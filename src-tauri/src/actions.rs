@@ -221,6 +221,28 @@ fn validate_request(req: &NewSessionRequest) -> Result<(), ActionError> {
     Ok(())
 }
 
+/// The call timed out: it may or may not have been applied, and is never retried.
+fn timed_out(argv: Vec<String>) -> ActionError {
+    ActionError::MaybeApplied {
+        message: format!(
+            "herdr did not answer in time. `herdr {}` may have been applied; refreshing.",
+            argv.join(" ")
+        ),
+        argv,
+    }
+}
+
+/// herdr exited 0 but its reply could not be read, so the action was applied.
+fn unreadable_reply(argv: Vec<String>) -> ActionError {
+    ActionError::MaybeApplied {
+        message: format!(
+            "herdr applied `herdr {}` but its reply could not be read; refreshing.",
+            argv.join(" ")
+        ),
+        argv,
+    }
+}
+
 /// Tells the poller to look again. `None` means every machine and the machine list.
 pub type RefreshHook = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 
@@ -264,6 +286,12 @@ fn created_terminal_id(v: &Value) -> Option<String> {
     .map(str::to_owned)
 }
 
+/// The new pane's id from a create reply. `mutate` already refreshed; if the reply has no pane
+/// the action was still applied, so say so rather than report a failure.
+fn created_pane(reply: &Value, argv: Vec<String>) -> Result<String, ActionError> {
+    parse_created_pane(reply).map_err(|_| unreadable_reply(argv))
+}
+
 impl Actions {
     pub fn new(cli: HerdrCli, refresh: RefreshHook) -> Self {
         Self {
@@ -278,7 +306,8 @@ impl Actions {
         self
     }
 
-    /// One mutating call. Refreshes the machine afterwards unless herdr refused it.
+    /// One mutating call. Refreshes the machine afterwards unless herdr refused it. A reply that
+    /// can't be read (exit 0) counts as applied.
     async fn mutate(
         &self,
         machine: &str,
@@ -292,13 +321,12 @@ impl Actions {
             }
             Err(HerdrError::Timeout { argv }) => {
                 (self.refresh)(Some(machine));
-                Err(ActionError::MaybeApplied {
-                    message: format!(
-                        "herdr did not answer in time. `herdr {}` may have been applied; refreshing.",
-                        argv.join(" ")
-                    ),
-                    argv,
-                })
+                Err(timed_out(argv))
+            }
+            // Parse only happens after exit 0, so the mutation went through.
+            Err(HerdrError::Parse { .. }) => {
+                (self.refresh)(Some(machine));
+                Err(unreadable_reply(args))
             }
             Err(error) => Err(ActionError::Herdr { error }),
         }
@@ -312,11 +340,13 @@ impl Actions {
     ) -> Result<CreatedSession, ActionError> {
         validate_request(req)?;
         let mut steps = plan_new_session(req).into_iter();
-        let first = steps.next().unwrap_or_default();
+        let Some(first) = steps.next() else {
+            return Err(invalid("Nothing to create."));
+        };
         let created = self
-            .mutate(&req.machine_id, first, self.timeouts.create)
+            .mutate(&req.machine_id, first.clone(), self.timeouts.create)
             .await?;
-        let pane_id = parse_created_pane(&created).map_err(|error| ActionError::Herdr { error })?;
+        let pane_id = created_pane(&created, first)?;
         let session = CreatedSession {
             terminal_id: created_terminal_id(&created),
             pane_id,
@@ -338,20 +368,21 @@ impl Actions {
                 terminal_id: created_terminal_id(&started).or(session.terminal_id),
                 pane_id: session.pane_id,
             }),
-            Err(e) => {
-                let reason = match e {
-                    ActionError::Herdr { error } => error.to_string(),
-                    ActionError::MaybeApplied { message, .. }
-                    | ActionError::Invalid { message } => message,
-                };
-                Err(ActionError::MaybeApplied {
-                    message: format!(
-                        "The pane {} was created, but the agent did not start ({reason}). The pane was left open.",
-                        session.pane_id
-                    ),
-                    argv: step,
-                })
-            }
+            // Timed out or unreadable reply: the agent may be running.
+            Err(ActionError::MaybeApplied { argv, .. }) => Err(ActionError::MaybeApplied {
+                message: format!(
+                    "The pane {} was created; the agent may or may not have started; refreshing.",
+                    session.pane_id
+                ),
+                argv,
+            }),
+            Err(e) => Err(ActionError::MaybeApplied {
+                message: format!(
+                    "The pane {} was created, but the agent did not start ({e}). The pane was left open.",
+                    session.pane_id
+                ),
+                argv: step,
+            }),
         }
     }
 
@@ -496,9 +527,11 @@ impl Actions {
         machine: &str,
         args: Vec<String>,
     ) -> Result<CreatedSession, ActionError> {
-        let v = self.mutate(machine, args, self.timeouts.create).await?;
+        let v = self
+            .mutate(machine, args.clone(), self.timeouts.create)
+            .await?;
         Ok(CreatedSession {
-            pane_id: parse_created_pane(&v).map_err(|error| ActionError::Herdr { error })?,
+            pane_id: created_pane(&v, args)?,
             terminal_id: created_terminal_id(&v),
         })
     }
@@ -556,13 +589,7 @@ impl Actions {
             }
             Err(HerdrError::Timeout { argv }) => {
                 (self.refresh)(None);
-                Err(ActionError::MaybeApplied {
-                    message: format!(
-                        "herdr did not answer in time. `herdr {}` may have been applied; refreshing.",
-                        argv.join(" ")
-                    ),
-                    argv,
-                })
+                Err(timed_out(argv))
             }
             Err(error) => Err(ActionError::Herdr { error }),
         }

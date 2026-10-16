@@ -157,16 +157,17 @@ pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
     parts.next().is_none().then_some(version)
 }
 
-/// Runs `<bin> --version` with exactly `env` and returns the version it reports (`0.9.4`).
-/// This is the one herdr call that prints plain text, so it does not go through `HerdrCli`.
-/// `None` if the binary fails, hangs past `limit`, or prints something unrecognizable.
-pub async fn herdr_version(
+/// Runs `<bin> <args…>` with exactly `env` and returns its stdout when it exits 0 in time.
+/// For the few herdr calls that print plain text instead of JSON, so they don't go through
+/// `HerdrCli`: `--version` and `agent start --help`.
+async fn run_plain_text(
     bin: &Path,
     env: &[(String, String)],
+    args: &[&str],
     limit: Duration,
 ) -> Option<String> {
     let child = Command::new(bin)
-        .arg("--version")
+        .args(args)
         .env_clear()
         .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
@@ -176,10 +177,21 @@ pub async fn herdr_version(
         .spawn()
         .ok()?;
     let output = timeout(limit, child.wait_with_output()).await.ok()?.ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let (major, minor, patch) = parse_version(&String::from_utf8_lossy(&output.stdout))?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Runs `<bin> --version` with exactly `env` and returns the version it reports (`0.9.4`).
+/// `None` if the binary fails, hangs past `limit`, or prints something unrecognizable.
+pub async fn herdr_version(
+    bin: &Path,
+    env: &[(String, String)],
+    limit: Duration,
+) -> Option<String> {
+    let text = run_plain_text(bin, env, &["--version"], limit).await?;
+    let (major, minor, patch) = parse_version(&text)?;
     Some(format!("{major}.{minor}.{patch}"))
 }
 
@@ -207,28 +219,14 @@ pub fn parse_agent_kinds(help: &str) -> Vec<String> {
 }
 
 /// Runs `<bin> agent start --help` with exactly `env` and returns the agent kinds it lists.
-/// Like `herdr_version`, this prints plain text, so it does not go through `HerdrCli`.
 /// `None` if the binary fails, hangs past `limit`, or lists no kinds.
 pub async fn herdr_agent_kinds(
     bin: &Path,
     env: &[(String, String)],
     limit: Duration,
 ) -> Option<Vec<String>> {
-    let child = Command::new(bin)
-        .args(["agent", "start", "--help"])
-        .env_clear()
-        .envs(env.iter().map(|(k, v)| (k, v)))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .ok()?;
-    let output = timeout(limit, child.wait_with_output()).await.ok()?.ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let kinds = parse_agent_kinds(&String::from_utf8_lossy(&output.stdout));
+    let text = run_plain_text(bin, env, &["agent", "start", "--help"], limit).await?;
+    let kinds = parse_agent_kinds(&text);
     (!kinds.is_empty()).then_some(kinds)
 }
 

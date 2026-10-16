@@ -381,3 +381,62 @@ async fn machine_command_errors_are_not_swallowed() {
     ));
     assert!(h.refreshed().is_empty());
 }
+
+#[tokio::test]
+async fn unreadable_success_output_is_maybe_applied_and_refreshes() {
+    let h = Harness::new();
+    h.put("pane_close_w1:p3.json", "closed, thanks");
+
+    let err = h.actions.close_pane("buildbox", "w1:p3").await.unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { argv, message } => {
+            assert_eq!(argv, ["pane", "close", "w1:p3"]);
+            assert!(message.contains("could not be read"), "{message}");
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+    assert_eq!(h.calls().len(), 1);
+    assert_eq!(h.refreshed(), [Some("buildbox".to_string())]);
+}
+
+#[tokio::test]
+async fn create_without_a_readable_pane_is_maybe_applied_and_never_continues() {
+    let h = Harness::new();
+    // Valid JSON, but no pane in it.
+    h.put(&format!("{SPLIT}.json"), r#"{"result":{}}"#);
+
+    let err = h
+        .actions
+        .create_session(&split_agent_request())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, ActionError::MaybeApplied { .. }), "{err:?}");
+    assert_eq!(h.calls().len(), 1, "agent start must not run");
+    assert_eq!(h.refreshed(), [Some("buildbox".to_string())]);
+}
+
+#[tokio::test]
+async fn agent_start_timeout_says_the_agent_may_have_started() {
+    let h = Harness::new();
+    h.put(&format!("{SPLIT}.json"), &fixture("pane_split.json"));
+    h.put(&format!("{START}.json"), &fixture("agent_start.json"));
+    h.put(&format!("{START}.sleep"), "3");
+
+    let err = h
+        .actions
+        .create_session(&split_agent_request())
+        .await
+        .unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(message.contains("w1:p5"), "{message}");
+            assert!(message.contains("may or may not have started"), "{message}");
+            assert!(!message.contains("did not start"), "{message}");
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+    assert_eq!(h.calls().len(), 2);
+}
