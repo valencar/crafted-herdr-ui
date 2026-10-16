@@ -1,0 +1,10 @@
+dist
+src-tauri
+pnpm-lock.yaml
+src/lib/bindings
+docs
+CLAUDE.md
+README.md
+LICENSE
+.superpowers
+fixtures-raw

@@ -152,3 +152,6 @@ vite.config.ts.timestamp-*
 .superpowers/
 .env.local
 fixtures-raw/
+dist/
+src-tauri/target/
+!.env.local.example
