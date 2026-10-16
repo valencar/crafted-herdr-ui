@@ -157,6 +157,32 @@ pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
     parts.next().is_none().then_some(version)
 }
 
+/// Runs `<bin> --version` with exactly `env` and returns the version it reports (`0.9.4`).
+/// This is the one herdr call that prints plain text, so it does not go through `HerdrCli`.
+/// `None` if the binary fails, hangs past `limit`, or prints something unrecognizable.
+pub async fn herdr_version(
+    bin: &Path,
+    env: &[(String, String)],
+    limit: Duration,
+) -> Option<String> {
+    let child = Command::new(bin)
+        .arg("--version")
+        .env_clear()
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()?;
+    let output = timeout(limit, child.wait_with_output()).await.ok()?.ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let (major, minor, patch) = parse_version(&String::from_utf8_lossy(&output.stdout))?;
+    Some(format!("{major}.{minor}.{patch}"))
+}
+
 /// True when the version meets the 0.9.0 floor.
 pub fn is_supported(version: (u32, u32, u32)) -> bool {
     version >= MIN_VERSION
@@ -391,5 +417,38 @@ mod tests {
             None
         );
         assert_eq!(login_which_herdr("/nonexistent/shell").await, None);
+    }
+
+    #[tokio::test]
+    async fn herdr_version_runs_the_binary_with_the_given_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake_shell(
+            dir.path(),
+            "herdr-ok",
+            r#"[ "$1" = "--version" ] && echo "herdr $FAKE_VERSION""#,
+        );
+        let env = [("FAKE_VERSION".to_string(), "0.9.4-preview.1".to_string())];
+        let v = herdr_version(Path::new(&bin), &env, Duration::from_secs(5)).await;
+        assert_eq!(v.as_deref(), Some("0.9.4"));
+    }
+
+    #[tokio::test]
+    async fn herdr_version_is_none_on_failure_garbage_timeout_or_missing_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, body) in [
+            ("fail", "echo 'herdr 0.9.4'; exit 1"),
+            ("garbage", "echo hello"),
+            ("hang", "exec sleep 30"),
+        ] {
+            let bin = fake_shell(dir.path(), name, body);
+            let limit = Duration::from_millis(300);
+            assert_eq!(
+                herdr_version(Path::new(&bin), &[], limit).await,
+                None,
+                "{name}"
+            );
+        }
+        let missing = herdr_version(Path::new("/nonexistent/herdr"), &[], Duration::from_secs(1));
+        assert_eq!(missing.await, None);
     }
 }

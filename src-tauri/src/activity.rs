@@ -92,6 +92,40 @@ impl ActivityTracker {
         transitions
     }
 
+    /// Like `observe`, for the first good snapshot after app start or after a failure: what
+    /// changed while the app could not see is not a fresh event. Any new or changed key gets
+    /// `since_ms = None` (unknown age, never a guess), nothing is returned, and this machine's
+    /// absent keys are pruned.
+    pub fn resync(&mut self, machine_id: &str, snap: &Snapshot) {
+        let mut seen = HashSet::new();
+        for agent in snap.agents.iter().filter(|a| !a.terminal_id.is_empty()) {
+            let key = ActivityKey {
+                machine_id: machine_id.to_owned(),
+                terminal_id: agent.terminal_id.clone(),
+            };
+            seen.insert(key.clone());
+            match self.map.get_mut(&key) {
+                Some(record) if record.status == agent.agent_status => {}
+                _ => {
+                    self.map.insert(
+                        key,
+                        ActivityRecord {
+                            status: agent.agent_status,
+                            since_ms: None,
+                        },
+                    );
+                }
+            }
+        }
+        self.map
+            .retain(|key, _| key.machine_id != machine_id || seen.contains(key));
+    }
+
+    /// Forgets every machine not in `ids` (profiles removed from herdr).
+    pub fn retain_machines(&mut self, ids: &[String]) {
+        self.map.retain(|key, _| ids.contains(&key.machine_id));
+    }
+
     pub fn since(&self, machine_id: &str, terminal_id: &str) -> Option<u64> {
         let key = ActivityKey {
             machine_id: machine_id.to_owned(),
@@ -294,6 +328,95 @@ mod tests {
         );
         assert!(out.is_empty());
         assert!(t.map.is_empty());
+    }
+
+    #[test]
+    fn resync_suppresses_transitions_and_ages() {
+        let mut t = ActivityTracker::default();
+        t.observe(
+            "local",
+            &snap(vec![
+                agent("w1:p1", "t1", AgentStatus::Idle),
+                agent("w1:p2", "t2", AgentStatus::Working),
+                agent("w1:p3", "t3", AgentStatus::Idle),
+            ]),
+            100,
+        );
+        t.observe(
+            "local",
+            &snap(vec![
+                agent("w1:p1", "t1", AgentStatus::Idle),
+                agent("w1:p2", "t2", AgentStatus::Done),
+                agent("w1:p3", "t3", AgentStatus::Idle),
+            ]),
+            200,
+        );
+        assert_eq!(t.since("local", "t2"), Some(200));
+        t.observe(
+            "buildbox",
+            &snap(vec![agent("w1:p1", "t9", AgentStatus::Idle)]),
+            1,
+        );
+
+        // t1 unchanged, t2 changed, t3 gone, t4 new.
+        t.resync(
+            "local",
+            &snap(vec![
+                agent("w1:p1", "t1", AgentStatus::Idle),
+                agent("w1:p2", "t2", AgentStatus::Blocked),
+                agent("w1:p4", "t4", AgentStatus::Working),
+            ]),
+        );
+        assert_eq!(t.since("local", "t2"), None, "changed key loses its age");
+        assert_eq!(t.since("local", "t4"), None);
+        assert_eq!(t.map.len(), 4, "t3 pruned, other machine untouched");
+
+        // The new baseline is in place, so the same snapshot is not a transition.
+        let out = t.observe(
+            "local",
+            &snap(vec![
+                agent("w1:p1", "t1", AgentStatus::Idle),
+                agent("w1:p2", "t2", AgentStatus::Blocked),
+                agent("w1:p4", "t4", AgentStatus::Working),
+            ]),
+            300,
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn resync_keeps_age_of_unchanged_status() {
+        let mut t = ActivityTracker::default();
+        t.observe(
+            "local",
+            &snap(vec![agent("w1:p1", "t1", AgentStatus::Idle)]),
+            1,
+        );
+        t.observe(
+            "local",
+            &snap(vec![agent("w1:p1", "t1", AgentStatus::Done)]),
+            50,
+        );
+        t.resync(
+            "local",
+            &snap(vec![agent("w1:p1", "t1", AgentStatus::Done)]),
+        );
+        assert_eq!(t.since("local", "t1"), Some(50));
+    }
+
+    #[test]
+    fn retain_machines_drops_other_machines() {
+        let mut t = ActivityTracker::default();
+        for (machine, terminal) in [("local", "t1"), ("buildbox", "t2"), ("gone", "t3")] {
+            t.observe(
+                machine,
+                &snap(vec![agent("w1:p1", terminal, AgentStatus::Idle)]),
+                1,
+            );
+        }
+        t.retain_machines(&["local".to_string(), "buildbox".to_string()]);
+        assert_eq!(t.map.len(), 2);
+        assert!(!t.map.keys().any(|k| k.machine_id == "gone"));
     }
 
     #[test]

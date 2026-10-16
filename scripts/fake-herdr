@@ -7,13 +7,17 @@
 # <joined>.stderr (printed to stderr), <joined>.exit (exit code, default 0).
 # In <joined>.json the literal token @SSH_AUTH_SOCK@ is replaced by $SSH_AUTH_SOCK, so tests can
 # check which environment the caller forwarded.
+# Per-machine overrides: when called with `--machine <id>`, files named `<id>@<joined>.*` are used
+# instead of `<joined>.*` if any of them exist, so one test can make machines behave differently.
 # With no matching file the script exits 2 with "unknown command".
 
 dir="${FAKE_HERDR_DIR:?FAKE_HERDR_DIR is not set}"
 
 echo "$*" >>"$dir/calls.log"
 
+machine=""
 if [ "${1:-}" = "--machine" ]; then
+  machine="$2"
   shift 2
 fi
 
@@ -22,6 +26,14 @@ for arg in "$@"; do
   joined="${joined:+${joined}_}${arg}"
 done
 base="$dir/$joined"
+if [ -n "$machine" ]; then
+  for ext in json stderr exit sleep; do
+    if [ -e "$dir/$machine@$joined.$ext" ]; then
+      base="$dir/$machine@$joined"
+      break
+    fi
+  done
+fi
 
 if [ ! -e "$base.json" ] && [ ! -e "$base.stderr" ] && [ ! -e "$base.exit" ] && [ ! -e "$base.sleep" ]; then
   echo "unknown command: $joined" >&2

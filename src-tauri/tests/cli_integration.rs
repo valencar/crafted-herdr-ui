@@ -274,3 +274,17 @@ async fn env_is_cleared_before_forwarding() {
         .unwrap();
     assert_eq!(v, json!({"sock": ""}));
 }
+
+#[tokio::test]
+async fn per_machine_files_override_the_generic_ones() {
+    let fake = Fake::new();
+    fake.put("agent_list.json", r#"{"who":"generic"}"#);
+    fake.put("p1@agent_list.json", r#"{"who":"p1"}"#);
+    let run = |m: Option<&'static str>| {
+        let cli = fake.cli.clone();
+        async move { cli.run(m, &args(&["agent", "list"]), T).await.unwrap() }
+    };
+    assert_eq!(run(Some("p1")).await, json!({"who": "p1"}));
+    assert_eq!(run(Some("p2")).await, json!({"who": "generic"}));
+    assert_eq!(run(None).await, json!({"who": "generic"}));
+}

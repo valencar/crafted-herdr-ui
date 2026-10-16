@@ -19,7 +19,7 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 
 ## Rules
 
-- **Every herdr call goes through `HerdrCli::run`.** No other `Command::new("herdr")`. The only other processes spawned are terminal launchers (`open`, `osascript`, `/bin/sh -c` for custom templates), the login shell for env capture, `mdfind`, and `ssh` inside attach commands.
+- **Every herdr call goes through `HerdrCli::run`.** No other `Command::new("herdr")`, except `env::herdr_version` (`herdr --version` prints plain text, not JSON). The only other processes spawned are terminal launchers (`open`, `osascript`, `/bin/sh -c` for custom templates), the login shell for env capture, `mdfind`, and `ssh` inside attach commands.
 - **Pass `--machine <profile id>` first**, before the subcommand. Local is the machine id `"local"`, which maps to no `--machine` flag.
 - **Mutations never retry automatically.** A timeout becomes `ActionError::MaybeApplied` and triggers `Poller::refresh_now`.
 - **Quoting:** any user- or herdr-derived string that reaches a shell or AppleScript goes through `shell_quote` / AppleScript escaping. Test it with hostile strings (`' " $ \` ; |`, unicode).
@@ -31,6 +31,6 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 ## Testing
 
 - **Unit tests** live next to the code in `#[cfg(test)]`. **Integration tests** in `tests/` run the real runner against `../scripts/fake-herdr` with a temp `FAKE_HERDR_DIR`.
-- **fake-herdr protocol:** argv after an optional `--machine <id>` is joined with `_` to form `<joined>.json` (stdout), `.stderr`, `.exit` and `.sleep`. Calls are appended to `$FAKE_HERDR_DIR/calls.log`.
+- **fake-herdr protocol:** argv after an optional `--machine <id>` is joined with `_` to form `<joined>.json` (stdout), `.stderr`, `.exit` and `.sleep`. Calls are appended to `$FAKE_HERDR_DIR/calls.log`. Files named `<id>@<joined>.*` override the generic ones for that machine.
 - **Fixtures** in `tests/fixtures/` are synthetic and generic (`buildbox`, `api-service`, `/home/dev`). Real captures go only to `../fixtures-raw/` (gitignored).
 - **Before committing:** `cargo fmt --check && cargo clippy -- -D warnings && cargo test`.

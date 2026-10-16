@@ -1,11 +1,106 @@
 pub mod activity;
 pub mod env;
 pub mod herdr;
+pub mod poller;
+pub mod state;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use tauri::{Emitter, Manager, WindowEvent};
+
+use activity::ActivityTracker;
+use herdr::cli::HerdrCli;
+use poller::{Poller, PollerConfig};
+use state::AppState;
+
+const FALLBACK_SHELL: &str = "/bin/zsh";
+const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+const MAIN_WINDOW: &str = "main";
+
+/// The current state, for a UI that started listening after the first `"state"` event.
+#[tauri::command]
+fn get_state(poller: tauri::State<'_, Poller>) -> AppState {
+    poller.current_state()
+}
+
+/// Startup wiring: find herdr, build the CLI runner and the poller, hand both to Tauri state,
+/// and start polling. Without herdr there is nothing to poll, so the UI just gets a state
+/// with `herdr_path: None`.
+fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| FALLBACK_SHELL.to_owned());
+    let (login, login_hit) = tauri::async_runtime::block_on(async {
+        tokio::join!(
+            env::capture_login_env(&shell),
+            env::login_which_herdr(&shell)
+        )
+    });
+    let forwarded = env::forwarded_env(&login);
+
+    // No saved path yet: Settings arrive later.
+    let home = app.path().home_dir()?;
+    let herdr_bin = env::resolve_herdr(None, login_hit, &home, &|p| p.is_file());
+    let herdr_version = herdr_bin.as_deref().and_then(|bin| {
+        tauri::async_runtime::block_on(env::herdr_version(bin, &forwarded, VERSION_TIMEOUT))
+    });
+
+    let activity_path = app.path().app_data_dir()?.join("activity.json");
+    let config = PollerConfig {
+        activity_path: Some(activity_path.clone()),
+        herdr_version,
+        herdr_path: herdr_bin.as_ref().map(|p| p.display().to_string()),
+    };
+    // An empty path makes every call fail with `NotFound`, which is what we want without herdr.
+    let cli = HerdrCli::new(herdr_bin.clone().unwrap_or_default(), forwarded);
+    let handle = app.handle().clone();
+    let poller = Poller::new(
+        cli.clone(),
+        ActivityTracker::load(&activity_path),
+        config,
+        Arc::new(move |state| {
+            // Nobody listening yet is fine; `get_state` covers that.
+            let _ = handle.emit("state", state);
+        }),
+    );
+    app.manage(cli);
+    app.manage(poller.clone());
+
+    if herdr_bin.is_some() {
+        tauri::async_runtime::spawn(async move { poller.run().await });
+    } else {
+        poller.emit_current();
+    }
+    Ok(())
+}
+
+/// Polls fast only while the main window is on screen.
+fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
+    if window.label() != MAIN_WINDOW {
+        return;
+    }
+    let visible = match event {
+        WindowEvent::Focused(true) => true,
+        // Losing focus does not hide the window; being minimized or hidden does.
+        WindowEvent::Focused(false) | WindowEvent::Resized(_) => {
+            window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false)
+        }
+        _ => return,
+    };
+    if let Some(poller) = window.try_state::<Poller>() {
+        poller.set_visible(visible);
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![get_state])
+        .on_window_event(track_visibility)
+        .setup(|app| start(app))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
