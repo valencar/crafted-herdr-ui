@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(snap.workspaces[0].label, "api-service");
         assert_eq!(snap.workspaces[0].agent_status, AgentStatus::Blocked);
         assert_eq!(snap.agents.len(), 4);
-        assert_eq!(snap.panes.len(), 5);
+        assert_eq!(snap.panes.len(), 6);
         assert_eq!(snap.focused_pane_id.as_deref(), Some("w1:p1"));
 
         let statuses: Vec<_> = snap.agents.iter().map(|a| a.agent_status).collect();

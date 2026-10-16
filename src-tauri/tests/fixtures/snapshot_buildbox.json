@@ -21,7 +21,7 @@
           "number": 2,
           "label": "web-app",
           "focused": false,
-          "pane_count": 2,
+          "pane_count": 3,
           "tab_count": 1,
           "active_tab_id": "w2:t1",
           "agent_status": "done"
@@ -52,7 +52,7 @@
           "number": 1,
           "label": "main",
           "focused": false,
-          "pane_count": 2,
+          "pane_count": 3,
           "agent_status": "done"
         }
       ],
@@ -143,6 +143,24 @@
           "agent_status": "idle",
           "focused": false,
           "revision": 5,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 40
+          }
+        },
+        {
+          "pane_id": "w2:p3",
+          "tab_id": "w2:t1",
+          "workspace_id": "w2",
+          "terminal_id": "term-6",
+          "cwd": "/home/dev",
+          "foreground_cwd": "/home/dev",
+          "terminal_title": "zsh",
+          "terminal_title_stripped": "zsh",
+          "agent_status": "unknown",
+          "focused": false,
+          "revision": 2,
           "scroll": {
             "max_offset_from_bottom": 0,
             "offset_from_bottom": 0,
@@ -329,6 +347,16 @@
             },
             {
               "pane_id": "w2:p2",
+              "focused": false,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 120,
+                "height": 40
+              }
+            },
+            {
+              "pane_id": "w2:p3",
               "focused": false,
               "rect": {
                 "x": 0,
