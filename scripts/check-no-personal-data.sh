@@ -1,47 +1,68 @@
 #!/usr/bin/env bash
-# Fails (exit 1) if any tracked or untracked-but-not-ignored file contains
-# personal data. Generic rules always apply; extra private patterns are read
-# from HERDR_UI_PRIVATE_PATTERNS (comma-separated) in .env.local when present.
-# Matched private values are never printed, only the file and a pattern index.
+# Fails if any tracked or untracked-but-not-ignored file contains personal data.
+# Exit 0 = clean, 1 = hits found, 2 = the check itself could not run (fails closed).
+# Generic rules always apply; extra private patterns are read from
+# HERDR_UI_PRIVATE_PATTERNS (comma-separated) in .env.local when present.
+# Matched private values are never printed, only file:line and a pattern index.
 set -u
 
 cd "$(git rev-parse --show-toplevel)" || exit 2
 
-self="scripts/check-no-personal-data.sh"
+errfile=$(mktemp) || exit 2
+trap 'rm -f "$errfile"' EXIT
+
 status=0
-hits=""
+
+list=$(git ls-files -co --exclude-standard) || {
+  echo "check-no-personal-data: git ls-files failed" >&2
+  exit 2
+}
 
 files=()
 while IFS= read -r f; do
-  [ -f "$f" ] && [ "$f" != "$self" ] && files+=("$f")
-done < <(git ls-files -co --exclude-standard)
+  [ -f "$f" ] && files+=("$f")
+done <<< "$list"
 
 if [ "${#files[@]}" -eq 0 ]; then
   echo "check-no-personal-data: no files to check"
   exit 0
 fi
 
-# Generic rules (extended regex, case-sensitive for the home-path and key rules).
-# Takes a rule name and a "file:line" list; prints and flags a failure if non-empty.
-report() {
-  if [ -n "$2" ]; then
-    echo "FAIL: $1"
-    echo "$2" | sed 's/^/  /'
+# search RULE_NAME FILTER GREP_ARGS...
+# Runs grep over all files. Exit 1 (no match) is fine; exit >= 2 (bad regex, unreadable
+# file, argument list too long, ...) aborts with exit 2 so the gate never reports
+# "clean" after a failed search. Hits are reduced to a sorted, unique file:line list.
+# FILTER is an extended regex of "file:line:match" records to ignore ("" for none).
+search() {
+  local rule=$1 filter=$2 out rc
+  shift 2
+  out=$(grep "$@" -- "${files[@]}" 2>"$errfile")
+  rc=$?
+  if [ "$rc" -ge 2 ]; then
+    echo "check-no-personal-data: search failed for rule '$rule' (grep exit $rc)" >&2
+    exit 2
+  fi
+  if [ -n "$filter" ] && [ -n "$out" ]; then
+    out=$(printf '%s\n' "$out" | grep -vE -e "$filter")
+    # grep -v exits 1 when everything was filtered out; only >= 2 is an error.
+    [ $? -ge 2 ] && { echo "check-no-personal-data: filter failed for rule '$rule'" >&2; exit 2; }
+  fi
+  if [ -n "$out" ]; then
+    echo "FAIL: $rule"
+    printf '%s\n' "$out" | cut -d: -f1,2 | sort -u | sed 's/^/  /'
     status=1
   fi
 }
 
-# Home paths other than /Users/dev/ and /home/dev/.
-hits=$(grep -nHEI '(/Users|/home)/[A-Za-z0-9._-]+/' -- "${files[@]}" 2>/dev/null \
-  | grep -vE ':[^:]*(/Users|/home)/dev/' | cut -d: -f1,2)
-report "home path outside /Users/dev and /home/dev" "$hits"
+# Home paths, judged per match so an allowed path cannot hide a real one on the same
+# line. Only a bare /Users/dev or /home/dev (the generic placeholder user) is allowed.
+search "home path outside /Users/dev and /home/dev" ':(/Users|/home)/dev$' \
+  -noHEI '(/Users|/home)/[A-Za-z0-9._-]+'
 
 # Anchored on the dashes of a real PEM header so docs describing the rule don't match.
-hits=$(grep -nHE -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' -- "${files[@]}" 2>/dev/null | cut -d: -f1,2)
-report "private key block" "$hits"
+search "private key block" "" -nHE -e '-----BEGIN [A-Z ]*PRIVATE KEY-----'
 
-hits=$(grep -nHE 'ssh-(rsa|ed25519) AAAA' -- "${files[@]}" 2>/dev/null | cut -d: -f1,2)
-report "ssh public key" "$hits"
+search "ssh public key" "" -nHE -e 'ssh-(rsa|ed25519) AAAA'
 
 # Private patterns from .env.local (absent in CI).
 if [ -f .env.local ]; then
@@ -50,12 +71,14 @@ if [ -f .env.local ]; then
   idx=0
   IFS=',' read -r -a patterns <<< "$raw"
   for p in "${patterns[@]+"${patterns[@]}"}"; do
-    p=$(echo "$p" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    p=$(printf '%s' "$p" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     [ -z "$p" ] && continue
     idx=$((idx + 1))
-    hits=$(grep -nHiF -e "$p" -- "${files[@]}" 2>/dev/null | cut -d: -f1,2)
-    report "private pattern #$idx from .env.local" "$hits"
+    search "private pattern #$idx from .env.local" "" -nHiF -e "$p"
   done
+  if [ "$idx" -eq 0 ]; then
+    echo "check-no-personal-data: notice: .env.local exists but HERDR_UI_PRIVATE_PATTERNS loaded 0 patterns"
+  fi
 fi
 
 if [ "$status" -eq 0 ]; then
