@@ -230,14 +230,18 @@ pub struct MachineStatusEntry {
 }
 
 fn parse_err(what: &str, e: impl std::fmt::Display) -> HerdrError {
-    HerdrError::Parse(format!("{what}: {e}"))
+    HerdrError::Parse {
+        message: format!("{what}: {e}"),
+    }
 }
 
 /// Reads `result.snapshot` from `herdr api snapshot` output.
 pub fn parse_snapshot(v: &Value) -> Result<Snapshot, HerdrError> {
     let snapshot = v
         .pointer("/result/snapshot")
-        .ok_or_else(|| HerdrError::Parse("snapshot: missing result.snapshot".into()))?;
+        .ok_or_else(|| HerdrError::Parse {
+            message: "snapshot: missing result.snapshot".into(),
+        })?;
     Snapshot::deserialize(snapshot).map_err(|e| parse_err("snapshot", e))
 }
 
@@ -252,7 +256,9 @@ pub fn parse_created_pane(v: &Value) -> Result<String, HerdrError> {
         .iter()
         .find_map(|p| v.pointer(p).and_then(Value::as_str))
         .map(str::to_owned)
-        .ok_or_else(|| HerdrError::Parse("created pane: no pane_id in result".into()))
+        .ok_or_else(|| HerdrError::Parse {
+            message: "created pane: no pane_id in result".into(),
+        })
 }
 
 #[cfg(test)]
@@ -359,7 +365,7 @@ mod tests {
     #[test]
     fn snapshot_without_result_is_a_parse_error() {
         let err = parse_snapshot(&fixture("error_agent_blocked.json")).unwrap_err();
-        assert!(matches!(err, HerdrError::Parse(_)));
+        assert!(matches!(err, HerdrError::Parse { .. }));
     }
 
     #[test]

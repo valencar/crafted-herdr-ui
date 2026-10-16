@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Test double for the herdr CLI. Reads $FAKE_HERDR_DIR.
+#
+# Protocol: the argv after an optional leading `--machine <id>` is joined with `_` to form <joined>.
+# The whole call (including `--machine <id>`) is appended as one line to $FAKE_HERDR_DIR/calls.log.
+# Then, if present: <joined>.sleep (seconds to sleep), <joined>.json (printed to stdout),
+# <joined>.stderr (printed to stderr), <joined>.exit (exit code, default 0).
+# In <joined>.json the literal token @SSH_AUTH_SOCK@ is replaced by $SSH_AUTH_SOCK, so tests can
+# check which environment the caller forwarded.
+# With no matching file the script exits 2 with "unknown command".
+
+dir="${FAKE_HERDR_DIR:?FAKE_HERDR_DIR is not set}"
+
+echo "$*" >>"$dir/calls.log"
+
+if [ "${1:-}" = "--machine" ]; then
+  shift 2
+fi
+
+joined=""
+for arg in "$@"; do
+  joined="${joined:+${joined}_}${arg}"
+done
+base="$dir/$joined"
+
+if [ ! -e "$base.json" ] && [ ! -e "$base.stderr" ] && [ ! -e "$base.exit" ] && [ ! -e "$base.sleep" ]; then
+  echo "unknown command: $joined" >&2
+  exit 2
+fi
+
+if [ -f "$base.sleep" ]; then
+  sleep "$(cat "$base.sleep")"
+fi
+
+if [ -f "$base.json" ]; then
+  out=$(cat "$base.json")
+  out=${out//@SSH_AUTH_SOCK@/"${SSH_AUTH_SOCK-}"}
+  printf '%s\n' "$out"
+fi
+
+if [ -f "$base.stderr" ]; then
+  cat "$base.stderr" >&2
+fi
+
+if [ -f "$base.exit" ]; then
+  exit "$(cat "$base.exit")"
+fi
+exit 0
