@@ -69,11 +69,16 @@ export const TERMINAL_LABEL: Record<TerminalId, string> = {
   custom: "your terminal",
 };
 
+const MAYBE_APPLIED_FALLBACK = "May have been applied; refreshing…";
+
 /**
  * The sentence shown for a failed action. It reads the `message` fields the app produced,
  * never a Rust Display string.
  */
 export function actionErrorMessage(e: ActionError): string {
+  if (e.kind === "maybeApplied") {
+    return e.message.trim() || MAYBE_APPLIED_FALLBACK;
+  }
   if (e.kind !== "herdr") return e.message;
   switch (e.error.kind) {
     case "notFound":
@@ -83,4 +88,14 @@ export function actionErrorMessage(e: ActionError): string {
     default:
       return e.error.message;
   }
+}
+
+/** The last `count` non-blank lines of terminal text, trailing spaces trimmed. */
+export function lastLines(text: string | null, count: number): string[] {
+  if (!text) return [];
+  return text
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim() !== "")
+    .slice(-count);
 }

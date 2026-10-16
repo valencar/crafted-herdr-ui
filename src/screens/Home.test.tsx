@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
@@ -6,6 +6,7 @@ import type { ActionError } from "../lib/bindings/ActionError";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
+import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
 import { Home } from "./Home";
@@ -13,10 +14,12 @@ import { Home } from "./Home";
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
+  onPreview: vi.fn(),
 }));
-import { invokeTyped } from "../lib/ipc";
+import { invokeTyped, onPreview } from "../lib/ipc";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
+let emitPreview: (frame: PreviewFrame) => void;
 
 // The raw herdr response has fields the bindings ignore, hence the cast.
 const fixture = raw.result.snapshot as unknown as Snapshot;
@@ -59,6 +62,8 @@ function setup(state: AppState | null = defaultState()) {
     groupBy: "project",
     sheet: null,
     view: { kind: "home" },
+    toast: null,
+    preview: null,
   });
   const user = userEvent.setup();
   render(<Home />);
@@ -76,6 +81,12 @@ function rowItem(key: string): HTMLElement {
 }
 
 beforeEach(() => {
+  vi.mocked(onPreview)
+    .mockReset()
+    .mockImplementation(async (cb) => {
+      emitPreview = cb;
+      return () => {};
+    });
   invoke.mockReset();
   invoke.mockImplementation(async (name: string) =>
     name === "list_terminals"
@@ -360,5 +371,89 @@ describe("Home", () => {
   it("shows_a_connecting_state_before_the_first_state", () => {
     setup(null);
     expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
+  });
+
+  it("selected_needs_you_card_shows_the_last_three_preview_lines", async () => {
+    const user = setup();
+    const section = screen.getByRole("region", { name: "Needs you" });
+    const cards = within(section).getAllByRole("article");
+    expect(within(cards[0]).queryByLabelText("Latest output")).toBeNull();
+
+    await user.click(cards[0]);
+    const key = useAppStore.getState().selectedKey!;
+    await waitFor(() => expect(onPreview).toHaveBeenCalled());
+    act(() => emitPreview({ key, text: "one\ntwo\n\nthree\nfour\n   \n" }));
+    const shown = within(
+      document.querySelector<HTMLElement>(`[data-card-key="${key}"]`)!,
+    ).getByLabelText("Latest output");
+    expect(shown).toHaveTextContent("two three four");
+    expect(shown.textContent).toBe("two\nthree\nfour");
+    // Only the selected row has a preview running; no other card shows output.
+    expect(screen.getAllByLabelText("Latest output")).toHaveLength(1);
+    expect(
+      invoke.mock.calls.filter(([name]) => name === "start_preview"),
+    ).toHaveLength(1);
+  });
+
+  it("the_inspector_follows_the_selection_and_starts_one_preview", async () => {
+    const user = setup();
+    await user.click(
+      within(rowItem("gpubox::w1:p1")).getByRole("button", {
+        name: /refactor auth/,
+      }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("start_preview", {
+        machineId: "gpubox",
+        paneId: "w1:p1",
+        isAgent: true,
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument();
+  });
+
+  it("backspace_and_cmd_enter_ignore_a_selection_hidden_by_search", async () => {
+    const user = setup();
+    useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
+    const search = screen.getByRole("searchbox");
+    await user.type(search, "terraform");
+    // Leave the field without changing the search; the selected shell is filtered out.
+    search.blur();
+    await user.keyboard("{Backspace}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
+  });
+
+  it("backspace_does_nothing_while_a_dialog_is_open", async () => {
+    const user = setup();
+    act(() => useAppStore.setState({ selectedKey: "buildbox::w1:p3" }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await user.keyboard("{Backspace}");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it("shows_a_reported_error_and_dismisses_it_after_8_seconds", () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      act(() =>
+        useAppStore.getState().reportError({
+          kind: "maybeApplied",
+          argv: [],
+          message: "",
+        }),
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "May have been applied; refreshing…",
+      );
+      act(() => {
+        vi.advanceTimersByTime(8_000);
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

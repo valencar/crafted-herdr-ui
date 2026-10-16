@@ -14,7 +14,7 @@ use tauri::{Emitter, Manager, WindowEvent};
 
 use actions::Actions;
 use activity::ActivityTracker;
-use commands::AgentKindsCache;
+use commands::{AgentKindsCache, PREVIEW_EVENT, PreviewManager};
 use herdr::cli::HerdrCli;
 use poller::{Poller, PollerConfig};
 use terminal::InstalledCache;
@@ -69,6 +69,15 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         cli.clone(),
         Arc::new(move |machine| refresh_poller.refresh_now(machine)),
     );
+    let preview_handle = app.handle().clone();
+    let visible_poller = poller.clone();
+    app.manage(PreviewManager::new(
+        cli.clone(),
+        Arc::new(move || visible_poller.is_visible()),
+        Arc::new(move |frame| {
+            let _ = preview_handle.emit(PREVIEW_EVENT, frame);
+        }),
+    ));
     app.manage(cli);
     app.manage(actions);
     app.manage(AgentKindsCache::default());
@@ -130,6 +139,8 @@ pub fn run() {
             commands::open_full_herdr,
             commands::list_terminals,
             commands::copy_attach_command,
+            commands::start_preview,
+            commands::stop_preview,
         ])
         .on_window_event(track_visibility)
         .setup(|app| start(app))

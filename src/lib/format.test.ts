@@ -4,6 +4,7 @@ import {
   TERMINAL_LABEL,
   actionErrorMessage,
   formatAge,
+  lastLines,
   formatStaleness,
   shortPath,
 } from "./format";
@@ -95,6 +96,21 @@ describe("actionErrorMessage", () => {
         error: { kind: "timeout", argv: ["agent"] },
       }),
     ).toBe("herdr did not answer in time.");
+  });
+
+  it("says a maybe-applied action with no message is being refreshed", () => {
+    expect(
+      actionErrorMessage({ kind: "maybeApplied", argv: [], message: "  " }),
+    ).toBe("May have been applied; refreshing…");
+  });
+});
+
+describe("lastLines", () => {
+  it("keeps the last non-blank lines", () => {
+    expect(lastLines("a\n\nb  \nc\n   \nd\n", 3)).toEqual(["b", "c", "d"]);
+    expect(lastLines("only", 3)).toEqual(["only"]);
+    expect(lastLines("", 3)).toEqual([]);
+    expect(lastLines(null, 3)).toEqual([]);
   });
 });
 

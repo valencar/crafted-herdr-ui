@@ -48,3 +48,12 @@ GUI-only checks that implementers skip; run them in a final pass with the mainta
 - [ ] A done card's "Mark seen" turns the agent from done to idle on the next poll; a failing open or mark-seen shows an error toast with herdr's own message.
 - [ ] Break a machine's connection: its rows dim, show herdr's error and "last updated Ns ago", and the other machines stay normal.
 - [ ] The release build (`pnpm tauri build --debug`, then run the .app) renders fonts and styles with the restrictive CSP in `tauri.conf.json` and the devtools console shows no CSP violations.
+
+## Task 10
+
+- [ ] Verify against a throwaway pane (a `herdr-ui-qa` session) that `herdr agent read <pane> --source recent-unwrapped --lines 60 --format text` and `herdr pane read …` print the JSON envelope `{"result":{"type":"pane_read","read":{"text":…}}}` on stdout. The preview reads `result.read.text`; if the CLI prints raw text instead, the inspector shows "could not parse herdr output".
+- [ ] Select a row: the inspector's Live preview fills with its terminal text within about 2 s and follows new output; selecting another row swaps the text and never shows the old pane's output. Clearing the selection stops the reads (the Activity drawer shows no more `read` calls).
+- [ ] Minimize the window or move it to another Space: `read` calls stop; bring it back and the preview refreshes within about 2 s.
+- [ ] Reply to an idle agent from the inspector: the text reaches the agent, the field clears, and a blocked agent shows the field disabled with "Answer this in the terminal".
+- [ ] Rename an agent (a lowercase name) and a shell pane (any text), then Copy command: the clipboard holds the exact line shown in the "what Open runs" box and the button reads "Copied" briefly.
+- [ ] Close from the inspector asks first; "Close session" on a throwaway pane closes it and the selection clears.

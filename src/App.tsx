@@ -5,6 +5,7 @@ import { useAppStore } from "./store/appStore";
 
 function App() {
   const setState = useAppStore((s) => s.setState);
+  const reportError = useAppStore((s) => s.reportError);
 
   useEffect(() => {
     let alive = true;
@@ -25,12 +26,15 @@ function App() {
         if (alive) unlisten = un;
         else un();
       })
-      .catch(() => {});
+      .catch((e) => {
+        // Without the event the screen would silently go stale.
+        if (alive) reportError(e);
+      });
     return () => {
       alive = false;
       unlisten?.();
     };
-  }, [setState]);
+  }, [setState, reportError]);
 
   return <Home />;
 }

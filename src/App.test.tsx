@@ -43,6 +43,16 @@ it("loads the state on mount, then subscribes to pushes", async () => {
   );
 });
 
+it("reports it when the state event cannot be listened to", async () => {
+  useAppStore.setState({ toast: null });
+  ipc.onState.mockRejectedValue(new Error("event system unavailable"));
+  render(<App />);
+  await waitFor(() =>
+    expect(useAppStore.getState().toast).toBe("event system unavailable"),
+  );
+  useAppStore.getState().clearToast();
+});
+
 it("unsubscribes on unmount", async () => {
   const unlisten = vi.fn();
   ipc.onState.mockResolvedValue(unlisten);

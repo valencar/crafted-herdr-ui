@@ -6,6 +6,7 @@ import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CreatedSession } from "./bindings/CreatedSession";
 import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
+import type { PreviewFrame } from "./bindings/PreviewFrame";
 import type { TerminalList } from "./bindings/TerminalList";
 
 /** Every Tauri command the UI may call, mapped to its result. A Rust `()` arrives as `null`. */
@@ -34,6 +35,8 @@ export type CommandResults = {
   open_full_herdr: null;
   list_terminals: TerminalList;
   copy_attach_command: string;
+  start_preview: null;
+  stop_preview: null;
 };
 export type CommandName = keyof CommandResults;
 
@@ -68,6 +71,8 @@ export type CommandArgs = {
   open_full_herdr: { machineId: string };
   list_terminals: undefined;
   copy_attach_command: { machineId: string; paneId: string };
+  start_preview: { machineId: string; paneId: string; isAgent: boolean };
+  stop_preview: undefined;
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([
@@ -124,4 +129,11 @@ export function getState(): Promise<AppState> {
 /** Subscribes to the `"state"` event. Resolves to the unlisten function. */
 export function onState(cb: (state: AppState) => void): Promise<() => void> {
   return listen<AppState>("state", (event) => cb(event.payload));
+}
+
+/** Subscribes to the `"preview"` event (the live preview of the one active pane). */
+export function onPreview(
+  cb: (frame: PreviewFrame) => void,
+): Promise<() => void> {
+  return listen<PreviewFrame>("preview", (event) => cb(event.payload));
 }

@@ -2,17 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Header } from "../components/Header";
+import { Inspector } from "../components/Inspector";
 import { NeedsYouCard } from "../components/NeedsYouCard";
 import { ProjectGroup } from "../components/ProjectGroup";
 import { Sidebar } from "../components/Sidebar";
 import { Toast } from "../components/Toast";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { TerminalId } from "../lib/bindings/TerminalId";
-import {
-  TERMINAL_LABEL,
-  actionErrorMessage,
-  formatStaleness,
-} from "../lib/format";
+import { TERMINAL_LABEL, formatStaleness, lastLines } from "../lib/format";
 import {
   groupByProject,
   groupByStatus,
@@ -22,7 +19,7 @@ import {
   type Group,
   type Row,
 } from "../lib/grouping";
-import { invokeTyped, toActionError } from "../lib/ipc";
+import { invokeTyped } from "../lib/ipc";
 import { useAppStore, type GroupBy } from "../store/appStore";
 
 const GROUP_TITLE: Record<GroupBy, string> = {
@@ -91,11 +88,14 @@ export function Home() {
   const select = useAppStore((s) => s.select);
   const setGroupBy = useAppStore((s) => s.setGroupBy);
   const setSheet = useAppStore((s) => s.setSheet);
+  const toast = useAppStore((s) => s.toast);
+  const preview = useAppStore((s) => s.preview);
+  const report = useAppStore((s) => s.reportError);
+  const dismissToast = useAppStore((s) => s.clearToast);
 
   const nowMs = useNow(30_000);
   const [query, setQuery] = useState("");
   const [terminal, setTerminal] = useState<TerminalId | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -145,6 +145,18 @@ export function Home() {
   }, [projectGroups]);
 
   const selectedRow = rows.find((r) => r.key === selectedKey) ?? null;
+  // Keyboard shortcuts only act on a selection the user can see in the list.
+  const actionRow =
+    selectedRow && visible.some((r) => r.key === selectedRow.key)
+      ? selectedRow
+      : null;
+  const selectedMachine = selectedRow
+    ? (machines.get(selectedRow.machineId) ?? null)
+    : null;
+  const previewLines =
+    selectedKey && preview?.key === selectedKey
+      ? lastLines(preview.text, 3)
+      : [];
   const closingRow = rows.find((r) => r.key === closingKey) ?? null;
   const terminalName = terminal ? TERMINAL_LABEL[terminal] : "terminal";
 
@@ -162,11 +174,6 @@ export function Home() {
     }
     return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
   };
-
-  const dismissToast = useCallback(() => setToast(null), []);
-  const report = useCallback((e: unknown) => {
-    setToast(actionErrorMessage(toActionError(e)));
-  }, []);
 
   const open = useCallback(
     (row: Row) => {
@@ -194,7 +201,9 @@ export function Home() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (closingRow || sheet) return;
+      if (closingRow || sheet || document.querySelector('[role="dialog"]')) {
+        return;
+      }
       if (e.metaKey) {
         if (e.key === "k") {
           e.preventDefault();
@@ -206,9 +215,9 @@ export function Home() {
         } else if (e.key === "r") {
           e.preventDefault();
           invokeTyped("refresh_now", {}).catch(report);
-        } else if (e.key === "Enter" && selectedRow) {
+        } else if (e.key === "Enter" && actionRow) {
           e.preventDefault();
-          open(selectedRow);
+          open(actionRow);
         }
         return;
       }
@@ -227,9 +236,9 @@ export function Home() {
         select(navRows[next].key);
         focusRow(navRows[next].key);
       } else if (e.key === "Backspace" || e.key === "Delete") {
-        if (selectedRow) {
+        if (actionRow) {
           e.preventDefault();
-          setClosingKey(selectedRow.key);
+          setClosingKey(actionRow.key);
         }
       }
     };
@@ -238,7 +247,7 @@ export function Home() {
   }, [
     closingRow,
     sheet,
-    selectedRow,
+    actionRow,
     selectedKey,
     navRows,
     select,
@@ -317,6 +326,7 @@ export function Home() {
                         note={noteFor(r.machineId)}
                         nowMs={nowMs}
                         terminalName={terminalName}
+                        previewLines={r.key === selectedKey ? previewLines : []}
                         onSelect={select}
                         onOpen={open}
                         onMarkSeen={markSeen}
@@ -382,14 +392,19 @@ export function Home() {
           )}
         </main>
 
-        {/* Task 10 builds the real inspector here. */}
-        <aside className="inspector" aria-label="Selected agent">
-          {selectedRow ? (
-            <h2 className="inspector-name mono">{selectedRow.name}</h2>
-          ) : (
+        {selectedRow && selectedMachine ? (
+          <Inspector
+            key={selectedRow.key}
+            row={selectedRow}
+            machine={selectedMachine}
+            project={projectOf.get(selectedRow.key) ?? null}
+            terminalName={terminalName}
+          />
+        ) : (
+          <aside className="inspector" aria-label="Selected agent">
             <p className="muted">Select an agent to see its details.</p>
-          )}
-        </aside>
+          </aside>
+        )}
       </div>
 
       {closingRow && (

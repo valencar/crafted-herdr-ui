@@ -1,8 +1,7 @@
-import { useEffect } from "react";
-
-const AUTO_DISMISS_MS = 8000;
-
-/** A minimal error toast: the message, and a Dismiss button. */
+/**
+ * A minimal error toast: the message, and a Dismiss button. The app store owns the message
+ * and the auto-dismiss timer, so every new report restarts it.
+ */
 export function Toast({
   message,
   onDismiss,
@@ -10,10 +9,6 @@ export function Toast({
   message: string;
   onDismiss: () => void;
 }) {
-  useEffect(() => {
-    const t = window.setTimeout(onDismiss, AUTO_DISMISS_MS);
-    return () => window.clearTimeout(t);
-  }, [message, onDismiss]);
   return (
     <div className="toast" role="alert">
       <span>{message}</span>

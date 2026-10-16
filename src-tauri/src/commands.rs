@@ -2,14 +2,19 @@
 //! state and hands off to `Actions` (or the poller). Names are snake_case in Rust and in
 //! `invoke()`; argument keys are camelCase, which is Tauri's default.
 
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 
+use serde::Serialize;
+use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use ts_rs::TS;
 
 use crate::actions::{self, ActionError, Actions, CreatedSession, NewSessionRequest};
 use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
-use crate::herdr::cli::{CommandLogEntry, HerdrCli};
+use crate::herdr::cli::{CommandLogEntry, HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::poller::Poller;
@@ -395,6 +400,201 @@ pub fn copy_attach_command(
     Ok(join_quoted(&argv))
 }
 
+const PREVIEW_EVERY: Duration = Duration::from_secs(2);
+/// The event `PreviewFrame`s are emitted on.
+pub const PREVIEW_EVENT: &str = "preview";
+
+/// One frame of the live preview, sent to the UI as the `"preview"` event. `key` is
+/// `<machineId>::<paneId>`, the same key the UI uses for a row.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct PreviewFrame {
+    pub key: String,
+    /// The terminal text, or `None` when the read failed.
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+}
+
+pub type PreviewEmit = Arc<dyn Fn(PreviewFrame) + Send + Sync>;
+pub type IsVisible = Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// The row key the UI uses for a pane.
+pub fn preview_key(machine_id: &str, pane_id: &str) -> String {
+    format!("{machine_id}::{pane_id}")
+}
+
+/// The read command for a pane: `agent read` for an agent, `pane read` for a shell.
+pub fn preview_argv(pane_id: &str, is_agent: bool) -> Vec<String> {
+    let group = if is_agent { "agent" } else { "pane" };
+    [
+        group,
+        "read",
+        pane_id,
+        "--source",
+        "recent-unwrapped",
+        "--lines",
+        "60",
+        "--format",
+        "text",
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+/// The terminal text inside herdr's reply: `{"result": {"type": "pane_read", "read": {"text"}}}`.
+pub fn preview_text(reply: &Value) -> Option<String> {
+    reply
+        .pointer("/result/read/text")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+fn preview_error(e: &HerdrError) -> String {
+    match e {
+        HerdrError::Server { message, .. } | HerdrError::Usage { message } => message.clone(),
+        HerdrError::NotFound => "herdr was not found.".to_owned(),
+        HerdrError::Timeout { .. } => "herdr did not answer in time.".to_owned(),
+        other => other.to_string(),
+    }
+}
+
+struct Active {
+    /// Bumped by every start and stop; a task only emits while its number is the current one.
+    generation: u64,
+    task: Option<JoinHandle<()>>,
+}
+
+/// The live preview: at most one pane is read every 2 s, and only while the window is visible.
+/// Starting another pane, or stopping, cancels the old read, and a frame for the old pane is
+/// never emitted after `start` or `stop` has returned.
+#[derive(Clone)]
+pub struct PreviewManager {
+    cli: HerdrCli,
+    visible: IsVisible,
+    emit: PreviewEmit,
+    every: Duration,
+    active: Arc<StdMutex<Active>>,
+}
+
+fn lock_active(m: &StdMutex<Active>) -> MutexGuard<'_, Active> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl PreviewManager {
+    pub fn new(cli: HerdrCli, visible: IsVisible, emit: PreviewEmit) -> Self {
+        Self {
+            cli,
+            visible,
+            emit,
+            every: PREVIEW_EVERY,
+            active: Arc::new(StdMutex::new(Active {
+                generation: 0,
+                task: None,
+            })),
+        }
+    }
+
+    /// A shorter period, for tests.
+    pub fn with_every(mut self, every: Duration) -> Self {
+        self.every = every;
+        self
+    }
+
+    /// Previews one pane, replacing any other. Must be called inside a tokio runtime.
+    pub fn start(
+        &self,
+        machine_id: &str,
+        pane_id: &str,
+        is_agent: bool,
+    ) -> Result<(), ActionError> {
+        if machine_id.trim().is_empty() || pane_id.trim().is_empty() || pane_id.starts_with('-') {
+            return Err(invalid("Pick a pane to preview."));
+        }
+        let mut active = lock_active(&self.active);
+        if let Some(old) = active.task.take() {
+            old.abort();
+        }
+        active.generation += 1;
+        let generation = active.generation;
+        let this = self.clone();
+        let machine = machine_id.to_owned();
+        let pane = pane_id.to_owned();
+        active.task = Some(tokio::spawn(async move {
+            this.run(generation, machine, pane, is_agent).await;
+        }));
+        Ok(())
+    }
+
+    /// Stops the preview, if one is running.
+    pub fn stop(&self) {
+        let mut active = lock_active(&self.active);
+        active.generation += 1;
+        if let Some(old) = active.task.take() {
+            old.abort();
+        }
+    }
+
+    /// Emits only while `generation` is still the current one. The check and the emit happen
+    /// under one lock, so `start`/`stop` returning means no stale frame follows.
+    fn emit_current(&self, generation: u64, frame: PreviewFrame) {
+        let active = lock_active(&self.active);
+        if active.generation == generation {
+            (self.emit)(frame);
+        }
+    }
+
+    async fn run(&self, generation: u64, machine: String, pane: String, is_agent: bool) {
+        let key = preview_key(&machine, &pane);
+        let args = preview_argv(&pane, is_agent);
+        loop {
+            if (self.visible)() {
+                let frame = match self.cli.run(Some(&machine), &args, T_DEFAULT).await {
+                    Ok(reply) => match preview_text(&reply) {
+                        Some(text) => PreviewFrame {
+                            key: key.clone(),
+                            text: Some(text),
+                            error: None,
+                        },
+                        None => PreviewFrame {
+                            key: key.clone(),
+                            text: None,
+                            error: Some("herdr sent no terminal text.".to_owned()),
+                        },
+                    },
+                    Err(e) => PreviewFrame {
+                        key: key.clone(),
+                        text: None,
+                        error: Some(preview_error(&e)),
+                    },
+                };
+                self.emit_current(generation, frame);
+            }
+            tokio::time::sleep(self.every).await;
+        }
+    }
+}
+
+/// Starts the live preview for one pane (replacing the previous one).
+#[tauri::command]
+pub async fn start_preview(
+    preview: State<'_, PreviewManager>,
+    machine_id: String,
+    pane_id: String,
+    is_agent: bool,
+) -> Result<(), ActionError> {
+    preview.start(&machine_id, &pane_id, is_agent)
+}
+
+/// Stops the live preview.
+#[tauri::command]
+pub async fn stop_preview(preview: State<'_, PreviewManager>) -> Result<(), ActionError> {
+    // Tauri needs a `Result` from an async command that borrows state; this never fails.
+    preview.stop();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,6 +636,48 @@ mod tests {
             herdr_path: None,
             generated_at_ms: 0,
         }
+    }
+
+    #[test]
+    fn preview_reads_agents_and_shells_with_the_agreed_flags() {
+        assert_eq!(
+            preview_argv("w1:p1", true).join(" "),
+            "agent read w1:p1 --source recent-unwrapped --lines 60 --format text"
+        );
+        assert_eq!(
+            preview_argv("w1:p2", false).join(" "),
+            "pane read w1:p2 --source recent-unwrapped --lines 60 --format text"
+        );
+        assert_eq!(preview_key("buildbox", "w1:p1"), "buildbox::w1:p1");
+    }
+
+    #[test]
+    fn preview_text_comes_from_result_read_text() {
+        let path = format!(
+            "{}/tests/fixtures/agent_read.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let reply: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(
+            preview_text(&reply).as_deref(),
+            Some("Running tests…\n  3 passed\n$ ")
+        );
+        assert_eq!(preview_text(&serde_json::json!({"result": {}})), None);
+        assert_eq!(preview_text(&Value::Null), None);
+        assert_eq!(
+            preview_text(&serde_json::json!({"result": {"read": {"text": 5}}})),
+            None
+        );
+    }
+
+    #[test]
+    fn preview_errors_read_as_sentences() {
+        let server = HerdrError::Server {
+            code: "pane_not_found".into(),
+            message: "pane w1:p9 not found".into(),
+        };
+        assert_eq!(preview_error(&server), "pane w1:p9 not found");
+        assert_eq!(preview_error(&HerdrError::NotFound), "herdr was not found.");
     }
 
     #[test]

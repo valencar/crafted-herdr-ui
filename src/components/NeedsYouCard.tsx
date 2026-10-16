@@ -12,6 +12,8 @@ type Props = {
   note: string | null;
   nowMs: number;
   terminalName: string;
+  /** The last few lines of the live preview; only the selected card has any. */
+  previewLines: string[];
   onSelect: (key: string) => void;
   onOpen: (row: Row) => void;
   onMarkSeen: (row: Row) => void;
@@ -25,6 +27,7 @@ export function NeedsYouCard({
   note,
   nowMs,
   terminalName,
+  previewLines,
   onSelect,
   onOpen,
   onMarkSeen,
@@ -49,6 +52,11 @@ export function NeedsYouCard({
         <div className="mono card-folder">{shortPath(row.folder)}</div>
       )}
       {note && <div className="row-note">{note}</div>}
+      {previewLines.length > 0 && (
+        <pre className="mono card-preview" aria-label="Latest output">
+          {previewLines.join("\n")}
+        </pre>
+      )}
       <div className="card-actions">
         <button
           type="button"

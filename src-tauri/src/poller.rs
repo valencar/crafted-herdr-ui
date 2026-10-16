@@ -251,6 +251,11 @@ impl Poller {
         }
     }
 
+    /// Whether the main window is on screen, as last reported by `set_visible`.
+    pub fn is_visible(&self) -> bool {
+        self.inner.visible()
+    }
+
     /// Status changes seen by polling, for notifications. Not sent for the first good poll after
     /// start or after a failure.
     pub fn subscribe(&self) -> broadcast::Receiver<Transition> {

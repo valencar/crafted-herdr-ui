@@ -1,9 +1,16 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "./appStore";
 
 const initial = useAppStore.getState();
 
-beforeEach(() => useAppStore.setState(initial, true));
+beforeEach(() => {
+  vi.useFakeTimers();
+  useAppStore.setState(initial, true);
+});
+afterEach(() => {
+  useAppStore.getState().clearToast();
+  vi.useRealTimers();
+});
 
 describe("appStore", () => {
   it("starts empty with project grouping on the home view", () => {
@@ -38,5 +45,64 @@ describe("appStore", () => {
       view: { kind: "workbox", machineId: "buildbox" },
       activityOpen: true,
     });
+  });
+
+  it("reports an error as a toast that dismisses itself after 8 s", () => {
+    const { reportError } = useAppStore.getState();
+    reportError({
+      kind: "herdr",
+      error: { kind: "server", code: "x", message: "pane is gone" },
+    });
+    expect(useAppStore.getState().toast).toBe("pane is gone");
+    vi.advanceTimersByTime(7_999);
+    expect(useAppStore.getState().toast).toBe("pane is gone");
+    vi.advanceTimersByTime(1);
+    expect(useAppStore.getState().toast).toBeNull();
+  });
+
+  it("restarts the timer when the same message is reported again", () => {
+    const { reportError } = useAppStore.getState();
+    reportError(new Error("nope"));
+    vi.advanceTimersByTime(6_000);
+    reportError(new Error("nope"));
+    vi.advanceTimersByTime(6_000);
+    expect(useAppStore.getState().toast).toBe("nope");
+    vi.advanceTimersByTime(2_000);
+    expect(useAppStore.getState().toast).toBeNull();
+  });
+
+  it("shows a maybe-applied action's message, or a default when it has none", () => {
+    const { reportError } = useAppStore.getState();
+    reportError({ kind: "maybeApplied", argv: [], message: "may be done" });
+    expect(useAppStore.getState().toast).toBe("may be done");
+    reportError({ kind: "maybeApplied", argv: [], message: "" });
+    expect(useAppStore.getState().toast).toBe(
+      "May have been applied; refreshing…",
+    );
+  });
+
+  it("clearToast removes the toast and its timer", () => {
+    const { reportError, clearToast } = useAppStore.getState();
+    reportError("boom");
+    clearToast();
+    expect(useAppStore.getState().toast).toBeNull();
+    reportError("later");
+    vi.advanceTimersByTime(7_000);
+    clearToast();
+    vi.advanceTimersByTime(5_000);
+    reportError("third");
+    vi.advanceTimersByTime(7_999);
+    expect(useAppStore.getState().toast).toBe("third");
+  });
+
+  it("keeps the latest preview frame", () => {
+    const s = useAppStore.getState();
+    s.setPreview({ key: "buildbox::w1:p1", text: "hi" });
+    expect(useAppStore.getState().preview).toEqual({
+      key: "buildbox::w1:p1",
+      text: "hi",
+    });
+    s.setPreview(null);
+    expect(useAppStore.getState().preview).toBeNull();
   });
 });

@@ -5,7 +5,8 @@ const listen = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
 
-const { getState, invokeTyped, onState, toActionError } = await import("./ipc");
+const { getState, invokeTyped, onPreview, onState, toActionError } =
+  await import("./ipc");
 
 beforeEach(() => {
   invoke.mockReset();
@@ -95,6 +96,19 @@ describe("state", () => {
     const off = await onState(cb);
     expect(listen).toHaveBeenCalledWith("state", expect.any(Function));
     expect(cb).toHaveBeenCalledWith({ machines: [] });
+    expect(off).toBe(unlisten);
+  });
+
+  it("onPreview listens on the preview event and delivers the frame", async () => {
+    const unlisten = vi.fn();
+    listen.mockImplementation(async (_name, handler) => {
+      handler({ payload: { key: "buildbox::w1:p1", text: "hi" } });
+      return unlisten;
+    });
+    const cb = vi.fn();
+    const off = await onPreview(cb);
+    expect(listen).toHaveBeenCalledWith("preview", expect.any(Function));
+    expect(cb).toHaveBeenCalledWith({ key: "buildbox::w1:p1", text: "hi" });
     expect(off).toBe(unlisten);
   });
 });
