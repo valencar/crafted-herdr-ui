@@ -100,7 +100,7 @@ impl Drop for Harness {
 #[tokio::test]
 async fn an_agent_is_read_with_agent_read_and_its_text_is_emitted_under_its_key() {
     let h = Harness::new();
-    h.put(&format!("{AGENT_P1}.json"), &fixture("agent_read.json"));
+    h.put(&format!("{AGENT_P1}.json"), &fixture("pane_read_text.txt"));
 
     h.preview.start("local", "w1:p1", true).unwrap();
     h.wait_for("two frames", |f| f.len() >= 2).await;
@@ -109,7 +109,7 @@ async fn an_agent_is_read_with_agent_read_and_its_text_is_emitted_under_its_key(
     assert_eq!(first.key, "local::w1:p1");
     assert_eq!(
         first.text.as_deref(),
-        Some("Running tests…\n  3 passed\n$ ")
+        Some("Running tests…\n  3 passed\n$ \n")
     );
     assert_eq!(first.error, None);
     assert_eq!(
@@ -123,7 +123,7 @@ async fn a_shell_is_read_with_pane_read_on_the_right_machine() {
     let h = Harness::new();
     h.put(
         &format!("buildbox@{PANE_P3}.json"),
-        &fixture("agent_read.json"),
+        &fixture("pane_read_text.txt"),
     );
 
     h.preview.start("buildbox", "w1:p3", false).unwrap();
@@ -155,24 +155,27 @@ async fn a_failed_read_emits_the_error_with_no_text() {
 }
 
 #[tokio::test]
-async fn a_reply_without_text_is_an_error_frame() {
+async fn output_that_is_not_json_is_the_text() {
     let h = Harness::new();
-    h.put(&format!("{AGENT_P1}.json"), r#"{"result":{"type":"ok"}}"#);
+    h.put(&format!("{AGENT_P1}.json"), "{not json at all\n  [1, 2");
 
     h.preview.start("local", "w1:p1", true).unwrap();
-    h.wait_for("an error frame", |f| !f.is_empty()).await;
+    h.wait_for("a frame", |f| !f.is_empty()).await;
 
-    assert_eq!(h.frames()[0].text, None);
-    assert!(h.frames()[0].error.is_some());
+    assert_eq!(
+        h.frames()[0].text.as_deref(),
+        Some("{not json at all\n  [1, 2\n")
+    );
+    assert_eq!(h.frames()[0].error, None);
 }
 
 #[tokio::test]
 async fn nothing_is_emitted_for_a_stale_key_after_a_switch() {
     let h = Harness::new();
     // The first pane answers after 1 s; the second answers at once.
-    h.put(&format!("{AGENT_P1}.json"), &fixture("agent_read.json"));
+    h.put(&format!("{AGENT_P1}.json"), &fixture("pane_read_text.txt"));
     h.put(&format!("{AGENT_P1}.sleep"), "1");
-    h.put(&format!("{AGENT_P2}.json"), &fixture("agent_read.json"));
+    h.put(&format!("{AGENT_P2}.json"), &fixture("pane_read_text.txt"));
 
     h.preview.start("local", "w1:p1", true).unwrap();
     // Let the slow read begin, then switch.
@@ -194,7 +197,7 @@ async fn nothing_is_emitted_for_a_stale_key_after_a_switch() {
 #[tokio::test]
 async fn stop_ends_the_reads() {
     let h = Harness::new();
-    h.put(&format!("{AGENT_P1}.json"), &fixture("agent_read.json"));
+    h.put(&format!("{AGENT_P1}.json"), &fixture("pane_read_text.txt"));
 
     h.preview.start("local", "w1:p1", true).unwrap();
     h.wait_for("a frame", |f| !f.is_empty()).await;
@@ -210,7 +213,7 @@ async fn stop_ends_the_reads() {
 #[tokio::test]
 async fn reads_pause_while_the_window_is_hidden_and_resume_when_it_is_shown() {
     let h = Harness::new();
-    h.put(&format!("{AGENT_P1}.json"), &fixture("agent_read.json"));
+    h.put(&format!("{AGENT_P1}.json"), &fixture("pane_read_text.txt"));
     h.visible.store(false, Ordering::Relaxed);
 
     h.preview.start("local", "w1:p1", true).unwrap();

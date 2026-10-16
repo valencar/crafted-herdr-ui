@@ -1,0 +1,3 @@
+Running tests…
+  3 passed
+$ 

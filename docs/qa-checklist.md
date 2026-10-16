@@ -51,7 +51,7 @@ GUI-only checks that implementers skip; run them in a final pass with the mainta
 
 ## Task 10
 
-- [ ] Verify against a throwaway pane (a `herdr-ui-qa` session) that `herdr agent read <pane> --source recent-unwrapped --lines 60 --format text` and `herdr pane read …` print the JSON envelope `{"result":{"type":"pane_read","read":{"text":…}}}` on stdout. The preview reads `result.read.text`; if the CLI prints raw text instead, the inspector shows "could not parse herdr output".
+- [ ] Against a real pane in a `herdr-ui-qa` session, check the live preview shows the same text as `herdr pane read <pane> --source recent-unwrapped --lines 60 --format text` run by hand (plain text on stdout), for both an agent pane and a shell pane, locally and on a remote machine.
 - [ ] Select a row: the inspector's Live preview fills with its terminal text within about 2 s and follows new output; selecting another row swaps the text and never shows the old pane's output. Clearing the selection stops the reads (the Activity drawer shows no more `read` calls).
 - [ ] Minimize the window or move it to another Space: `read` calls stop; bring it back and the preview refreshes within about 2 s.
 - [ ] Reply to an idle agent from the inspector: the text reaches the agent, the field clears, and a blocked agent shows the field disabled with "Answer this in the terminal".

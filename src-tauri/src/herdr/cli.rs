@@ -99,6 +99,30 @@ impl HerdrCli {
         args: &[String],
         timeout: Duration,
     ) -> Result<Value, HerdrError> {
+        self.run_mapped(machine, args, timeout, map_output).await
+    }
+
+    /// Like `run`, for the commands that print plain text (`pane read`, `agent read`): on exit
+    /// 0 the stdout is returned as is, without a JSON parse. Failures map exactly as in `run`.
+    pub async fn run_text(
+        &self,
+        machine: Option<&str>,
+        args: &[String],
+        timeout: Duration,
+    ) -> Result<String, HerdrError> {
+        self.run_mapped(machine, args, timeout, map_text_output)
+            .await
+    }
+
+    /// The one path every herdr call takes: semaphore, spawn, timeout and log entry. `map`
+    /// turns the finished process into the caller's result.
+    async fn run_mapped<T>(
+        &self,
+        machine: Option<&str>,
+        args: &[String],
+        timeout: Duration,
+        map: fn(Option<i32>, &str, &str) -> Result<T, HerdrError>,
+    ) -> Result<T, HerdrError> {
         let remote = machine.filter(|m| *m != LOCAL);
         let semaphore = self.semaphore(remote.unwrap_or(LOCAL));
         let _permit = semaphore
@@ -113,7 +137,7 @@ impl HerdrCli {
         let outcome = self.spawn(remote, args, timeout).await;
 
         let (exit_code, result) = match outcome {
-            Ok((code, result)) => (code, result),
+            Ok((code, stdout, stderr)) => (code, map(code, &stdout, &stderr)),
             Err(e) => (None, Err(e)),
         };
         lock(&self.log).push(CommandLogEntry {
@@ -148,13 +172,13 @@ impl HerdrCli {
             .clone()
     }
 
-    /// Spawns the process. Returns the exit code (if the process exited) with the mapped result.
+    /// Spawns the process. Returns the exit code (if the process exited), stdout and stderr.
     async fn spawn(
         &self,
         remote: Option<&str>,
         args: &[String],
         timeout: Duration,
-    ) -> Result<(Option<i32>, Result<Value, HerdrError>), HerdrError> {
+    ) -> Result<(Option<i32>, String, String), HerdrError> {
         let mut cmd = Command::new(&self.bin);
         if let Some(id) = remote {
             cmd.arg("--machine").arg(id);
@@ -190,9 +214,27 @@ impl HerdrCli {
         };
 
         let code = output.status.code();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok((code, map_output(code, &stdout, &stderr)))
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        Ok((code, stdout, stderr))
+    }
+}
+
+/// Maps a finished process that printed plain text. Errors map as in `map_output`.
+fn map_text_output(code: Option<i32>, stdout: &str, stderr: &str) -> Result<String, HerdrError> {
+    match code {
+        Some(0) => Ok(stdout.to_owned()),
+        _ => Err(failure(code, stderr)),
+    }
+}
+
+/// The error for a process that did not exit 0: usage (exit 2) or a server error.
+fn failure(code: Option<i32>, stderr: &str) -> HerdrError {
+    match code {
+        Some(2) => HerdrError::Usage {
+            message: stderr.trim().to_owned(),
+        },
+        _ => server_error(stderr),
     }
 }
 
@@ -208,10 +250,7 @@ fn map_output(code: Option<i32>, stdout: &str, stderr: &str) -> Result<Value, He
                 message: format!("stdout is not JSON: {e}"),
             })
         }
-        Some(2) => Err(HerdrError::Usage {
-            message: stderr.trim().to_owned(),
-        }),
-        _ => Err(server_error(stderr)),
+        _ => Err(failure(code, stderr)),
     }
 }
 
@@ -247,6 +286,23 @@ mod tests {
         assert!(matches!(
             map_output(None, "", "killed"),
             Err(HerdrError::Server { code, .. }) if code == "unknown"
+        ));
+    }
+
+    #[test]
+    fn text_output_is_returned_verbatim_on_exit_0_and_errors_map_as_for_json() {
+        assert_eq!(
+            map_text_output(Some(0), "not json\n  indented\n", "").unwrap(),
+            "not json\n  indented\n"
+        );
+        assert_eq!(map_text_output(Some(0), "", "").unwrap(), "");
+        assert!(matches!(
+            map_text_output(Some(2), "", " bad flag "),
+            Err(HerdrError::Usage { message }) if message == "bad flag"
+        ));
+        assert!(matches!(
+            map_text_output(Some(1), "", r#"{"error":{"code":"c","message":"m"}}"#),
+            Err(HerdrError::Server { code, message }) if code == "c" && message == "m"
         ));
     }
 

@@ -288,3 +288,86 @@ async fn per_machine_files_override_the_generic_ones() {
     assert_eq!(run(Some("p2")).await, json!({"who": "generic"}));
     assert_eq!(run(None).await, json!({"who": "generic"}));
 }
+
+#[tokio::test]
+async fn run_text_returns_stdout_verbatim_without_parsing_json() {
+    let fake = Fake::new();
+    fake.put(
+        "pane_read_w1:p1.json",
+        "plain text, not JSON\n  second line",
+    );
+
+    let out = fake
+        .cli
+        .run_text(Some("p1"), &args(&["pane", "read", "w1:p1"]), T)
+        .await
+        .unwrap();
+
+    assert_eq!(out, "plain text, not JSON\n  second line\n");
+    assert_eq!(fake.calls(), ["--machine p1 pane read w1:p1"]);
+    let log = fake.cli.log_snapshot();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].argv, args(&["pane", "read", "w1:p1"]));
+    assert_eq!(log[0].exit_code, Some(0));
+    assert_eq!(log[0].error, None);
+}
+
+#[tokio::test]
+async fn run_text_maps_exit_1_to_a_server_error_and_logs_it() {
+    let fake = Fake::new();
+    fake.put(
+        "pane_read_w9:p9.stderr",
+        r#"{"error":{"code":"pane_not_found","message":"no such pane"}}"#,
+    );
+    fake.put("pane_read_w9:p9.exit", "1");
+
+    let err = fake
+        .cli
+        .run_text(None, &args(&["pane", "read", "w9:p9"]), T)
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        err,
+        HerdrError::Server {
+            code: "pane_not_found".into(),
+            message: "no such pane".into()
+        }
+    );
+    let log = fake.cli.log_snapshot();
+    assert_eq!(log[0].exit_code, Some(1));
+    assert!(log[0].error.is_some());
+}
+
+#[tokio::test]
+async fn run_text_maps_exit_2_to_usage() {
+    let fake = Fake::new();
+    let err = fake
+        .cli
+        .run_text(None, &args(&["pane", "read", "--bogus"]), T)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, HerdrError::Usage { .. }));
+}
+
+#[tokio::test]
+async fn run_text_times_out_and_kills_the_child() {
+    let fake = Fake::new();
+    fake.put("slow_text-kill-test.json", "text");
+    fake.put("slow_text-kill-test.sleep", "2");
+    let argv = args(&["slow", "text-kill-test"]);
+
+    let err = fake
+        .cli
+        .run_text(None, &argv, Duration::from_millis(300))
+        .await
+        .unwrap_err();
+
+    assert_eq!(err, HerdrError::Timeout { argv });
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let alive = Command::new("pgrep")
+        .args(["-f", "fake-herdr slow text-kill-test"])
+        .status()
+        .unwrap();
+    assert!(!alive.success(), "fake-herdr child survived the timeout");
+}

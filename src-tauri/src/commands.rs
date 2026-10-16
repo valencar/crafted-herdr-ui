@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 
 use serde::Serialize;
-use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -443,14 +442,6 @@ pub fn preview_argv(pane_id: &str, is_agent: bool) -> Vec<String> {
     .to_vec()
 }
 
-/// The terminal text inside herdr's reply: `{"result": {"type": "pane_read", "read": {"text"}}}`.
-pub fn preview_text(reply: &Value) -> Option<String> {
-    reply
-        .pointer("/result/read/text")?
-        .as_str()
-        .map(str::to_owned)
-}
-
 fn preview_error(e: &HerdrError) -> String {
     match e {
         HerdrError::Server { message, .. } | HerdrError::Usage { message } => message.clone(),
@@ -550,18 +541,11 @@ impl PreviewManager {
         let args = preview_argv(&pane, is_agent);
         loop {
             if (self.visible)() {
-                let frame = match self.cli.run(Some(&machine), &args, T_DEFAULT).await {
-                    Ok(reply) => match preview_text(&reply) {
-                        Some(text) => PreviewFrame {
-                            key: key.clone(),
-                            text: Some(text),
-                            error: None,
-                        },
-                        None => PreviewFrame {
-                            key: key.clone(),
-                            text: None,
-                            error: Some("herdr sent no terminal text.".to_owned()),
-                        },
+                let frame = match self.cli.run_text(Some(&machine), &args, T_DEFAULT).await {
+                    Ok(text) => PreviewFrame {
+                        key: key.clone(),
+                        text: Some(text),
+                        error: None,
                     },
                     Err(e) => PreviewFrame {
                         key: key.clone(),
@@ -649,25 +633,6 @@ mod tests {
             "pane read w1:p2 --source recent-unwrapped --lines 60 --format text"
         );
         assert_eq!(preview_key("buildbox", "w1:p1"), "buildbox::w1:p1");
-    }
-
-    #[test]
-    fn preview_text_comes_from_result_read_text() {
-        let path = format!(
-            "{}/tests/fixtures/agent_read.json",
-            env!("CARGO_MANIFEST_DIR")
-        );
-        let reply: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert_eq!(
-            preview_text(&reply).as_deref(),
-            Some("Running tests…\n  3 passed\n$ ")
-        );
-        assert_eq!(preview_text(&serde_json::json!({"result": {}})), None);
-        assert_eq!(preview_text(&Value::Null), None);
-        assert_eq!(
-            preview_text(&serde_json::json!({"result": {"read": {"text": 5}}})),
-            None
-        );
     }
 
     #[test]
