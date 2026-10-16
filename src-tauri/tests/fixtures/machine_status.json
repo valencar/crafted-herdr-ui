@@ -1,0 +1,20 @@
+[
+  {
+    "id": "buildbox",
+    "label": "Build box",
+    "status": "reachable",
+    "error": null
+  },
+  {
+    "id": "gpubox",
+    "label": "GPU box",
+    "status": "unreachable",
+    "error": "ssh: connect to host gpubox port 22: Connection timed out"
+  },
+  {
+    "id": "staging",
+    "label": "Staging",
+    "status": "disabled",
+    "error": null
+  }
+]

@@ -1,0 +1,348 @@
+{
+  "id": "cli:api:snapshot",
+  "result": {
+    "type": "session_snapshot",
+    "snapshot": {
+      "version": "0.9.4",
+      "protocol": 22,
+      "workspaces": [
+        {
+          "workspace_id": "w1",
+          "number": 1,
+          "label": "api-service",
+          "focused": true,
+          "pane_count": 3,
+          "tab_count": 2,
+          "active_tab_id": "w1:t1",
+          "agent_status": "blocked"
+        },
+        {
+          "workspace_id": "w2",
+          "number": 2,
+          "label": "web-app",
+          "focused": false,
+          "pane_count": 2,
+          "tab_count": 1,
+          "active_tab_id": "w2:t1",
+          "agent_status": "done"
+        }
+      ],
+      "tabs": [
+        {
+          "tab_id": "w1:t1",
+          "workspace_id": "w1",
+          "number": 1,
+          "label": "main",
+          "focused": true,
+          "pane_count": 2,
+          "agent_status": "blocked"
+        },
+        {
+          "tab_id": "w1:t2",
+          "workspace_id": "w1",
+          "number": 2,
+          "label": "shell",
+          "focused": false,
+          "pane_count": 1,
+          "agent_status": "unknown"
+        },
+        {
+          "tab_id": "w2:t1",
+          "workspace_id": "w2",
+          "number": 1,
+          "label": "main",
+          "focused": false,
+          "pane_count": 2,
+          "agent_status": "done"
+        }
+      ],
+      "panes": [
+        {
+          "pane_id": "w1:p1",
+          "tab_id": "w1:t1",
+          "workspace_id": "w1",
+          "terminal_id": "term-1",
+          "cwd": "/home/dev/projects/api-service",
+          "foreground_cwd": "/home/dev/projects/api-service",
+          "terminal_title": "claude: refactor auth",
+          "terminal_title_stripped": "claude: refactor auth",
+          "agent_status": "blocked",
+          "focused": true,
+          "revision": 12,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 40
+          },
+          "agent": "claude",
+          "display_agent": "claude"
+        },
+        {
+          "pane_id": "w1:p2",
+          "tab_id": "w1:t1",
+          "workspace_id": "w1",
+          "terminal_id": "term-2",
+          "cwd": "/home/dev/projects/api-service",
+          "foreground_cwd": "/home/dev/projects/infra",
+          "terminal_title": "copilot: terraform plan",
+          "terminal_title_stripped": "copilot: terraform plan",
+          "agent_status": "thinking",
+          "focused": false,
+          "revision": 7,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 40
+          }
+        },
+        {
+          "pane_id": "w1:p3",
+          "tab_id": "w1:t2",
+          "workspace_id": "w1",
+          "terminal_id": "term-3",
+          "cwd": "/home/dev/projects/api-service/packages/db",
+          "foreground_cwd": "/home/dev/projects/api-service/packages/db",
+          "terminal_title": "zsh",
+          "terminal_title_stripped": "zsh",
+          "agent_status": "unknown",
+          "focused": false,
+          "revision": 3,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 40
+          }
+        },
+        {
+          "pane_id": "w2:p1",
+          "tab_id": "w2:t1",
+          "workspace_id": "w2",
+          "terminal_id": "term-4",
+          "cwd": "/home/dev/projects/web-app",
+          "foreground_cwd": "/home/dev/projects/web-app",
+          "terminal_title": "codex: add tests",
+          "terminal_title_stripped": "codex: add tests",
+          "agent_status": "done",
+          "focused": false,
+          "revision": 21,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 40
+          }
+        },
+        {
+          "pane_id": "w2:p2",
+          "tab_id": "w2:t1",
+          "workspace_id": "w2",
+          "terminal_id": "term-5",
+          "cwd": "/home/dev/projects",
+          "foreground_cwd": "/home/dev/projects",
+          "terminal_title": "claude",
+          "terminal_title_stripped": "claude",
+          "agent_status": "idle",
+          "focused": false,
+          "revision": 5,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 40
+          }
+        }
+      ],
+      "agents": [
+        {
+          "pane_id": "w1:p1",
+          "tab_id": "w1:t1",
+          "workspace_id": "w1",
+          "terminal_id": "term-1",
+          "cwd": "/home/dev/projects/api-service",
+          "foreground_cwd": "/home/dev/projects/api-service",
+          "terminal_title": "claude: refactor auth",
+          "terminal_title_stripped": "claude: refactor auth",
+          "focused": true,
+          "revision": 12,
+          "agent": "claude",
+          "agent_status": "blocked",
+          "state_change_seq": 41,
+          "completion_seq": 40,
+          "agent_session": {
+            "agent": "claude",
+            "kind": "session_id",
+            "source": "hook",
+            "value": "sess-0001"
+          },
+          "name": "planner"
+        },
+        {
+          "pane_id": "w1:p2",
+          "tab_id": "w1:t1",
+          "workspace_id": "w1",
+          "terminal_id": "term-2",
+          "cwd": "/home/dev/projects/api-service",
+          "foreground_cwd": "/home/dev/projects/infra",
+          "terminal_title": "copilot: terraform plan",
+          "terminal_title_stripped": "copilot: terraform plan",
+          "focused": false,
+          "revision": 7,
+          "agent": "copilot",
+          "agent_status": "working",
+          "state_change_seq": 38,
+          "completion_seq": 30,
+          "agent_session": {
+            "agent": "copilot",
+            "kind": "session_id",
+            "source": "hook",
+            "value": "sess-0002"
+          }
+        },
+        {
+          "pane_id": "w2:p1",
+          "tab_id": "w2:t1",
+          "workspace_id": "w2",
+          "terminal_id": "term-4",
+          "cwd": "/home/dev/projects/web-app",
+          "foreground_cwd": "/home/dev/projects/web-app",
+          "terminal_title": "codex: add tests",
+          "terminal_title_stripped": "codex: add tests",
+          "focused": false,
+          "revision": 21,
+          "agent": "codex",
+          "agent_status": "done",
+          "state_change_seq": 55,
+          "completion_seq": 55,
+          "agent_session": {
+            "agent": "codex",
+            "kind": "session_id",
+            "source": "hook",
+            "value": "sess-0003"
+          },
+          "name": "tester"
+        },
+        {
+          "pane_id": "w2:p2",
+          "tab_id": "w2:t1",
+          "workspace_id": "w2",
+          "terminal_id": "term-5",
+          "cwd": "/home/dev/projects",
+          "foreground_cwd": "/home/dev/projects",
+          "terminal_title": "claude",
+          "terminal_title_stripped": "claude",
+          "focused": false,
+          "revision": 5,
+          "agent": "claude",
+          "agent_status": "idle",
+          "state_change_seq": 9,
+          "completion_seq": null,
+          "agent_session": {
+            "agent": "claude",
+            "kind": "session_id",
+            "source": "hook",
+            "value": "sess-0004"
+          },
+          "name": null
+        }
+      ],
+      "layouts": [
+        {
+          "workspace_id": "w1",
+          "tab_id": "w1:t1",
+          "zoomed": false,
+          "focused_pane_id": "w1:p1",
+          "area": {
+            "x": 0,
+            "y": 0,
+            "width": 120,
+            "height": 40
+          },
+          "splits": [],
+          "panes": [
+            {
+              "pane_id": "w1:p1",
+              "focused": true,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 120,
+                "height": 40
+              }
+            },
+            {
+              "pane_id": "w1:p2",
+              "focused": false,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 120,
+                "height": 40
+              }
+            }
+          ]
+        },
+        {
+          "workspace_id": "w1",
+          "tab_id": "w1:t2",
+          "zoomed": false,
+          "focused_pane_id": "w1:p3",
+          "area": {
+            "x": 0,
+            "y": 0,
+            "width": 120,
+            "height": 40
+          },
+          "splits": [],
+          "panes": [
+            {
+              "pane_id": "w1:p3",
+              "focused": true,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 120,
+                "height": 40
+              }
+            }
+          ]
+        },
+        {
+          "workspace_id": "w2",
+          "tab_id": "w2:t1",
+          "zoomed": false,
+          "focused_pane_id": "w2:p1",
+          "area": {
+            "x": 0,
+            "y": 0,
+            "width": 120,
+            "height": 40
+          },
+          "splits": [],
+          "panes": [
+            {
+              "pane_id": "w2:p1",
+              "focused": true,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 120,
+                "height": 40
+              }
+            },
+            {
+              "pane_id": "w2:p2",
+              "focused": false,
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 120,
+                "height": 40
+              }
+            }
+          ]
+        }
+      ],
+      "focused_workspace_id": "w1",
+      "focused_tab_id": "w1:t1",
+      "focused_pane_id": "w1:p1"
+    }
+  }
+}

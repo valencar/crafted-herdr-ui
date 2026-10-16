@@ -1,0 +1,26 @@
+[
+  {
+    "id": "buildbox",
+    "label": "Build box",
+    "target": "buildbox",
+    "session": "default",
+    "enabled": true,
+    "selected": true
+  },
+  {
+    "id": "gpubox",
+    "label": "GPU box",
+    "target": "gpubox",
+    "session": "default",
+    "enabled": true,
+    "selected": false
+  },
+  {
+    "id": "staging",
+    "label": "Staging",
+    "target": "staging-host",
+    "session": "qa",
+    "enabled": false,
+    "selected": false
+  }
+]

@@ -1,0 +1,32 @@
+{
+  "id": "cli:agent:start",
+  "result": {
+    "type": "agent_started",
+    "agent": {
+      "pane_id": "w1:p6",
+      "tab_id": "w1:t1",
+      "workspace_id": "w1",
+      "terminal_id": "term-9",
+      "cwd": "/home/dev/projects/api-service",
+      "foreground_cwd": "/home/dev/projects/api-service",
+      "terminal_title": "claude",
+      "terminal_title_stripped": "claude",
+      "focused": true,
+      "revision": 2,
+      "agent": "claude",
+      "agent_status": "idle",
+      "state_change_seq": 1,
+      "completion_seq": null,
+      "agent_session": {
+        "agent": "claude",
+        "kind": "session_id",
+        "source": "hook",
+        "value": "sess-0005"
+      },
+      "name": "helper"
+    },
+    "argv": [
+      "claude"
+    ]
+  }
+}

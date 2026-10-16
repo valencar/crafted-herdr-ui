@@ -1,0 +1,33 @@
+{
+  "id": "cli:tab:create",
+  "result": {
+    "type": "tab_created",
+    "tab": {
+      "tab_id": "w1:t3",
+      "workspace_id": "w1",
+      "number": 3,
+      "label": "scratch",
+      "focused": true,
+      "pane_count": 1,
+      "agent_status": "unknown"
+    },
+    "root_pane": {
+      "pane_id": "w1:p4",
+      "tab_id": "w1:t3",
+      "workspace_id": "w1",
+      "terminal_id": "term-7",
+      "cwd": "/home/dev/projects/api-service",
+      "foreground_cwd": "/home/dev/projects/api-service",
+      "terminal_title": "zsh",
+      "terminal_title_stripped": "zsh",
+      "agent_status": "unknown",
+      "focused": true,
+      "revision": 1,
+      "scroll": {
+        "max_offset_from_bottom": 0,
+        "offset_from_bottom": 0,
+        "viewport_rows": 40
+      }
+    }
+  }
+}
