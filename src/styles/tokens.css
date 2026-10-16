@@ -1,0 +1,48 @@
+/* Design tokens (spec section 9). Every color is a variable so a light theme only has to
+   override this block; v1 ships dark only. Components use these, never hex literals. */
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #0b0c0e;
+  --bg-sidebar: #101114;
+  --panel: #0f1013;
+  --panel-2: #121317;
+  --raised: #1e2025;
+  --border: #1f2126;
+  --border-strong: #2a2d33;
+
+  /* text */
+  --text: #ececef;
+  --text-2: #c9cbd1;
+  --text-3: #a3a5ad;
+  --text-4: #8b8e97;
+  --muted: #7c7f88;
+
+  /* status */
+  --st-needs: #ffa94d;
+  --st-done: #8fd3ff;
+  --st-working: #6e93ff;
+  --st-idle: #a3a5ad;
+  --online: #7ee0b0;
+  --danger: #ff9b94;
+
+  /* primary button: light fill, dark text */
+  --primary-bg: #ececef;
+  --primary-text: #0b0c0e;
+
+  /* focus ring */
+  --focus: #8fd3ff;
+
+  /* shape */
+  --radius-s: 6px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --radius-xl: 14px;
+
+  /* type */
+  --font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-size: 13px;
+  --line-height: 1.45;
+}

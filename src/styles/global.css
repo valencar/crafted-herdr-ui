@@ -1,0 +1,85 @@
+/* Bundled Geist and Geist Mono (SIL OFL, see ../fonts/OFL.txt). No network font loading. */
+@font-face {
+  font-family: "Geist";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/Geist-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/Geist-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/Geist-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/GeistMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/GeistMono-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/GeistMono-SemiBold.woff2") format("woff2");
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-mono);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
