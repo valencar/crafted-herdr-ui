@@ -50,3 +50,30 @@ it("shows a command with its caption", () => {
   expect(screen.getByText("herdr terminal attach term-1")).toBeInTheDocument();
   expect(screen.getByText("# what “Open” runs")).toBeInTheDocument();
 });
+
+it("styles the confirm button as dangerous unless told otherwise", () => {
+  const noop = () => {};
+  const { rerender } = render(
+    <ConfirmDialog
+      title="t"
+      body="b"
+      confirmLabel="Go"
+      onConfirm={noop}
+      onCancel={noop}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Go" })).toHaveClass("btn-danger");
+  rerender(
+    <ConfirmDialog
+      title="t"
+      body="b"
+      confirmLabel="Go"
+      danger={false}
+      onConfirm={noop}
+      onCancel={noop}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Go" })).not.toHaveClass(
+    "btn-danger",
+  );
+});

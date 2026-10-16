@@ -315,6 +315,35 @@ describe("Home", () => {
       machineId: "gpubox",
       paneId: "w2:p1",
     });
+    // w2:p1 is a done agent: opening it marks it seen.
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("mark_seen", {
+        machineId: "gpubox",
+        paneId: "w2:p1",
+      }),
+    );
+  });
+
+  it("opening_a_done_card_marks_it_seen_but_a_blocked_one_is_only_opened", async () => {
+    const user = setup();
+    const cards = within(
+      screen.getByRole("region", { name: "Needs you" }),
+    ).getAllByRole("article");
+    await user.click(
+      within(cards[0]).getByRole("button", { name: /^Open in/ }),
+    );
+    await user.click(
+      within(cards[2]).getByRole("button", { name: /^Open in/ }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("mark_seen", {
+        machineId: "buildbox",
+        paneId: "w2:p1",
+      }),
+    );
+    expect(invoke.mock.calls.filter(([n]) => n === "mark_seen")).toHaveLength(
+      1,
+    );
   });
 
   it("backspace_asks_before_closing", async () => {

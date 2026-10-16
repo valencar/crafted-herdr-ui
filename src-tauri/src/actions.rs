@@ -533,8 +533,9 @@ impl Actions {
         })
     }
 
-    /// Sends `text` to an agent. `cached_status` is what the poller last saw for it: a blocked
-    /// agent is refused here without calling herdr, because the app never answers approvals.
+    /// Sends `text` to an agent. `cached_status` is what the poller last saw for it: only an
+    /// idle or done agent is replied to; any other known status is refused here without calling
+    /// herdr (a blocked agent is never answered: the app doesn't approve things for the user).
     /// With no cached status herdr decides (it rejects a blocked agent with `agent_blocked`).
     pub async fn reply_to_agent(
         &self,
@@ -547,10 +548,16 @@ impl Actions {
         if text.trim().is_empty() {
             return Err(invalid("Reply can't be empty."));
         }
-        if cached_status == Some(AgentStatus::Blocked) {
-            return Err(invalid(
-                "This agent is waiting for approval. Open it to answer there.",
-            ));
+        match cached_status {
+            None | Some(AgentStatus::Idle | AgentStatus::Done) => {}
+            Some(AgentStatus::Blocked) => {
+                return Err(invalid(
+                    "This agent is waiting for approval. Open it to answer there.",
+                ));
+            }
+            Some(AgentStatus::Working | AgentStatus::Unknown) => {
+                return Err(invalid("Reply when the agent is idle."));
+            }
         }
         let mut args = argv(&["agent", "prompt", pane_id]);
         if text.starts_with('-') {

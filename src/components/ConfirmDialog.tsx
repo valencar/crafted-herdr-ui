@@ -4,6 +4,8 @@ type Props = {
   title: string;
   body: string;
   confirmLabel: string;
+  /** Styles the confirm button as dangerous. */
+  danger?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -16,6 +18,7 @@ export function ConfirmDialog({
   title,
   body,
   confirmLabel,
+  danger = true,
   onConfirm,
   onCancel,
 }: Props) {
@@ -75,7 +78,7 @@ export function ConfirmDialog({
           <button
             ref={confirmRef}
             type="button"
-            className="btn btn-danger"
+            className={`btn${danger ? " btn-danger" : ""}`}
             onClick={onConfirm}
           >
             {confirmLabel}

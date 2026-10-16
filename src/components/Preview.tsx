@@ -21,6 +21,7 @@ function inOrder<T>(job: () => Promise<T>): Promise<T> {
 export function Preview({ row }: { row: Row }) {
   const frame = useAppStore((s) => s.preview);
   const setPreview = useAppStore((s) => s.setPreview);
+  const reportError = useAppStore((s) => s.reportError);
   const { key, machineId, paneId } = row;
   const isAgent = row.status !== "shell";
 
@@ -35,7 +36,10 @@ export function Preview({ row }: { row: Row }) {
         if (alive) unlisten = un;
         else un();
       })
-      .catch(() => {});
+      .catch((e) => {
+        // Without the event the preview would stay on "Waiting for output…" forever.
+        if (alive) reportError(e);
+      });
     inOrder(() =>
       invokeTyped("start_preview", { machineId, paneId, isAgent }),
     ).catch((e) => {
@@ -51,7 +55,7 @@ export function Preview({ row }: { row: Row }) {
       alive = false;
       unlisten?.();
     };
-  }, [key, machineId, paneId, isAgent, setPreview]);
+  }, [key, machineId, paneId, isAgent, setPreview, reportError]);
 
   useEffect(
     () => () => {

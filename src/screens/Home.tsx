@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
-import { ConfirmDialog } from "../components/ConfirmDialog";
+import { CloseConfirm } from "../components/CloseConfirm";
 import { Header } from "../components/Header";
 import { Inspector } from "../components/Inspector";
 import { NeedsYouCard } from "../components/NeedsYouCard";
@@ -20,6 +20,7 @@ import {
   type Row,
 } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
+import { openRow } from "../lib/openRow";
 import { useAppStore, type GroupBy } from "../store/appStore";
 
 const GROUP_TITLE: Record<GroupBy, string> = {
@@ -175,35 +176,16 @@ export function Home() {
     return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
   };
 
-  const open = useCallback(
-    (row: Row) => {
-      invokeTyped("open_session", {
-        machineId: row.machineId,
-        paneId: row.paneId,
-      }).catch(report);
-    },
-    [report],
-  );
+  const open = openRow;
   const markSeen = (row: Row) => {
     invokeTyped("mark_seen", {
       machineId: row.machineId,
       paneId: row.paneId,
     }).catch(report);
   };
-  const confirmClose = () => {
-    if (!closingRow) return;
-    invokeTyped("close_pane", {
-      machineId: closingRow.machineId,
-      paneId: closingRow.paneId,
-    }).catch(report);
-    setClosingKey(null);
-  };
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (closingRow || sheet || document.querySelector('[role="dialog"]')) {
-        return;
-      }
+      if (sheet || useAppStore.getState().dialogOpen) return;
       if (e.metaKey) {
         if (e.key === "k") {
           e.preventDefault();
@@ -244,17 +226,7 @@ export function Home() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [
-    closingRow,
-    sheet,
-    actionRow,
-    selectedKey,
-    navRows,
-    select,
-    setSheet,
-    open,
-    report,
-  ]);
+  }, [sheet, actionRow, selectedKey, navRows, select, setSheet, open, report]);
 
   const needsMachines = new Set(needs.map((r) => r.machineId)).size;
   const hasAnyRows = rows.length > 0;
@@ -408,13 +380,7 @@ export function Home() {
       </div>
 
       {closingRow && (
-        <ConfirmDialog
-          title={`Close ${closingRow.name}?`}
-          body={`This closes pane ${closingRow.paneId} on ${closingRow.machineLabel} and ends whatever is running in it.`}
-          confirmLabel="Close session"
-          onConfirm={confirmClose}
-          onCancel={() => setClosingKey(null)}
-        />
+        <CloseConfirm row={closingRow} onDone={() => setClosingKey(null)} />
       )}
       {toast && <Toast message={toast} onDismiss={dismissToast} />}
     </div>

@@ -3,9 +3,10 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import { shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
+import { openRow } from "../lib/openRow";
 import { useAppStore } from "../store/appStore";
 import { CommandBox } from "./CommandBox";
-import { ConfirmDialog } from "./ConfirmDialog";
+import { CloseConfirm } from "./CloseConfirm";
 import { KindBadge } from "./KindBadge";
 import { Preview } from "./Preview";
 import { StatusPill } from "./StatusPill";
@@ -77,10 +78,15 @@ export function Inspector({
   const hintId = useId();
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
-  const blocked = row.status === "blocked";
+  // Spec section 7: reply only to an idle or done agent.
+  const canReply = row.status === "idle" || row.status === "done";
+  const replyHint =
+    row.status === "blocked"
+      ? "Answer this in the terminal"
+      : "Reply when the agent is idle";
   const send = async () => {
     const text = reply.trim();
-    if (blocked || sending || text === "") return;
+    if (!canReply || sending || text === "") return;
     setSending(true);
     try {
       await invokeTyped("reply_to_agent", { ...target, text });
@@ -94,6 +100,7 @@ export function Inspector({
 
   // Rename
   const [renaming, setRenaming] = useState(false);
+  const renameId = useId();
   const [draft, setDraft] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const renameButton = useRef<HTMLButtonElement>(null);
@@ -140,12 +147,7 @@ export function Inspector({
     }
   };
 
-  // Close
   const [closing, setClosing] = useState(false);
-  const confirmClose = () => {
-    setClosing(false);
-    invokeTyped("close_pane", target).catch(reportError);
-  };
 
   return (
     <aside className="inspector" aria-label="Selected agent">
@@ -210,21 +212,21 @@ export function Inspector({
               className="field"
               placeholder={`Send to ${row.name}…`}
               value={reply}
-              disabled={blocked}
-              aria-describedby={blocked ? hintId : undefined}
+              disabled={!canReply}
+              aria-describedby={canReply ? undefined : hintId}
               onChange={(e) => setReply(e.target.value)}
             />
             <button
               type="submit"
               className="btn"
-              disabled={blocked || sending || reply.trim() === ""}
+              disabled={!canReply || sending || reply.trim() === ""}
             >
               Send
             </button>
           </div>
-          {blocked && (
+          {!canReply && (
             <p id={hintId} className="muted reply-hint">
-              Answer this in the terminal
+              {replyHint}
             </p>
           )}
         </form>
@@ -234,7 +236,7 @@ export function Inspector({
         <button
           type="button"
           className="btn btn-primary btn-wide"
-          onClick={() => invokeTyped("open_session", target).catch(reportError)}
+          onClick={() => void openRow(row)}
         >
           Open in {terminalName} <kbd className="mono">⌘↩</kbd>
         </button>
@@ -255,12 +257,12 @@ export function Inspector({
               void saveRename();
             }}
           >
-            <label htmlFor="rename-input" className="inspector-label">
+            <label htmlFor={renameId} className="inspector-label">
               New name
             </label>
             <div className="reply-line">
               <input
-                id="rename-input"
+                id={renameId}
                 type="text"
                 className="field mono"
                 value={draft}
@@ -313,15 +315,7 @@ export function Inspector({
 
       {command && <CommandBox command={command} />}
 
-      {closing && (
-        <ConfirmDialog
-          title={`Close ${row.name}?`}
-          body={`This closes pane ${paneId} on ${row.machineLabel} and ends whatever is running in it.`}
-          confirmLabel="Close session"
-          onConfirm={confirmClose}
-          onCancel={() => setClosing(false)}
-        />
-      )}
+      {closing && <CloseConfirm row={row} onDone={() => setClosing(false)} />}
     </aside>
   );
 }

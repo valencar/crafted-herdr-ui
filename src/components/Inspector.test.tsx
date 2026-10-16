@@ -42,6 +42,7 @@ const rowOf = (key: string) => rows.find((r) => r.key === key)!;
 const BLOCKED = rowOf("buildbox::w1:p1");
 const DONE = rowOf("buildbox::w2:p1");
 const IDLE = rowOf("buildbox::w2:p2");
+const WORKING = rowOf("buildbox::w1:p2");
 const SHELL = rowOf("buildbox::w1:p3");
 
 let emit: (frame: PreviewFrame) => void;
@@ -111,6 +112,26 @@ describe("Inspector reply", () => {
     expect(input).toBeDisabled();
     expect(input).toHaveAccessibleDescription("Answer this in the terminal");
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it("reply_is_disabled_for_working_agents_with_a_hint", async () => {
+    const { user } = setup(WORKING);
+    const input = screen.getByLabelText("Reply without opening a terminal");
+    expect(input).toBeDisabled();
+    expect(input).toHaveAccessibleDescription("Reply when the agent is idle");
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    await user.keyboard("{Enter}");
+    expect(invoke).not.toHaveBeenCalledWith(
+      "reply_to_agent",
+      expect.anything(),
+    );
+  });
+
+  it("reply_is_enabled_for_done_agents", () => {
+    setup(DONE);
+    expect(
+      screen.getByLabelText("Reply without opening a terminal"),
+    ).toBeEnabled();
   });
 
   it("reply_sends_and_clears", async () => {
@@ -183,6 +204,21 @@ describe("Inspector actions", () => {
       machineId: "buildbox",
       paneId: "w1:p1",
     });
+  });
+
+  it("open_marks_a_done_agent_seen_after_it_opened", async () => {
+    const { user } = setup(DONE);
+    await user.click(screen.getByRole("button", { name: /^Open in Ghostty/ }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("mark_seen", {
+        machineId: "buildbox",
+        paneId: "w2:p1",
+      }),
+    );
+    const names = invoke.mock.calls.map(([n]) => n);
+    expect(names.indexOf("open_session")).toBeLessThan(
+      names.indexOf("mark_seen"),
+    );
   });
 
   it("close_requires_confirmation", async () => {
@@ -341,6 +377,14 @@ describe("Inspector live preview", () => {
     unmount();
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("stop_preview"));
     expect(unlisten).toHaveBeenCalled();
+  });
+
+  it("reports_it_when_the_preview_cannot_be_listened_to", async () => {
+    listen.mockRejectedValue(new Error("event system unavailable"));
+    setup();
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("event system unavailable"),
+    );
   });
 
   it("previews_a_shell_as_a_pane", async () => {

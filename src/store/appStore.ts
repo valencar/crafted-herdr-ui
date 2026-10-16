@@ -21,6 +21,8 @@ type AppStore = {
   activityOpen: boolean;
   /** The error shown in the toast, if any. */
   toast: string | null;
+  /** A modal dialog is open, so keyboard shortcuts stand down. */
+  dialogOpen: boolean;
   /** The latest live-preview frame for the selected row. */
   preview: PreviewFrame | null;
   setState: (state: AppState) => void;
@@ -33,6 +35,7 @@ type AppStore = {
   reportError: (e: unknown) => void;
   clearToast: () => void;
   setPreview: (frame: PreviewFrame | null) => void;
+  setDialogOpen: (open: boolean) => void;
 };
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -44,6 +47,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   activityOpen: false,
   toast: null,
   preview: null,
+  dialogOpen: false,
   setState: (state) => set({ state }),
   select: (selectedKey) => set({ selectedKey }),
   setGroupBy: (groupBy) => set({ groupBy }),
@@ -60,4 +64,5 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ toast: null });
   },
   setPreview: (preview) => set({ preview }),
+  setDialogOpen: (dialogOpen) => set({ dialogOpen }),
 }));

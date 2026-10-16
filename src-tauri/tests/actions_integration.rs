@@ -183,28 +183,42 @@ async fn timeout_triggers_refresh_without_retry() {
 }
 
 #[tokio::test]
-async fn reply_refused_when_blocked() {
+async fn reply_refused_unless_the_agent_is_idle_or_done() {
     let h = Harness::new();
 
-    let err = h
-        .actions
-        .reply_to_agent("buildbox", "w1:p2", "yes", Some(AgentStatus::Blocked))
-        .await
-        .unwrap_err();
+    for status in [
+        AgentStatus::Blocked,
+        AgentStatus::Working,
+        AgentStatus::Unknown,
+    ] {
+        let err = h
+            .actions
+            .reply_to_agent("buildbox", "w1:p2", "yes", Some(status))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ActionError::Invalid { .. }),
+            "{status:?}: {err:?}"
+        );
+    }
 
-    assert!(matches!(err, ActionError::Invalid { .. }), "{err:?}");
     assert!(h.calls().is_empty());
     assert!(h.refreshed().is_empty());
 }
 
 #[tokio::test]
-async fn reply_goes_through_for_idle_or_unknown_agents() {
+async fn reply_goes_through_for_idle_or_done_agents_and_lets_herdr_decide_when_uncached() {
     let h = Harness::new();
     h.put("agent_prompt_w1:p2_hello.json", "{}");
+    h.put("agent_prompt_w1:p2_again.json", "{}");
     h.put("agent_prompt_w1:p2_--_-x.json", "{}");
 
     h.actions
         .reply_to_agent("local", "w1:p2", "hello", Some(AgentStatus::Idle))
+        .await
+        .unwrap();
+    h.actions
+        .reply_to_agent("local", "w1:p2", "again", Some(AgentStatus::Done))
         .await
         .unwrap();
     h.actions
@@ -214,7 +228,11 @@ async fn reply_goes_through_for_idle_or_unknown_agents() {
 
     assert_eq!(
         h.calls(),
-        ["agent prompt w1:p2 hello", "agent prompt w1:p2 -- -x"]
+        [
+            "agent prompt w1:p2 hello",
+            "agent prompt w1:p2 again",
+            "agent prompt w1:p2 -- -x"
+        ]
     );
 }
 
