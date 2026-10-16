@@ -1,0 +1,407 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AgentRow } from "../components/AgentRow";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Header } from "../components/Header";
+import { NeedsYouCard } from "../components/NeedsYouCard";
+import { ProjectGroup } from "../components/ProjectGroup";
+import { Sidebar } from "../components/Sidebar";
+import { Toast } from "../components/Toast";
+import type { MachineView } from "../lib/bindings/MachineView";
+import type { TerminalId } from "../lib/bindings/TerminalId";
+import {
+  TERMINAL_LABEL,
+  actionErrorMessage,
+  formatStaleness,
+} from "../lib/format";
+import {
+  groupByProject,
+  groupByStatus,
+  groupByWorkbox,
+  needsYou,
+  toRows,
+  type Group,
+  type Row,
+} from "../lib/grouping";
+import { invokeTyped, toActionError } from "../lib/ipc";
+import { useAppStore, type GroupBy } from "../store/appStore";
+
+const GROUP_TITLE: Record<GroupBy, string> = {
+  project: "By project",
+  workbox: "By workbox",
+  status: "By status",
+};
+const GROUP_HINT: Record<GroupBy, string> = {
+  project: "Grouped by each agent’s working folder",
+  workbox: "Grouped by the machine they run on",
+  status: "Grouped by what they are doing",
+};
+const GROUPERS: Record<GroupBy, (rows: Row[]) => Group[]> = {
+  project: groupByProject,
+  workbox: groupByWorkbox,
+  status: groupByStatus,
+};
+
+function matches(row: Row, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [row.name, row.title, row.folder ?? "", row.machineLabel].some((s) =>
+    s.toLowerCase().includes(q),
+  );
+}
+
+function isEditable(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
+  );
+}
+
+function useNow(everyMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), everyMs);
+    return () => window.clearInterval(t);
+  }, [everyMs]);
+  return now;
+}
+
+function scrollToId(id: string) {
+  window.setTimeout(() => {
+    document
+      .getElementById(id)
+      ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, 0);
+}
+
+function focusRow(key: string) {
+  const li = [...document.querySelectorAll<HTMLElement>("[data-row-key]")].find(
+    (el) => el.dataset.rowKey === key,
+  );
+  const button = li?.querySelector<HTMLElement>("button.row-main");
+  button?.focus();
+  button?.scrollIntoView?.({ block: "nearest" });
+}
+
+export function Home() {
+  const state = useAppStore((s) => s.state);
+  const selectedKey = useAppStore((s) => s.selectedKey);
+  const groupBy = useAppStore((s) => s.groupBy);
+  const sheet = useAppStore((s) => s.sheet);
+  const select = useAppStore((s) => s.select);
+  const setGroupBy = useAppStore((s) => s.setGroupBy);
+  const setSheet = useAppStore((s) => s.setSheet);
+
+  const nowMs = useNow(30_000);
+  const [query, setQuery] = useState("");
+  const [terminal, setTerminal] = useState<TerminalId | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [closingKey, setClosingKey] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    invokeTyped("list_terminals")
+      .then((t) => {
+        if (!cancelled) setTerminal(t.default);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const rows = useMemo(() => (state ? toRows(state) : []), [state]);
+  const machines = useMemo(
+    () =>
+      new Map<string, MachineView>(
+        (state?.machines ?? []).map((m) => [m.id, m]),
+      ),
+    [state],
+  );
+
+  // The selected row went away (the agent exited, the machine was removed): clear it.
+  useEffect(() => {
+    if (state && selectedKey && !rows.some((r) => r.key === selectedKey)) {
+      select(null);
+    }
+  }, [state, rows, selectedKey, select]);
+
+  const visible = useMemo(
+    () => rows.filter((r) => matches(r, query)),
+    [rows, query],
+  );
+  const needs = useMemo(() => needsYou(visible), [visible]);
+  const groups = useMemo(() => GROUPERS[groupBy](visible), [groupBy, visible]);
+  const navRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
+  const projectGroups = useMemo(() => groupByProject(rows), [rows]);
+  const projectOf = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of projectGroups) {
+      if (g.tier === 3) continue;
+      for (const r of g.rows) map.set(r.key, g.name);
+    }
+    return map;
+  }, [projectGroups]);
+
+  const selectedRow = rows.find((r) => r.key === selectedKey) ?? null;
+  const closingRow = rows.find((r) => r.key === closingKey) ?? null;
+  const terminalName = terminal ? TERMINAL_LABEL[terminal] : "terminal";
+
+  const dimmed = (machineId: string) => {
+    const kind = machines.get(machineId)?.health.kind;
+    return kind === "attention" || kind === "reconnecting";
+  };
+  const noteFor = (machineId: string): string | null => {
+    const m = machines.get(machineId);
+    if (
+      !m ||
+      (m.health.kind !== "attention" && m.health.kind !== "reconnecting")
+    ) {
+      return null;
+    }
+    return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
+  };
+
+  const dismissToast = useCallback(() => setToast(null), []);
+  const report = useCallback((e: unknown) => {
+    setToast(actionErrorMessage(toActionError(e)));
+  }, []);
+
+  const open = useCallback(
+    (row: Row) => {
+      invokeTyped("open_session", {
+        machineId: row.machineId,
+        paneId: row.paneId,
+      }).catch(report);
+    },
+    [report],
+  );
+  const markSeen = (row: Row) => {
+    invokeTyped("mark_seen", {
+      machineId: row.machineId,
+      paneId: row.paneId,
+    }).catch(report);
+  };
+  const confirmClose = () => {
+    if (!closingRow) return;
+    invokeTyped("close_pane", {
+      machineId: closingRow.machineId,
+      paneId: closingRow.paneId,
+    }).catch(report);
+    setClosingKey(null);
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (closingRow || sheet) return;
+      if (e.metaKey) {
+        if (e.key === "k") {
+          e.preventDefault();
+          searchRef.current?.focus();
+          searchRef.current?.select();
+        } else if (e.key === "n") {
+          e.preventDefault();
+          setSheet("new-session");
+        } else if (e.key === "r") {
+          e.preventDefault();
+          invokeTyped("refresh_now", {}).catch(report);
+        } else if (e.key === "Enter" && selectedRow) {
+          e.preventDefault();
+          open(selectedRow);
+        }
+        return;
+      }
+      if (e.ctrlKey || e.altKey || isEditable(e.target)) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        if (navRows.length === 0) return;
+        e.preventDefault();
+        const at = navRows.findIndex((r) => r.key === selectedKey);
+        const down = e.key === "ArrowDown";
+        const next =
+          at < 0
+            ? down
+              ? 0
+              : navRows.length - 1
+            : Math.min(navRows.length - 1, Math.max(0, at + (down ? 1 : -1)));
+        select(navRows[next].key);
+        focusRow(navRows[next].key);
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        if (selectedRow) {
+          e.preventDefault();
+          setClosingKey(selectedRow.key);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    closingRow,
+    sheet,
+    selectedRow,
+    selectedKey,
+    navRows,
+    select,
+    setSheet,
+    open,
+    report,
+  ]);
+
+  const needsMachines = new Set(needs.map((r) => r.machineId)).size;
+  const hasAnyRows = rows.length > 0;
+
+  return (
+    <div className="app">
+      <Header
+        herdrVersion={state?.herdr_version ?? null}
+        query={query}
+        onQuery={setQuery}
+        searchRef={searchRef}
+        terminalName={terminal ? terminalName : null}
+        onNewSession={() => setSheet("new-session")}
+      />
+      <div className="body">
+        <Sidebar
+          needsCount={needsYou(rows).length}
+          agentCount={rows.filter((r) => r.status !== "shell").length}
+          projects={projectGroups}
+          machines={state?.machines ?? []}
+          herdrPath={state?.herdr_path ?? null}
+          herdrVersion={state?.herdr_version ?? null}
+          onJump={scrollToId}
+          onProject={(g) => {
+            setGroupBy("project");
+            scrollToId(`group-${g.key}`);
+          }}
+          onWorkbox={(id) => {
+            setGroupBy("workbox");
+            scrollToId(`group-${id}`);
+          }}
+          onAddWorkbox={() => setSheet("add-workbox")}
+        />
+
+        <main className="main">
+          {state === null ? (
+            <p className="empty">Connecting to herdr…</p>
+          ) : !hasAnyRows ? (
+            <div className="empty">
+              <h1 className="section-title">No agents yet</h1>
+              <p>Start one with ⌘N.</p>
+            </div>
+          ) : (
+            <>
+              <section
+                id="needs-you"
+                className="section"
+                aria-labelledby="needs-h"
+              >
+                <div className="section-head">
+                  <h1 id="needs-h" className="section-title">
+                    Needs you
+                  </h1>
+                  <span className="muted">
+                    {needs.length === 0
+                      ? "All clear"
+                      : `${needs.length} ${needs.length === 1 ? "agent" : "agents"} waiting across ${needsMachines} ${needsMachines === 1 ? "workbox" : "workboxes"}`}
+                  </span>
+                </div>
+                {needs.length > 0 && (
+                  <div className="cards">
+                    {needs.map((r) => (
+                      <NeedsYouCard
+                        key={r.key}
+                        row={r}
+                        project={projectOf.get(r.key) ?? null}
+                        selected={r.key === selectedKey}
+                        dim={dimmed(r.machineId)}
+                        note={noteFor(r.machineId)}
+                        nowMs={nowMs}
+                        terminalName={terminalName}
+                        onSelect={select}
+                        onOpen={open}
+                        onMarkSeen={markSeen}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section
+                id="by-group"
+                className="section"
+                aria-labelledby="group-h"
+              >
+                <div className="section-head">
+                  <h2 id="group-h" className="section-sub">
+                    {GROUP_TITLE[groupBy]}
+                  </h2>
+                  <div role="group" aria-label="Group by" className="segmented">
+                    {(["project", "workbox", "status"] as const).map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        aria-pressed={groupBy === g}
+                        onClick={() => setGroupBy(g)}
+                      >
+                        {g[0].toUpperCase() + g.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="muted section-hint">
+                    {GROUP_HINT[groupBy]}
+                  </span>
+                </div>
+                {groups.length === 0 && (
+                  <p className="empty">No sessions match “{query.trim()}”.</p>
+                )}
+                {groups.map((g) => (
+                  <ProjectGroup
+                    key={g.key}
+                    group={g}
+                    showSession={groupBy === "project"}
+                    onNewSession={() => setSheet("new-session")}
+                  >
+                    {g.rows.map((r) => (
+                      <AgentRow
+                        key={r.key}
+                        row={r}
+                        selected={r.key === selectedKey}
+                        dim={dimmed(r.machineId)}
+                        note={noteFor(r.machineId)}
+                        showMachine={groupBy === "status"}
+                        nowMs={nowMs}
+                        terminalName={terminalName}
+                        onSelect={select}
+                        onOpen={open}
+                      />
+                    ))}
+                  </ProjectGroup>
+                ))}
+              </section>
+            </>
+          )}
+        </main>
+
+        {/* Task 10 builds the real inspector here. */}
+        <aside className="inspector" aria-label="Selected agent">
+          {selectedRow ? (
+            <h2 className="inspector-name mono">{selectedRow.name}</h2>
+          ) : (
+            <p className="muted">Select an agent to see its details.</p>
+          )}
+        </aside>
+      </div>
+
+      {closingRow && (
+        <ConfirmDialog
+          title={`Close ${closingRow.name}?`}
+          body={`This closes pane ${closingRow.paneId} on ${closingRow.machineLabel} and ends whatever is running in it.`}
+          confirmLabel="Close session"
+          onConfirm={confirmClose}
+          onCancel={() => setClosingKey(null)}
+        />
+      )}
+      {toast && <Toast message={toast} onDismiss={dismissToast} />}
+    </div>
+  );
+}

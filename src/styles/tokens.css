@@ -11,6 +11,15 @@
   --raised: #1e2025;
   --border: #1f2126;
   --border-strong: #2a2d33;
+  --card: #131418;
+  --chip: #1c1e23;
+  --input: #17191d;
+  --input-border: #24272d;
+  --hover: #17191d;
+  --nav-hover: #1a1c21;
+  --selected: #16181d;
+  --segment: #15171b;
+  --segment-on: #24272d;
 
   /* text */
   --text: #ececef;
@@ -30,6 +39,8 @@
   /* primary button: light fill, dark text */
   --primary-bg: #ececef;
   --primary-text: #0b0c0e;
+  --primary-hover: #ffffff;
+  --on-needs: #1a1206;
 
   /* focus ring */
   --focus: #8fd3ff;

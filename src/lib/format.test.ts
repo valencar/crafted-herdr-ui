@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { STATUS_LABEL, formatAge, formatStaleness, shortPath } from "./format";
+import {
+  STATUS_LABEL,
+  TERMINAL_LABEL,
+  actionErrorMessage,
+  formatAge,
+  formatStaleness,
+  shortPath,
+} from "./format";
 
 const NOW = 10_000_000;
 
@@ -62,5 +69,38 @@ describe("STATUS_LABEL", () => {
       unknown: "Unknown",
       shell: "Shell",
     });
+  });
+});
+
+describe("actionErrorMessage", () => {
+  it("reads message fields and has fixed text for the variants without one", () => {
+    expect(actionErrorMessage({ kind: "invalid", message: "bad name" })).toBe(
+      "bad name",
+    );
+    expect(
+      actionErrorMessage({ kind: "maybeApplied", argv: [], message: "unsure" }),
+    ).toBe("unsure");
+    expect(
+      actionErrorMessage({
+        kind: "herdr",
+        error: { kind: "server", code: "agent_blocked", message: "blocked" },
+      }),
+    ).toBe("blocked");
+    expect(
+      actionErrorMessage({ kind: "herdr", error: { kind: "notFound" } }),
+    ).toBe("herdr was not found.");
+    expect(
+      actionErrorMessage({
+        kind: "herdr",
+        error: { kind: "timeout", argv: ["agent"] },
+      }),
+    ).toBe("herdr did not answer in time.");
+  });
+});
+
+describe("TERMINAL_LABEL", () => {
+  it("names every terminal", () => {
+    expect(TERMINAL_LABEL.ghostty).toBe("Ghostty");
+    expect(TERMINAL_LABEL.terminalApp).toBe("Terminal");
   });
 });

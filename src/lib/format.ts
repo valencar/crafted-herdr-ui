@@ -1,4 +1,6 @@
+import type { ActionError } from "./bindings/ActionError";
 import type { AgentStatus } from "./bindings/AgentStatus";
+import type { TerminalId } from "./bindings/TerminalId";
 
 /** A row's status: a herdr agent status, or `shell` for a pane with no agent. */
 export type RowStatus = AgentStatus | "shell";
@@ -53,4 +55,32 @@ export function formatStaleness(
  */
 export function shortPath(path: string): string {
   return path.replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, "~");
+}
+
+/** The name shown for each terminal in "Opens in <Terminal>". */
+export const TERMINAL_LABEL: Record<TerminalId, string> = {
+  ghostty: "Ghostty",
+  iTerm2: "iTerm2",
+  terminalApp: "Terminal",
+  warp: "Warp",
+  wezTerm: "WezTerm",
+  kitty: "kitty",
+  alacritty: "Alacritty",
+  custom: "your terminal",
+};
+
+/**
+ * The sentence shown for a failed action. It reads the `message` fields the app produced,
+ * never a Rust Display string.
+ */
+export function actionErrorMessage(e: ActionError): string {
+  if (e.kind !== "herdr") return e.message;
+  switch (e.error.kind) {
+    case "notFound":
+      return "herdr was not found.";
+    case "timeout":
+      return "herdr did not answer in time.";
+    default:
+      return e.error.message;
+  }
 }
