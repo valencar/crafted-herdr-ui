@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -125,6 +125,16 @@ impl HerdrCli {
             error: result.as_ref().err().map(ToString::to_string),
         });
         result
+    }
+
+    /// The resolved `herdr` binary, for the few calls that print plain text instead of JSON.
+    pub fn bin(&self) -> &Path {
+        &self.bin
+    }
+
+    /// The environment every herdr spawn gets.
+    pub fn env(&self) -> &[(String, String)] {
+        &self.env
     }
 
     pub fn log_snapshot(&self) -> Vec<CommandLogEntry> {

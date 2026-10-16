@@ -5,7 +5,7 @@ const listen = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
 
-const { getState, invokeTyped, onState, toHerdrError } = await import("./ipc");
+const { getState, invokeTyped, onState, toActionError } = await import("./ipc");
 
 beforeEach(() => {
   invoke.mockReset();
@@ -15,49 +15,65 @@ beforeEach(() => {
 describe("invokeTyped", () => {
   it("passes the command and args through and returns the result", async () => {
     invoke.mockResolvedValue({ ok: 1 });
-    await expect(invokeTyped("get_state", { a: 1 })).resolves.toEqual({
-      ok: 1,
-    });
-    expect(invoke).toHaveBeenCalledWith("get_state", { a: 1 });
+    const args = { machineId: "buildbox", paneId: "w1:p1" };
+    await expect(invokeTyped("close_pane", args)).resolves.toEqual({ ok: 1 });
+    expect(invoke).toHaveBeenCalledWith("close_pane", args);
   });
 
-  it("rethrows a tagged HerdrError unchanged", async () => {
-    const err = { kind: "server", code: "agent_blocked", message: "nope" };
+  it("rethrows a tagged ActionError unchanged", async () => {
+    const err = {
+      kind: "herdr",
+      error: { kind: "server", code: "agent_blocked", message: "nope" },
+    };
     invoke.mockRejectedValue(err);
     await expect(invokeTyped("get_state")).rejects.toEqual(err);
   });
 
-  it("wraps a string error into a HerdrError", async () => {
+  it("wraps a string error into an invalid ActionError", async () => {
     invoke.mockRejectedValue("command get_state not found");
     await expect(invokeTyped("get_state")).rejects.toEqual({
-      kind: "spawn",
+      kind: "invalid",
       message: "command get_state not found",
     });
   });
 });
 
-describe("toHerdrError", () => {
-  it("recognises every tagged variant", () => {
+describe("invokeTyped types", () => {
+  it("requires each command's arguments", () => {
+    invoke.mockResolvedValue(null);
+    // These only need to compile; the calls are never awaited for a result.
+    // @ts-expect-error close_pane needs machineId and paneId
+    void invokeTyped("close_pane");
+    // @ts-expect-error argument keys are camelCase
+    void invokeTyped("close_pane", { machine_id: "a", pane_id: "b" });
+    void invokeTyped("refresh_now", {});
+    void invokeTyped("list_agent_kinds");
+  });
+});
+
+describe("toActionError", () => {
+  it("passes every ActionError variant through", () => {
     for (const e of [
-      { kind: "notFound" },
-      { kind: "spawn", message: "m" },
-      { kind: "timeout", argv: ["a"] },
-      { kind: "server", code: "c", message: "m" },
-      { kind: "usage", message: "m" },
-      { kind: "parse", message: "m" },
+      { kind: "herdr", error: { kind: "notFound" } },
+      { kind: "maybeApplied", argv: ["tab", "create"], message: "m" },
+      { kind: "invalid", message: "m" },
     ]) {
-      expect(toHerdrError(e)).toBe(e);
+      expect(toActionError(e)).toBe(e);
     }
   });
 
-  it("wraps Error instances and unknown shapes", () => {
-    expect(toHerdrError(new Error("boom"))).toEqual({
-      kind: "spawn",
+  it("wraps Error instances and unknown shapes as invalid", () => {
+    expect(toActionError(new Error("boom"))).toEqual({
+      kind: "invalid",
       message: "boom",
     });
-    expect(toHerdrError({ kind: "mystery" })).toEqual({
-      kind: "spawn",
+    expect(toActionError({ kind: "mystery" })).toEqual({
+      kind: "invalid",
       message: '{"kind":"mystery"}',
+    });
+    expect(toActionError(undefined)).toEqual({
+      kind: "invalid",
+      message: "undefined",
     });
   });
 });

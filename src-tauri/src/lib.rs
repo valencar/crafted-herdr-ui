@@ -1,4 +1,6 @@
+pub mod actions;
 pub mod activity;
+pub mod commands;
 pub mod env;
 pub mod herdr;
 pub mod poller;
@@ -9,20 +11,15 @@ use std::time::Duration;
 
 use tauri::{Emitter, Manager, WindowEvent};
 
+use actions::Actions;
 use activity::ActivityTracker;
+use commands::AgentKindsCache;
 use herdr::cli::HerdrCli;
 use poller::{Poller, PollerConfig};
-use state::AppState;
 
 const FALLBACK_SHELL: &str = "/bin/zsh";
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 const MAIN_WINDOW: &str = "main";
-
-/// The current state, for a UI that started listening after the first `"state"` event.
-#[tauri::command]
-fn get_state(poller: tauri::State<'_, Poller>) -> AppState {
-    poller.current_state()
-}
 
 /// Startup wiring: find herdr, build the CLI runner and the poller, hand both to Tauri state,
 /// and start polling. Without herdr there is nothing to poll, so the UI just gets a state
@@ -65,7 +62,14 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             let _ = handle.emit("state", state);
         }),
     );
+    let refresh_poller = poller.clone();
+    let actions = Actions::new(
+        cli.clone(),
+        Arc::new(move |machine| refresh_poller.refresh_now(machine)),
+    );
     app.manage(cli);
+    app.manage(actions);
+    app.manage(AgentKindsCache::default());
     app.manage(poller.clone());
 
     if herdr_bin.is_some() {
@@ -98,7 +102,28 @@ fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_state])
+        .invoke_handler(tauri::generate_handler![
+            commands::get_state,
+            commands::create_session,
+            commands::preview_new_session,
+            commands::rename_session,
+            commands::close_pane,
+            commands::create_tab,
+            commands::rename_tab,
+            commands::close_tab,
+            commands::create_workspace,
+            commands::rename_workspace,
+            commands::close_workspace,
+            commands::reply_to_agent,
+            commands::mark_seen,
+            commands::machine_rename,
+            commands::machine_set_enabled,
+            commands::machine_remove,
+            commands::machine_status,
+            commands::refresh_now,
+            commands::get_command_log,
+            commands::list_agent_kinds,
+        ])
         .on_window_event(track_visibility)
         .setup(|app| start(app))
         .run(tauri::generate_context!())
