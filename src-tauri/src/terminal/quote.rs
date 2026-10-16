@@ -1,12 +1,17 @@
 //! The single POSIX quoter. Everything user- or herdr-derived that reaches a shell goes
 //! through `shell_quote`.
 
+/// Whether `s` is non-empty and made only of `[A-Za-z0-9_@%+=:,./-]`, which no shell (POSIX or
+/// not) treats specially. These are the characters `shell_quote` leaves unquoted.
+pub fn is_plain(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c))
+}
+
 /// POSIX single-quote `s` unless it is made only of characters no shell treats specially.
 pub fn shell_quote(s: &str) -> String {
-    let plain = !s.is_empty()
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c));
-    if plain {
+    if is_plain(s) {
         s.to_owned()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))

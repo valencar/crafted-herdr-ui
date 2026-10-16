@@ -2,10 +2,22 @@
 
 use crate::state::MachineView;
 
-use super::quote::shell_quote;
+use super::quote::{is_plain, shell_quote};
 
 /// Refuses machines the app can't safely build a command for.
+///
+/// The command line is parsed by POSIX `sh` and also by the user's login shell (Terminal.app,
+/// Warp and the remote side of ssh), which may be fish, where `\\` and `\'` mean something inside
+/// single quotes. So the strings herdr hands us (SSH target, session name) must be made only of
+/// characters that are safe unquoted everywhere.
 pub fn check_openable(machine: &MachineView) -> Result<(), String> {
+    if machine.session != DEFAULT_SESSION && !is_plain(&machine.session) {
+        return Err(format!(
+            "The session name of {} has characters the app won't pass to a shell. \
+             Open it from a terminal instead.",
+            machine.label
+        ));
+    }
     if machine.is_local {
         return Ok(());
     }
@@ -19,7 +31,33 @@ pub fn check_openable(machine: &MachineView) -> Result<(), String> {
             "The SSH target of {} starts with '-', which ssh would read as an option.",
             machine.label
         )),
+        Some(t) if !is_plain(t) => Err(format!(
+            "The SSH target of {} has characters the app won't pass to a shell.",
+            machine.label
+        )),
         Some(_) => Ok(()),
+    }
+}
+
+/// Refuses a terminal id that isn't safe to put in a command line (same reason as
+/// `check_openable`).
+pub fn check_terminal_id(terminal_id: &str) -> Result<(), String> {
+    if is_plain(terminal_id) {
+        Ok(())
+    } else {
+        Err(format!(
+            "The terminal id {terminal_id:?} has characters the app won't pass to a shell."
+        ))
+    }
+}
+
+/// Refuses a herdr path that can't be quoted for every shell. Spaces are fine; backslashes,
+/// quotes, `$`, backticks and control characters are not.
+pub fn check_bin(bin: &str) -> Result<(), String> {
+    if bin.chars().any(|c| c.is_control() || "\\'\"$`".contains(c)) {
+        Err("The herdr path has characters the app won't pass to a shell.".to_owned())
+    } else {
+        Ok(())
     }
 }
 
@@ -30,6 +68,17 @@ const REMOTE_BIN: &str = "herdr";
 /// fallback so a bad call fails visibly in the terminal instead of panicking.
 fn remote_target(machine: &MachineView) -> &str {
     machine.target.as_deref().unwrap_or(&machine.id)
+}
+
+/// The local herdr path as it appears inside the attach script: bare when plain, otherwise in
+/// double quotes (`check_bin` has refused every character that would still be special there).
+/// Single quotes would turn into `'\\''` once the whole script is quoted again.
+fn bin_in_script(bin: &str) -> String {
+    if is_plain(bin) {
+        bin.to_owned()
+    } else {
+        format!("\"{bin}\"")
+    }
 }
 
 /// `[export HERDR_SESSION=<s>; ]` for a non-default session.
@@ -46,16 +95,17 @@ fn session_prefix(machine: &MachineView) -> String {
 /// plain `herdr` from its own PATH.
 pub fn attach_argv(machine: &MachineView, terminal_id: &str, local_bin: &str) -> Vec<String> {
     let herdr = if machine.is_local {
-        shell_quote(local_bin)
+        bin_in_script(local_bin)
     } else {
         REMOTE_BIN.to_owned()
     };
     let id = shell_quote(terminal_id);
     // The attach runs where the app can't watch it. If another client owns the terminal it
-    // fails, and only an explicit "y" reruns it with `--takeover`.
+    // fails, and only an explicit "y" reruns it with `--takeover`. The constant text uses
+    // double quotes only, so quoting the whole script never produces `\\'` sequences.
     let script = format!(
-        "{prefix}{herdr} terminal attach {id} || {{ printf '\\nAnother client owns this session. \
-         Take over? [y/N] '; read a; [ \"$a\" = y ] && exec {herdr} terminal attach {id} --takeover; }}",
+        "{prefix}{herdr} terminal attach {id} || {{ printf \"\\nAnother client owns this session. \
+         Take over? [y/N] \"; read a; [ \"$a\" = y ] && exec {herdr} terminal attach {id} --takeover; }}",
         prefix = session_prefix(machine),
     );
     if machine.is_local {
@@ -70,17 +120,14 @@ pub fn attach_argv(machine: &MachineView, terminal_id: &str, local_bin: &str) ->
     }
 }
 
-/// The full herdr UI: locally, or on a remote machine through `herdr --remote`.
+/// The full herdr UI: `herdr`, or `herdr --remote <target>` for a remote machine. Both run
+/// the local client, so both use the local binary.
 pub fn full_ui_argv(machine: &MachineView, local_bin: &str) -> Vec<String> {
-    let mut argv = if machine.is_local {
-        vec![local_bin.to_owned()]
-    } else {
-        vec![
-            REMOTE_BIN.to_owned(),
-            "--remote".into(),
-            remote_target(machine).to_owned(),
-        ]
-    };
+    let mut argv = vec![local_bin.to_owned()];
+    if !machine.is_local {
+        argv.push("--remote".into());
+        argv.push(remote_target(machine).to_owned());
+    }
     if machine.session != DEFAULT_SESSION {
         argv.push("--session".into());
         argv.push(machine.session.clone());
@@ -174,13 +221,19 @@ mod tests {
         );
         let remote = machine("buildbox", Some("buildbox"), "default");
         assert_eq!(
-            full_ui_argv(&remote, "/unused"),
-            ["herdr", "--remote", "buildbox"]
+            full_ui_argv(&remote, "/opt/herdr/bin/herdr"),
+            ["/opt/herdr/bin/herdr", "--remote", "buildbox"]
         );
         let remote_s = machine("buildbox", Some("buildbox"), "work");
         assert_eq!(
-            full_ui_argv(&remote_s, "/unused"),
-            ["herdr", "--remote", "buildbox", "--session", "work"]
+            full_ui_argv(&remote_s, "/opt/herdr/bin/herdr"),
+            [
+                "/opt/herdr/bin/herdr",
+                "--remote",
+                "buildbox",
+                "--session",
+                "work"
+            ]
         );
     }
 
@@ -258,5 +311,72 @@ mod tests {
             assert!(!ok, "answer {answer:?}");
             assert_eq!(calls, ["session=|terminal|attach|term_1"], "{answer:?}");
         }
+    }
+
+    #[test]
+    fn strings_a_login_shell_could_misread_are_refused() {
+        for target in ["bu ildbox", "b;x", "b'x", "b\\x", "b$x", "ünï", "a|b"] {
+            assert!(
+                check_openable(&machine("b", Some(target), "default")).is_err(),
+                "target {target:?}"
+            );
+        }
+        for session in ["a b", "it's", "a\\b", "x;y", "ünï", "$x"] {
+            assert!(
+                check_openable(&machine("local", None, session)).is_err(),
+                "session {session:?}"
+            );
+            assert!(check_openable(&machine("b", Some("buildbox"), session)).is_err());
+        }
+        assert!(check_openable(&machine("b", Some("dev@host.example:22"), "my-work_1")).is_ok());
+
+        assert!(check_terminal_id("term_1").is_ok());
+        for id in ["", "a b", "x'y", "x\\y", "x;y", "x\"y", "$HOME", "ünï"] {
+            assert!(check_terminal_id(id).is_err(), "terminal id {id:?}");
+        }
+
+        assert!(check_bin("/opt/herdr/bin/herdr").is_ok());
+        assert!(check_bin("/Users/dev/My Apps/herdr").is_ok());
+        for bin in [
+            "/a'b/herdr",
+            "/a\\b/herdr",
+            "/a\"b",
+            "/a$b",
+            "/a`b",
+            "/a\nb",
+        ] {
+            assert!(check_bin(bin).is_err(), "bin {bin:?}");
+        }
+    }
+
+    #[test]
+    fn the_script_has_no_single_quotes_or_backslashes_but_the_newline() {
+        // A bin path with a space is double-quoted in the script, so even after the script and
+        // the whole command line are single-quoted there is no `\'` or `\\` for fish to misread.
+        let bin = "/Users/dev/My Apps/herdr";
+        for m in [
+            machine("local", None, "default"),
+            machine("local", None, "my-work"),
+        ] {
+            let script = &attach_argv(&m, "term_1", bin)[2];
+            assert!(script.contains("\"/Users/dev/My Apps/herdr\" terminal attach term_1"));
+            assert!(
+                !script.replace("\\n", "").contains(['\\', '\'']),
+                "{script}"
+            );
+            let line = crate::terminal::join_quoted(&attach_argv(&m, "term_1", bin));
+            // Only the quotes around the script itself remain.
+            assert_eq!(line.matches('\'').count(), 2, "{line}");
+        }
+        let remote = machine("buildbox", Some("buildbox"), "my-work");
+        let argv = attach_argv(&remote, "term_1", bin);
+        let line = crate::terminal::join_quoted(&argv);
+        assert!(!argv[3].replace("\\n", "").contains('\\'), "{}", argv[3]);
+        // The remote string is quoted a second time, so its two outer quotes become `'\\''`,
+        // a backslash outside any quotes, which every shell reads the same way.
+        assert!(
+            !line.replace("'\\''", "").replace("\\n", "").contains('\\'),
+            "{line}"
+        );
     }
 }

@@ -10,12 +10,13 @@ use tokio::sync::Mutex;
 use crate::actions::{self, ActionError, Actions, CreatedSession, NewSessionRequest};
 use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
 use crate::herdr::cli::{CommandLogEntry, HerdrCli};
+use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::poller::Poller;
 use crate::state::{AppState, MachineView};
 use crate::terminal::{
-    self, InstalledCache, LaunchSpec, OpenMode, TerminalList, attach_argv, check_openable,
-    default_terminal, full_ui_argv, join_quoted, launcher_for,
+    self, InstalledCache, LaunchSpec, OpenMode, TerminalList, attach_argv, check_bin,
+    check_openable, check_terminal_id, default_terminal, full_ui_argv, join_quoted, launcher_for,
 };
 
 const LOCAL: &str = "local";
@@ -284,7 +285,7 @@ fn pane_terminal_id<'a>(machine: &'a MachineView, pane_id: &str) -> Result<&'a s
             .map(|a| a.terminal_id.as_str())
     };
     match from_panes.or_else(from_agents) {
-        Some(id) if !id.is_empty() => Ok(id),
+        Some(id) if !id.is_empty() => check_terminal_id(id).map(|()| id).map_err(invalid),
         Some(_) => Err(invalid(format!(
             "Pane {pane_id} has no terminal to attach to."
         ))),
@@ -301,6 +302,7 @@ fn local_bin(cli: &HerdrCli) -> Result<String, ActionError> {
     if bin.is_empty() {
         return Err(invalid("herdr was not found on this computer."));
     }
+    check_bin(&bin).map_err(invalid)?;
     Ok(bin)
 }
 
@@ -334,7 +336,11 @@ async fn open_in_terminal(
     let home = app.path().home_dir().map_err(|e| invalid(e.to_string()))?;
     let terminal = default_terminal(&installed.get().await);
     let spec: LaunchSpec = launcher_for(terminal, home, "").spec(argv, OpenMode::default(), title);
-    terminal::launch(&spec, cli.env()).await.map_err(invalid)
+    terminal::launch(&spec, cli.env())
+        .await
+        .map_err(|message| ActionError::Herdr {
+            error: HerdrError::Spawn { message },
+        })
 }
 
 /// Opens one pane, attached, in the user's terminal.
@@ -363,12 +369,8 @@ pub async fn open_full_herdr(
     let state = poller.current_state();
     let machine = find_machine(&state, &machine_id)?;
     check_openable(machine).map_err(invalid)?;
-    let bin = if machine.is_local {
-        local_bin(&cli)?
-    } else {
-        String::new()
-    };
-    let argv = full_ui_argv(machine, &bin);
+    // Remote machines too: `herdr --remote` is the local client.
+    let argv = full_ui_argv(machine, &local_bin(&cli)?);
     open_in_terminal(&app, &cli, &installed, &argv, &machine.label).await
 }
 
@@ -565,5 +567,18 @@ mod tests {
         ));
         // Remote machines don't use the local binary.
         assert!(attach_for_pane(&s, &missing, "buildbox", "w1:p1").is_ok());
+    }
+
+    #[test]
+    fn terminal_ids_a_login_shell_could_misread_are_refused() {
+        let mut s = remote_state();
+        let snapshot = s.machines[1].snapshot.as_mut().unwrap();
+        for pane in &mut snapshot.panes {
+            pane.terminal_id = "term 1';x".into();
+        }
+        assert!(matches!(
+            attach_for_pane(&s, &cli(), "buildbox", "w1:p1"),
+            Err(ActionError::Invalid { .. })
+        ));
     }
 }

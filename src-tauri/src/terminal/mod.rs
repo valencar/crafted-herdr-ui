@@ -14,13 +14,16 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use ts_rs::TS;
 
-pub use attach::{attach_argv, check_openable, full_ui_argv};
+pub use attach::{attach_argv, check_bin, check_openable, check_terminal_id, full_ui_argv};
 pub use quote::{join_quoted, shell_quote};
 
 use launchers::{Alacritty, Custom, Ghostty, ITerm2, Kitty, TerminalApp, Warp, WezTerm};
 
 const DETECT_TIMEOUT: Duration = Duration::from_secs(5);
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
+/// `osascript` waits while macOS asks the user to allow Automation the first time.
+const OSASCRIPT_TIMEOUT: Duration = Duration::from_secs(120);
+const AUTOMATION_HINT: &str = "Allow Automation permission in System Settings → Privacy & Security → Automation, then try again.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -191,9 +194,38 @@ impl TerminalList {
     }
 }
 
+fn launch_timeout(program: &str) -> Duration {
+    if program == "osascript" {
+        OSASCRIPT_TIMEOUT
+    } else {
+        LAUNCH_TIMEOUT
+    }
+}
+
+/// Why a launch failed, with a pointer to the Automation setting for AppleScript launchers
+/// (`-1743` is macOS "not authorized to send Apple events").
+fn failure_message(program: &str, what: &str, stderr: &str) -> String {
+    let mut message = format!("{program} {what}");
+    if program == "osascript" && (what == "did not finish in time" || stderr.contains("-1743")) {
+        message.push_str(". ");
+        message.push_str(AUTOMATION_HINT);
+    } else {
+        message.push('.');
+    }
+    message
+}
+
 /// Writes the launcher's support files, then runs its process. `env` is the login environment
 /// (a custom template may need it).
 pub async fn launch(spec: &LaunchSpec, env: &[(String, String)]) -> Result<(), String> {
+    run_spec(spec, env, launch_timeout(&spec.program)).await
+}
+
+async fn run_spec(
+    spec: &LaunchSpec,
+    env: &[(String, String)],
+    timeout: Duration,
+) -> Result<(), String> {
     for file in &spec.files {
         write_if_changed(file)
             .map_err(|e| format!("Could not write {}: {e}", file.path.display()))?;
@@ -206,16 +238,20 @@ pub async fn launch(spec: &LaunchSpec, env: &[(String, String)]) -> Result<(), S
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true)
         .output();
-    let out = tokio::time::timeout(LAUNCH_TIMEOUT, run)
+    let out = tokio::time::timeout(timeout, run)
         .await
-        .map_err(|_| format!("{} did not finish in time.", spec.program))?
+        .map_err(|_| failure_message(&spec.program, "did not finish in time", ""))?
         .map_err(|e| format!("Could not run {}: {e}", spec.program))?;
     if out.status.success() {
         return Ok(());
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
     let detail: String = stderr.trim().chars().take(300).collect();
-    Err(format!("{} failed: {detail}", spec.program))
+    Err(failure_message(
+        &spec.program,
+        &format!("failed: {detail}"),
+        &stderr,
+    ))
 }
 
 fn write_if_changed(file: &SupportFile) -> std::io::Result<()> {
@@ -324,5 +360,36 @@ mod tests {
                 .unwrap_err()
                 .contains("Could not run")
         );
+    }
+
+    #[test]
+    fn only_osascript_gets_the_long_timeout_and_the_automation_hint() {
+        assert_eq!(launch_timeout("osascript"), Duration::from_secs(120));
+        assert_eq!(launch_timeout("open"), Duration::from_secs(10));
+        let timed_out = failure_message("osascript", "did not finish in time", "");
+        assert!(
+            timed_out.contains("Privacy & Security → Automation"),
+            "{timed_out}"
+        );
+        let denied = failure_message(
+            "osascript",
+            "failed: …",
+            "execution error: Not authorized (-1743)",
+        );
+        assert!(denied.contains("Automation"), "{denied}");
+        assert!(!failure_message("open", "did not finish in time", "").contains("Automation"));
+    }
+
+    #[tokio::test]
+    async fn a_slow_launcher_is_killed_at_the_timeout() {
+        let spec = LaunchSpec {
+            program: "/bin/sleep".into(),
+            args: vec!["5".into()],
+            files: vec![],
+        };
+        let err = run_spec(&spec, &[], Duration::from_millis(100))
+            .await
+            .unwrap_err();
+        assert_eq!(err, "/bin/sleep did not finish in time.");
     }
 }
