@@ -5,6 +5,7 @@ pub mod env;
 pub mod herdr;
 pub mod poller;
 pub mod state;
+pub mod terminal;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,6 +17,7 @@ use activity::ActivityTracker;
 use commands::AgentKindsCache;
 use herdr::cli::HerdrCli;
 use poller::{Poller, PollerConfig};
+use terminal::InstalledCache;
 
 const FALLBACK_SHELL: &str = "/bin/zsh";
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -70,6 +72,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(cli);
     app.manage(actions);
     app.manage(AgentKindsCache::default());
+    app.manage(InstalledCache::default());
     app.manage(poller.clone());
 
     if herdr_bin.is_some() {
@@ -123,6 +126,10 @@ pub fn run() {
             commands::refresh_now,
             commands::get_command_log,
             commands::list_agent_kinds,
+            commands::open_session,
+            commands::open_full_herdr,
+            commands::list_terminals,
+            commands::copy_attach_command,
         ])
         .on_window_event(track_visibility)
         .setup(|app| start(app))

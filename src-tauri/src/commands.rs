@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
 use crate::actions::{self, ActionError, Actions, CreatedSession, NewSessionRequest};
@@ -12,7 +12,11 @@ use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
 use crate::herdr::cli::{CommandLogEntry, HerdrCli};
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::poller::Poller;
-use crate::state::AppState;
+use crate::state::{AppState, MachineView};
+use crate::terminal::{
+    self, InstalledCache, LaunchSpec, OpenMode, TerminalList, attach_argv, check_openable,
+    default_terminal, full_ui_argv, join_quoted, launcher_for,
+};
 
 const LOCAL: &str = "local";
 const HELP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -247,6 +251,148 @@ pub async fn list_agent_kinds(
     Ok(cache.get(&cli).await)
 }
 
+fn invalid(message: impl Into<String>) -> ActionError {
+    ActionError::Invalid {
+        message: message.into(),
+    }
+}
+
+fn find_machine<'a>(state: &'a AppState, machine_id: &str) -> Result<&'a MachineView, ActionError> {
+    state
+        .machines
+        .iter()
+        .find(|m| m.id == machine_id)
+        .ok_or_else(|| invalid(format!("Unknown machine {machine_id}.")))
+}
+
+/// The terminal id of a pane, from the last snapshot. A pane with none can't be attached.
+fn pane_terminal_id<'a>(machine: &'a MachineView, pane_id: &str) -> Result<&'a str, ActionError> {
+    let snapshot = machine
+        .snapshot
+        .as_ref()
+        .ok_or_else(|| invalid(format!("{} has not reported its panes yet.", machine.label)))?;
+    let from_panes = snapshot
+        .panes
+        .iter()
+        .find(|p| p.pane_id == pane_id)
+        .map(|p| p.terminal_id.as_str());
+    let from_agents = || {
+        snapshot
+            .agents
+            .iter()
+            .find(|a| a.pane_id == pane_id)
+            .map(|a| a.terminal_id.as_str())
+    };
+    match from_panes.or_else(from_agents) {
+        Some(id) if !id.is_empty() => Ok(id),
+        Some(_) => Err(invalid(format!(
+            "Pane {pane_id} has no terminal to attach to."
+        ))),
+        None => Err(invalid(format!(
+            "Pane {pane_id} is not on {}.",
+            machine.label
+        ))),
+    }
+}
+
+/// The herdr binary a Local command runs. Remote machines use their own `herdr`.
+fn local_bin(cli: &HerdrCli) -> Result<String, ActionError> {
+    let bin = cli.bin().to_string_lossy().into_owned();
+    if bin.is_empty() {
+        return Err(invalid("herdr was not found on this computer."));
+    }
+    Ok(bin)
+}
+
+/// The attach command for a pane: what the terminal runs, as argv.
+fn attach_for_pane(
+    state: &AppState,
+    cli: &HerdrCli,
+    machine_id: &str,
+    pane_id: &str,
+) -> Result<Vec<String>, ActionError> {
+    let machine = find_machine(state, machine_id)?;
+    check_openable(machine).map_err(invalid)?;
+    let terminal_id = pane_terminal_id(machine, pane_id)?;
+    let bin = if machine.is_local {
+        local_bin(cli)?
+    } else {
+        String::new()
+    };
+    Ok(attach_argv(machine, terminal_id, &bin))
+}
+
+/// Opens `argv` in the user's terminal. Until Settings exist the choice is the default
+/// terminal, in a new window.
+async fn open_in_terminal(
+    app: &AppHandle,
+    cli: &HerdrCli,
+    installed: &InstalledCache,
+    argv: &[String],
+    title: &str,
+) -> Result<(), ActionError> {
+    let home = app.path().home_dir().map_err(|e| invalid(e.to_string()))?;
+    let terminal = default_terminal(&installed.get().await);
+    let spec: LaunchSpec = launcher_for(terminal, home, "").spec(argv, OpenMode::default(), title);
+    terminal::launch(&spec, cli.env()).await.map_err(invalid)
+}
+
+/// Opens one pane, attached, in the user's terminal.
+#[tauri::command]
+pub async fn open_session(
+    app: AppHandle,
+    poller: State<'_, Poller>,
+    cli: State<'_, HerdrCli>,
+    installed: State<'_, InstalledCache>,
+    machine_id: String,
+    pane_id: String,
+) -> Result<(), ActionError> {
+    let argv = attach_for_pane(&poller.current_state(), &cli, &machine_id, &pane_id)?;
+    open_in_terminal(&app, &cli, &installed, &argv, &pane_id).await
+}
+
+/// Opens the full herdr UI for a machine in the user's terminal.
+#[tauri::command]
+pub async fn open_full_herdr(
+    app: AppHandle,
+    poller: State<'_, Poller>,
+    cli: State<'_, HerdrCli>,
+    installed: State<'_, InstalledCache>,
+    machine_id: String,
+) -> Result<(), ActionError> {
+    let state = poller.current_state();
+    let machine = find_machine(&state, &machine_id)?;
+    check_openable(machine).map_err(invalid)?;
+    let bin = if machine.is_local {
+        local_bin(&cli)?
+    } else {
+        String::new()
+    };
+    let argv = full_ui_argv(machine, &bin);
+    open_in_terminal(&app, &cli, &installed, &argv, &machine.label).await
+}
+
+/// The installed terminals (detected again) and the default one.
+#[tauri::command]
+pub async fn list_terminals(
+    installed: State<'_, InstalledCache>,
+) -> Result<TerminalList, ActionError> {
+    // Tauri needs a `Result` from an async command that borrows state; this never fails.
+    Ok(TerminalList::new(installed.refresh().await))
+}
+
+/// The one-line command that attaches a pane, for the user to paste into any terminal.
+#[tauri::command]
+pub fn copy_attach_command(
+    poller: State<'_, Poller>,
+    cli: State<'_, HerdrCli>,
+    machine_id: String,
+    pane_id: String,
+) -> Result<String, ActionError> {
+    let argv = attach_for_pane(&poller.current_state(), &cli, &machine_id, &pane_id)?;
+    Ok(join_quoted(&argv))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,5 +493,77 @@ mod tests {
             cache.get(&cli).await,
             ["claude", "codex", "copilot", "opencode", "cursor"]
         );
+    }
+
+    fn remote_state() -> AppState {
+        let mut s = state();
+        s.machines[1].target = Some("buildbox".into());
+        s
+    }
+
+    fn cli() -> HerdrCli {
+        HerdrCli::new("/opt/herdr/bin/herdr".into(), vec![])
+    }
+
+    #[test]
+    fn attach_command_for_a_remote_pane_uses_ssh_and_plain_herdr() {
+        let argv = attach_for_pane(&remote_state(), &cli(), "buildbox", "w1:p1").unwrap();
+        assert_eq!(argv[..3], ["ssh", "-t", "buildbox"]);
+        assert!(argv[3].contains("herdr terminal attach term-1 ||"));
+        assert!(!argv[3].contains("/opt/herdr"));
+    }
+
+    #[test]
+    fn attach_command_for_a_local_pane_uses_the_resolved_binary() {
+        let mut s = remote_state();
+        s.machines[0].snapshot = s.machines[1].snapshot.clone();
+        let argv = attach_for_pane(&s, &cli(), "local", "w1:p1").unwrap();
+        assert_eq!(argv[..2], ["/bin/sh", "-c"]);
+        assert!(argv[2].starts_with("/opt/herdr/bin/herdr terminal attach term-1 ||"));
+        let line = join_quoted(&argv);
+        assert!(line.starts_with("/bin/sh -c '/opt/herdr/bin/herdr terminal attach term-1 || "));
+    }
+
+    #[test]
+    fn panes_that_cannot_be_attached_are_refused_before_launching() {
+        let mut s = remote_state();
+        let invalid =
+            |r: Result<Vec<String>, ActionError>| matches!(r, Err(ActionError::Invalid { .. }));
+        assert!(invalid(attach_for_pane(&s, &cli(), "gone", "w1:p1")));
+        assert!(invalid(attach_for_pane(&s, &cli(), "buildbox", "w9:p9")));
+        // Local has no snapshot yet.
+        assert!(invalid(attach_for_pane(&s, &cli(), "local", "w1:p1")));
+
+        let snapshot = s.machines[1].snapshot.as_mut().unwrap();
+        for pane in &mut snapshot.panes {
+            pane.terminal_id.clear();
+        }
+        for agent in &mut snapshot.agents {
+            agent.terminal_id.clear();
+        }
+        assert!(invalid(attach_for_pane(&s, &cli(), "buildbox", "w1:p1")));
+
+        // A remote machine without an SSH target can't be reached.
+        let mut no_target = state();
+        no_target.machines[1].target = None;
+        assert!(invalid(attach_for_pane(
+            &no_target,
+            &cli(),
+            "buildbox",
+            "w1:p1"
+        )));
+    }
+
+    #[test]
+    fn local_commands_need_a_herdr_binary() {
+        let mut s = remote_state();
+        s.machines[0].snapshot = s.machines[1].snapshot.clone();
+        let missing = HerdrCli::new(std::path::PathBuf::new(), vec![]);
+        assert!(matches!(
+            attach_for_pane(&s, &missing, "local", "w1:p1"),
+            Err(ActionError::Invalid { .. })
+        ));
+        // Remote machines don't use the local binary.
+        assert!(attach_for_pane(&s, &missing, "buildbox", "w1:p1").is_ok());
     }
 }

@@ -6,6 +6,7 @@ import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CreatedSession } from "./bindings/CreatedSession";
 import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
+import type { TerminalList } from "./bindings/TerminalList";
 
 /** Every Tauri command the UI may call, mapped to its result. A Rust `()` arrives as `null`. */
 export type CommandResults = {
@@ -29,6 +30,10 @@ export type CommandResults = {
   refresh_now: null;
   get_command_log: CommandLogEntry[];
   list_agent_kinds: string[];
+  open_session: null;
+  open_full_herdr: null;
+  list_terminals: TerminalList;
+  copy_attach_command: string;
 };
 export type CommandName = keyof CommandResults;
 
@@ -59,6 +64,10 @@ export type CommandArgs = {
   refresh_now: { machineId?: string | null };
   get_command_log: undefined;
   list_agent_kinds: undefined;
+  open_session: { machineId: string; paneId: string };
+  open_full_herdr: { machineId: string };
+  list_terminals: undefined;
+  copy_attach_command: { machineId: string; paneId: string };
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([

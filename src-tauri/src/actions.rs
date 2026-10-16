@@ -11,6 +11,7 @@ use ts_rs::TS;
 use crate::herdr::cli::{HerdrCli, T_AGENT_START, T_CREATE, T_DEFAULT, T_PROMPT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry, parse_created_pane};
+use crate::terminal::shell_quote;
 
 /// Where a new session goes.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
@@ -154,16 +155,12 @@ pub fn plan_new_session(req: &NewSessionRequest) -> Vec<Vec<String>> {
     steps
 }
 
-/// POSIX single-quote an argument when it has anything but plain characters.
-fn quote_arg(arg: &str) -> String {
-    let plain = !arg.is_empty()
-        && arg
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c));
-    if plain || arg == PANE_PLACEHOLDER {
+/// One argument of a displayed command line. The pane placeholder stays readable.
+fn display_arg(arg: &str) -> String {
+    if arg == PANE_PLACEHOLDER {
         arg.to_owned()
     } else {
-        format!("'{}'", arg.replace('\'', "'\\''"))
+        shell_quote(arg)
     }
 }
 
@@ -172,9 +169,9 @@ fn display_command(machine_label: Option<&str>, argv: &[String]) -> String {
     let mut parts = vec!["herdr".to_owned()];
     if let Some(label) = machine_label {
         parts.push("--machine".into());
-        parts.push(quote_arg(label));
+        parts.push(shell_quote(label));
     }
-    parts.extend(argv.iter().map(|a| quote_arg(a)));
+    parts.extend(argv.iter().map(|a| display_arg(a)));
     parts.join(" ")
 }
 
@@ -795,7 +792,8 @@ mod tests {
         );
         let local = preview_new_session(&req(None, Placement::NewWorkspace, &[]), None);
         assert!(local[0].starts_with("herdr workspace create "));
-        assert_eq!(quote_arg(""), "''");
+        assert_eq!(display_arg(""), "''");
+        assert_eq!(display_arg(PANE_PLACEHOLDER), PANE_PLACEHOLDER);
     }
 
     #[test]
