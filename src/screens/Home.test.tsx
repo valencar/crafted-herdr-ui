@@ -26,6 +26,22 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
 }));
 import { invokeTyped, onPreview } from "../lib/ipc";
 
+// AgentRow and NeedsYouCard each call formatAge once per render and Home never does, so its
+// call count says how many rows rendered.
+vi.mock("../lib/format", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/format")>();
+  return { ...actual, formatAge: vi.fn(actual.formatAge) };
+});
+import { formatAge } from "../lib/format";
+
+const rowRenders = vi.mocked(formatAge);
+
+/** Waits out the terminal lookup, which re-renders every row once, then zeroes the counter. */
+async function settleRows() {
+  await screen.findByText("Opens in Ghostty");
+  rowRenders.mockClear();
+}
+
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 let emitPreview: (frame: PreviewFrame) => void;
 
@@ -470,6 +486,44 @@ describe("Home", () => {
       useAppStore.getState().setPreview({ key: "x::w1:p1", text: "hi" }),
     );
     expect(commits).not.toHaveBeenCalled();
+  });
+
+  // Memoization guard: it counts row renders, not timing. The `user.type` below re-renders Home
+  // (its search state changes) without changing any row's props, so a row that loses `memo`, or
+  // gets an unstable prop such as a new callback each render, renders again and fails these.
+  it("home_re_rendering_for_an_unrelated_reason_re_renders_no_row", async () => {
+    const commits = vi.fn();
+    const user = setup(defaultState(), (home) => (
+      <Profiler id="home" onRender={commits}>
+        {home}
+      </Profiler>
+    ));
+    await settleRows();
+    commits.mockClear();
+    // A blank query keeps every row visible, so only Home's own state changes.
+    await user.type(screen.getByRole("searchbox"), " ");
+    expect(commits).toHaveBeenCalled();
+    expect(rowRenders).not.toHaveBeenCalled();
+  });
+
+  it("a_row_re_renders_when_its_own_props_change", async () => {
+    const user = setup();
+    await settleRows();
+    await user.click(selectButton("gpubox::w1:p1"));
+    // The spy sees renders (so the guard above can fail): the newly selected row rendered.
+    expect(rowRenders).toHaveBeenCalled();
+  });
+
+  it("a_preview_frame_for_the_selected_row_re_renders_only_that_card", async () => {
+    const user = setup();
+    const section = screen.getByRole("region", { name: "Needs you" });
+    await user.click(within(section).getAllByRole("article")[0]);
+    const key = useAppStore.getState().selectedKey!;
+    await waitFor(() => expect(onPreview).toHaveBeenCalled());
+    await settleRows();
+    act(() => emitPreview({ key, text: "one\ntwo" }));
+    // Home re-rendered for the selected row's text; every other row and card kept its props.
+    expect(rowRenders).toHaveBeenCalledTimes(1);
   });
 
   it("the_inspector_follows_the_selection_and_starts_one_preview", async () => {
