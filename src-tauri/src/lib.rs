@@ -275,12 +275,10 @@ pub fn run() {
         RunEvent::ExitRequested {
             api, code: None, ..
         } => api.prevent_exit(),
-        // A click on the Dock icon while the main window is hidden brings it back.
+        // A click on the Dock icon always brings the main window back, even while Settings or
+        // the popover is on screen (macOS then reports a visible window).
         #[cfg(target_os = "macos")]
-        RunEvent::Reopen {
-            has_visible_windows: false,
-            ..
-        } => tray::show_main(app),
+        RunEvent::Reopen { .. } => tray::show_main(app),
         _ => {}
     });
 }

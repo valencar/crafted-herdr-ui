@@ -167,3 +167,8 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] Settings › herdr CLI › "Attach as: Full herdr UI": the inspector's "what Open runs" box shows the full-UI command (`herdr --remote <target>`), and switching back shows the attach command without reselecting.
 - [ ] Add workbox for a host that already has a profile, with a different remote session: the button is enabled. With the same session (or none, when the profile is `default`) it says "Already added as <label>".
 - [ ] Unplug the network for one poll interval (a blip of 1-2 failed polls) while an agent becomes blocked: a notification fires after the machine recovers. After a longer outage (3 or more failed polls), nothing fires for what changed meanwhile.
+
+## Polish
+
+- [ ] Toggle a notification setting within 2 s of launching the app: it saves at once, instead of waiting for herdr to be located. A herdr path saved in that window is picked up too (Settings › herdr CLI shows the saved path as found).
+- [ ] With Settings (or the menu-bar popover) open and the main window hidden or behind it, click the Dock icon: the main window comes to the front.
