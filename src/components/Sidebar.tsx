@@ -31,6 +31,8 @@ type Props = {
   machines: MachineView[];
   herdrPath: string | null;
   herdrVersion: string | null;
+  /** The workbox whose screen is open, if any. */
+  activeWorkbox: string | null;
   onJump: (elementId: string) => void;
   onProject: (group: Group) => void;
   onWorkbox: (machineId: string) => void;
@@ -44,6 +46,7 @@ export function Sidebar({
   machines,
   herdrPath,
   herdrVersion,
+  activeWorkbox,
   onJump,
   onProject,
   onWorkbox,
@@ -108,6 +111,7 @@ export function Sidebar({
           key={m.id}
           type="button"
           className="nav-item"
+          aria-current={m.id === activeWorkbox ? "page" : undefined}
           onClick={() => onWorkbox(m.id)}
         >
           <span className="nav-label">{m.label}</span>

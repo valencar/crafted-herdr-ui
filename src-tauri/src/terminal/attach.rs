@@ -135,6 +135,86 @@ pub fn full_ui_argv(machine: &MachineView, local_bin: &str) -> Vec<String> {
     argv
 }
 
+/// A value that goes into an allowlisted command: plain characters only, and never something
+/// herdr or ssh would read as an option.
+fn allowed_value(what: &str, value: &str) -> Result<(), String> {
+    if is_plain(value) && !value.starts_with('-') {
+        Ok(())
+    } else {
+        Err(format!(
+            "{what} {value:?} has characters the app won't pass to a shell."
+        ))
+    }
+}
+
+/// A machine label: plain characters and single spaces inside, so it reads as one name.
+fn allowed_label(value: &str) -> Result<(), String> {
+    let ok = !value.is_empty()
+        && value == value.trim()
+        && !value.starts_with('-')
+        && value
+            .chars()
+            .all(|c| c == ' ' || c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c));
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "The label {value:?} has characters the app won't pass to a shell."
+        ))
+    }
+}
+
+/// The options `machine add <target>` may carry, each at most once, in any order.
+fn check_machine_add_options(options: &[String]) -> Result<(), String> {
+    let mut seen: Vec<&str> = Vec::new();
+    for pair in options.chunks(2) {
+        let [flag, value] = pair else {
+            return Err(format!("{} needs a value.", pair[0]));
+        };
+        if seen.contains(&flag.as_str()) {
+            return Err(format!("{flag} was given twice."));
+        }
+        match flag.as_str() {
+            "--label" => allowed_label(value)?,
+            "--remote-session" => allowed_value("The remote session", value)?,
+            other => return Err(format!("{other} is not an option the app will run.")),
+        }
+        seen.push(flag);
+    }
+    Ok(())
+}
+
+/// The command for `open_in_terminal`: `herdr_bin` followed by `args`, but only when `args` is
+/// one of the three listed shapes. Anything else is refused, so the UI can't have the app run an
+/// arbitrary herdr command (or anything else) in the user's terminal.
+///
+/// - `machine reconnect <id>`
+/// - `machine add <target> [--label <L>] [--remote-session <S>]`
+/// - `--remote <target> [--session <S>]`
+pub fn allowed_herdr_argv(herdr_bin: &str, args: &[String]) -> Result<Vec<String>, String> {
+    check_bin(herdr_bin)?;
+    if herdr_bin.is_empty() {
+        return Err("herdr was not found on this computer.".to_owned());
+    }
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        ["machine", "reconnect", id] => allowed_value("The machine id", id)?,
+        ["machine", "add", target, ..] => {
+            allowed_value("The SSH target", target)?;
+            check_machine_add_options(&args[3..])?;
+        }
+        ["--remote", target] => allowed_value("The SSH target", target)?,
+        ["--remote", target, "--session", session] => {
+            allowed_value("The SSH target", target)?;
+            allowed_value("The session", session)?;
+        }
+        _ => return Err("The app won't run that command in a terminal.".to_owned()),
+    }
+    let mut argv = vec![herdr_bin.to_owned()];
+    argv.extend_from_slice(args);
+    Ok(argv)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,6 +233,123 @@ mod tests {
             last_ok_ms: None,
             ages: HashMap::new(),
         }
+    }
+
+    fn strs(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn open_in_terminal_accepts_each_listed_shape() {
+        let ok = |args: &[&str]| allowed_herdr_argv("/opt/herdr/bin/herdr", &strs(args));
+        assert_eq!(
+            ok(&["machine", "reconnect", "buildbox"]).unwrap(),
+            strs(&["/opt/herdr/bin/herdr", "machine", "reconnect", "buildbox"])
+        );
+        assert_eq!(
+            ok(&["machine", "add", "buildbox"]).unwrap().len(),
+            4,
+            "machine add <target>"
+        );
+        assert_eq!(
+            ok(&[
+                "machine",
+                "add",
+                "dev@build.example",
+                "--label",
+                "Build box",
+                "--remote-session",
+                "work"
+            ])
+            .unwrap(),
+            strs(&[
+                "/opt/herdr/bin/herdr",
+                "machine",
+                "add",
+                "dev@build.example",
+                "--label",
+                "Build box",
+                "--remote-session",
+                "work"
+            ])
+        );
+        // Either order, and either option alone.
+        assert!(
+            ok(&[
+                "machine",
+                "add",
+                "t",
+                "--remote-session",
+                "s",
+                "--label",
+                "L"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["machine", "add", "t", "--label", "L"]).is_ok());
+        assert!(ok(&["machine", "add", "t", "--remote-session", "s"]).is_ok());
+        assert_eq!(
+            ok(&["--remote", "buildbox"]).unwrap(),
+            strs(&["/opt/herdr/bin/herdr", "--remote", "buildbox"])
+        );
+        assert_eq!(
+            ok(&["--remote", "buildbox", "--session", "work"])
+                .unwrap()
+                .len(),
+            5
+        );
+    }
+
+    #[test]
+    fn open_in_terminal_rejects_unlisted_argv() {
+        let bad = |args: &[&str]| allowed_herdr_argv("herdr", &strs(args)).is_err();
+        // Not a listed shape at all.
+        assert!(bad(&[]));
+        assert!(bad(&["server", "stop"]));
+        assert!(bad(&["machine", "remove", "buildbox"]));
+        assert!(bad(&["machine", "reconnect"]));
+        assert!(bad(&["machine", "reconnect", "a", "b"]));
+        assert!(bad(&["machine", "add"]));
+        assert!(bad(&["terminal", "attach", "term-1"]));
+        assert!(bad(&["--remote"]));
+        assert!(bad(&["--remote", "buildbox", "--takeover"]));
+        assert!(bad(&["--remote", "buildbox", "--session"]));
+        assert!(bad(&["--session", "work", "--remote", "buildbox"]));
+        // Unlisted or repeated options after `machine add <target>`.
+        assert!(bad(&["machine", "add", "t", "--trust-repository"]));
+        assert!(bad(&["machine", "add", "t", "--label"]));
+        assert!(bad(&[
+            "machine", "add", "t", "--label", "A", "--label", "B"
+        ]));
+        assert!(bad(&["machine", "add", "t", "--label", "A", "extra"]));
+        // Values a shell or ssh could misread.
+        assert!(bad(&["machine", "reconnect", "a b"]));
+        assert!(bad(&["machine", "reconnect", "a;b"]));
+        assert!(bad(&["machine", "reconnect", "$(x)"]));
+        assert!(bad(&["machine", "reconnect", ""]));
+        assert!(bad(&["machine", "reconnect", "-oProxyCommand=x"]));
+        assert!(bad(&["--remote", "-oProxyCommand=x"]));
+        assert!(bad(&["--remote", "host'x"]));
+        assert!(bad(&["machine", "add", "t", "--label", "it's"]));
+        assert!(bad(&["machine", "add", "t", "--label", "a`b`"]));
+        assert!(bad(&["machine", "add", "t", "--label", "-x"]));
+        assert!(bad(&["machine", "add", "t", "--label", "  "]));
+        assert!(bad(&["machine", "add", "t", "--label", "a\nb"]));
+        assert!(bad(&[
+            "machine",
+            "add",
+            "t",
+            "--remote-session",
+            "two words"
+        ]));
+    }
+
+    #[test]
+    fn open_in_terminal_needs_a_shell_safe_binary() {
+        let args = strs(&["machine", "reconnect", "buildbox"]);
+        assert!(allowed_herdr_argv("", &args).is_err());
+        assert!(allowed_herdr_argv("/opt/it's/herdr", &args).is_err());
+        assert!(allowed_herdr_argv("/opt/my tools/herdr", &args).is_ok());
     }
 
     #[test]

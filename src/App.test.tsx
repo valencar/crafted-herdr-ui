@@ -62,3 +62,31 @@ it("unsubscribes on unmount", async () => {
   unmount();
   expect(unlisten).toHaveBeenCalled();
 });
+
+it("shows the Workbox screen when the view is a workbox, and Home otherwise", async () => {
+  ipc.getState.mockResolvedValue({
+    ...state,
+    machines: [
+      {
+        id: "buildbox",
+        label: "buildbox",
+        target: "buildbox",
+        session: "default",
+        is_local: false,
+        health: { kind: "online" },
+        snapshot: null,
+        last_ok_ms: null,
+        ages: {},
+      },
+    ],
+  });
+  useAppStore.setState({ view: { kind: "workbox", machineId: "buildbox" } });
+  render(<App />);
+  expect(
+    await screen.findByRole("navigation", { name: "Breadcrumb" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("searchbox")).toBeNull();
+
+  useAppStore.setState({ view: { kind: "home" } });
+  expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+});

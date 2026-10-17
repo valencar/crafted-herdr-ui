@@ -4,6 +4,7 @@ import {
   TERMINAL_LABEL,
   actionErrorMessage,
   formatAge,
+  formatChecked,
   lastLines,
   formatStaleness,
   shortPath,
@@ -118,5 +119,15 @@ describe("TERMINAL_LABEL", () => {
   it("names every terminal", () => {
     expect(TERMINAL_LABEL.ghostty).toBe("Ghostty");
     expect(TERMINAL_LABEL.terminalApp).toBe("Terminal");
+  });
+});
+
+describe("formatChecked", () => {
+  it("checked_note_counts_up", () => {
+    expect(formatChecked(NOW, NOW)).toBe("checked 0s ago");
+    expect(formatChecked(NOW - 14_000, NOW)).toBe("checked 14s ago");
+    expect(formatChecked(NOW - 125_000, NOW)).toBe("checked 2m ago");
+    expect(formatChecked(NOW - 3 * 3_600_000, NOW)).toBe("checked 3h ago");
+    expect(formatChecked(NOW + 5_000, NOW)).toBe("checked 0s ago");
   });
 });

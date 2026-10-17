@@ -19,8 +19,9 @@ use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::poller::Poller;
 use crate::state::{AppState, MachineView};
 use crate::terminal::{
-    self, InstalledCache, LaunchSpec, OpenMode, TerminalList, attach_argv, check_bin,
-    check_openable, check_terminal_id, default_terminal, full_ui_argv, join_quoted, launcher_for,
+    self, InstalledCache, LaunchSpec, OpenMode, TerminalList, allowed_herdr_argv, attach_argv,
+    check_bin, check_openable, check_terminal_id, default_terminal, full_ui_argv, join_quoted,
+    launcher_for,
 };
 
 const LOCAL: &str = "local";
@@ -330,7 +331,7 @@ fn attach_for_pane(
 
 /// Opens `argv` in the user's terminal. Until Settings exist the choice is the default
 /// terminal, in a new window.
-async fn open_in_terminal(
+async fn launch_in_terminal(
     app: &AppHandle,
     cli: &HerdrCli,
     installed: &InstalledCache,
@@ -358,7 +359,7 @@ pub async fn open_session(
     pane_id: String,
 ) -> Result<(), ActionError> {
     let argv = attach_for_pane(&poller.current_state(), &cli, &machine_id, &pane_id)?;
-    open_in_terminal(&app, &cli, &installed, &argv, &pane_id).await
+    launch_in_terminal(&app, &cli, &installed, &argv, &pane_id).await
 }
 
 /// Opens the full herdr UI for a machine in the user's terminal.
@@ -375,7 +376,22 @@ pub async fn open_full_herdr(
     check_openable(machine).map_err(invalid)?;
     // Remote machines too: `herdr --remote` is the local client.
     let argv = full_ui_argv(machine, &local_bin(&cli)?);
-    open_in_terminal(&app, &cli, &installed, &argv, &machine.label).await
+    launch_in_terminal(&app, &cli, &installed, &argv, &machine.label).await
+}
+
+/// Runs one of the few herdr commands that need a terminal (`machine reconnect` asks for SSH
+/// authentication) in the user's terminal. `args` is what follows the herdr binary, which is
+/// always the resolved local one; anything outside the allowlist is refused.
+#[tauri::command]
+pub async fn open_in_terminal(
+    app: AppHandle,
+    cli: State<'_, HerdrCli>,
+    installed: State<'_, InstalledCache>,
+    argv: Vec<String>,
+) -> Result<(), ActionError> {
+    let bin = cli.bin().to_string_lossy().into_owned();
+    let full = allowed_herdr_argv(&bin, &argv).map_err(invalid)?;
+    launch_in_terminal(&app, &cli, &installed, &full, "herdr").await
 }
 
 /// The installed terminals (detected again) and the default one.
@@ -397,6 +413,49 @@ pub fn copy_attach_command(
 ) -> Result<String, ActionError> {
     let argv = attach_for_pane(&poller.current_state(), &cli, &machine_id, &pane_id)?;
     Ok(join_quoted(&argv))
+}
+
+/// The one-line read behind a pane box in the Workbox screen.
+pub fn pane_tail_argv(pane_id: &str) -> Vec<String> {
+    [
+        "pane",
+        "read",
+        pane_id,
+        "--source",
+        "recent-unwrapped",
+        "--lines",
+        "1",
+        "--format",
+        "text",
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+/// The last line with something on it, trimmed; empty when the pane has printed nothing.
+pub fn last_nonempty_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// The last line a pane printed, for its box in the Workbox screen.
+#[tauri::command]
+pub async fn read_pane_tail(
+    cli: State<'_, HerdrCli>,
+    machine_id: String,
+    pane_id: String,
+) -> Result<String, ActionError> {
+    if machine_id.trim().is_empty() || pane_id.trim().is_empty() || pane_id.starts_with('-') {
+        return Err(invalid("Pick a pane to read."));
+    }
+    let text = cli
+        .run_text(Some(&machine_id), &pane_tail_argv(&pane_id), T_DEFAULT)
+        .await
+        .map_err(|error| ActionError::Herdr { error })?;
+    Ok(last_nonempty_line(&text))
 }
 
 const PREVIEW_EVERY: Duration = Duration::from_secs(2);
@@ -633,6 +692,21 @@ mod tests {
             "pane read w1:p2 --source recent-unwrapped --lines 60 --format text"
         );
         assert_eq!(preview_key("buildbox", "w1:p1"), "buildbox::w1:p1");
+    }
+
+    #[test]
+    fn pane_tail_reads_one_unwrapped_line() {
+        assert_eq!(
+            pane_tail_argv("w1:p2").join(" "),
+            "pane read w1:p2 --source recent-unwrapped --lines 1 --format text"
+        );
+        assert_eq!(
+            last_nonempty_line("  ready on :3000  \n\n  \n"),
+            "ready on :3000"
+        );
+        assert_eq!(last_nonempty_line("one\ntwo\n"), "two");
+        assert_eq!(last_nonempty_line("\n \n"), "");
+        assert_eq!(last_nonempty_line(""), "");
     }
 
     #[test]

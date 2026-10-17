@@ -14,7 +14,9 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use ts_rs::TS;
 
-pub use attach::{attach_argv, check_bin, check_openable, check_terminal_id, full_ui_argv};
+pub use attach::{
+    allowed_herdr_argv, attach_argv, check_bin, check_openable, check_terminal_id, full_ui_argv,
+};
 pub use quote::{join_quoted, shell_quote};
 
 use launchers::{Alacritty, Custom, Ghostty, ITerm2, Kitty, TerminalApp, Warp, WezTerm};

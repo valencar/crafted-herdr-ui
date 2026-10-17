@@ -49,6 +49,15 @@ export function formatStaleness(
   return `last updated ${Math.floor(diff / DAY)}d ago`;
 }
 
+/** "checked 14s ago", for the time the user last pressed "Check now". */
+export function formatChecked(checkedAtMs: number, nowMs: number): string {
+  const diff = Math.max(0, nowMs - checkedAtMs);
+  if (diff < MINUTE) return `checked ${Math.floor(diff / SECOND)}s ago`;
+  if (diff < HOUR) return `checked ${Math.floor(diff / MINUTE)}m ago`;
+  if (diff < DAY) return `checked ${Math.floor(diff / HOUR)}h ago`;
+  return `checked ${Math.floor(diff / DAY)}d ago`;
+}
+
 /**
  * Replaces a leading `/home/<user>` or `/Users/<user>` with `~`. The home directory is read
  * from the path itself, so no machine is needed.

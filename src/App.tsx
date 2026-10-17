@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 import { getState, onState } from "./lib/ipc";
 import { Home } from "./screens/Home";
+import { Workbox } from "./screens/Workbox";
 import { useAppStore } from "./store/appStore";
 
 function App() {
   const setState = useAppStore((s) => s.setState);
   const reportError = useAppStore((s) => s.reportError);
+  const view = useAppStore((s) => s.view);
 
   useEffect(() => {
     let alive = true;
@@ -36,7 +38,11 @@ function App() {
     };
   }, [setState, reportError]);
 
-  return <Home />;
+  return view.kind === "workbox" ? (
+    <Workbox key={view.machineId} machineId={view.machineId} />
+  ) : (
+    <Home />
+  );
 }
 
 export default App;

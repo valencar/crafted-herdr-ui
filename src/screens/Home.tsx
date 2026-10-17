@@ -8,8 +8,7 @@ import { ProjectGroup } from "../components/ProjectGroup";
 import { Sidebar } from "../components/Sidebar";
 import { Toast } from "../components/Toast";
 import type { MachineView } from "../lib/bindings/MachineView";
-import type { TerminalId } from "../lib/bindings/TerminalId";
-import { TERMINAL_LABEL, formatStaleness, lastLines } from "../lib/format";
+import { formatStaleness, lastLines } from "../lib/format";
 import {
   groupByProject,
   groupByStatus,
@@ -21,6 +20,12 @@ import {
 } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
+import {
+  scrollToId,
+  terminalName as terminalLabel,
+  useDefaultTerminal,
+  useNow,
+} from "../lib/uiHelpers";
 import { useAppStore, type GroupBy } from "../store/appStore";
 import { NewSession } from "./NewSession";
 
@@ -56,23 +61,6 @@ function isEditable(target: EventTarget | null): boolean {
   );
 }
 
-function useNow(everyMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), everyMs);
-    return () => window.clearInterval(t);
-  }, [everyMs]);
-  return now;
-}
-
-function scrollToId(id: string) {
-  window.setTimeout(() => {
-    document
-      .getElementById(id)
-      ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-  }, 0);
-}
-
 function focusRow(key: string) {
   const li = [...document.querySelectorAll<HTMLElement>("[data-row-key]")].find(
     (el) => el.dataset.rowKey === key,
@@ -90,6 +78,7 @@ export function Home() {
   const select = useAppStore((s) => s.select);
   const setGroupBy = useAppStore((s) => s.setGroupBy);
   const setSheet = useAppStore((s) => s.setSheet);
+  const setView = useAppStore((s) => s.setView);
   const openNewSession = useAppStore((s) => s.openNewSession);
   const toast = useAppStore((s) => s.toast);
   const preview = useAppStore((s) => s.preview);
@@ -102,21 +91,9 @@ export function Home() {
 
   const nowMs = useNow(30_000);
   const [query, setQuery] = useState("");
-  const [terminal, setTerminal] = useState<TerminalId | null>(null);
+  const terminal = useDefaultTerminal();
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    invokeTyped("list_terminals")
-      .then((t) => {
-        if (!cancelled) setTerminal(t.default);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const machines = useMemo(
@@ -189,7 +166,7 @@ export function Home() {
       ? lastLines(preview.text, 3)
       : [];
   const closingRow = rows.find((r) => r.key === closingKey) ?? null;
-  const terminalName = terminal ? TERMINAL_LABEL[terminal] : "terminal";
+  const terminalName = terminalLabel(terminal);
 
   const dimmed = (machineId: string) => {
     const kind = machines.get(machineId)?.health.kind;
@@ -293,10 +270,8 @@ export function Home() {
             setGroupBy("project");
             scrollToId(`group-${g.key}`);
           }}
-          onWorkbox={(id) => {
-            setGroupBy("workbox");
-            scrollToId(`group-${id}`);
-          }}
+          activeWorkbox={null}
+          onWorkbox={(id) => setView({ kind: "workbox", machineId: id })}
           onAddWorkbox={() => setSheet("add-workbox")}
         />
 

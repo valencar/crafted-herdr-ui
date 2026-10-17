@@ -136,6 +136,18 @@ describe("Home", () => {
     ).toHaveTextContent("planner");
   });
 
+  it("a_sidebar_workbox_opens_its_screen", async () => {
+    const user = setup();
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
+    await user.click(
+      within(sidebar).getByRole("button", { name: /^gpubox\s*Online$/ }),
+    );
+    expect(useAppStore.getState().view).toEqual({
+      kind: "workbox",
+      machineId: "gpubox",
+    });
+  });
+
   it("group_toggle_switches_views", async () => {
     const user = setup();
     const headings = () =>

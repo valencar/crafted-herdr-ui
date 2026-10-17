@@ -33,6 +33,8 @@ export type CommandResults = {
   list_agent_kinds: string[];
   open_session: null;
   open_full_herdr: null;
+  open_in_terminal: null;
+  read_pane_tail: string;
   list_terminals: TerminalList;
   copy_attach_command: string;
   start_preview: null;
@@ -69,6 +71,9 @@ export type CommandArgs = {
   list_agent_kinds: undefined;
   open_session: { machineId: string; paneId: string };
   open_full_herdr: { machineId: string };
+  /** What follows the herdr binary; the Rust side allows only a few shapes. */
+  open_in_terminal: { argv: string[] };
+  read_pane_tail: { machineId: string; paneId: string };
   list_terminals: undefined;
   copy_attach_command: { machineId: string; paneId: string };
   start_preview: { machineId: string; paneId: string; isAgent: boolean };

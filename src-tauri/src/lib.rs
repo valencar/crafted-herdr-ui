@@ -138,6 +138,8 @@ pub fn run() {
             commands::list_agent_kinds,
             commands::open_session,
             commands::open_full_herdr,
+            commands::open_in_terminal,
+            commands::read_pane_tail,
             commands::list_terminals,
             commands::copy_attach_command,
             commands::start_preview,
