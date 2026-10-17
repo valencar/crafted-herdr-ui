@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crafted_herdr_ui_lib::machine_setup::{
     Emit, ExitHook, MachineSetup, RunExit, SetupEvent, SetupPrompt, SetupStep, StepState,
 };
-use crafted_herdr_ui_lib::pty::{PtyControl, PtySpawner, SpawnedPty};
+use crafted_herdr_ui_lib::pty::{PtyControl, PtySpawner, SpawnedPty, TermSize};
 
 /// The argv and environment a process was started with.
 type Spawn = (Vec<String>, Vec<(String, String)>);
@@ -67,6 +67,7 @@ struct ReplayControl {
     exited_early: bool,
     killed: Arc<Mutex<bool>>,
     tx: Arc<Replay>,
+    sizes: Arc<Mutex<Vec<TermSize>>>,
 }
 
 impl PtyControl for ReplayControl {
@@ -80,6 +81,10 @@ impl PtyControl for ReplayControl {
     fn try_wait(&self) -> Option<i32> {
         self.exited_early.then_some(self.code)
     }
+    fn resize(&self, size: TermSize) -> io::Result<()> {
+        lock(&self.sizes).push(size);
+        Ok(())
+    }
 }
 
 struct ReplaySpawner {
@@ -91,6 +96,8 @@ struct ReplaySpawner {
     typed: Arc<Mutex<Vec<u8>>>,
     killed: Arc<Mutex<bool>>,
     spawned_with: Mutex<Vec<Spawn>>,
+    /// Every size the terminal had: the one it started at, then each resize.
+    sizes: Arc<Mutex<Vec<TermSize>>>,
     /// Output stays open after the script (a process that hangs).
     hang: bool,
     /// The process exits after the first output but something keeps the terminal open.
@@ -109,6 +116,7 @@ impl ReplaySpawner {
             typed: Arc::default(),
             killed: Arc::default(),
             spawned_with: Mutex::default(),
+            sizes: Arc::default(),
             hang: false,
             exits_while_open: false,
         })
@@ -116,8 +124,14 @@ impl ReplaySpawner {
 }
 
 impl PtySpawner for ReplaySpawner {
-    fn spawn(&self, argv: &[String], env: &[(String, String)]) -> io::Result<SpawnedPty> {
+    fn spawn(
+        &self,
+        argv: &[String],
+        env: &[(String, String)],
+        size: TermSize,
+    ) -> io::Result<SpawnedPty> {
         lock(&self.spawned_with).push((argv.to_vec(), env.to_vec()));
+        lock(&self.sizes).push(size);
         let (tx, output) = mpsc::channel();
         let _ = tx.send(self.first.clone());
         let replay = Arc::new(Replay {
@@ -139,6 +153,7 @@ impl PtySpawner for ReplaySpawner {
                 exited_early: self.exits_while_open,
                 killed: self.killed.clone(),
                 tx: replay,
+                sizes: self.sizes.clone(),
             }),
         })
     }
@@ -196,6 +211,13 @@ fn session_flow_types_the_answers_the_prompts_need() {
         .start(&argv(), &env, emit, ignore_exit())
         .expect("start");
     assert_eq!(lock(&spawner.spawned_with)[0], (argv(), env));
+    assert_eq!(
+        *lock(&spawner.sizes),
+        [TermSize {
+            cols: 120,
+            rows: 40
+        }]
+    );
 
     // 1. The picker: choose the second session.
     wait_for(&events, "picker", |e| {
@@ -455,10 +477,18 @@ impl PtyControl for Chatty {
     fn try_wait(&self) -> Option<i32> {
         Some(0)
     }
+    fn resize(&self, _size: TermSize) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 impl PtySpawner for Chatty {
-    fn spawn(&self, _argv: &[String], _env: &[(String, String)]) -> io::Result<SpawnedPty> {
+    fn spawn(
+        &self,
+        _argv: &[String],
+        _env: &[(String, String)],
+        _size: TermSize,
+    ) -> io::Result<SpawnedPty> {
         let (tx, output) = mpsc::channel();
         std::thread::spawn(move || {
             // Quiet long enough for the driver to notice the exit, then never quiet again

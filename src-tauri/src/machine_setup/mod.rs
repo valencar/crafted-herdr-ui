@@ -11,11 +11,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::lock;
-use crate::pty::{PtyControl, PtySpawner};
+use crate::pty::{PtyControl, PtySpawner, TermSize};
 
 /// The event the UI listens to.
 pub const SETUP_EVENT: &str = "machine-setup";
 
+/// The hidden terminal's size.
+const SIZE: TermSize = TermSize {
+    cols: 120,
+    rows: 40,
+};
 /// No new output and no recognized prompt for this long means the run is stuck on something
 /// the app doesn't understand (an ssh passphrase, a host-key question, a slow install).
 pub const STALL_AFTER: Duration = Duration::from_secs(5);
@@ -89,7 +94,7 @@ impl MachineSetup {
         }
         let spawned = self
             .spawner
-            .spawn(argv, env)
+            .spawn(argv, env, SIZE)
             .map_err(|e| format!("Couldn't start herdr: {e}"))?;
         let (run, first) = SetupRun::start();
         for event in first {
