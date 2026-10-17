@@ -85,9 +85,10 @@ fn cached_status(state: &AppState, machine_id: &str, pane_id: &str) -> Option<Ag
 }
 
 /// The current state, for a UI that started listening after the first `"state"` event.
+/// `None` while startup is still looking for herdr; the first `"state"` event follows.
 #[tauri::command]
-pub fn get_state(poller: State<'_, Poller>) -> AppState {
-    poller.current_state()
+pub fn get_state(poller: State<'_, Poller>) -> Option<AppState> {
+    poller.is_located().then(|| poller.current_state())
 }
 
 #[tauri::command]
@@ -318,6 +319,15 @@ fn local_bin(cli: &HerdrCli) -> Result<String, ActionError> {
     Ok(bin)
 }
 
+/// The herdr arguments the command log shows for an attach: the plain `terminal attach`, not
+/// the wrapper script around it.
+fn attach_log_args(state: &AppState, machine_id: &str, pane_id: &str) -> Vec<String> {
+    let id = find_machine(state, machine_id)
+        .and_then(|m| pane_terminal_id(m, pane_id))
+        .unwrap_or(pane_id);
+    ["terminal", "attach", id].map(str::to_owned).to_vec()
+}
+
 /// The attach command for a pane: what the terminal runs, as argv.
 fn attach_for_pane(
     state: &AppState,
@@ -336,8 +346,14 @@ fn attach_for_pane(
     Ok(attach_argv(machine, terminal_id, &bin))
 }
 
-/// The process that opens `argv` in the terminal the settings ask for: the chosen one, or the
-/// default of the installed terminals.
+/// The terminal the settings ask for: the chosen one, or the default of the installed ones.
+fn chosen_terminal(settings: &Settings, installed: &[TerminalId]) -> TerminalId {
+    settings
+        .terminal
+        .unwrap_or_else(|| default_terminal(installed))
+}
+
+/// The process that opens `argv` in the terminal the settings ask for.
 fn launch_spec(
     settings: &Settings,
     installed: &[TerminalId],
@@ -345,9 +361,7 @@ fn launch_spec(
     argv: &[String],
     title: &str,
 ) -> Result<LaunchSpec, String> {
-    let terminal = settings
-        .terminal
-        .unwrap_or_else(|| default_terminal(installed));
+    let terminal = chosen_terminal(settings, installed);
     let template = settings.terminal_custom_template.trim();
     if terminal == TerminalId::Custom && template.is_empty() {
         return Err("Set the launch command for your custom terminal in Settings.".into());
@@ -355,8 +369,21 @@ fn launch_spec(
     Ok(launcher_for(terminal, home, template).spec(argv, settings.open_mode, title))
 }
 
+/// What the Activity drawer shows for a command that was handed to a terminal: the herdr
+/// arguments (without the binary) and the machine they were for.
+struct LaunchLog<'a> {
+    machine: Option<&'a str>,
+    args: Vec<String>,
+}
+
+/// The note on a command-log entry for a launch: the app can't see how the command ends, so
+/// the entry says where it went instead of an exit code.
+fn opened_in(terminal: TerminalId) -> String {
+    format!("opened in {}", terminal.display_name())
+}
+
 /// Opens `argv` in the user's terminal, as the settings say (read now, so a change applies to
-/// the next open).
+/// the next open), and adds the launch to the command log.
 async fn launch_in_terminal(
     app: &AppHandle,
     cli: &HerdrCli,
@@ -364,16 +391,26 @@ async fn launch_in_terminal(
     settings: &SharedSettings,
     argv: &[String],
     title: &str,
+    log: LaunchLog<'_>,
 ) -> Result<(), ActionError> {
     let home = app.path().home_dir().map_err(|e| invalid(e.to_string()))?;
     let settings = settings.get();
-    let spec =
-        launch_spec(&settings, &installed.get().await, home, argv, title).map_err(invalid)?;
+    let installed = installed.get().await;
+    let spec = launch_spec(&settings, &installed, home, argv, title).map_err(invalid)?;
+    let started = crate::herdr::cli::now_ms();
     terminal::launch(&spec, cli.env())
         .await
         .map_err(|message| ActionError::Herdr {
             error: HerdrError::Spawn { message },
-        })
+        })?;
+    cli.record(
+        log.machine,
+        log.args,
+        started,
+        None,
+        Some(opened_in(chosen_terminal(&settings, &installed))),
+    );
+    Ok(())
 }
 
 /// The full herdr UI for a machine, in the user's terminal.
@@ -389,7 +426,11 @@ async fn open_full(
     check_openable(machine).map_err(invalid)?;
     // Remote machines too: `herdr --remote` is the local client.
     let argv = full_ui_argv(machine, &local_bin(cli)?);
-    launch_in_terminal(app, cli, installed, settings, &argv, &machine.label).await
+    let log = LaunchLog {
+        machine: Some(machine_id),
+        args: argv[1..].to_vec(),
+    };
+    launch_in_terminal(app, cli, installed, settings, &argv, &machine.label, log).await
 }
 
 /// Opens one pane, attached, in the user's terminal; or, when Settings say "full herdr UI",
@@ -409,7 +450,11 @@ pub async fn open_session(
         return open_full(&app, &state, &cli, &installed, &settings, &machine_id).await;
     }
     let argv = attach_for_pane(&state, &cli, &machine_id, &pane_id)?;
-    launch_in_terminal(&app, &cli, &installed, &settings, &argv, &pane_id).await
+    let log = LaunchLog {
+        machine: Some(&machine_id),
+        args: attach_log_args(&state, &machine_id, &pane_id),
+    };
+    launch_in_terminal(&app, &cli, &installed, &settings, &argv, &pane_id, log).await
 }
 
 /// Opens the full herdr UI for a machine in the user's terminal.
@@ -446,7 +491,11 @@ pub async fn open_in_terminal(
 ) -> Result<(), ActionError> {
     let bin = cli.bin().to_string_lossy().into_owned();
     let full = allowed_herdr_argv(&bin, &argv).map_err(invalid)?;
-    launch_in_terminal(&app, &cli, &installed, &settings, &full, "herdr").await
+    let log = LaunchLog {
+        machine: None,
+        args: argv,
+    };
+    launch_in_terminal(&app, &cli, &installed, &settings, &full, "herdr", log).await
 }
 
 /// What follows the herdr binary in `machine add`, for the form's fields. The UI hands this to
@@ -489,7 +538,7 @@ pub fn start_machine_add(
         } else {
             None
         };
-        log_cli.record(logged.clone(), started_ms, Some(exit.code), error);
+        log_cli.record(None, logged.clone(), started_ms, Some(exit.code), error);
     });
     let emit: Emit = Arc::new(move |event| {
         if matches!(event, SetupEvent::Finished { ok: true }) {
@@ -926,6 +975,22 @@ mod tests {
             herdr_path: None,
             generated_at_ms: 0,
         }
+    }
+
+    #[test]
+    fn launches_are_logged_as_plain_herdr_arguments() {
+        let state = state();
+        let pane = state.machines[1].snapshot.as_ref().unwrap().panes[0].clone();
+        assert_eq!(
+            attach_log_args(&state, "buildbox", &pane.pane_id),
+            ["terminal", "attach", pane.terminal_id.as_str()]
+        );
+        assert_eq!(opened_in(TerminalId::Ghostty), "opened in Ghostty");
+        assert_eq!(opened_in(TerminalId::TerminalApp), "opened in Terminal");
+        assert_eq!(
+            chosen_terminal(&Settings::default(), &[TerminalId::Warp]),
+            TerminalId::Warp
+        );
     }
 
     #[test]

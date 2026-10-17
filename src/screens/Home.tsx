@@ -240,6 +240,17 @@ export function Home() {
   const hasAnyRows = rows.length > 0;
   const allMachines = state?.machines ?? [];
   const onlyLocal = allMachines.every((m) => m.is_local);
+  // Local never gets the reconnect card below, so a herdr that isn't answering would be
+  // invisible. Say so, with the one thing to do.
+  const localDown = allMachines.find(
+    (m) => m.is_local && m.health.kind !== "online" && m.snapshot === null,
+  );
+  const localError =
+    localDown &&
+    (localDown.health.kind === "attention" ||
+      localDown.health.kind === "reconnecting")
+      ? localDown.health.error.trim()
+      : "";
   const attentionMachines = allMachines.filter(
     (m) => !m.is_local && m.health.kind === "attention",
   );
@@ -296,6 +307,23 @@ export function Home() {
         />
 
         <main className="main">
+          {localDown && (
+            <EmptyState
+              title="Local isn’t answering"
+              action={{
+                label: "Retry now",
+                onClick: () =>
+                  invokeTyped("refresh_now", { machineId: "local" }).catch(
+                    report,
+                  ),
+              }}
+            >
+              <p>{localError || "herdr isn’t answering yet"}</p>
+              <p>
+                Start herdr with <code>herdr</code> in a terminal, then retry.
+              </p>
+            </EmptyState>
+          )}
           {/* Once per machine, rows or not: an unreachable box must never vanish from Home. */}
           {attentionMachines.map((m) => (
             <EmptyState key={m.id} title={`${m.label} needs attention`}>

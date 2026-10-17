@@ -46,6 +46,20 @@ pub enum TerminalId {
 }
 
 impl TerminalId {
+    /// The name shown to the user (and in the command log).
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Ghostty => "Ghostty",
+            Self::ITerm2 => "iTerm2",
+            Self::TerminalApp => "Terminal",
+            Self::Warp => "Warp",
+            Self::WezTerm => "WezTerm",
+            Self::Kitty => "kitty",
+            Self::Alacritty => "Alacritty",
+            Self::Custom => "your terminal",
+        }
+    }
+
     /// The macOS bundle id used to detect the app. `Custom` has none.
     pub fn bundle_id(self) -> Option<&'static str> {
         Some(match self {

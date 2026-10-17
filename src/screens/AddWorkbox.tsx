@@ -152,8 +152,11 @@ export function AddWorkbox() {
     target !== "" && !hostProblem && !sessionProblem && !labelProblem;
 
   const machines = useMemo(() => state?.machines ?? [], [state]);
+  // A profile is a duplicate only when the host and the session both match; an empty session
+  // field means `default`.
+  const wantedSession = sessionText || "default";
   const existing = target
-    ? machines.find((m) => m.target === target)
+    ? machines.find((m) => m.target === target && m.session === wantedSession)
     : undefined;
 
   useEffect(() => {

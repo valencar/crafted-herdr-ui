@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -63,7 +63,9 @@ impl CommandLog {
 pub struct HerdrCli {
     /// Shared by every clone, so a path chosen in Settings reaches all of them.
     bin: Arc<RwLock<PathBuf>>,
-    env: Vec<(String, String)>,
+    /// Set once: at construction, or by `set_env` when the login environment is captured
+    /// after startup. Until then calls run with an empty environment.
+    env: Arc<OnceLock<Vec<(String, String)>>>,
     log: Arc<Mutex<CommandLog>>,
     limits: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
 }
@@ -81,10 +83,28 @@ pub(crate) fn now_ms() -> u64 {
 }
 
 impl HerdrCli {
-    pub fn new(bin: PathBuf, env: Vec<(String, String)>) -> Self {
+    /// A runner whose environment is not known yet: `set_env` supplies it once the login shell
+    /// has been asked. Every clone sees it.
+    pub fn without_env(bin: PathBuf) -> Self {
         Self {
             bin: Arc::new(RwLock::new(bin)),
-            env,
+            env: Arc::default(),
+            log: Arc::default(),
+            limits: Arc::default(),
+        }
+    }
+
+    /// Sets the environment of a runner made with `without_env`. Only the first call counts.
+    pub fn set_env(&self, env: Vec<(String, String)>) {
+        let _ = self.env.set(env);
+    }
+
+    pub fn new(bin: PathBuf, env: Vec<(String, String)>) -> Self {
+        let cell = OnceLock::new();
+        let _ = cell.set(env);
+        Self {
+            bin: Arc::new(RwLock::new(bin)),
+            env: Arc::new(cell),
             log: Arc::default(),
             limits: Arc::default(),
         }
@@ -153,9 +173,12 @@ impl HerdrCli {
     }
 
     /// Adds a call that ran outside `run` (the pty-driven `machine add`) to the command log.
-    /// `argv` is what follows the herdr binary; `started_ms` is a Unix time in milliseconds.
+    /// `machine` is the profile id for a remote machine (`None` for Local or when no single
+    /// machine is meant), `argv` is what follows the herdr binary, and `started_ms` is a Unix
+    /// time in milliseconds.
     pub fn record(
         &self,
+        machine: Option<&str>,
         argv: Vec<String>,
         started_ms: u64,
         exit_code: Option<i32>,
@@ -163,7 +186,7 @@ impl HerdrCli {
     ) {
         lock(&self.log).push(CommandLogEntry {
             at_ms: started_ms,
-            machine: None,
+            machine: machine.filter(|m| *m != LOCAL).map(str::to_owned),
             argv,
             exit_code,
             duration_ms: now_ms().saturating_sub(started_ms),
@@ -184,7 +207,7 @@ impl HerdrCli {
 
     /// The environment every herdr spawn gets.
     pub fn env(&self) -> &[(String, String)] {
-        &self.env
+        self.env.get().map_or(&[], Vec::as_slice)
     }
 
     pub fn log_snapshot(&self) -> Vec<CommandLogEntry> {
@@ -211,7 +234,7 @@ impl HerdrCli {
         }
         cmd.args(args)
             .env_clear()
-            .envs(self.env.iter().map(|(k, v)| (k, v)))
+            .envs(self.env().iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -255,12 +278,21 @@ fn map_text_output(code: Option<i32>, stdout: &str, stderr: &str) -> Result<Stri
 }
 
 /// The error for a process that did not exit 0: usage (exit 2) or a server error.
+/// When stderr is empty the message says how the process ended instead of being blank.
 fn failure(code: Option<i32>, stderr: &str) -> HerdrError {
+    let stderr = if stderr.trim().is_empty() {
+        match code {
+            Some(n) => format!("herdr exited with status {n}"),
+            None => "herdr was terminated by a signal".to_owned(),
+        }
+    } else {
+        stderr.to_owned()
+    };
     match code {
         Some(2) => HerdrError::Usage {
             message: stderr.trim().to_owned(),
         },
-        _ => server_error(stderr),
+        _ => server_error(&stderr),
     }
 }
 
@@ -333,9 +365,54 @@ mod tests {
     }
 
     #[test]
+    fn a_runner_made_without_env_gets_it_once_for_every_clone() {
+        let cli = HerdrCli::without_env(PathBuf::from("herdr"));
+        let clone = cli.clone();
+        assert!(clone.env().is_empty());
+        cli.set_env(vec![("PATH".into(), "/bin".into())]);
+        cli.set_env(vec![("PATH".into(), "/other".into())]);
+        assert_eq!(clone.env(), [("PATH".to_owned(), "/bin".to_owned())]);
+    }
+
+    #[test]
+    fn empty_stderr_still_gives_a_readable_message() {
+        assert!(matches!(
+            map_output(Some(1), "", "  \n"),
+            Err(HerdrError::Server { message, .. }) if message == "herdr exited with status 1"
+        ));
+        assert!(matches!(
+            map_output(Some(2), "", ""),
+            Err(HerdrError::Usage { message }) if message == "herdr exited with status 2"
+        ));
+        assert!(matches!(
+            map_text_output(None, "", ""),
+            Err(HerdrError::Server { message, .. }) if message == "herdr was terminated by a signal"
+        ));
+    }
+
+    #[test]
     fn server_error_requires_both_fields() {
         let e = server_error(r#"{"error":{"code":"x"}}"#);
         assert!(matches!(e, HerdrError::Server { code, .. } if code == "unknown"));
+    }
+
+    #[test]
+    fn recorded_calls_carry_the_remote_machine_and_never_local() {
+        let cli = HerdrCli::new(PathBuf::from("herdr"), vec![]);
+        let at = now_ms();
+        cli.record(
+            Some("buildbox"),
+            vec!["terminal".into(), "attach".into(), "t1".into()],
+            at,
+            None,
+            Some("opened in Ghostty".into()),
+        );
+        cli.record(Some(LOCAL), vec!["--remote".into()], at, None, None);
+        let log = cli.log_snapshot();
+        assert_eq!(log[0].machine.as_deref(), Some("buildbox"));
+        assert_eq!(log[0].error.as_deref(), Some("opened in Ghostty"));
+        assert_eq!(log[0].exit_code, None);
+        assert_eq!(log[1].machine, None);
     }
 
     #[test]

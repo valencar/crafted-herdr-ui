@@ -798,6 +798,59 @@ describe("Home states", () => {
     );
   });
 
+  describe("a Local herdr that isn't answering", () => {
+    const down = (health: Health, snapshot: Snapshot | null = null) =>
+      appState(
+        machine("local", health, {
+          is_local: true,
+          label: "Local",
+          snapshot,
+          last_ok_ms: null,
+        }),
+      );
+
+    it("gets_a_card_with_the_error_the_hint_and_a_retry_button", async () => {
+      const user = setup(
+        down({
+          kind: "reconnecting",
+          retry_in_ms: 4000,
+          error: "could not start herdr: no such file",
+        }),
+      );
+      const card = screen.getByRole("region", {
+        name: "Local isn’t answering",
+      });
+      expect(card).toHaveTextContent("could not start herdr: no such file");
+      expect(card).toHaveTextContent(
+        "Start herdr with herdr in a terminal, then retry.",
+      );
+      await user.click(within(card).getByRole("button", { name: "Retry now" }));
+      expect(invoke).toHaveBeenCalledWith("refresh_now", {
+        machineId: "local",
+      });
+    });
+
+    it("says_it_isnt_answering_yet_when_there_is_no_error_text", () => {
+      setup(down({ kind: "attention", error: "  " }));
+      expect(
+        screen.getByRole("region", { name: "Local isn’t answering" }),
+      ).toHaveTextContent("herdr isn’t answering yet");
+    });
+
+    it("is_absent_when_local_is_online_or_still_has_a_snapshot", () => {
+      setup(down({ kind: "online" }));
+      expect(screen.queryByText("Local isn’t answering")).toBeNull();
+      cleanup();
+      setup(
+        down(
+          { kind: "reconnecting", retry_in_ms: 1000, error: "boom" },
+          structuredClone(fixture),
+        ),
+      );
+      expect(screen.queryByText("Local isn’t answering")).toBeNull();
+    });
+  });
+
   describe("an attention machine", () => {
     const attention = () =>
       appState(

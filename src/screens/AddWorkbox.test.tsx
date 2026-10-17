@@ -301,6 +301,51 @@ describe("AddWorkbox", () => {
     ).toBeEnabled();
   });
 
+  it("allows the same host in a different session, and blocks the same session", async () => {
+    useAppStore.setState({
+      state: appState(LOCAL, machine("buildbox", "Build box", "buildbox")),
+    });
+    const user = setup();
+    await open();
+    const go = () =>
+      screen.getByRole("button", { name: "Continue in Ghostty" });
+    await user.type(screen.getByLabelText("SSH host"), "buildbox");
+    // The empty session field means `default`, which is the profile that exists.
+    expect(screen.getByText("Already added as Build box")).toBeVisible();
+    expect(go()).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Remote session"), "work");
+    expect(screen.queryByText(/Already added/)).toBeNull();
+    expect(go()).toBeEnabled();
+
+    await user.clear(screen.getByLabelText("Remote session"));
+    await user.type(screen.getByLabelText("Remote session"), "default");
+    expect(screen.getByText("Already added as Build box")).toBeVisible();
+    expect(go()).toBeDisabled();
+  });
+
+  it("blocks a host whose profile is in the session being asked for", async () => {
+    const work = {
+      ...machine("buildbox-work", "Build box (work)", "buildbox"),
+      session: "work",
+    };
+    useAppStore.setState({
+      state: appState(
+        LOCAL,
+        machine("buildbox", "Build box", "buildbox"),
+        work,
+      ),
+    });
+    const user = setup();
+    await open();
+    await user.type(screen.getByLabelText("SSH host"), "buildbox");
+    await user.type(screen.getByLabelText("Remote session"), "work");
+    expect(screen.getByText("Already added as Build box (work)")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Continue in Ghostty" }),
+    ).toBeDisabled();
+  });
+
   it.each([
     ["-oProxyCommand=x", "SSH host"],
     ["two words", "SSH host"],
