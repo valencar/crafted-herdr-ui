@@ -435,6 +435,45 @@ describe("Inspector live preview", () => {
     await waitFor(() =>
       expect(useAppStore.getState().toast).toBe("event system unavailable"),
     );
+    // No listener means nobody could show a frame, so the preview is not started.
+    expect(invoke).not.toHaveBeenCalledWith("start_preview", expect.anything());
+  });
+
+  it("starts_the_preview_only_once_its_listener_is_live", async () => {
+    let registered!: (un: () => void) => void;
+    listen.mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          registered = resolve;
+        }),
+    );
+    setup();
+    await waitFor(() => expect(listen).toHaveBeenCalled());
+    // The listener is still registering: a frame emitted now would have nobody to hear it.
+    expect(invoke).not.toHaveBeenCalledWith("start_preview", expect.anything());
+    await act(async () => registered(unlisten as unknown as () => void));
+    await waitFor(() =>
+      expect(
+        invoke.mock.calls.filter(([name]) => name === "start_preview"),
+      ).toHaveLength(1),
+    );
+  });
+
+  it("never_starts_the_preview_when_unmounted_before_its_listener_is_live", async () => {
+    let registered!: (un: () => void) => void;
+    listen.mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          registered = resolve;
+        }),
+    );
+    const { unmount } = setup();
+    await waitFor(() => expect(listen).toHaveBeenCalled());
+    unmount();
+    await act(async () => registered(unlisten as unknown as () => void));
+    // The late listener is released at once, and the preview never started.
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(invoke).not.toHaveBeenCalledWith("start_preview", expect.anything());
   });
 
   it("previews_a_shell_as_a_pane", async () => {
