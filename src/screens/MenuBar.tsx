@@ -61,6 +61,7 @@ export function MenuBar() {
   const toastTone = useAppStore((s) => s.toastTone);
   const dismissToast = useAppStore((s) => s.clearToast);
   const report = useAppStore((s) => s.reportError);
+  const shortcutOn = useAppStore((s) => s.settings?.global_shortcut_enabled);
   const nowMs = useNow(30_000);
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
@@ -174,7 +175,7 @@ export function MenuBar() {
 
       <div className="pop-foot">
         <button type="button" className="btn" onClick={() => void showApp()}>
-          Open app <kbd>⌥⌘H</kbd>
+          Open app {shortcutOn && <kbd>⌃⌥⌘H</kbd>}
         </button>
         <button type="button" className="btn" onClick={() => void newSession()}>
           New session

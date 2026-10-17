@@ -330,12 +330,15 @@ pub fn start_badge<R: Runtime>(tray: TrayIcon<R>, state: watch::Receiver<AppStat
 
 // ---------- the global shortcut ----------
 
-/// ⌥⌘H.
+/// ⌃⌥⌘H.
 pub fn global_shortcut() -> Shortcut {
-    Shortcut::new(Some(Modifiers::ALT | Modifiers::SUPER), Code::KeyH)
+    Shortcut::new(
+        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
+        Code::KeyH,
+    )
 }
 
-/// Registers or releases ⌥⌘H. Registering twice, or releasing what was never registered, is
+/// Registers or releases ⌃⌥⌘H. Registering twice, or releasing what was never registered, is
 /// fine.
 pub fn set_global_shortcut<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> Result<(), String> {
     let shortcuts = app.global_shortcut();
@@ -343,10 +346,10 @@ pub fn set_global_shortcut<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> Res
     match (enabled, shortcuts.is_registered(shortcut)) {
         (true, false) => shortcuts
             .register(shortcut)
-            .map_err(|e| format!("Could not register ⌥⌘H: {e}")),
+            .map_err(|e| format!("Could not register ⌃⌥⌘H: {e}")),
         (false, true) => shortcuts
             .unregister(shortcut)
-            .map_err(|e| format!("Could not release ⌥⌘H: {e}")),
+            .map_err(|e| format!("Could not release ⌃⌥⌘H: {e}")),
         _ => Ok(()),
     }
 }

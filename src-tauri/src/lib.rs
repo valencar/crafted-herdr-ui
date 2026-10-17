@@ -24,7 +24,7 @@ use commands::{AgentKindsCache, PREVIEW_EVENT, PreviewManager};
 use herdr::cli::HerdrCli;
 use machine_setup::{MachineSetup, PortablePty};
 use poller::{Poller, PollerConfig};
-use settings::{HerdrLocator, SharedSettings};
+use settings::{HerdrLocator, SharedSettings, ShortcutState, ShortcutStatus};
 use state::{AppState, PollIntervals};
 use terminal::InstalledCache;
 use tray::{MAIN_WINDOW, POPOVER_WINDOW, PopoverGuard};
@@ -116,11 +116,14 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let tray_icon = tray::create_tray(&handle)?;
     tray::start_badge(tray_icon, state_rx.clone());
     notify::start(&handle, &poller, state_rx, shared);
-    if settings.global_shortcut_enabled
-        && let Err(message) = tray::set_global_shortcut(&handle, true)
-    {
-        eprintln!("{message}");
+    let shortcut = ShortcutState::default();
+    if settings.global_shortcut_enabled {
+        shortcut.record(ShortcutStatus::after(
+            true,
+            tray::set_global_shortcut(&handle, true),
+        ));
     }
+    app.manage(shortcut);
 
     if herdr.path.is_some() && poller.claim_start() {
         tauri::async_runtime::spawn(async move { poller.run().await });
@@ -217,6 +220,7 @@ pub fn run() {
             commands::get_settings,
             commands::set_settings,
             commands::herdr_status,
+            commands::shortcut_status,
             commands::preview_launch_template,
             commands::show_main,
             commands::show_main_new_session,

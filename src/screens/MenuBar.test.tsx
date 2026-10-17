@@ -1,9 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
+import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
 
@@ -15,6 +16,20 @@ import { invokeTyped } from "../lib/ipc";
 import { MenuBar } from "./MenuBar";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
+const SETTINGS: Settings = {
+  herdr_path: null,
+  terminal: null,
+  terminal_custom_template: "",
+  open_mode: "window",
+  attach_mode: "pane",
+  notify_blocked: true,
+  notify_done: true,
+  poll_interval_visible_ms: 2000,
+  poll_interval_hidden_ms: 10_000,
+  group_by: "project",
+  global_shortcut_enabled: true,
+  open_after_create: true,
+};
 const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();
 
@@ -115,6 +130,25 @@ describe("MenuBar", () => {
     expect(invoke).toHaveBeenCalledWith("show_main");
     await user.click(screen.getByRole("button", { name: "New session" }));
     expect(invoke).toHaveBeenCalledWith("show_main_new_session");
+  });
+
+  it("shows_the_shortcut_hint_only_while_the_global_shortcut_is_on", () => {
+    useAppStore.setState({ settings: null });
+    setup(appState(machine("buildbox")));
+    expect(screen.queryByText("⌃⌥⌘H")).toBeNull();
+    cleanup();
+    useAppStore.setState({
+      settings: { ...SETTINGS, global_shortcut_enabled: true },
+    });
+    setup(appState(machine("buildbox")));
+    expect(screen.getByText("⌃⌥⌘H")).toBeInTheDocument();
+    cleanup();
+    useAppStore.setState({
+      settings: { ...SETTINGS, global_shortcut_enabled: false },
+    });
+    setup(appState(machine("buildbox")));
+    expect(screen.queryByText("⌃⌥⌘H")).toBeNull();
+    useAppStore.setState({ settings: null });
   });
 
   it("says_so_when_nothing_needs_you_or_nothing_is_known_yet", () => {

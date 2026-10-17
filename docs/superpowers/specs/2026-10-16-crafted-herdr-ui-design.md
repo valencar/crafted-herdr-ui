@@ -201,7 +201,7 @@ Unknown output that waits for input for more than 5 s triggers "Continue in term
 - Main window 1280×820 default, min 900×600, `titleBarStyle: Overlay` with traffic lights inset, so the custom header from the design sits in the title bar.
 - Closing the main window keeps the app running in the menu bar. Quit is ⌘Q or the tray menu.
 - Notifications use `tauri-plugin-notification`.
-- Shortcuts: ⌘K search/jump, ⌘N new session, ⌘↩ open the selected session, ⌘, settings, ⌘R refresh, ↑/↓ move selection, ⌫ close the selected session (with confirm). Global ⌥⌘H show/hide (tauri-plugin-global-shortcut, can be turned off).
+- Shortcuts: ⌘K search/jump, ⌘N new session, ⌘↩ open the selected session, ⌘, settings, ⌘R refresh, ↑/↓ move selection, ⌫ close the selected session (with confirm). Global ⌃⌥⌘H show/hide (tauri-plugin-global-shortcut, can be turned off).
 
 ### 8.8 Settings (tauri-plugin-store, `settings.json` in app data)
 
@@ -216,7 +216,7 @@ Design tokens: background `#0B0C0E`; sidebar and header `#101114`; panel `#0F101
 3. **New session** sheet: workbox radio cards; project folder (text plus Browse… for Local only, plus recent folders for that machine taken from the snapshot); "Work in a new git worktree" with a branch field; Run: agent kinds plus plain shell; Name; Place it (new tab in workspace X / split beside selected / new workspace); a command preview of the exact herdr calls; "Open in <Terminal> when ready"; Create (⌘↩).
 4. **Add workbox** sheet: SSH host field with chips from `~/.ssh/config` `Host` entries (no wildcards); Label; Remote session; setup checklist; consent card for install/replace; collapsible herdr output; footer note "Keys stay with OpenSSH".
 5. **Settings** window: General, Terminal, Workboxes, Notifications, herdr CLI, Shortcuts. The Terminal pane has terminal radio cards (installed or not), open mode, attach mode, launch template with a resolved example, and herdr binary status.
-6. **Menu bar popover:** Needs you list with Open, Working list, Idle summary, per-workbox online dots, "Open app ⌥⌘H" and "New session".
+6. **Menu bar popover:** Needs you list with Open, Working list, Idle summary, per-workbox online dots, "Open app ⌃⌥⌘H" and "New session".
 
 Empty and error states (not on the canvas; build them in the same style): herdr not found (onboarding); no machines besides Local; a machine in Attention (row turns dim, shows the error and the suggested CLI command); no agents anywhere ("Start one with ⌘N"); stale data when a machine is reconnecting (dim, with "last updated 40s ago").
 

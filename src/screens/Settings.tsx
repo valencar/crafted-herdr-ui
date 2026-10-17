@@ -5,6 +5,7 @@ import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
 import type { OpenMode } from "../lib/bindings/OpenMode";
 import type { AttachMode } from "../lib/bindings/AttachMode";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
+import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
 import type { TerminalId } from "../lib/bindings/TerminalId";
 import type { TerminalList } from "../lib/bindings/TerminalList";
 import { TERMINAL_LABEL, actionErrorMessage } from "../lib/format";
@@ -555,6 +556,14 @@ function Shortcuts({
   settings: SettingsData;
   update: Update;
 }) {
+  const [status, setStatus] = useState<ShortcutStatus | null>(null);
+  const refresh = useCallback(() => {
+    invokeTyped("shortcut_status")
+      .then(setStatus)
+      .catch(() => {});
+  }, []);
+  useEffect(refresh, [refresh]);
+
   return (
     <div className="settings-stack">
       <ul className="settings-list">
@@ -567,12 +576,17 @@ function Shortcuts({
       </ul>
       <Check
         label="Show or hide Crafted Herdr from anywhere"
-        hint="⌥⌘H, even when another app is in front."
+        hint="⌃⌥⌘H, even when another app is in front."
         checked={settings.global_shortcut_enabled}
         onChange={(global_shortcut_enabled) =>
-          void update({ global_shortcut_enabled })
+          void update({ global_shortcut_enabled }).then(refresh)
         }
       />
+      {settings.global_shortcut_enabled && status?.error && (
+        <p className="settings-warn" role="status">
+          Couldn’t register ⌃⌥⌘H (another app may be using it)
+        </p>
+      )}
     </div>
   );
 }

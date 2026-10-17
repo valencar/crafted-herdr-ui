@@ -10,6 +10,7 @@ import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
 import type { SetupEvent } from "./bindings/SetupEvent";
 import type { Settings } from "./bindings/Settings";
+import type { ShortcutStatus } from "./bindings/ShortcutStatus";
 import type { TerminalList } from "./bindings/TerminalList";
 
 /** Every Tauri command the UI may call, mapped to its result. A Rust `()` arrives as `null`. */
@@ -51,6 +52,7 @@ export type CommandResults = {
   get_settings: Settings;
   set_settings: Settings;
   herdr_status: HerdrStatus;
+  shortcut_status: ShortcutStatus;
   preview_launch_template: string;
   show_main: null;
   show_main_new_session: null;
@@ -115,6 +117,7 @@ export type CommandArgs = {
   /** Merged over the current settings; refused as a whole if any value is invalid. */
   set_settings: { patch: Partial<Settings> };
   herdr_status: undefined;
+  shortcut_status: undefined;
   /** The script a Custom launch command runs for a sample pane. */
   preview_launch_template: { template: string };
   show_main: undefined;

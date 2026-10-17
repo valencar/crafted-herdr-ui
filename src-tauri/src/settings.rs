@@ -149,19 +149,33 @@ impl Settings {
 
 /// The settings every part of the app reads. Cheap to clone; all clones share one value.
 #[derive(Clone, Default)]
-pub struct SharedSettings(Arc<RwLock<Settings>>);
+pub struct SharedSettings {
+    value: Arc<RwLock<Settings>>,
+    /// Held for a whole change (merge, save, apply), so two changes never interleave.
+    updates: Arc<tokio::sync::Mutex<()>>,
+}
 
 impl SharedSettings {
     pub fn new(settings: Settings) -> Self {
-        Self(Arc::new(RwLock::new(settings)))
+        Self {
+            value: Arc::new(RwLock::new(settings)),
+            updates: Arc::default(),
+        }
+    }
+
+    /// Waits for any change in progress, and keeps the next one waiting until the guard drops.
+    /// Without it, two quick herdr path changes could finish out of order and leave the runner
+    /// pointed at the older one.
+    pub async fn begin_update(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.updates.clone().lock_owned().await
     }
 
     fn read(&self) -> RwLockReadGuard<'_, Settings> {
-        self.0.read().unwrap_or_else(|p| p.into_inner())
+        self.value.read().unwrap_or_else(|p| p.into_inner())
     }
 
     fn write(&self) -> RwLockWriteGuard<'_, Settings> {
-        self.0.write().unwrap_or_else(|p| p.into_inner())
+        self.value.write().unwrap_or_else(|p| p.into_inner())
     }
 
     pub fn get(&self) -> Settings {
@@ -195,6 +209,45 @@ pub fn save<R: Runtime>(app: &AppHandle<R>, settings: &Settings) -> Result<(), S
     store
         .save()
         .map_err(|e| format!("Could not save {SETTINGS_FILE}: {e}"))
+}
+
+/// Whether the global shortcut is registered, for Settings › Shortcuts.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct ShortcutStatus {
+    pub registered: bool,
+    /// Why registering failed (another app owns the key); `None` when it is fine or off.
+    pub error: Option<String>,
+}
+
+impl ShortcutStatus {
+    /// The status after trying to switch the shortcut on or off.
+    pub fn after(enabled: bool, result: Result<(), String>) -> Self {
+        match result {
+            Ok(()) => Self {
+                registered: enabled,
+                error: None,
+            },
+            Err(error) => Self {
+                registered: false,
+                error: enabled.then_some(error),
+            },
+        }
+    }
+}
+
+/// The last `ShortcutStatus`, kept in Tauri state.
+#[derive(Default)]
+pub struct ShortcutState(Mutex<ShortcutStatus>);
+
+impl ShortcutState {
+    pub fn record(&self, status: ShortcutStatus) {
+        *self.0.lock().unwrap_or_else(|p| p.into_inner()) = status;
+    }
+
+    pub fn get(&self) -> ShortcutStatus {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
 }
 
 /// Where herdr was found, for Settings › herdr CLI.
@@ -523,5 +576,59 @@ mod tests {
         assert_eq!(stale.path, Some(on_path.display().to_string()));
         assert!(stale.saved_missing);
         assert_eq!(cli.bin(), on_path);
+    }
+
+    #[test]
+    fn a_failed_registration_is_reported_only_while_the_shortcut_is_on() {
+        let busy = || Err("Could not register ⌃⌥⌘H: already registered".to_owned());
+        assert_eq!(
+            ShortcutStatus::after(true, Ok(())),
+            ShortcutStatus {
+                registered: true,
+                error: None
+            }
+        );
+        let failed = ShortcutStatus::after(true, busy());
+        assert!(!failed.registered);
+        assert!(failed.error.unwrap().contains("already registered"));
+        // Turning it off is never an error to show, even if releasing failed.
+        assert_eq!(
+            ShortcutStatus::after(false, busy()),
+            ShortcutStatus::default()
+        );
+        assert_eq!(
+            ShortcutStatus::after(false, Ok(())),
+            ShortcutStatus::default()
+        );
+
+        let state = ShortcutState::default();
+        state.record(ShortcutStatus::after(true, busy()));
+        assert!(state.get().error.is_some());
+    }
+
+    #[tokio::test]
+    async fn updates_run_one_at_a_time_in_the_order_they_started() {
+        let shared = SharedSettings::default();
+        let log: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+        let first = {
+            let (shared, log) = (shared.clone(), log.clone());
+            let guard = shared.begin_update().await;
+            tokio::spawn(async move {
+                // A slow change (herdr re-resolution), holding the lock the whole time.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                log.lock().unwrap().push("first done");
+                drop(guard);
+            })
+        };
+        let second = {
+            let (shared, log) = (shared.clone(), log.clone());
+            tokio::spawn(async move {
+                let _guard = shared.begin_update().await;
+                log.lock().unwrap().push("second done");
+            })
+        };
+        first.await.unwrap();
+        second.await.unwrap();
+        assert_eq!(*log.lock().unwrap(), ["first done", "second done"]);
     }
 }

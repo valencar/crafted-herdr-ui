@@ -5,6 +5,7 @@ import type { AppState } from "../lib/bindings/AppState";
 import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
+import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
 import { useAppStore } from "../store/appStore";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -67,6 +68,7 @@ const STATE: AppState = {
 };
 
 let herdr: HerdrStatus;
+let shortcut: ShortcutStatus;
 
 function setup(settings: Partial<SettingsData> = {}, section?: string) {
   useAppStore.setState({
@@ -85,6 +87,7 @@ function setup(settings: Partial<SettingsData> = {}, section?: string) {
 
 beforeEach(() => {
   herdr = HERDR;
+  shortcut = { registered: true, error: null };
   chooseFile.mockReset();
   invoke
     .mockReset()
@@ -94,6 +97,8 @@ beforeEach(() => {
           return { installed: ["ghostty", "terminalApp"], default: "ghostty" };
         case "herdr_status":
           return herdr;
+        case "shortcut_status":
+          return shortcut;
         case "preview_launch_template":
           return `${(args as { template: string }).template.replace("{attach}", "ssh -t buildbox 'sh -c …'")}`;
         case "set_settings":
@@ -266,6 +271,34 @@ describe("Settings", () => {
     expect(invoke).toHaveBeenCalledWith("set_settings", {
       patch: { global_shortcut_enabled: false },
     });
+  });
+
+  it("says when the global shortcut could not be registered", async () => {
+    shortcut = { registered: false, error: "Could not register: in use" };
+    const user = await setup({}, "Shortcuts");
+    expect(
+      await screen.findByText(
+        "Couldn’t register ⌃⌥⌘H (another app may be using it)",
+      ),
+    ).toBeInTheDocument();
+
+    // Switching it off hides the message, and the status is asked for again.
+    shortcut = { registered: false, error: null };
+    await user.click(
+      screen.getByRole("checkbox", { name: /Show or hide Crafted Herdr/ }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(/Couldn’t register/)).toBeNull(),
+    );
+    expect(
+      invoke.mock.calls.filter((c: unknown[]) => c[0] === "shortcut_status"),
+    ).toHaveLength(2);
+  });
+
+  it("shows no warning while the shortcut is registered", async () => {
+    await setup({}, "Shortcuts");
+    await screen.findByText("Search and jump");
+    expect(screen.queryByText(/Couldn’t register/)).toBeNull();
   });
 
   it("general: new-session default, grouping, and refresh intervals in seconds", async () => {

@@ -19,7 +19,8 @@ use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::poller::Poller;
 use crate::settings::{
-    self, AttachMode, HerdrLocator, HerdrStatus, Settings, SharedSettings, changes,
+    self, AttachMode, HerdrLocator, HerdrStatus, Settings, SharedSettings, ShortcutState,
+    ShortcutStatus, changes,
 };
 use crate::ssh_config;
 use crate::state::{AppState, MachineView, PollIntervals};
@@ -582,10 +583,13 @@ pub async fn set_settings(
     app: AppHandle,
     shared: State<'_, SharedSettings>,
     locator: State<'_, HerdrLocator>,
+    shortcut: State<'_, ShortcutState>,
     cli: State<'_, HerdrCli>,
     poller: State<'_, Poller>,
     patch: serde_json::Value,
 ) -> Result<Settings, ActionError> {
+    // One change at a time, from reading the old values to applying the new ones.
+    let _update = shared.begin_update().await;
     let old = shared.get();
     let new = old.merged(&patch).map_err(invalid)?;
     if new == old {
@@ -610,11 +614,13 @@ pub async fn set_settings(
         }
         poller.refresh_now(None);
     }
-    if todo.shortcut
-        && let Err(message) = tray::set_global_shortcut(&app, new.global_shortcut_enabled)
-    {
-        // The setting is saved; the shortcut just is not available (another app owns it).
-        eprintln!("{message}");
+    if todo.shortcut {
+        // The setting is saved either way; if another app owns the key, Settings says so.
+        let enabled = new.global_shortcut_enabled;
+        shortcut.record(ShortcutStatus::after(
+            enabled,
+            tray::set_global_shortcut(&app, enabled),
+        ));
     }
     let _ = app.emit(SETTINGS_EVENT, &new);
     Ok(new)
@@ -624,6 +630,12 @@ pub async fn set_settings(
 #[tauri::command]
 pub fn herdr_status(locator: State<'_, HerdrLocator>) -> HerdrStatus {
     locator.status()
+}
+
+/// Whether the global shortcut is registered, and why not if it failed.
+#[tauri::command]
+pub fn shortcut_status(shortcut: State<'_, ShortcutState>) -> ShortcutStatus {
+    shortcut.get()
 }
 
 /// What a Custom launch command would run for a sample pane, for the Settings preview.
