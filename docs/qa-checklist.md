@@ -7,6 +7,8 @@ GUI-only checks that implementers skip; run them in a final pass with the mainta
 Run these first, in order, on the built app (`pnpm tauri build`, then the `.app` or `.dmg`). They cover the highest-risk behavior. Use the test workbox (`$HERDR_UI_TEST_MACHINE`) and only the `herdr-ui-qa` workspace or session on it. The per-task sections below hold the rest.
 
 - [ ] Launch the built `Crafted Herdr.app` from Finder (not from a terminal): herdr is found through the login shell, Local shows Online, and every remote workbox shows Online (SSH agent auth works from a GUI-launched app). This verifies the login-shell PATH and environment capture.
+- [ ] Login shell that sets PATH/SSH_AUTH_SOCK only in ~/.zshrc, app launched from Finder: herdr is still found and remote workboxes still connect. The window shows "Connecting to herdr…" (never the "herdr wasn't found" screen) until startup finishes, and `herdr status` appears once in the Activity drawer.
+- [ ] Ghostty `-e` argv is not re-joined into a shell string: an argument with spaces or quotes arrives as one argument and the attach command runs unchanged. (Run this first: it decides whether the Ghostty launcher is right.)
 - [ ] Open a session in each installed terminal (Ghostty, iTerm2, Terminal, Warp, WezTerm, Kitty, Alacritty, and a Custom template): each opens a window running the attach command and lands in the pane. iTerm2 and Terminal ask for Automation permission on first use.
 - [ ] Remote attach plus takeover: open a pane on a remote workbox, then open it again while another client is attached. The shell asks "Another client owns this session. Take over? [y/N]"; `n` leaves it alone and `y` takes over. A normal detach (`ctrl+b q`) shows no prompt.
 - [ ] A done agent marks seen when you open it: Open on a done row, and on the next poll the agent shows idle (see the Task 7 `agent focus` check).
@@ -18,7 +20,6 @@ Carried from the reviews (coordinator notes):
 
 - [ ] `env -0` works for the login-shell capture on macOS 13 (the environment is read correctly when launched from Finder there). If `env -0` is not supported, the fallback still yields `PATH` and `SSH_AUTH_SOCK`.
 - [ ] iTerm2 parses quoted commands that contain `'\''` (a command with a single quote in an argument, such as a reply or a name, runs as typed).
-- [ ] Ghostty `-e` argv is not re-joined into a shell string: an argument with spaces or quotes arrives as one argument and the attach command runs unchanged.
 - [ ] A session name or id with odd characters (spaces, quotes, `;`, `$`, newlines) is refused with a clear message instead of being opened.
 - [ ] Mutating herdr commands (rename, close, focus) return JSON on success; when one does not (plain text, or a timeout), the app shows "may have been applied" and refreshes rather than reporting a plain failure, and never retries on its own.
 - [ ] The release build renders fonts and styles under the restrictive CSP with no violations in the devtools console, and the app icon (a light `>_` on a graphite rounded square) shows in the Dock, the DMG and the app switcher.
@@ -145,7 +146,7 @@ None of these were run by the implementer (they need a real GUI session and a ma
 - [ ] Launch with no herdr anywhere (rename the binary and clear the saved path): the main window shows "herdr wasn't found" with the install URL as text, "Open herdr.dev ↗" and "Choose binary…". "Open herdr.dev ↗" opens https://herdr.dev in the default browser (the capability allows that one URL; nothing else opens). "Choose binary…" with a real herdr switches to Home at once, without a restart. Choosing a file that is not herdr shows the refusal inline and stays on the screen.
 - [ ] ⌘⇧A and the sidebar footer's "Activity ⌘⇧A" open and close the Activity drawer on Home and on a Workbox screen. While open it adds new commands within about 2 s. Poll and preview reads are hidden until "Show reads" is on; a failed read still shows. "Copy" on a row pastes a command that runs in a terminal. Escape closes it and focus goes back to where it was.
 - [ ] With a herdr older than 0.9.0 (or one whose `--version` can't be read), Home shows the banner "herdr <version> is older than this app supports (0.9.0+). Some actions may fail." and "Dismiss" hides it until the version changes.
-- [ ] Stop reaching a workbox (disconnect the network or use a profile with a wrong target): its rows dim and show the error and "last updated Ns ago". Once the machine is in Attention, one "<label> needs attention" card sits at the top of Home (even when the machine has no rows) with the error and `herdr machine reconnect <label>` with a working Copy; no row repeats the command. The Workbox screen shows the same line under the error.
+- [ ] Stop reaching a workbox (disconnect the network or use a profile with a wrong target): its rows dim and show the error and "last updated Ns ago". Once the machine is in Attention, one "<label> needs attention" card sits at the top of Home (even when the machine has no rows) with the error and `herdr machine reconnect <id>` (the profile id) with a working Copy; no row repeats the command. The Workbox screen shows the same line under the error.
 - [ ] Disable a workbox that has a cached snapshot: it is dimmed in the sidebar and labelled "Disabled", and its Workbox screen shows 0 for all four counts.
 - [ ] With only Local, Home shows the "Only this computer so far" card; its "Add workbox" opens the sheet. With no agents anywhere, "No agents yet / Start one with ⌘N." shows.
 - [ ] Keyboard: Tab to a row in a project card; the focus ring is fully visible (not clipped by the card's rounded corner). VoiceOver reads a pane box on the Workbox screen as "Open <name>", then its status and last line; a kind badge reads as the full kind name.
@@ -154,3 +155,15 @@ None of these were run by the implementer (they need a real GUI session and a ma
 
 - [ ] From a pushed `v*` tag, the Release workflow finishes and leaves a draft GitHub Release with a universal `.dmg`. On an Apple Silicon Mac, download it, drag the app to Applications, and confirm the first-launch steps in the README (right-click › Open, or `xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"`) are enough to start it (the build is ad-hoc signed, not notarized).
 - [ ] `pnpm tauri build` (full bundle with the DMG step, in a GUI session) opens the DMG window with the new icon, and `Crafted Herdr.app` inside shows it too.
+
+## Final review fixes
+
+None of these were run by the implementer (they need a GUI session or a real herdr).
+
+- [ ] Open a pane, open the full herdr UI, and run Reconnect and "Continue in <Terminal>" on a test workbox: each appears in the Activity drawer as "opened in <Terminal>" with the machine id, and no exit code.
+- [ ] With herdr not running locally (or the binary renamed), Home shows "Local isn't answering" with herdr's error, the hint to start herdr, and "Retry now". Start herdr and press Retry now: the card goes away and Local's rows show.
+- [ ] Attach to a pane on a remote workbox whose non-interactive ssh PATH lacks herdr: the terminal prints "herdr not found on <target> (check PATH for non-interactive ssh)" and offers no takeover prompt.
+- [ ] Settings › Terminal › Rescan: install or remove a terminal (or move its .app between /Applications and ~/Applications) and press Rescan: the radio list updates. A terminal Spotlight doesn't know (indexing off) is still found in /Applications.
+- [ ] Settings › herdr CLI › "Attach as: Full herdr UI": the inspector's "what Open runs" box shows the full-UI command (`herdr --remote <target>`), and switching back shows the attach command without reselecting.
+- [ ] Add workbox for a host that already has a profile, with a different remote session: the button is enabled. With the same session (or none, when the profile is `default`) it says "Already added as <label>".
+- [ ] Unplug the network for one poll interval (a blip of 1-2 failed polls) while an agent becomes blocked: a notification fires after the machine recovers. After a longer outage (3 or more failed polls), nothing fires for what changed meanwhile.

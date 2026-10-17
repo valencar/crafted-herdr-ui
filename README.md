@@ -19,7 +19,7 @@ Screenshots coming soon.
 - **New session.** Start a shell or an agent in a new tab, a split, a new workspace or a worktree, with the exact commands shown before you run them.
 - **Workbox management.** Check, reconnect, rename, enable, disable and remove workboxes. Add one through a guided sheet around `herdr machine add`.
 - **Menu bar and notifications.** A tray icon with a count, a compact "Needs you" popover, and a notification when an agent becomes blocked or done.
-- **Activity drawer.** Every `herdr` call the app makes is listed, with a Copy button.
+- **Activity drawer.** The `herdr` commands the app runs are listed, with a Copy button. That includes commands it hands to your terminal. Quiet probes (`herdr --version` and `agent start --help`) are not logged.
 
 ## Requirements
 
@@ -30,7 +30,10 @@ Screenshots coming soon.
 ## Install
 
 1. Download the latest `.dmg` from the [Releases](../../releases) page and drag **Crafted Herdr** to Applications.
-2. Builds are not notarized yet. The first time, right-click the app and choose **Open**, then confirm. Or clear the quarantine flag once:
+2. Builds are not notarized yet, so macOS blocks the first launch.
+   - On macOS 15 and later: try to open the app once, then go to System Settings › Privacy & Security, scroll to the message about Crafted Herdr and choose **Open Anyway**.
+   - On older versions: right-click the app and choose **Open**, then confirm.
+   - On any version, you can instead clear the quarantine flag once:
 
    ```bash
    xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"
@@ -62,7 +65,7 @@ Crafted Herdr talks to herdr only through its public CLI. It has no private prot
 | Manage workboxes | `machine rename`, `machine enable`, `machine disable`, `machine remove`, `machine reconnect` |
 | Add a workbox | `machine add <target> [--label …] [--remote-session …]` |
 
-Every call is visible in the **Activity drawer** (⌘⇧A). The app never installs herdr, stops or replaces a server, answers a blocked agent, or passes `--takeover` or `--trust-repository` without an explicit click from you.
+The commands are visible in the **Activity drawer** (⌘⇧A): the calls the app runs itself, and the ones it opens in your terminal (marked "opened in …", since the app can't see how they end). The version and help probes (`herdr --version`, `herdr agent start --help`) are not logged. The app never installs herdr, stops or replaces a server, answers a blocked agent, or passes `--takeover` or `--trust-repository` without an explicit click from you.
 
 ## Terminal support
 
@@ -94,6 +97,7 @@ iTerm2 and Terminal are driven with AppleScript, so macOS asks for **Automation*
 
 ## Privacy
 
+- Warp is opened through a launch configuration the app writes to `~/.warp/launch_configurations/crafted-herdr-*.yaml`. These files stay on disk and contain the attach command (the terminal id and, for a remote workbox, the SSH target). Delete them if you don't want them kept.
 - The app makes no network calls of its own. Everything goes through your `herdr` CLI, and SSH is done by herdr and OpenSSH.
 - Your SSH keys and agent stay with OpenSSH. The app stores no passwords, keys or tokens, and only reads `Host` aliases from `~/.ssh/config` to suggest targets.
 - No telemetry, no analytics, no accounts.

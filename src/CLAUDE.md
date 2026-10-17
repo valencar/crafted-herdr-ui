@@ -27,7 +27,7 @@ The UI renders `AppState` pushed from Rust (`"state"` event) and calls typed Tau
   - `aria-label` on icon-only buttons;
   - destructive actions always go through `ConfirmDialog`.
 - **Copy:** monospace for ids, paths, commands and terminal output; sans for everything else.
-- **CLI transparency:** show the exact command for an action where the design does (command box, new-session preview). The text comes from Rust (`previewNewSession`, `copyAttachCommand`), never rebuilt in TS.
+- **CLI transparency:** show the exact command for an action where the design does (command box, new-session preview). The text comes from Rust (`previewNewSession`, `copyAttachCommand`, `previewReconnect`), never rebuilt in TS.
 - **Unknown inputs:**
   - agent names may be `null`, so use `displayName`;
   - ages may be `null`, so render nothing rather than guessing.

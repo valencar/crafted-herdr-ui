@@ -26,7 +26,7 @@ pnpm dev            # Vite only
 pnpm tauri dev      # full app
 pnpm test           # Vitest
 pnpm lint && pnpm typecheck
-cd src-tauri && cargo test && cargo clippy -- -D warnings && cargo fmt --check
+cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 scripts/check-no-personal-data.sh
 ```
 
