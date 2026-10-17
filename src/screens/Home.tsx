@@ -27,7 +27,7 @@ import {
   type Row,
 } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { openRow } from "../lib/openRow";
+import { markSeen, openRow } from "../lib/openRow";
 import {
   focusRowButton,
   isEditable,
@@ -56,6 +56,9 @@ const GROUPERS: Record<GroupBy, (rows: Row[]) => Group[]> = {
   status: groupByStatus,
 };
 
+/** Shared by every card but the selected one, so a memoized card sees the same prop. */
+const NO_LINES: string[] = [];
+
 function matches(row: Row, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -76,7 +79,10 @@ export function Home() {
   const openNewSession = useAppStore((s) => s.openNewSession);
   const toast = useAppStore((s) => s.toast);
   const toastTone = useAppStore((s) => s.toastTone);
-  const preview = useAppStore((s) => s.preview);
+  // Only the selected row's text: another row's frame must not re-render Home.
+  const previewText = useAppStore((s) =>
+    s.preview && s.preview.key === s.selectedKey ? s.preview.text : null,
+  );
   const report = useAppStore((s) => s.reportError);
   const dismissToast = useAppStore((s) => s.clearToast);
   const dismissedVersion = useAppStore((s) => s.dismissedVersion);
@@ -153,10 +159,7 @@ export function Home() {
   const selectedMachine = selectedRow
     ? (machines.get(selectedRow.machineId) ?? null)
     : null;
-  const previewLines =
-    selectedKey && preview?.key === selectedKey
-      ? lastLines(preview.text, 3)
-      : [];
+  const previewLines = useMemo(() => lastLines(previewText, 3), [previewText]);
   const closingRow = rows.find((r) => r.key === closingKey) ?? null;
   const terminalName = terminalLabel(terminal);
 
@@ -176,12 +179,6 @@ export function Home() {
   };
 
   const open = openRow;
-  const markSeen = (row: Row) => {
-    invokeTyped("mark_seen", {
-      machineId: row.machineId,
-      paneId: row.paneId,
-    }).catch(report);
-  };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (sheet || useAppStore.getState().dialogOpen > 0) return;
@@ -389,7 +386,9 @@ export function Home() {
                         note={noteFor(r.machineId)}
                         nowMs={nowMs}
                         terminalName={terminalName}
-                        previewLines={r.key === selectedKey ? previewLines : []}
+                        previewLines={
+                          r.key === selectedKey ? previewLines : NO_LINES
+                        }
                         onSelect={select}
                         onOpen={open}
                         onMarkSeen={markSeen}

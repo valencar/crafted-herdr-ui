@@ -1,5 +1,5 @@
-import { formatAge } from "../lib/format";
-import { shortPath } from "../lib/format";
+import { memo } from "react";
+import { formatAge, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { StatusPill } from "./StatusPill";
 
@@ -19,7 +19,7 @@ type Props = {
   onMarkSeen: (row: Row) => void;
 };
 
-export function NeedsYouCard({
+export const NeedsYouCard = memo(function NeedsYouCard({
   row,
   project,
   selected,
@@ -86,4 +86,4 @@ export function NeedsYouCard({
       </div>
     </article>
   );
-}
+});

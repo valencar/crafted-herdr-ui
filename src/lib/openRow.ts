@@ -15,3 +15,11 @@ export async function openRow(row: Row): Promise<void> {
     useAppStore.getState().reportError(e);
   }
 }
+
+/** Marks a "done" agent seen without opening it. Errors go to the toast. */
+export function markSeen(row: Row): void {
+  invokeTyped("mark_seen", {
+    machineId: row.machineId,
+    paneId: row.paneId,
+  }).catch(useAppStore.getState().reportError);
+}

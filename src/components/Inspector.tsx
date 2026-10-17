@@ -3,7 +3,7 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import { shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { openRow } from "../lib/openRow";
+import { markSeen, openRow } from "../lib/openRow";
 import { useAppStore } from "../store/appStore";
 import { CommandBox } from "./CommandBox";
 import { CloseConfirm } from "./CloseConfirm";
@@ -242,11 +242,7 @@ export function Inspector({
           Open in {terminalName} <kbd className="mono">⌘↩</kbd>
         </button>
         {row.status === "done" && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => invokeTyped("mark_seen", target).catch(reportError)}
-          >
+          <button type="button" className="btn" onClick={() => markSeen(row)}>
             Mark seen
           </button>
         )}
