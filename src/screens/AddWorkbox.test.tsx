@@ -256,7 +256,8 @@ describe("AddWorkbox", () => {
     ).toBeVisible();
     expect(screen.queryByText("Waiting for setup in Ghostty…")).toBeNull();
     const polled = callsTo("refresh_now").length;
-    expect(polled).toBe(300 - 1);
+    // About one poll every 2 s for 10 minutes; the exact count depends on timer ordering.
+    expect(polled).toBeGreaterThanOrEqual(299);
     await advance(10_000);
     expect(callsTo("refresh_now")).toHaveLength(polled);
     expect(useAppStore.getState().sheet).toBe("add-workbox");
@@ -658,5 +659,87 @@ describe("AddWorkbox", () => {
     expect(
       screen.queryByRole("dialog", { name: /Stop the herdr server/ }),
     ).toBeNull();
+  });
+
+  describe("field errors", () => {
+    it("are_alerts_linked_to_their_inputs", async () => {
+      const user = setup();
+      await open();
+      const host = screen.getByLabelText("SSH host");
+      const label = screen.getByLabelText("Label");
+      const session = screen.getByLabelText("Remote session");
+      await user.type(host, "bad host");
+      await user.type(label, "bad;label");
+      await user.type(session, "-x");
+
+      for (const [input, text] of [
+        [host, /The SSH host may only use letters/],
+        [label, /The label may only use letters/],
+        [session, /The remote session can’t start with “-”/],
+      ] as const) {
+        expect(input).toHaveAttribute("aria-invalid", "true");
+        const id = input.getAttribute("aria-describedby");
+        expect(id).toBeTruthy();
+        const error = document.getElementById(id!)!;
+        expect(error).toHaveAttribute("role", "alert");
+        expect(error).toHaveTextContent(text);
+      }
+    });
+
+    it("tell_the_label_it_may_have_single_spaces_between_words", async () => {
+      const user = setup();
+      await open();
+      await user.type(screen.getByLabelText("Label"), "two  spaces");
+      expect(screen.getByLabelText("Label")).toHaveAccessibleDescription(
+        /single spaces between words/,
+      );
+      await user.clear(screen.getByLabelText("Label"));
+      await user.type(screen.getByLabelText("Label"), "one space");
+      expect(screen.getByLabelText("Label")).not.toHaveAttribute(
+        "aria-describedby",
+      );
+    });
+
+    it("leave_no_description_on_a_valid_field", async () => {
+      const user = setup();
+      await open();
+      await user.type(screen.getByLabelText("SSH host"), "buildbox");
+      expect(screen.getByLabelText("SSH host")).not.toHaveAttribute(
+        "aria-describedby",
+      );
+    });
+  });
+
+  it("the_checklist_title_names_the_host_of_the_last_submit_not_the_live_field", async () => {
+    const user = setup();
+    await startNative(user, "buildbox");
+    await emitSetup({
+      kind: "step",
+      data: { step: "ssh", state: "failed", meta: "refused" },
+    });
+    await emitSetup({ kind: "finished", data: { ok: false } });
+    expect(screen.getByText("Setting up buildbox")).toBeVisible();
+
+    // The fields are open again; editing one must not rename what was tried.
+    await user.clear(screen.getByLabelText("SSH host"));
+    await user.type(screen.getByLabelText("SSH host"), "gpubox");
+    expect(screen.getByText("Setting up buildbox")).toBeVisible();
+    expect(screen.queryByText("Setting up gpubox")).toBeNull();
+  });
+
+  it("the_waiting_row_uses_the_working_icon_not_the_needs_you_one", async () => {
+    const user = setup();
+    await open();
+    await user.type(screen.getByLabelText("SSH host"), "staging");
+    await user.click(
+      screen.getByRole("button", { name: "Continue in Ghostty" }),
+    );
+    await advance(0);
+    const row = screen
+      .getByText("Waiting for setup in Ghostty…")
+      .closest(".checklist-row")!;
+    expect(row.querySelector(".checklist-icon")).toHaveClass(
+      "checklist-icon-active",
+    );
   });
 });

@@ -154,7 +154,7 @@ export function Inspector({
       <header className="inspector-head">
         <div className="inspector-badges">
           <StatusPill status={row.status} />
-          <KindBadge kind={row.kind} />
+          <KindBadge kind={row.kind} named />
           <span className="muted">{row.kind ?? "Shell"}</span>
         </div>
         <h2 className="inspector-name mono">{row.name}</h2>

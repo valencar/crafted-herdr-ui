@@ -15,6 +15,7 @@ import { invokeTyped, toActionError } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
 import {
+  isEditable,
   scrollToId,
   openSettings,
   terminalName as terminalLabel,
@@ -46,14 +47,6 @@ function sentence(text: string): string {
   return /[.!?]$/.test(t) ? t : `${t}.`;
 }
 
-function isEditable(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.isContentEditable ||
-    ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
-  );
-}
-
 /** Where a workspace was started: the folder of its first pane. */
 function workspaceFolder(panes: Pane[], workspaceId: string): string | null {
   const pane = panes.find((p) => p.workspace_id === workspaceId);
@@ -73,6 +66,8 @@ export function Workbox({ machineId }: { machineId: string }) {
   const openNewSession = useAppStore((s) => s.openNewSession);
   const report = useAppStore((s) => s.reportError);
   const dismissToast = useAppStore((s) => s.clearToast);
+  const activityOpen = useAppStore((s) => s.activityOpen);
+  const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const pendingOpen = useAppStore((s) => s.pendingOpen);
   const setPendingOpen = useAppStore((s) => s.setPendingOpen);
 
@@ -145,6 +140,9 @@ export function Workbox({ machineId }: { machineId: string }) {
       setCheckedAtMs(Date.now());
       setCheckError(entries.find((e) => e.id === machineId)?.error ?? null);
     } catch (e) {
+      // The last check no longer says anything about now.
+      setCheckedAtMs(null);
+      setCheckError(null);
       report(e);
     } finally {
       setChecking(false);
@@ -196,15 +194,21 @@ export function Workbox({ machineId }: { machineId: string }) {
       onWorkbox={(id) => setView({ kind: "workbox", machineId: id })}
       onAddWorkbox={() => setSheet("add-workbox")}
       onSettings={openSettings}
+      activityOpen={activityOpen}
+      onActivity={() => setActivityOpen(!activityOpen)}
     />
   );
 
-  const counts: Counts = {
-    workspaces: snapshot?.workspaces.length ?? 0,
-    sessions: snapshot?.panes.length ?? 0,
-    agents: snapshot?.agents.length ?? 0,
-    needsYou: rows.filter(isNeedsYou).length,
-  };
+  // A disabled machine shows no workspaces, even when a snapshot is still cached, so its
+  // counts are all zero rather than a mix of cached and empty.
+  const counts: Counts = disabled
+    ? { workspaces: 0, sessions: 0, agents: 0, needsYou: 0 }
+    : {
+        workspaces: snapshot?.workspaces.length ?? 0,
+        sessions: snapshot?.panes.length ?? 0,
+        agents: snapshot?.agents.length ?? 0,
+        needsYou: rows.filter(isNeedsYou).length,
+      };
 
   const workspaces = [...(snapshot?.workspaces ?? [])].sort(
     (a, b) => a.number - b.number,

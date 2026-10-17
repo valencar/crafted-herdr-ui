@@ -1,8 +1,13 @@
 import { useId } from "react";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { formatChecked, formatStaleness } from "../lib/format";
+import {
+  formatChecked,
+  formatStaleness,
+  reconnectCommand,
+} from "../lib/format";
 import { useNow } from "../lib/uiHelpers";
+import { CommandBox } from "./CommandBox";
 
 export type Counts = {
   workspaces: number;
@@ -91,7 +96,16 @@ export function WorkboxSummary({
         </div>
         <span className="mono muted workbox-meta">{meta}</span>
         {health.kind === "attention" && (
-          <p className="field-error">{health.error}</p>
+          <>
+            <p className="field-error">{health.error}</p>
+            {!machine.is_local && (
+              <CommandBox
+                command={reconnectCommand(machine.label)}
+                caption="to reconnect, run this in a terminal"
+                copyable
+              />
+            )}
+          </>
         )}
         {health.kind === "reconnecting" && (
           <p className="field-error">

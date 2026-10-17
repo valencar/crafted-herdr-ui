@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { shortPath } from "../lib/format";
 import type { Group } from "../lib/grouping";
 
@@ -17,7 +17,9 @@ export function ProjectGroup({
   onNewSession,
   children,
 }: Props) {
-  const headingId = `heading-${group.key}`;
+  // The key holds folder paths, which may contain spaces: an id for the label comes from
+  // React. `group-<key>` stays only as the sidebar's scroll target.
+  const headingId = useId();
   return (
     <section
       className="group"

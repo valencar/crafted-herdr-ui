@@ -38,6 +38,9 @@ type Props = {
   onWorkbox: (machineId: string) => void;
   onAddWorkbox: () => void;
   onSettings: () => void;
+  /** Whether the Activity drawer is open, and the button that toggles it. */
+  activityOpen: boolean;
+  onActivity: () => void;
 };
 
 export function Sidebar({
@@ -53,6 +56,8 @@ export function Sidebar({
   onWorkbox,
   onAddWorkbox,
   onSettings,
+  activityOpen,
+  onActivity,
 }: Props) {
   const localOnly = machines.length === 1 && machines[0].is_local;
   return (
@@ -89,7 +94,12 @@ export function Sidebar({
             className="nav-item"
             onClick={() => onProject(g)}
           >
-            <span className="dot" data-status={status} aria-hidden="true" />
+            <span
+              className="dot"
+              data-status={status}
+              title={STATUS_LABEL[status]}
+              aria-hidden="true"
+            />
             <span className="sr-only">{STATUS_LABEL[status]}: </span>
             <span className="nav-label">{g.name}</span>
             <span className="mono nav-sub">{g.machineLabel}</span>
@@ -112,7 +122,7 @@ export function Sidebar({
         <button
           key={m.id}
           type="button"
-          className="nav-item"
+          className={`nav-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
           aria-current={m.id === activeWorkbox ? "page" : undefined}
           onClick={() => onWorkbox(m.id)}
         >
@@ -135,6 +145,14 @@ export function Sidebar({
           {herdrPath ?? "herdr not found"}
           {herdrVersion ? ` · ${herdrVersion}` : ""}
         </span>
+        <button
+          type="button"
+          className="nav-link"
+          aria-pressed={activityOpen}
+          onClick={onActivity}
+        >
+          Activity ⌘⇧A
+        </button>
         <button type="button" className="nav-link" onClick={onSettings}>
           Settings ⌘,
         </button>

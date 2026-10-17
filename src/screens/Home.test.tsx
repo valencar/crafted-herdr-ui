@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
@@ -659,5 +666,290 @@ describe("Home", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("Home states", () => {
+  const LOCAL = () =>
+    machine("local", { kind: "online" }, { is_local: true, label: "Local" });
+  const noAgents = (m: MachineView): MachineView => ({
+    ...m,
+    snapshot: { ...structuredClone(fixture), agents: [], panes: [] },
+  });
+
+  it("unsupported_version_banner", async () => {
+    const user = setup({ ...defaultState(), herdr_version: "0.8.9" });
+    const banner = screen.getByRole("status");
+    expect(banner).toHaveTextContent(
+      "herdr 0.8.9 is older than this app supports (0.9.0+). Some actions may fail.",
+    );
+    await user.click(within(banner).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/is older than this app supports/)).toBeNull();
+  });
+
+  it("shows_the_banner_for_a_version_that_does_not_parse_or_is_missing", () => {
+    setup({ ...defaultState(), herdr_version: null });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "herdr (unknown version) is older than this app supports (0.9.0+).",
+    );
+  });
+
+  it("shows_no_banner_for_0_9_0_and_newer", () => {
+    for (const version of ["0.9.0", "0.9.4", "0.10.0", "1.0.0"]) {
+      setup({ ...defaultState(), herdr_version: version });
+      expect(screen.queryByText(/is older than this app supports/)).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("brings_the_banner_back_when_the_version_changes", async () => {
+    const user = setup({ ...defaultState(), herdr_version: "0.8.9" });
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    act(() =>
+      useAppStore.setState({
+        state: { ...defaultState(), herdr_version: "0.8.9" },
+      }),
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+    act(() =>
+      useAppStore.setState({
+        state: { ...defaultState(), herdr_version: "0.8.8" },
+      }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("herdr 0.8.8");
+  });
+
+  it("empty_agents_state", () => {
+    setup(appState(noAgents(machine("buildbox")), noAgents(machine("gpubox"))));
+    const card = screen.getByRole("region", { name: "No agents yet" });
+    expect(card).toHaveTextContent("Start one with ⌘N.");
+    // There are workboxes, so no nudge to add one.
+    expect(
+      screen.queryByRole("region", { name: /Only this computer/ }),
+    ).toBeNull();
+  });
+
+  it("no_workboxes_card_offers_add_workbox_next_to_the_groups_and_when_empty", async () => {
+    const user = setup(appState(LOCAL()));
+    const card = screen.getByRole("region", {
+      name: "Only this computer so far",
+    });
+    await user.click(within(card).getByRole("button", { name: "Add workbox" }));
+    expect(useAppStore.getState().sheet).toBe("add-workbox");
+
+    cleanup();
+    setup(appState(noAgents(LOCAL())));
+    expect(screen.getByRole("region", { name: "No agents yet" })).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Only this computer so far" }),
+    ).toBeVisible();
+  });
+
+  it("stale_label_from_last_ok", () => {
+    setup(
+      appState(
+        machine("buildbox"),
+        machine(
+          "gpubox",
+          { kind: "reconnecting", retry_in_ms: 5000, error: "timed out" },
+          { last_ok_ms: Date.now() - 40_000 },
+        ),
+        machine(
+          "stagingbox",
+          { kind: "online" },
+          { last_ok_ms: Date.now() - 90_000 },
+        ),
+      ),
+    );
+    expect(rowItem("gpubox::w1:p1")).toHaveTextContent(
+      "timed out · last updated 40s ago",
+    );
+    // `last_ok_ms` is only a staleness for a machine that is not online.
+    expect(rowItem("buildbox::w1:p1")).not.toHaveTextContent("last updated");
+    expect(rowItem("stagingbox::w1:p1")).not.toHaveTextContent("last updated");
+  });
+
+  it("a_machine_with_no_answer_yet_says_so", () => {
+    setup(
+      appState(
+        machine("buildbox"),
+        machine(
+          "gpubox",
+          { kind: "attention", error: "ssh: refused" },
+          { last_ok_ms: null },
+        ),
+      ),
+    );
+    expect(rowItem("gpubox::w1:p1")).toHaveTextContent(
+      "ssh: refused · not updated yet",
+    );
+  });
+
+  describe("an attention row", () => {
+    beforeEach(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        configurable: true,
+      });
+    });
+
+    const attention = () =>
+      appState(
+        machine("buildbox"),
+        machine(
+          "gpubox",
+          { kind: "attention", error: "ssh: connection refused" },
+          { last_ok_ms: Date.now() - 40_000, label: "gpu box" },
+        ),
+      );
+
+    it("suggests_the_reconnect_command_with_a_copy_button", async () => {
+      setup(attention());
+      const dim = rowItem("gpubox::w1:p1");
+      expect(dim).toHaveTextContent("ssh: connection refused");
+      expect(dim).toHaveTextContent("herdr machine reconnect 'gpu box'");
+      // The clipboard stub must be in place after userEvent.setup replaced it.
+      const user = userEvent.setup();
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        configurable: true,
+      });
+      await user.click(
+        within(dim).getByRole("button", { name: /^Copy command/ }),
+      );
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        "herdr machine reconnect 'gpu box'",
+      );
+      expect(
+        await within(dim).findByRole("button", { name: "Copied" }),
+      ).toBeVisible();
+    });
+
+    it("suggests_nothing_for_a_healthy_or_reconnecting_machine_or_for_local", () => {
+      setup(
+        appState(
+          machine("buildbox"),
+          machine("gpubox", {
+            kind: "reconnecting",
+            retry_in_ms: 1000,
+            error: "timed out",
+          }),
+        ),
+      );
+      expect(screen.queryByText(/machine reconnect/)).toBeNull();
+      cleanup();
+      setup(
+        appState({
+          ...LOCAL(),
+          health: { kind: "attention", error: "herdr is not running" },
+        }),
+      );
+      expect(screen.queryByText(/machine reconnect/)).toBeNull();
+    });
+
+    it("also_shows_on_a_needs_you_card", () => {
+      setup(attention());
+      const cards = within(
+        screen.getByRole("region", { name: "Needs you" }),
+      ).getAllByRole("article");
+      const dim = cards.find((c) => c.className.includes("is-dim"));
+      expect(dim).toHaveTextContent("herdr machine reconnect 'gpu box'");
+    });
+
+    it("explains_an_attention_machine_that_has_no_rows_to_dim", () => {
+      setup(
+        appState(
+          machine("buildbox", { kind: "online" }, { snapshot: null }),
+          machine(
+            "gpubox",
+            { kind: "attention", error: "ssh: connection refused" },
+            { snapshot: null, last_ok_ms: Date.now() - 40_000 },
+          ),
+        ),
+      );
+      const card = screen.getByRole("region", {
+        name: "gpubox needs attention",
+      });
+      expect(card).toHaveTextContent("ssh: connection refused");
+      expect(card).toHaveTextContent("last updated 40s ago");
+      expect(card).toHaveTextContent("herdr machine reconnect gpubox");
+      expect(
+        within(card).getByRole("button", { name: /^Copy command/ }),
+      ).toBeVisible();
+    });
+  });
+
+  it("dims_a_disabled_workbox_in_the_sidebar_and_labels_it", () => {
+    setup(
+      appState(machine("buildbox"), machine("gpubox", { kind: "disabled" })),
+    );
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
+    const disabled = within(sidebar).getByRole("button", {
+      name: /^gpubox\s*Disabled$/,
+    });
+    expect(disabled).toHaveClass("is-dim");
+    expect(
+      within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
+    ).not.toHaveClass("is-dim");
+  });
+
+  it("gives_each_project_dot_its_status_as_a_title", () => {
+    setup();
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
+    const dots = [
+      ...sidebar.querySelectorAll<HTMLElement>(".dot[data-status]"),
+    ];
+    expect(dots.length).toBeGreaterThan(0);
+    for (const dot of dots) {
+      expect(dot.title).toMatch(
+        /^(Needs input|Done, unseen|Working|Idle|Unknown|Shell)$/,
+      );
+    }
+  });
+
+  it("labels_each_group_by_a_generated_id_even_when_the_folder_has_spaces", () => {
+    const spaced = JSON.parse(
+      JSON.stringify(fixture).replace(
+        /\/home\/dev\/projects\/api-service/g,
+        "/home/dev/projects/api service",
+      ),
+    ) as Snapshot;
+    setup(appState(machine("buildbox", undefined, { snapshot: spaced })));
+    const group = document.querySelector<HTMLElement>(
+      '[id^="group-"][id*=" "]',
+    );
+    // The scroll target keeps the key; the label does not depend on it.
+    expect(group).not.toBeNull();
+    const labelId = group!.getAttribute("aria-labelledby")!;
+    expect(labelId).not.toMatch(/\s/);
+    expect(document.getElementById(labelId)).toHaveTextContent("api service");
+    expect(screen.getByRole("region", { name: "api service" })).toBe(group);
+  });
+
+  it("reports_a_group_by_that_could_not_be_saved", async () => {
+    const user = setup();
+    invoke.mockImplementation(async (name: string) => {
+      if (name === "set_settings") {
+        throw { kind: "invalid", message: "settings file is read-only" };
+      }
+      return name === "list_terminals"
+        ? { installed: ["ghostty"], default: "ghostty" }
+        : null;
+    });
+    await user.click(screen.getByRole("button", { name: "Status" }));
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("settings file is read-only"),
+    );
+    // The view still switched.
+    expect(useAppStore.getState().groupBy).toBe("status");
+  });
+
+  it("toggles_the_activity_drawer_from_the_sidebar_footer", async () => {
+    const user = setup();
+    useAppStore.setState({ activityOpen: false });
+    await user.click(screen.getByRole("button", { name: /^Activity/ }));
+    expect(useAppStore.getState().activityOpen).toBe(true);
+    await user.click(screen.getByRole("button", { name: /^Activity/ }));
+    expect(useAppStore.getState().activityOpen).toBe(false);
   });
 });

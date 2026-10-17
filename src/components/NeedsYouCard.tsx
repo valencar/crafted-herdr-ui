@@ -1,6 +1,7 @@
 import { formatAge } from "../lib/format";
 import { shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
+import { CommandBox } from "./CommandBox";
 import { StatusPill } from "./StatusPill";
 
 type Props = {
@@ -10,6 +11,8 @@ type Props = {
   selected: boolean;
   dim: boolean;
   note: string | null;
+  /** The command that would bring the machine back, when it needs attention. */
+  suggestion: string | null;
   nowMs: number;
   terminalName: string;
   /** The last few lines of the live preview; only the selected card has any. */
@@ -25,6 +28,7 @@ export function NeedsYouCard({
   selected,
   dim,
   note,
+  suggestion,
   nowMs,
   terminalName,
   previewLines,
@@ -52,6 +56,13 @@ export function NeedsYouCard({
         <div className="mono card-folder">{shortPath(row.folder)}</div>
       )}
       {note && <div className="row-note">{note}</div>}
+      {suggestion && (
+        <CommandBox
+          command={suggestion}
+          caption="to reconnect, run this in a terminal"
+          copyable
+        />
+      )}
       {previewLines.length > 0 && (
         <pre className="mono card-preview" aria-label="Latest output">
           {previewLines.join("\n")}

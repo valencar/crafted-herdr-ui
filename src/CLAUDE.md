@@ -11,7 +11,7 @@ The UI renders `AppState` pushed from Rust (`"state"` event) and calls typed Tau
 | `lib/useSync.ts` | `useStateSync` / `useSettingsSync`: every window (main, popover, Settings) keeps its own store current |
 | `lib/grouping.ts`, `lib/format.ts` | `toRows`, `needsYou`, `groupByProject/Workbox/Status`, `displayName`, `formatAge`, `shortPath` |
 | `store/appStore.ts` | Zustand: state, `selectedKey`, `groupBy`, sheet, view, `activityOpen` |
-| `components/` | presentational pieces (StatusPill, AgentRow, Inspector, ConfirmDialog, …) |
+| `components/` | presentational pieces (StatusPill, AgentRow, Inspector, ConfirmDialog, EmptyState, ActivityDrawer, …) |
 | `screens/` | Home, Workbox, NewSession, AddWorkbox, Settings, MenuBar, Onboarding. Settings and MenuBar are their own windows (`settings.html`, `popover.html`, entries `settings.tsx`, `popover.tsx`) |
 | `styles/tokens.css` | design tokens as CSS variables (spec §9) |
 
@@ -20,6 +20,7 @@ The UI renders `AppState` pushed from Rust (`"state"` event) and calls typed Tau
 - **Identity:** a row key is always `${machineId}::${paneId}`. herdr ids repeat across machines; never key by pane id alone.
 - **Status is never color-only.** Every status shows its text label too: "Needs input", "Done, unseen", "Working", "Idle", "Unknown", "Shell".
 - **Colors and sizes come from `tokens.css` variables.** No hex literals in components.
+- **The one URL:** the app opens `https://herdr.dev` (Onboarding) through `plugin-opener`; the main window's capability allows that URL and no other. No other link, fetch or `<a href>` to the web.
 - **Fonts:** Geist and Geist Mono are bundled under `fonts/`. No network font loading, and no network calls at all.
 - **Accessibility:**
   - real `<button>`, `<a>` and `<input>`/`<label>`, with a visible focus ring;

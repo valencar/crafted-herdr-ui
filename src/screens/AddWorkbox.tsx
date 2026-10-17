@@ -68,12 +68,14 @@ function valueProblem(
   what: string,
   value: string,
   pattern: RegExp,
+  /** Said between "digits" and the symbols, for a field with more freedom than the rest. */
+  also = "",
 ): string | null {
   if (value === "") return null;
   if (value.startsWith("-")) return `${what} can’t start with “-”.`;
   return pattern.test(value)
     ? null
-    : `${what} may only use letters, digits and _ @ % + = : , . / -`;
+    : `${what} may only use letters, digits${also} and _ @ % + = : , . / -`;
 }
 
 /** The target the sheet is after: it should show up as a profile it did not know before. */
@@ -107,6 +109,9 @@ export function AddWorkbox() {
   const hostId = useId();
   const labelId = useId();
   const sessionId = useId();
+  const hostErrorId = useId();
+  const labelErrorId = useId();
+  const sessionErrorId = useId();
 
   const [host, setHost] = useState("");
   const [label, setLabel] = useState("");
@@ -126,6 +131,9 @@ export function AddWorkbox() {
   const [stalled, setStalled] = useState(false);
   const [runFailure, setRunFailure] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
+  // The host the last run or terminal hand-off was for; the checklist is about that one even if
+  // the field is edited afterwards.
+  const [setupTarget, setSetupTarget] = useState("");
   // Events arrive while the callbacks below are mid-render, so they read the run from a ref.
   const runRef = useRef<Run | null>(null);
 
@@ -134,7 +142,12 @@ export function AddWorkbox() {
   const sessionText = session.trim();
   const hostProblem = valueProblem("The SSH host", target, VALUE);
   const sessionProblem = valueProblem("The remote session", sessionText, VALUE);
-  const labelProblem = valueProblem("The label", labelText, LABEL);
+  const labelProblem = valueProblem(
+    "The label",
+    labelText,
+    LABEL,
+    ", single spaces between words,",
+  );
   const valid =
     target !== "" && !hostProblem && !sessionProblem && !labelProblem;
 
@@ -321,6 +334,7 @@ export function AddWorkbox() {
     setLog("");
     setShowLog(false);
     setStarted(true);
+    setSetupTarget(target);
     const next = newRun();
     // The first events come before the call returns.
     runRef.current = next;
@@ -370,6 +384,7 @@ export function AddWorkbox() {
       // The hidden run and the terminal must not both answer to the same host.
       await stopRun();
       setStarted(false);
+      setSetupTarget(target);
       const fields = {
         target,
         label: labelText || null,
@@ -443,10 +458,11 @@ export function AddWorkbox() {
             autoCapitalize="off"
             disabled={locked}
             aria-invalid={hostProblem ? true : undefined}
+            aria-describedby={hostProblem ? hostErrorId : undefined}
             onChange={(e) => setHost(e.target.value)}
           />
           {hostProblem && (
-            <p className="field-error" role="alert">
+            <p id={hostErrorId} className="field-error" role="alert">
               {hostProblem}
             </p>
           )}
@@ -488,9 +504,14 @@ export function AddWorkbox() {
               spellCheck={false}
               disabled={locked}
               aria-invalid={labelProblem ? true : undefined}
+              aria-describedby={labelProblem ? labelErrorId : undefined}
               onChange={(e) => setLabel(e.target.value)}
             />
-            {labelProblem && <p className="field-error">{labelProblem}</p>}
+            {labelProblem && (
+              <p id={labelErrorId} className="field-error" role="alert">
+                {labelProblem}
+              </p>
+            )}
           </div>
           <div className="sheet-field">
             <label htmlFor={sessionId} className="sheet-label">
@@ -506,9 +527,14 @@ export function AddWorkbox() {
               autoCapitalize="off"
               disabled={locked}
               aria-invalid={sessionProblem ? true : undefined}
+              aria-describedby={sessionProblem ? sessionErrorId : undefined}
               onChange={(e) => setSession(e.target.value)}
             />
-            {sessionProblem && <p className="field-error">{sessionProblem}</p>}
+            {sessionProblem && (
+              <p id={sessionErrorId} className="field-error" role="alert">
+                {sessionProblem}
+              </p>
+            )}
           </div>
         </div>
 
@@ -538,7 +564,7 @@ export function AddWorkbox() {
         {(started || waiting || timedOut || runFailure) && (
           <div className="checklist" aria-live="polite">
             <p className="checklist-title">
-              Setting up {run?.target ?? waiting?.target ?? target}
+              Setting up {run?.target ?? waiting?.target ?? setupTarget}
             </p>
             {started &&
               STEP_ORDER.map((step) => {
@@ -564,8 +590,11 @@ export function AddWorkbox() {
               })}
             {waiting && (
               <div className="checklist-row">
-                <span className="checklist-icon" aria-hidden="true">
-                  !
+                <span
+                  className="checklist-icon checklist-icon-active"
+                  aria-hidden="true"
+                >
+                  …
                 </span>
                 <span>
                   {waiting.via === "terminal"

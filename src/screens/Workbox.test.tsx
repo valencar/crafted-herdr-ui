@@ -739,4 +739,107 @@ describe("Workbox pane tails", () => {
     );
     expect(useAppStore.getState().toast).toBeNull();
   });
+
+  it("names_each_pane_box_by_what_it_opens_and_describes_its_status_and_tail", async () => {
+    setup();
+    const planner = within(workspace("api-service")).getByRole("button", {
+      name: "Open planner",
+    });
+    const described = await waitFor(() => {
+      const ids = planner.getAttribute("aria-describedby")!.split(" ");
+      expect(ids).toHaveLength(2);
+      return ids.map((id) => document.getElementById(id)?.textContent);
+    });
+    expect(described).toEqual(["Needs input", "tail of w1:p1"]);
+  });
+
+  it("describes_a_box_with_no_tail_by_its_status_alone", () => {
+    answers.read_pane_tail = () => {
+      throw serverError("pane_not_found", "pane gone");
+    };
+    setup();
+    const planner = within(workspace("api-service")).getByRole("button", {
+      name: "Open planner",
+    });
+    expect(planner.getAttribute("aria-describedby")!.split(" ")).toHaveLength(
+      1,
+    );
+    expect(
+      document.getElementById(planner.getAttribute("aria-describedby")!),
+    ).toHaveTextContent("Needs input");
+  });
+
+  it("a_disabled_machine_with_a_cached_snapshot_counts_zero_in_all_four", () => {
+    setup(appState(machine("buildbox", {}, { kind: "disabled" })));
+    const summary = screen.getByRole("region", { name: "buildbox" });
+    const count = (term: string) =>
+      within(summary).getByText(term).parentElement?.querySelector("dd")
+        ?.textContent;
+    expect(
+      ["Workspaces", "Sessions", "Agents", "Needs you"].map(count),
+    ).toEqual(["0", "0", "0", "0"]);
+  });
+
+  it("an_attention_machine_suggests_the_reconnect_command_with_copy", async () => {
+    const user = setup(
+      appState(
+        machine("buildbox", {}, { kind: "attention", error: "ssh: denied" }),
+      ),
+    );
+    // After `userEvent.setup`, which installs a clipboard stub of its own.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const summary = screen.getByRole("region", { name: "buildbox" });
+    expect(summary).toHaveTextContent("herdr machine reconnect buildbox");
+    await user.click(
+      within(summary).getByRole("button", { name: /^Copy command/ }),
+    );
+    expect(writeText).toHaveBeenCalledWith("herdr machine reconnect buildbox");
+  });
+
+  it("a_failed_re_check_clears_the_old_checked_note", async () => {
+    answers.machine_status = () => [
+      { id: "buildbox", label: "buildbox", status: "ok", error: null },
+    ];
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: "Check now" }));
+    expect(await screen.findByText(/^checked/)).toBeInTheDocument();
+
+    answers.machine_status = () => {
+      throw serverError("unreachable", "cannot reach buildbox");
+    };
+    await user.click(screen.getByRole("button", { name: "Check now" }));
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("cannot reach buildbox"),
+    );
+    expect(screen.queryByText(/^checked/)).toBeNull();
+  });
+
+  describe("while the window is hidden", () => {
+    const hide = (hidden: boolean) =>
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => hidden,
+      });
+    afterEach(() => hide(false));
+
+    it("does_not_read_the_first_tails_and_reads_them_once_it_shows_again", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      hide(true);
+      setup();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(calls("read_pane_tail")).toEqual([]);
+
+      hide(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(calls("read_pane_tail").length).toBeGreaterThan(0);
+    });
+  });
 });

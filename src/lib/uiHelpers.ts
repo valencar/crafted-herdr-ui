@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { useAppStore } from "../store/appStore";
 import type { TerminalId } from "./bindings/TerminalId";
@@ -88,4 +89,23 @@ export function focusRowElement(key: string, attemptsLeft = 4): void {
       focusRowElement(key, attemptsLeft - 1);
     }
   }, 60);
+}
+
+/** Whether a key press landed in a field the user is typing into. */
+export function isEditable(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
+  );
+}
+
+/**
+ * The one page the app opens in the browser. Nothing is fetched: the default browser loads it,
+ * and the capability allows this URL and no other.
+ */
+export const INSTALL_URL = "https://herdr.dev";
+
+export function openInstallPage(): Promise<void> {
+  return openUrl(INSTALL_URL);
 }

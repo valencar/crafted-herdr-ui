@@ -1,5 +1,6 @@
 import type { ActionError } from "./bindings/ActionError";
 import type { AgentStatus } from "./bindings/AgentStatus";
+import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { TerminalId } from "./bindings/TerminalId";
 
 /** A row's status: a herdr agent status, or `shell` for a pane with no agent. */
@@ -107,4 +108,71 @@ export function lastLines(text: string | null, count: number): string[] {
     .map((l) => l.trimEnd())
     .filter((l) => l.trim() !== "")
     .slice(-count);
+}
+
+/** The first herdr version the app is built against (`env.rs` `MIN_VERSION`). */
+const MIN_VERSION: [number, number, number] = [0, 9, 0];
+
+/**
+ * `[major, minor, patch]` from `herdr --version` text (`0.9.4`, `herdr v1.2.3+build5`). A
+ * pre-release or build suffix is ignored; anything else is `null`. Mirrors Rust `parse_version`.
+ */
+export function parseVersion(text: string): [number, number, number] | null {
+  const token = text
+    .split(/\s+/)
+    .map((t) => t.replace(/^v+/, ""))
+    .find((t) => /^\d/.test(t));
+  if (!token) return null;
+  const parts = token.split(/[-+]/)[0].split(".");
+  if (parts.length !== 3 || !parts.every((p) => /^\d+$/.test(p))) return null;
+  return parts.map(Number) as [number, number, number];
+}
+
+/** True when the version parses and is 0.9.0 or newer. */
+export function isSupportedVersion(version: string | null): boolean {
+  const parsed = version === null ? null : parseVersion(version);
+  if (!parsed) return false;
+  for (let i = 0; i < 3; i++) {
+    if (parsed[i] !== MIN_VERSION[i]) return parsed[i] > MIN_VERSION[i];
+  }
+  return true;
+}
+
+/** Quotes one word for a POSIX shell: plain words stay as they are (Rust `shell_quote`). */
+export function shellQuote(word: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word)) return word;
+  return `'${word.replace(/'/g, () => "'\\''")}'`;
+}
+
+/** An argv as one command line, each word quoted. */
+export function shellJoin(argv: readonly string[]): string {
+  return argv.map(shellQuote).join(" ");
+}
+
+/** A local time of day as `HH:MM:SS`. */
+export function formatClock(ms: number): string {
+  const d = new Date(ms);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+}
+
+/** "412 ms" below a second, "1.2 s" from there. */
+export function formatDuration(ms: number): string {
+  return ms < SECOND ? `${ms} ms` : `${(ms / SECOND).toFixed(1)} s`;
+}
+
+/** The command that fixes a machine that needs attention; the label is quoted if needed. */
+export function reconnectCommand(label: string): string {
+  return `herdr machine reconnect ${shellQuote(label)}`;
+}
+
+/**
+ * A successful read-only call: `api snapshot`, or `<noun> read …` (`pane read`, `agent read`).
+ * The poller and the previews make these every couple of seconds, so the Activity drawer hides
+ * them unless asked. A read that failed is never quiet.
+ */
+export function isQuietRead(entry: CommandLogEntry): boolean {
+  if (entry.exitCode !== 0 || entry.error !== null) return false;
+  const [first, second] = entry.argv;
+  return (first === "api" && second === "snapshot") || second === "read";
 }

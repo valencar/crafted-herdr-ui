@@ -11,11 +11,21 @@ function monogram(kind: string | null): string {
   return MONOGRAM[kind] ?? kind.slice(0, 2).toUpperCase();
 }
 
-/** The agent kind as a two-letter monogram; `null` is a plain shell. */
-export function KindBadge({ kind }: { kind: string | null }) {
+/**
+ * The agent kind as a two-letter monogram; `null` is a plain shell. Screen readers get the full
+ * kind name, unless the caller writes it out next to the badge (`named`).
+ */
+export function KindBadge({
+  kind,
+  named = false,
+}: {
+  kind: string | null;
+  named?: boolean;
+}) {
   return (
     <span className="kind" title={kind ?? "shell"}>
-      {monogram(kind)}
+      <span aria-hidden="true">{monogram(kind)}</span>
+      {!named && <span className="sr-only">{kind ?? "shell"}</span>}
     </span>
   );
 }

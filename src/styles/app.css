@@ -598,6 +598,7 @@ kbd {
 }
 .agent-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding-right: 14px;
@@ -725,6 +726,16 @@ kbd {
 .cmdbox-prompt {
   color: var(--text-4);
 }
+.cmdbox-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cmdbox-row .cmdbox-line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 .scrim {
   position: fixed;
@@ -771,6 +782,7 @@ kbd {
 
 .toast {
   position: fixed;
+  z-index: 40;
   right: 16px;
   bottom: 16px;
   max-width: 420px;
@@ -1358,4 +1370,201 @@ select.field {
   align-items: center;
   gap: 8px;
   font-family: var(--font-mono);
+}
+
+/* ---------- focus ring inside the clipped group card ---------- */
+
+/* `.group` clips its overflow (rounded corners), so a ring drawn outside the row would be cut
+   off. Drawn inside, it is always whole. */
+.row-main:focus-visible {
+  outline-offset: -2px;
+  border-radius: var(--radius-s);
+}
+
+/* ---------- states: banner, empty cards, dimmed lists ---------- */
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px 8px 78px;
+  background: color-mix(in srgb, var(--st-needs) 12%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--st-needs) 40%, transparent);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 560px;
+  padding: 16px 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+}
+.empty-card .cmdbox {
+  align-self: stretch;
+}
+.empty-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.empty-body {
+  color: var(--text-3);
+}
+.empty-body p {
+  margin: 0;
+}
+.row-fix {
+  flex: 1 0 100%;
+  padding: 0 14px 10px;
+}
+.nav-item.is-dim .nav-label {
+  opacity: 0.55;
+}
+.nav-link[aria-pressed="true"] {
+  color: var(--text);
+}
+
+/* ---------- onboarding ---------- */
+
+.onboarding {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+.onboarding-card {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  color: var(--text-3);
+}
+.onboarding-card p {
+  margin: 0;
+}
+.onboarding-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.onboarding-url {
+  color: var(--text);
+}
+.onboarding-actions {
+  display: flex;
+  gap: 8px;
+}
+.onboarding-note {
+  font-size: 11.5px;
+}
+
+/* ---------- activity drawer ---------- */
+
+.activity {
+  position: fixed;
+  z-index: 30;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(520px, 100vw);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  overflow: hidden;
+  background: var(--panel-2);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: -12px 0 32px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.activity-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.activity-title {
+  margin: 0;
+  margin-right: auto;
+  font-size: 15px;
+  font-weight: 600;
+}
+.activity-reads {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.activity-sub,
+.activity-empty {
+  margin: 0;
+  font-size: 12px;
+}
+.activity-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.activity-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto auto;
+  grid-template-areas:
+    "time machine . exit duration copy"
+    "cmd cmd cmd cmd cmd cmd"
+    "err err err err err err";
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.activity-time,
+.activity-exit,
+.activity-duration {
+  font-size: 11px;
+}
+.activity-time {
+  grid-area: time;
+}
+.activity-machine {
+  grid-area: machine;
+}
+.activity-cmd {
+  grid-area: cmd;
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.activity-exit {
+  grid-area: exit;
+}
+.activity-duration {
+  grid-area: duration;
+}
+.activity-row .btn {
+  grid-area: copy;
+}
+.activity-row[data-failed="true"] .activity-exit {
+  color: var(--danger);
+}
+.activity-error {
+  grid-area: err;
 }

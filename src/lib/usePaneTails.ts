@@ -81,7 +81,9 @@ export function usePaneTails(
 
   useEffect(() => {
     current.current = key ? key.split("|") : [];
-    // Panes that just appeared get their line right away, not at the next round.
+    // Panes that just appeared get their line right away, not at the next round, unless the
+    // window is hidden (the next round while visible reads them).
+    if (document.hidden) return;
     void read(current.current.filter((id) => !fetched.current.has(id)));
   }, [key, read]);
 

@@ -231,7 +231,23 @@ describe("appStore", () => {
     expect(s.view).toEqual({ kind: "home" });
   });
 
-  it("keeps the settings once they are read", () => {
+  it("starts without settings and keeps them once they are read", () => {
     expect(useAppStore.getState().settings).toBeNull();
+    const settings = {
+      herdr_path: null,
+      terminal: null,
+      terminal_custom_template: "",
+      open_mode: "window",
+      attach_mode: "pane",
+      notify_blocked: true,
+      notify_done: true,
+      poll_interval_visible_ms: 2000,
+      poll_interval_hidden_ms: 10_000,
+      group_by: "project",
+      global_shortcut_enabled: true,
+      open_after_create: true,
+    } as const;
+    useAppStore.getState().setSettings(settings);
+    expect(useAppStore.getState().settings).toEqual(settings);
   });
 });

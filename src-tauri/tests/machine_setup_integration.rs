@@ -443,3 +443,57 @@ fn the_run_ends_when_the_process_exits_even_if_the_terminal_stays_open() {
         }]
     );
 }
+
+/// A process that has exited while something else keeps chattering into the terminal.
+struct Chatty;
+
+impl PtyControl for Chatty {
+    fn kill(&self) {}
+    fn wait(&self) -> i32 {
+        0
+    }
+    fn try_wait(&self) -> Option<i32> {
+        Some(0)
+    }
+}
+
+impl PtySpawner for Chatty {
+    fn spawn(&self, _argv: &[String], _env: &[(String, String)]) -> io::Result<SpawnedPty> {
+        let (tx, output) = mpsc::channel();
+        std::thread::spawn(move || {
+            // Quiet long enough for the driver to notice the exit, then never quiet again
+            // for as long as the test could wait.
+            std::thread::sleep(Duration::from_millis(300));
+            for _ in 0..200 {
+                if tx.send(b"tick\n".to_vec()).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+        Ok(SpawnedPty {
+            output,
+            input: Box::new(io::sink()),
+            control: Arc::new(Chatty),
+        })
+    }
+}
+
+#[test]
+fn the_drain_after_an_exit_has_a_total_cap_not_only_an_idle_gap() {
+    let setup = MachineSetup::new(Arc::new(Chatty));
+    let (emit, events) = collect();
+    let started = Instant::now();
+    setup
+        .start(&argv(), &[], emit, ignore_exit())
+        .expect("start");
+    wait_for(&events, "finish", |e| {
+        matches!(e, SetupEvent::Finished { .. })
+    });
+    // The idle gap (200 ms) never elapses; only the 1 s cap can end the drain.
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+}

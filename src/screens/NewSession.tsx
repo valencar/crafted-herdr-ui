@@ -452,7 +452,7 @@ export function NewSession({ terminalName }: Props) {
                   onChange={() => setKindChoice(k)}
                 />
                 <span aria-hidden="true">
-                  <KindBadge kind={k} />
+                  <KindBadge kind={k} named />
                 </span>
                 <span className="opt-name">{k ?? "Plain shell"}</span>
               </label>

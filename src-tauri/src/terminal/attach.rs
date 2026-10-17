@@ -147,15 +147,11 @@ fn allowed_value(what: &str, value: &str) -> Result<(), String> {
     }
 }
 
-/// A machine label: plain characters and single spaces inside, so it reads as one name.
+/// A machine label: words of plain characters separated by single spaces, so it reads as one
+/// name. Splitting on `' '` makes an empty word (a leading, trailing or doubled space) fail
+/// `is_plain`, and the leading-`-` check keeps it from reading as an option.
 fn allowed_label(value: &str) -> Result<(), String> {
-    let ok = !value.is_empty()
-        && value == value.trim()
-        && !value.starts_with('-')
-        && value
-            .chars()
-            .all(|c| c == ' ' || c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c));
-    if ok {
+    if value.split(' ').all(is_plain) && !value.starts_with('-') {
         Ok(())
     } else {
         Err(format!(
@@ -318,6 +314,7 @@ mod tests {
             .is_ok()
         );
         assert!(ok(&["machine", "add", "t", "--label", "L"]).is_ok());
+        assert!(ok(&["machine", "add", "t", "--label", "build box 2"]).is_ok());
         assert!(ok(&["machine", "add", "t", "--remote-session", "s"]).is_ok());
         assert_eq!(
             ok(&["--remote", "buildbox"]).unwrap(),
@@ -365,6 +362,10 @@ mod tests {
         assert!(bad(&["machine", "add", "t", "--label", "a`b`"]));
         assert!(bad(&["machine", "add", "t", "--label", "-x"]));
         assert!(bad(&["machine", "add", "t", "--label", "  "]));
+        assert!(bad(&["machine", "add", "t", "--label", "a  b"]));
+        assert!(bad(&["machine", "add", "t", "--label", " a"]));
+        assert!(bad(&["machine", "add", "t", "--label", "a "]));
+        assert!(bad(&["machine", "add", "t", "--label", ""]));
         assert!(bad(&["machine", "add", "t", "--label", "a\nb"]));
         assert!(bad(&[
             "machine",

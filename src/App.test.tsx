@@ -5,7 +5,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "./lib/bindings/AppState";
 import type { Snapshot } from "./lib/bindings/Snapshot";
@@ -46,6 +47,11 @@ beforeEach(() => {
   ipc.invokeTyped
     .mockReset()
     .mockResolvedValue({ installed: [], default: "ghostty" });
+});
+
+afterEach(() => {
+  // A test that opened a sheet or the drawer must not leave it open for the next one.
+  useAppStore.setState({ sheet: null, activityOpen: false });
 });
 
 it("loads the state on mount, then subscribes to pushes", async () => {
@@ -145,7 +151,6 @@ it("renders the Add workbox sheet over both Home and the Workbox screen", async 
   expect(
     await screen.findByRole("dialog", { name: "Add workbox" }),
   ).toBeInTheDocument();
-  useAppStore.setState({ sheet: null });
 });
 
 const SETTINGS = {
@@ -221,7 +226,6 @@ it("opens the New session sheet when the tray or the popover asks", async () => 
   await waitFor(() => expect(ipc.onNewSession).toHaveBeenCalled());
   act(() => handler(ipc.onNewSession)());
   expect(useAppStore.getState().sheet).toBe("new-session");
-  useAppStore.setState({ sheet: null });
 });
 
 it("opens Settings on ⌘, and from the sidebar link", async () => {
@@ -247,4 +251,101 @@ it("stops listening for the window events on unmount", async () => {
   unmount();
   expect(stopFocus).toHaveBeenCalled();
   expect(stopNew).toHaveBeenCalled();
+});
+
+it("onboarding_when_no_herdr", async () => {
+  useAppStore.setState({ view: { kind: "home" } });
+  ipc.getState.mockResolvedValue({
+    ...state,
+    herdr_path: null,
+    herdr_version: null,
+  });
+  render(<App />);
+  expect(
+    await screen.findByRole("heading", { name: "herdr wasn’t found" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Choose binary…" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("searchbox")).toBeNull();
+  // The drawer and the sheets have nothing to show without herdr.
+  fireEvent.keyDown(window, { key: "A", metaKey: true, shiftKey: true });
+  expect(screen.queryByRole("complementary", { name: "Activity" })).toBeNull();
+  expect(useAppStore.getState().activityOpen).toBe(false);
+
+  // Once herdr is found, the push swaps the screen for Home.
+  const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+  act(() => push(state));
+  expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+});
+
+it("shows_nothing_but_the_connecting_state_before_the_first_state", () => {
+  render(<App />);
+  expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
+  expect(screen.queryByText("herdr wasn’t found")).toBeNull();
+});
+
+describe("the Activity drawer", () => {
+  beforeEach(() => {
+    useAppStore.setState({ view: { kind: "home" } });
+    ipc.invokeTyped.mockImplementation(async (name: string) =>
+      name === "get_command_log" ? [] : { installed: [], default: "ghostty" },
+    );
+  });
+
+  it("toggles_with_cmd_shift_a_on_every_screen", async () => {
+    useAppStore.setState({ view: { kind: "home" } });
+    render(<App />);
+    await screen.findByRole("searchbox");
+    expect(
+      screen.queryByRole("complementary", { name: "Activity" }),
+    ).toBeNull();
+
+    fireEvent.keyDown(window, { key: "A", metaKey: true, shiftKey: true });
+    expect(
+      await screen.findByRole("complementary", { name: "Activity" }),
+    ).toBeInTheDocument();
+    expect(ipc.invokeTyped).toHaveBeenCalledWith("get_command_log");
+
+    // The same keys close it, and it stays open across a change of screen.
+    act(() =>
+      useAppStore.setState({
+        view: { kind: "workbox", machineId: "buildbox" },
+      }),
+    );
+    expect(
+      screen.getByRole("complementary", { name: "Activity" }),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "a", metaKey: true, shiftKey: true });
+    expect(
+      screen.queryByRole("complementary", { name: "Activity" }),
+    ).toBeNull();
+  });
+
+  it("ignores_a_plain_cmd_a_and_cmd_shift_other_keys", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    fireEvent.keyDown(window, { key: "a", metaKey: true });
+    fireEvent.keyDown(window, { key: "b", metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: "A", shiftKey: true });
+    expect(useAppStore.getState().activityOpen).toBe(false);
+  });
+
+  it("opens_and_closes_from_the_sidebar_footer_button", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("searchbox");
+    const button = screen.getByRole("button", { name: /^Activity/ });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    await user.click(button);
+    expect(
+      await screen.findByRole("complementary", { name: "Activity" }),
+    ).toBeInTheDocument();
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(
+      screen.queryByRole("complementary", { name: "Activity" }),
+    ).toBeNull();
+    expect(useAppStore.getState().activityOpen).toBe(false);
+  });
 });

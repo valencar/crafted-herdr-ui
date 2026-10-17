@@ -77,7 +77,7 @@ GUI-only checks that implementers skip; run them in a final pass with the mainta
 ## Task 13
 
 - [ ] "+ Add workbox" (Home sidebar and Workbox screen) opens the sheet. The chips match the `Host` aliases in your `~/.ssh/config` (and files it `Include`s), with no wildcards.
-- [ ] "Continue in <Terminal>" opens the default terminal running `herdr machine add <target> …` (use a throwaway target, never a live default session). Finish setup there: within about 2 s the sheet closes, "Added <label>" shows as a toast, and the new workbox opens.
+- [ ] "Continue in <Terminal>" opens the default terminal running `herdr machine add <target> …` (use a throwaway target and give it the remote session `herdr-ui-qa` in the sheet's "Remote session" field, never a live default session). Finish setup there: within about 2 s the sheet closes, "Added <label>" shows as a toast, and the new workbox opens.
 - [ ] Cancel while waiting stops the polling (no more `machine list` calls in the Activity drawer). After 10 minutes with nothing new, the "Didn't see the new workbox yet…" message shows.
 - [ ] A host that is already a profile shows "Already added as <label>" and the button is disabled.
 
@@ -116,3 +116,15 @@ None of these were run by the implementer (tray, popover, notifications and the 
 - [ ] With no herdr anywhere, launch the app, then choose a binary in Settings: polling starts without a restart.
 - [ ] Occupy ⌃⌥⌘H with another app (or a Shortcuts.app shortcut), then turn the global shortcut on in Settings › Shortcuts: it shows "Couldn't register ⌃⌥⌘H (another app may be using it)". Free the key and toggle it off and on: the message goes away.
 - [ ] The popover footer shows the ⌃⌥⌘H hint only while the global shortcut is switched on in Settings.
+
+## Task 16
+
+None of these were run by the implementer (they need a real GUI session and a machine without herdr on its PATH).
+
+- [ ] Launch with no herdr anywhere (rename the binary and clear the saved path): the main window shows "herdr wasn't found" with the install URL as text, "Open herdr.dev ↗" and "Choose binary…". "Open herdr.dev ↗" opens https://herdr.dev in the default browser (the capability allows that one URL; nothing else opens). "Choose binary…" with a real herdr switches to Home at once, without a restart. Choosing a file that is not herdr shows the refusal inline and stays on the screen.
+- [ ] ⌘⇧A and the sidebar footer's "Activity ⌘⇧A" open and close the Activity drawer on Home and on a Workbox screen. While open it adds new commands within about 2 s. Poll and preview reads are hidden until "Show reads" is on; a failed read still shows. "Copy" on a row pastes a command that runs in a terminal. Escape closes it and focus goes back to where it was.
+- [ ] With a herdr older than 0.9.0 (or one whose `--version` can't be read), Home shows the banner "herdr <version> is older than this app supports (0.9.0+). Some actions may fail." and "Dismiss" hides it until the version changes.
+- [ ] Stop reaching a workbox (disconnect the network or use a profile with a wrong target): its rows dim, show the error and "last updated Ns ago", and, once the machine is in Attention, the line `herdr machine reconnect <label>` with a working Copy. The Workbox screen shows the same line under the error.
+- [ ] Disable a workbox that has a cached snapshot: it is dimmed in the sidebar and labelled "Disabled", and its Workbox screen shows 0 for all four counts.
+- [ ] With only Local, Home shows the "Only this computer so far" card; its "Add workbox" opens the sheet. With no agents anywhere, "No agents yet / Start one with ⌘N." shows.
+- [ ] Keyboard: Tab to a row in a project card; the focus ring is fully visible (not clipped by the card's rounded corner). VoiceOver reads a pane box on the Workbox screen as "Open <name>", then its status and last line; a kind badge reads as the full kind name.

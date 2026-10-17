@@ -194,14 +194,15 @@ fn replace_message(trimmed: &str, question: &str) -> String {
     message.join("\n").trim().to_owned()
 }
 
-/// The lines herdr printed right before the question (up to 4, back to the last blank line).
+/// The lines herdr printed right before the question (up to 4, back to the last blank line or
+/// the session picker's footer, so a picker redraw never leaks into the detail).
 fn context_before_question(trimmed: &str) -> Option<String> {
     let lines: Vec<&str> = trimmed.lines().collect();
     let body = &lines[..lines.len().saturating_sub(1)];
     let mut context: Vec<&str> = body
         .iter()
         .rev()
-        .take_while(|l| !l.trim().is_empty())
+        .take_while(|l| !l.trim().is_empty() && !l.contains(PICKER_FOOTER))
         .take(4)
         .map(|l| l.trim_end())
         .collect();
@@ -517,6 +518,11 @@ impl SetupRun {
                     None,
                     &mut events,
                 );
+            }
+            // A confirmation that replaces an unanswered picker ends the picking: from here
+            // on a picker block is a redraw, not a new question.
+            if matches!(self.pending, Some(SetupPrompt::PickSession { .. })) {
+                self.picked = true;
             }
             self.pending = Some(prompt.clone());
             events.push(SetupEvent::Prompt(prompt));
@@ -836,8 +842,10 @@ fn deliver(active: &Mutex<Option<Active>>, bytes: &[u8]) -> bool {
     true
 }
 
-/// How long to keep reading after the process is gone, for output still on its way.
+/// How long to keep reading after the process is gone, for output still on its way: until the
+/// output has been quiet for `DRAIN`, but never longer than `DRAIN_MAX` in all.
 const DRAIN: Duration = Duration::from_millis(200);
+const DRAIN_MAX: Duration = Duration::from_secs(1);
 
 /// Reads output until the process ends, reporting what it says and when it goes quiet. The end
 /// is the output closing or the process exiting, whichever comes first (a child of herdr can
@@ -862,7 +870,11 @@ fn drive(
                 }
                 if let Some(code) = control.try_wait() {
                     exited = Some(code);
-                    while let Ok(bytes) = output.recv_timeout(DRAIN) {
+                    let deadline = Instant::now() + DRAIN_MAX;
+                    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+                        let Ok(bytes) = output.recv_timeout(DRAIN.min(left)) else {
+                            break;
+                        };
                         deliver(active, &bytes);
                     }
                     break;
@@ -1107,6 +1119,36 @@ mod tests {
         );
         // Answering this one types `y`, never a bare Enter that herdr would read as the default.
         assert_eq!(run.answer("yes").map(|(k, _)| k), Ok(b"y\n".to_vec()));
+    }
+
+    #[test]
+    fn install_detail_stops_at_a_picker_redraw_before_the_prompt() {
+        // herdr redrew the picker, then went on to ask for consent without a blank line.
+        let text = format!(
+            "{}{}",
+            plain_fixture("session_picker_redrawn"),
+            plain_fixture("install_consent")
+        );
+        let Some(SetupPrompt::ConfirmInstall { detail, .. }) = classify(&text) else {
+            panic!("{text}");
+        };
+        let detail = detail.unwrap_or_default();
+        assert!(detail.starts_with("matching herdr 0.9.4"), "{detail:?}");
+        assert!(!detail.contains("Esc cancel"), "{detail:?}");
+        assert!(!detail.contains("agents"), "{detail:?}");
+    }
+
+    #[test]
+    fn a_confirmation_that_replaces_a_picker_makes_later_picker_blocks_redraws() {
+        let (mut run, _) = SetupRun::start();
+        run.feed(fixture("session_picker").as_bytes());
+        run.feed(fixture("install_consent").as_bytes());
+        assert_eq!(run.answer("no").map(|(k, _)| k), Ok(b"n\n".to_vec()));
+        let events = run.feed(fixture("session_picker").as_bytes());
+        assert!(
+            !events.iter().any(|e| matches!(e, SetupEvent::Prompt(_))),
+            "{events:?}"
+        );
     }
 
     #[test]

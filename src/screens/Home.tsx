@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
+import { CommandBox } from "../components/CommandBox";
+import { EmptyState } from "../components/EmptyState";
 import { Header } from "../components/Header";
 import { Inspector } from "../components/Inspector";
 import { NeedsYouCard } from "../components/NeedsYouCard";
@@ -8,7 +10,12 @@ import { ProjectGroup } from "../components/ProjectGroup";
 import { Sidebar } from "../components/Sidebar";
 import { Toast } from "../components/Toast";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { formatStaleness, lastLines } from "../lib/format";
+import {
+  formatStaleness,
+  isSupportedVersion,
+  lastLines,
+  reconnectCommand,
+} from "../lib/format";
 import {
   groupByProject,
   groupByStatus,
@@ -23,6 +30,7 @@ import { invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
 import {
   focusRowButton,
+  isEditable,
   openSettings,
   scrollToId,
   terminalName as terminalLabel,
@@ -56,14 +64,6 @@ function matches(row: Row, query: string): boolean {
   );
 }
 
-function isEditable(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.isContentEditable ||
-    ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
-  );
-}
-
 export function Home() {
   const state = useAppStore((s) => s.state);
   const selectedKey = useAppStore((s) => s.selectedKey);
@@ -79,6 +79,8 @@ export function Home() {
   const preview = useAppStore((s) => s.preview);
   const report = useAppStore((s) => s.reportError);
   const dismissToast = useAppStore((s) => s.clearToast);
+  const activityOpen = useAppStore((s) => s.activityOpen);
+  const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
   const pendingOpen = useAppStore((s) => s.pendingOpen);
@@ -88,6 +90,8 @@ export function Home() {
   const [query, setQuery] = useState("");
   const { current: terminal, installed } = useTerminals();
   const [closingKey, setClosingKey] = useState<string | null>(null);
+  // The version whose "older than supported" banner the user dismissed.
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
@@ -159,6 +163,13 @@ export function Home() {
   const dimmed = (machineId: string) => {
     const kind = machines.get(machineId)?.health.kind;
     return kind === "attention" || kind === "reconnecting";
+  };
+  /** What to run to bring back a machine that needs attention (Local has no profile). */
+  const suggestionFor = (machineId: string): string | null => {
+    const m = machines.get(machineId);
+    return m && !m.is_local && m.health.kind === "attention"
+      ? reconnectCommand(m.label)
+      : null;
   };
   const noteFor = (machineId: string): string | null => {
     const m = machines.get(machineId);
@@ -234,6 +245,26 @@ export function Home() {
 
   const needsMachines = new Set(needs.map((r) => r.machineId)).size;
   const hasAnyRows = rows.length > 0;
+  const allMachines = state?.machines ?? [];
+  const onlyLocal = allMachines.every((m) => m.is_local);
+  const attentionMachines = allMachines.filter(
+    (m) => !m.is_local && m.health.kind === "attention",
+  );
+  const unsupported =
+    state !== null &&
+    !isSupportedVersion(state.herdr_version) &&
+    dismissedVersion !== (state.herdr_version ?? "");
+  const noWorkboxes = onlyLocal && (
+    <EmptyState
+      title="Only this computer so far"
+      action={{ label: "Add workbox", onClick: () => setSheet("add-workbox") }}
+    >
+      <p>
+        Add a workbox to see the agents running on a machine you can reach over
+        SSH.
+      </p>
+    </EmptyState>
+  );
 
   return (
     <div className="app">
@@ -246,6 +277,21 @@ export function Home() {
         installed={installed}
         onNewSession={() => openNewSession()}
       />
+      {unsupported && (
+        <div className="banner" role="status">
+          <span>
+            herdr {state.herdr_version ?? "(unknown version)"} is older than
+            this app supports (0.9.0+). Some actions may fail.
+          </span>
+          <button
+            type="button"
+            className="btn btn-small btn-ghost"
+            onClick={() => setDismissedVersion(state.herdr_version ?? "")}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className="body">
         <Sidebar
           needsCount={needsYou(rows).length}
@@ -263,16 +309,33 @@ export function Home() {
           onWorkbox={(id) => setView({ kind: "workbox", machineId: id })}
           onAddWorkbox={() => setSheet("add-workbox")}
           onSettings={openSettings}
+          activityOpen={activityOpen}
+          onActivity={() => setActivityOpen(!activityOpen)}
         />
 
         <main className="main">
           {state === null ? (
             <p className="empty">Connecting to herdr…</p>
           ) : !hasAnyRows ? (
-            <div className="empty">
-              <h1 className="section-title">No agents yet</h1>
-              <p>Start one with ⌘N.</p>
-            </div>
+            <>
+              <EmptyState title="No agents yet">
+                <p>Start one with ⌘N.</p>
+              </EmptyState>
+              {attentionMachines.map((m) => (
+                <EmptyState key={m.id} title={`${m.label} needs attention`}>
+                  <p>
+                    {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
+                    {formatStaleness(m.last_ok_ms, nowMs)}
+                  </p>
+                  <CommandBox
+                    command={reconnectCommand(m.label)}
+                    caption="to reconnect, run this in a terminal"
+                    copyable
+                  />
+                </EmptyState>
+              ))}
+              {noWorkboxes}
+            </>
           ) : (
             <>
               <section
@@ -300,6 +363,7 @@ export function Home() {
                         selected={r.key === selectedKey}
                         dim={dimmed(r.machineId)}
                         note={noteFor(r.machineId)}
+                        suggestion={suggestionFor(r.machineId)}
                         nowMs={nowMs}
                         terminalName={terminalName}
                         previewLines={r.key === selectedKey ? previewLines : []}
@@ -332,7 +396,7 @@ export function Home() {
                           // Remembered for the next launch.
                           invokeTyped("set_settings", {
                             patch: { group_by: g },
-                          }).catch(() => {});
+                          }).catch(report);
                         }}
                       >
                         {g[0].toUpperCase() + g.slice(1)}
@@ -366,6 +430,7 @@ export function Home() {
                         selected={r.key === selectedKey}
                         dim={dimmed(r.machineId)}
                         note={noteFor(r.machineId)}
+                        suggestion={suggestionFor(r.machineId)}
                         showMachine={groupBy === "status"}
                         nowMs={nowMs}
                         terminalName={terminalName}
@@ -376,6 +441,7 @@ export function Home() {
                   </ProjectGroup>
                 ))}
               </section>
+              {noWorkboxes}
             </>
           )}
         </main>

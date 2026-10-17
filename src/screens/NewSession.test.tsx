@@ -436,7 +436,7 @@ describe("NewSession form", () => {
     const snap = structuredClone(fixture);
     snap.agents = [];
     const template = snap.panes[0];
-    // Nine distinct folders (and a repeat of the first) on seven panes' worth of rows.
+    // Nine distinct folders, then a repeat of the first: ten panes in all.
     snap.panes = [...Array.from({ length: 9 }, (_, i) => i), 0].map((n, i) => ({
       ...template,
       pane_id: `w1:p${i + 1}`,
