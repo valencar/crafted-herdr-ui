@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { create } from "zustand";
 import type { AppState } from "../lib/bindings/AppState";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
@@ -9,7 +10,9 @@ export type Sheet = null | "new-session" | "add-workbox";
 export type View = { kind: "home" } | { kind: "workbox"; machineId: string };
 
 const TOAST_MS = 8000;
+const PENDING_SELECT_MS = 10_000;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingTimer: ReturnType<typeof setTimeout> | undefined;
 
 type AppStore = {
   state: AppState | null;
@@ -21,8 +24,13 @@ type AppStore = {
   activityOpen: boolean;
   /** The error shown in the toast, if any. */
   toast: string | null;
-  /** A modal dialog is open, so keyboard shortcuts stand down. */
-  dialogOpen: boolean;
+  /** How many modals (confirm dialogs, sheets) are mounted. Above 0 the shortcuts stand down. */
+  dialogOpen: number;
+  /**
+   * A row key to select once the row shows up in the state (a session was just created and
+   * the next poll has not listed it yet). Dropped after 10 s.
+   */
+  pendingSelectKey: string | null;
   /** The latest live-preview frame for the selected row. */
   preview: PreviewFrame | null;
   setState: (state: AppState) => void;
@@ -35,8 +43,20 @@ type AppStore = {
   reportError: (e: unknown) => void;
   clearToast: () => void;
   setPreview: (frame: PreviewFrame | null) => void;
-  setDialogOpen: (open: boolean) => void;
+  openDialog: () => void;
+  closeDialog: () => void;
+  setPendingSelectKey: (key: string | null) => void;
 };
+
+/** Marks a modal as open for as long as the calling component is mounted. */
+export function useModalOpen(): void {
+  const openDialog = useAppStore((s) => s.openDialog);
+  const closeDialog = useAppStore((s) => s.closeDialog);
+  useEffect(() => {
+    openDialog();
+    return closeDialog;
+  }, [openDialog, closeDialog]);
+}
 
 export const useAppStore = create<AppStore>((set, get) => ({
   state: null,
@@ -47,7 +67,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   activityOpen: false,
   toast: null,
   preview: null,
-  dialogOpen: false,
+  dialogOpen: 0,
+  pendingSelectKey: null,
   setState: (state) => set({ state }),
   select: (selectedKey) => set({ selectedKey }),
   setGroupBy: (groupBy) => set({ groupBy }),
@@ -64,5 +85,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ toast: null });
   },
   setPreview: (preview) => set({ preview }),
-  setDialogOpen: (dialogOpen) => set({ dialogOpen }),
+  openDialog: () => set((s) => ({ dialogOpen: s.dialogOpen + 1 })),
+  closeDialog: () =>
+    set((s) => ({ dialogOpen: Math.max(0, s.dialogOpen - 1) })),
+  setPendingSelectKey: (pendingSelectKey) => {
+    clearTimeout(pendingTimer);
+    set({ pendingSelectKey });
+    if (pendingSelectKey !== null) {
+      pendingTimer = setTimeout(
+        () => set({ pendingSelectKey: null }),
+        PENDING_SELECT_MS,
+      );
+    }
+  },
 }));

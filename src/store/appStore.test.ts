@@ -105,4 +105,38 @@ describe("appStore", () => {
     s.setPreview(null);
     expect(useAppStore.getState().preview).toBeNull();
   });
+
+  it("counts open dialogs so nested ones do not release the shortcuts early", () => {
+    const { openDialog, closeDialog } = useAppStore.getState();
+    expect(useAppStore.getState().dialogOpen).toBe(0);
+    openDialog();
+    openDialog();
+    expect(useAppStore.getState().dialogOpen).toBe(2);
+    closeDialog();
+    expect(useAppStore.getState().dialogOpen).toBe(1);
+    closeDialog();
+    closeDialog();
+    expect(useAppStore.getState().dialogOpen).toBe(0);
+  });
+
+  it("holds a pending selection for 10 s, then drops it", () => {
+    const { setPendingSelectKey } = useAppStore.getState();
+    setPendingSelectKey("buildbox::w3:p1");
+    expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p1");
+    vi.advanceTimersByTime(9_999);
+    expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p1");
+    vi.advanceTimersByTime(1);
+    expect(useAppStore.getState().pendingSelectKey).toBeNull();
+  });
+
+  it("a newer pending selection restarts the clock and null clears it", () => {
+    const { setPendingSelectKey } = useAppStore.getState();
+    setPendingSelectKey("buildbox::w3:p1");
+    vi.advanceTimersByTime(6_000);
+    setPendingSelectKey("buildbox::w3:p2");
+    vi.advanceTimersByTime(6_000);
+    expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p2");
+    setPendingSelectKey(null);
+    expect(useAppStore.getState().pendingSelectKey).toBeNull();
+  });
 });

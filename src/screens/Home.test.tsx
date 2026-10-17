@@ -64,6 +64,8 @@ function setup(state: AppState | null = defaultState()) {
     view: { kind: "home" },
     toast: null,
     preview: null,
+    dialogOpen: 0,
+    pendingSelectKey: null,
   });
   const user = userEvent.setup();
   render(<Home />);
@@ -91,7 +93,9 @@ beforeEach(() => {
   invoke.mockImplementation(async (name: string) =>
     name === "list_terminals"
       ? { installed: ["ghostty"], default: "ghostty" }
-      : null,
+      : name === "list_agent_kinds"
+        ? ["claude"]
+        : null,
   );
 });
 
@@ -461,6 +465,75 @@ describe("Home", () => {
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     await user.keyboard("{Backspace}");
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it("the_new_session_sheet_opens_over_home_and_escape_hands_the_shortcuts_back", async () => {
+    const user = setup();
+    await user.keyboard("{Meta>}n{/Meta}");
+    const dialog = await screen.findByRole("dialog", { name: "New session" });
+    expect(dialog).toBeInTheDocument();
+    expect(useAppStore.getState().dialogOpen).toBe(1);
+    // Home's shortcuts stand down while the sheet is up.
+    await user.keyboard("{Meta>}r{/Meta}");
+    expect(invoke).not.toHaveBeenCalledWith("refresh_now", {});
+    await user.keyboard("{Escape}");
+    expect(useAppStore.getState().sheet).toBeNull();
+    expect(useAppStore.getState().dialogOpen).toBe(0);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.keyboard("{Meta>}r{/Meta}");
+    expect(invoke).toHaveBeenCalledWith("refresh_now", {});
+  });
+
+  it("the_plus_session_button_opens_the_sheet_and_focus_returns_to_it_on_cancel", async () => {
+    const user = setup();
+    const button = screen.getAllByRole("button", {
+      name: /^New session in /,
+    })[0];
+    await user.click(button);
+    expect(
+      await screen.findByRole("dialog", { name: "New session" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(button).toHaveFocus();
+  });
+
+  describe("a_just_created_session", () => {
+    const KEY = "buildbox::w9:p9";
+    const withNewPane = () => {
+      const m = machine("buildbox");
+      m.snapshot!.panes.push({
+        ...m.snapshot!.panes[0],
+        pane_id: "w9:p9",
+        terminal_id: "term-99",
+      });
+      return appState(m, machine("gpubox"));
+    };
+
+    it("is_selected_once_its_row_shows_up", () => {
+      setup();
+      act(() => useAppStore.getState().setPendingSelectKey(KEY));
+      expect(useAppStore.getState().selectedKey).toBeNull();
+      act(() => useAppStore.getState().setState(withNewPane()));
+      expect(useAppStore.getState().selectedKey).toBe(KEY);
+      expect(useAppStore.getState().pendingSelectKey).toBeNull();
+    });
+
+    it("is_dropped_after_10_seconds_if_it_never_shows_up", () => {
+      vi.useFakeTimers();
+      try {
+        setup();
+        act(() => useAppStore.getState().setPendingSelectKey(KEY));
+        act(() => {
+          vi.advanceTimersByTime(10_000);
+        });
+        expect(useAppStore.getState().pendingSelectKey).toBeNull();
+        act(() => useAppStore.getState().setState(withNewPane()));
+        expect(useAppStore.getState().selectedKey).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("shows_a_reported_error_and_dismisses_it_after_8_seconds", () => {

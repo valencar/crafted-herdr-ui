@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from "react";
+import { useModalOpen } from "../store/appStore";
 
 type Props = {
   title: string;
@@ -12,7 +13,8 @@ type Props = {
 
 /**
  * A modal confirmation. Focus starts on Cancel (the safe choice), Tab stays inside, Escape
- * cancels, and focus returns to where it was. Every destructive action goes through this.
+ * cancels, and focus returns to where it was. While mounted it counts as an open modal, so
+ * keyboard shortcuts stand down. Every destructive action goes through this.
  */
 export function ConfirmDialog({
   title,
@@ -22,6 +24,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: Props) {
+  useModalOpen();
   const titleId = useId();
   const bodyId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);

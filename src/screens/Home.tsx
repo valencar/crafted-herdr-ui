@@ -22,6 +22,7 @@ import {
 import { invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
 import { useAppStore, type GroupBy } from "../store/appStore";
+import { NewSession } from "./NewSession";
 
 const GROUP_TITLE: Record<GroupBy, string> = {
   project: "By project",
@@ -93,6 +94,8 @@ export function Home() {
   const preview = useAppStore((s) => s.preview);
   const report = useAppStore((s) => s.reportError);
   const dismissToast = useAppStore((s) => s.clearToast);
+  const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
+  const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
 
   const nowMs = useNow(30_000);
   const [query, setQuery] = useState("");
@@ -127,6 +130,14 @@ export function Home() {
       select(null);
     }
   }, [state, rows, selectedKey, select]);
+
+  // A session was just created: select its row once the next poll lists it.
+  useEffect(() => {
+    if (pendingSelectKey && rows.some((r) => r.key === pendingSelectKey)) {
+      select(pendingSelectKey);
+      setPendingSelectKey(null);
+    }
+  }, [pendingSelectKey, rows, select, setPendingSelectKey]);
 
   const visible = useMemo(
     () => rows.filter((r) => matches(r, query)),
@@ -185,7 +196,7 @@ export function Home() {
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (sheet || useAppStore.getState().dialogOpen) return;
+      if (sheet || useAppStore.getState().dialogOpen > 0) return;
       if (e.metaKey) {
         if (e.key === "k") {
           e.preventDefault();
@@ -382,6 +393,7 @@ export function Home() {
       {closingRow && (
         <CloseConfirm row={closingRow} onDone={() => setClosingKey(null)} />
       )}
+      {sheet === "new-session" && <NewSession terminalName={terminalName} />}
       {toast && <Toast message={toast} onDismiss={dismissToast} />}
     </div>
   );

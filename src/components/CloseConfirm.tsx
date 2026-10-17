@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
@@ -6,8 +5,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 
 /**
  * The confirmation for closing a pane, and the close itself. Every way to close a session
- * (the inspector's Close button, ⌫ on a row) renders this. While it is mounted the store's
- * `dialogOpen` is set, so keyboard shortcuts stand down.
+ * (the inspector's Close button, ⌫ on a row) renders this.
  */
 export function CloseConfirm({
   row,
@@ -18,12 +16,6 @@ export function CloseConfirm({
   onDone: () => void;
 }) {
   const reportError = useAppStore((s) => s.reportError);
-  const setDialogOpen = useAppStore((s) => s.setDialogOpen);
-
-  useEffect(() => {
-    setDialogOpen(true);
-    return () => setDialogOpen(false);
-  }, [setDialogOpen]);
 
   return (
     <ConfirmDialog

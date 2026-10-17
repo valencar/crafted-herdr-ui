@@ -22,7 +22,7 @@ const row = {
 
 beforeEach(() => {
   invoke.mockReset().mockResolvedValue(null);
-  useAppStore.setState({ toast: null, dialogOpen: false });
+  useAppStore.setState({ toast: null, dialogOpen: 0 });
 });
 
 it("asks first, closes the pane on confirm and says it is done", async () => {
@@ -57,7 +57,7 @@ it("reports a failed close", async () => {
 
 it("flags a dialog as open while it is mounted", () => {
   const { unmount } = render(<CloseConfirm row={row} onDone={() => {}} />);
-  expect(useAppStore.getState().dialogOpen).toBe(true);
+  expect(useAppStore.getState().dialogOpen).toBe(1);
   unmount();
-  expect(useAppStore.getState().dialogOpen).toBe(false);
+  expect(useAppStore.getState().dialogOpen).toBe(0);
 });
