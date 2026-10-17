@@ -15,7 +15,7 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 | `actions.rs`, `commands.rs` | argv builders (pure) plus `#[tauri::command]` wrappers (`commands.rs` holds only the wrappers and their small helpers) |
 | `terminal/` | `attach_argv`, `shell_quote`, one launcher per terminal app; `open.rs` is what "Open" runs (attach or full UI, the launch spec, the command-log entry) and takes the home dir, so it knows nothing of Tauri |
 | `preview.rs` | `PreviewManager` (the live preview, emitting only changed frames), `PreviewFrame`, the one-line pane read |
-| `ssh_config.rs`, `machine_setup.rs` | Host alias parsing; pty-driven `machine add` |
+| `ssh_config.rs`, `machine_setup/` | Host alias parsing; pty-driven `machine add` (`transcript.rs` is the pure prompt/step parser and `SetupRun`; `mod.rs` the pty and thread driver) |
 | `settings.rs` | `Settings` (merge + validation), the `settings.json` store, herdr re-resolution (`HerdrLocator`) |
 | `notify.rs`, `tray.rs` | notifications from `Transition`s; tray, badge, popover and Settings windows, global shortcut |
 
