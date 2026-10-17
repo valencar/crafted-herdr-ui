@@ -59,6 +59,7 @@ export function NewSession({ terminalName }: Props) {
   const reportError = useAppStore((s) => s.reportError);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
   const setPendingOpen = useAppStore((s) => s.setPendingOpen);
+  const openTarget = useAppStore((s) => s.settings?.open_target ?? "app");
   // Read once: the prefill only seeds the form.
   const [prefill] = useState(() => useAppStore.getState().sheetPrefill);
 
@@ -319,7 +320,9 @@ export function NewSession({ terminalName }: Props) {
               checked={openAfter}
               onChange={(e) => setOpenAfter(e.target.checked)}
             />
-            Open in {terminalName} when ready
+            {openTarget === "app"
+              ? "Open here when ready"
+              : `Open in ${terminalName} when ready`}
           </label>
           <button type="button" className="btn sheet-cancel" onClick={close}>
             Cancel

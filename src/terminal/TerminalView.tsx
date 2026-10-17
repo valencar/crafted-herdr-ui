@@ -21,6 +21,12 @@ import { xtermTheme } from "./xtermTheme";
 const RESIZE_DEBOUNCE_MS = 50;
 
 /** What the find bar (in the panel) can ask of a tab's terminal. */
+/** A sheet or a dialog is open, so the terminal must not take keyboard focus. */
+function modalOpen(): boolean {
+  const { sheet, dialogOpen } = useAppStore.getState();
+  return sheet !== null || dialogOpen > 0;
+}
+
 export type TerminalHandle = {
   findNext(q: string): boolean;
   findPrevious(q: string): boolean;
@@ -159,16 +165,18 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
   }, [fontSize, fitNow]);
 
   // Focus the terminal when it becomes visible, and again once a reattach or retry succeeds
-  // (the overlay button that had focus is gone by then).
+  // (the overlay button that had focus is gone by then). Never while a sheet or a dialog is
+  // open: a tab can open on its own (a notification, the popover), and the user's next keys
+  // belong to the sheet, not to the herdr pane behind it.
   const live = tab.state === "live";
   useEffect(() => {
-    if (active) termRef.current?.focus();
+    if (active && !modalOpen()) termRef.current?.focus();
   }, [active, live]);
 
   // The overlay's default button takes focus, so Enter reattaches or retries.
   const overlay = tab.state === "detached" || tab.state === "error";
   useEffect(() => {
-    if (active && overlay) overlayButtonRef.current?.focus();
+    if (active && overlay && !modalOpen()) overlayButtonRef.current?.focus();
   }, [active, overlay]);
 
   useImperativeHandle(
@@ -177,7 +185,9 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
       findNext: (q) => searchRef.current?.findNext(q) ?? false,
       findPrevious: (q) => searchRef.current?.findPrevious(q) ?? false,
       clearSearch: () => searchRef.current?.clearDecorations(),
-      focus: () => termRef.current?.focus(),
+      focus: () => {
+        if (!modalOpen()) termRef.current?.focus();
+      },
     }),
     [],
   );

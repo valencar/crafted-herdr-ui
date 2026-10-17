@@ -344,6 +344,27 @@ it("open-row event opens the tab", async () => {
   useAppStore.setState({ settings: null });
 });
 
+it("opens the tab but leaves the sheet alone when focus-row or open-row arrives behind it", async () => {
+  useAppStore.setState({
+    view: { kind: "home" },
+    settings: { open_target: "app" } as unknown as Settings,
+  });
+  listBuildbox();
+  render(<App />);
+  await waitFor(() => expect(ipc.onOpenRow).toHaveBeenCalled());
+  await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+  act(() => useAppStore.getState().openNewSession());
+  const sheet = await screen.findByRole("dialog", { name: "New session" });
+  act(() => handler(ipc.onOpenRow)("buildbox::w1:p1"));
+  act(() => handler(ipc.onFocusRow)("buildbox::w1:p2"));
+  // The tabs exist (the view is a stub here; TerminalView's own tests cover that it takes no
+  // focus), and the sheet is still up.
+  expect(useTerminalStore.getState().tabs).toHaveLength(2);
+  expect(useAppStore.getState().sheet).toBe("new-session");
+  expect(sheet).toBeInTheDocument();
+  useAppStore.setState({ selectedKey: null, settings: null });
+});
+
 it("opens the New session sheet when the tray or the popover asks", async () => {
   useAppStore.setState({ sheet: null, view: { kind: "home" } });
   render(<App />);

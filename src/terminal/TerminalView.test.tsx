@@ -361,6 +361,38 @@ describe("TerminalView", () => {
     expect(tabState().state).toBe("live");
   });
 
+  it("focuses the terminal when it opens, with no sheet or dialog up", async () => {
+    useAppStore.setState({ sheet: null, dialogOpen: 0 });
+    render(<Harness />);
+    await flush();
+    expect(term().focus).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a sheet", { sheet: "new-session" as const, dialogOpen: 0 }],
+    ["a dialog", { sheet: null, dialogOpen: 1 }],
+  ])(
+    "never takes focus while %s is open, and focus stays where it was",
+    async (_name, modal) => {
+      useAppStore.setState(modal);
+      const handle = createRef<TerminalHandle>();
+      render(
+        <>
+          <input aria-label="Folder" />
+          <Harness handle={handle} />
+        </>,
+      );
+      screen.getByLabelText("Folder").focus();
+      await flush();
+      // The tab is up and live (opening it is not blocked), but it did not take focus.
+      expect(tabState().state).toBe("live");
+      handle.current?.focus();
+      expect(term().focus).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("Folder")).toHaveFocus();
+      useAppStore.setState({ sheet: null, dialogOpen: 0 });
+    },
+  );
+
   it("exposes_search_and_focus_through_the_ref", async () => {
     const handle = createRef<TerminalHandle>();
     render(<Harness handle={handle} />);
