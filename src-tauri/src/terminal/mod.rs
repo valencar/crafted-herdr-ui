@@ -7,6 +7,7 @@ pub mod attach;
 pub mod launchers;
 pub mod open;
 pub mod quote;
+pub mod session;
 
 use std::path::PathBuf;
 use std::time::Duration;

@@ -33,6 +33,12 @@ const DEFAULTS: SettingsData = {
   group_by: "project",
   global_shortcut_enabled: true,
   open_after_create: true,
+  open_target: "app",
+  terminal_placement: "bottom",
+  terminal_panel_size: 320,
+  terminal_font_size: 13,
+  sidebar_collapsed: false,
+  row_density: "comfortable",
 };
 
 const HERDR: HerdrStatus = {
@@ -123,6 +129,31 @@ describe("Settings", () => {
     setup();
     act(() => useAppStore.getState().reportError(new Error("no events")));
     expect(screen.getByRole("alert")).toHaveTextContent("no events");
+  });
+
+  it("Open sessions saves open_target", async () => {
+    const user = await setup({ open_target: "app" }, "Terminal");
+    const group = await screen.findByRole("group", { name: "Open sessions" });
+    const here = within(group).getByRole("button", {
+      name: "In Crafted Herdr",
+    });
+    // The other choice names the terminal that is selected (the detected default here).
+    const external = within(group).getByRole("button", { name: "In Ghostty" });
+    expect(here).toHaveAttribute("aria-pressed", "true");
+    expect(external).toHaveAttribute("aria-pressed", "false");
+    await user.click(external);
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { open_target: "external" },
+    });
+    await waitFor(() =>
+      expect(
+        within(group).getByRole("button", { name: "In Ghostty" }),
+      ).toHaveAttribute("aria-pressed", "true"),
+    );
+    await user.click(here);
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { open_target: "app" },
+    });
   });
 
   it("settings_terminal_radio_disables_missing", async () => {
@@ -287,6 +318,31 @@ describe("Settings", () => {
         "Saved herdr binary not found; using /home/dev/.local/bin/herdr",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("Row density saves row_density", async () => {
+    const user = await setup({ row_density: "comfortable" }, "Appearance");
+    const group = await screen.findByRole("group", { name: "Row density" });
+    const comfortable = within(group).getByRole("button", {
+      name: "Comfortable",
+    });
+    const compact = within(group).getByRole("button", { name: "Compact" });
+    expect(comfortable).toHaveAttribute("aria-pressed", "true");
+    expect(compact).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(compact);
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { row_density: "compact" },
+    });
+    await waitFor(() =>
+      expect(
+        within(group).getByRole("button", { name: "Compact" }),
+      ).toHaveAttribute("aria-pressed", "true"),
+    );
+    await user.click(comfortable);
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { row_density: "comfortable" },
+    });
   });
 
   it("lists the shortcuts and switches the global one", async () => {

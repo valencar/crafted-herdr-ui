@@ -164,7 +164,7 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] With herdr not running locally (or the binary renamed), Home shows "Local isn't answering" with herdr's error, the hint to start herdr, and "Retry now". Start herdr and press Retry now: the card goes away and Local's rows show.
 - [ ] Attach to a pane on a remote workbox whose non-interactive ssh PATH lacks herdr: the terminal prints "herdr not found on <target> (check PATH for non-interactive ssh)" and offers no takeover prompt.
 - [ ] Settings › Terminal › Rescan: install or remove a terminal (or move its .app between /Applications and ~/Applications) and press Rescan: the radio list updates. A terminal Spotlight doesn't know (indexing off) is still found in /Applications.
-- [ ] Settings › herdr CLI › "Attach as: Full herdr UI": the inspector's "what Open runs" box shows the full-UI command (`herdr --remote <target>`), and switching back shows the attach command without reselecting.
+- [ ] Settings › Terminal › "Attach as: Full herdr UI": the inspector's "what Open runs" box shows the full-UI command (`herdr --remote <target>`), and switching back shows the attach command without reselecting.
 - [ ] Add workbox for a host that already has a profile, with a different remote session: the button is enabled. With the same session (or none, when the profile is `default`) it says "Already added as <label>".
 - [ ] Unplug the network for one poll interval (a blip of 1-2 failed polls) while an agent becomes blocked: a notification fires after the machine recovers. After a longer outage (3 or more failed polls), nothing fires for what changed meanwhile.
 
@@ -172,3 +172,34 @@ None of these were run by the implementer (they need a GUI session or a real her
 
 - [ ] Toggle a notification setting within 2 s of launching the app: it saves at once, instead of waiting for herdr to be located. A herdr path saved in that window is picked up too (Settings › herdr CLI shows the saved path as found).
 - [ ] With Settings (or the menu-bar popover) open and the main window hidden or behind it, click the Dock icon: the main window comes to the front.
+
+## v0.2
+
+- [ ] ⌘W with no tab open does nothing; the red button still hides the window.
+- [ ] ⌘C/⌘V work in text inputs (Edit menu).
+- [ ] Menu shortcuts fire while a terminal has focus.
+- [ ] ⌘, opens Settings from the menu; ⌘W with the Settings window focused closes it.
+- [ ] The menu bar shows App, Edit, View, Terminal and Window with the shortcuts of spec §2.4, and no Close Window item.
+- [ ] A terminal tab renders with the bundled Geist Mono at the right cell width on first open (no misaligned columns after the font loads) and honours the terminal font-size setting; the 16 ANSI colors read well on the dark background (`ls --color`, a TUI).
+- [ ] In a terminal tab, ⌘-click on a URL copies it and shows "Link copied"; a plain click does nothing and no browser opens.
+- [ ] An exited or detached tab shows "Detached" with Reattach focused (Enter reattaches); Retry works after a failed open; closing the tab leaves the herdr pane running.
+- [ ] Resizing the window or panel reflows the running program in the active tab; inactive tabs catch up when shown.
+- [ ] Typing in a tab: ⌃C, arrows, Backspace and a full-screen agent TUI work, and none of those keys moves Home's selection or opens its Close dialog.
+- [ ] Panel resize and placement persist: drag the handle (and use the arrow keys on it), quit and relaunch, and the panel comes back at the same size and on the same edge (bottom or right). On the right, Home's Inspector is hidden while the panel is open.
+- [ ] Tabs survive Home ↔ Workbox: scrollback and the running program are intact after switching screens and after ⌃` hides and shows the panel.
+- [ ] A tab for an agent that needs you is highlighted in the tab strip, and the tab shows "Opening…" until its session is up.
+- [ ] ⌘F inside a terminal opens the find bar (Enter next, ⇧Enter previous, Esc closes and returns focus to the terminal); ⌘F elsewhere focuses Home's search box.
+- [ ] ⌘+ / ⌘− / ⌘0 change the terminal font size within 9 to 24 and reset to 13, and the size persists.
+- [ ] With the panel open, the Close dialog, the New session sheet and the Activity drawer sit above it (dimmed scrim over the terminal, no terminal layer on top).
+- [ ] Notification click opens the tab.
+- [ ] Popover Open brings the main window with the tab.
+- [ ] Open in {Terminal} still launches the external app.
+- [ ] ⌘K opens the command palette from Home, the Workbox screen and while a terminal has focus; it sits above the terminal panel (dimmed scrim over it) and under the Activity drawer; ↑/↓ move, Enter runs, ⌘Enter opens an agent the other way (here vs. the external terminal), Esc closes and returns focus to where it was.
+- [ ] In the palette, typing finds agents, projects, workboxes and commands; an empty query lists needs-you agents first, then commands; choosing a project scrolls Home to its group, and a workbox opens its screen. While it is open, typing never reaches the terminal behind it.
+- [ ] Compact density and collapsed sidebar look right at 50+ agents.
+- [ ] ⌘J cycles through the agents that need you (blocked first), selects each on Home and opens it in the terminal panel; with nobody waiting it shows "Nobody needs you right now."
+- [ ] ⌘\ moves the terminal panel between the bottom and the right edge (and shows it if hidden), and the choice survives a relaunch.
+- [ ] ⌘B collapses the sidebar to a 56 px rail (workbox initials with health dots, tooltips naming each workbox and its health) and back, on Home and on the Workbox screen; the rail's expand button works.
+- [ ] Window size and position persist across quit and relaunch.
+- [ ] Quitting with open terminal tabs leaves every herdr pane running (check `herdr pane list`).
+- [ ] ⌘C/⌘V copy and paste work inside a terminal tab.

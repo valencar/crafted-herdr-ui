@@ -1,16 +1,19 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AppState } from "./bindings/AppState";
 import type { ActionError } from "./bindings/ActionError";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CreatedSession } from "./bindings/CreatedSession";
 import type { HerdrStatus } from "./bindings/HerdrStatus";
+import type { MenuId } from "./bindings/MenuId";
 import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
 import type { SetupEvent } from "./bindings/SetupEvent";
 import type { Settings } from "./bindings/Settings";
 import type { ShortcutStatus } from "./bindings/ShortcutStatus";
+import type { TermEvent } from "./bindings/TermEvent";
+import type { TermTarget } from "./bindings/TermTarget";
 import type { TerminalList } from "./bindings/TerminalList";
 
 /** Every Tauri command the UI may call, mapped to its result. A Rust `()` arrives as `null`. */
@@ -60,6 +63,12 @@ export type CommandResults = {
   show_main: null;
   show_main_new_session: null;
   open_settings: null;
+  /** The new terminal's id, for `term_write`, `term_resize` and `term_close`. */
+  term_open: number;
+  term_write: null;
+  term_resize: null;
+  term_close: null;
+  show_main_open_row: null;
 };
 export type CommandName = keyof CommandResults;
 
@@ -129,6 +138,14 @@ export type CommandArgs = {
   show_main: undefined;
   show_main_new_session: undefined;
   open_settings: undefined;
+  /** `onEvent` (the output channel) is added by `openTerm`; callers don't pass it. */
+  term_open: { target: TermTarget; cols: number; rows: number };
+  /** Keystrokes and pastes only; the command a tab runs is built on the Rust side. */
+  term_write: { id: number; data: string };
+  term_resize: { id: number; cols: number; rows: number };
+  /** Kills the attach client; the herdr pane keeps running. */
+  term_close: { id: number };
+  show_main_open_row: { machineId: string; paneId: string };
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([
@@ -221,4 +238,38 @@ export function onFocusRow(cb: (key: string) => void): Promise<() => void> {
 /** Subscribes to `"new-session"`: the tray or the popover asked for the New session sheet. */
 export function onNewSession(cb: () => void): Promise<() => void> {
   return listen("new-session", () => cb());
+}
+
+/** Subscribes to `"menu"`: a native menu item was chosen; the payload is its id. */
+export function onMenu(cb: (id: MenuId) => void): Promise<() => void> {
+  return listen<MenuId>("menu", (event) => cb(event.payload));
+}
+
+/** Subscribes to `"open-row"`: the popover asked the main window to open a row (its key). */
+export function onOpenRow(cb: (key: string) => void): Promise<() => void> {
+  return listen<string>("open-row", (event) => cb(event.payload));
+}
+
+/**
+ * Opens a terminal tab on `target` and streams its output to `onEvent`. Resolves to the id the
+ * `term_*` commands take. Rejects with an `ActionError`.
+ */
+export async function openTerm(
+  target: TermTarget,
+  cols: number,
+  rows: number,
+  onEvent: (e: TermEvent) => void,
+): Promise<number> {
+  const channel = new Channel<TermEvent>();
+  channel.onmessage = onEvent;
+  try {
+    return await invoke<number>("term_open", {
+      target,
+      cols,
+      rows,
+      onEvent: channel,
+    });
+  } catch (e) {
+    throw toActionError(e);
+  }
 }

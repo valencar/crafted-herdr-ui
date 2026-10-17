@@ -13,10 +13,11 @@ import type { Workspace } from "../lib/bindings/Workspace";
 import { shortPath } from "../lib/format";
 import { groupByProject, isNeedsYou, needsYou, toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
-import { openRow, useOpenWhenListed } from "../lib/openRow";
+import { openFull, openRow, useOpenWhenListed } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
 import {
   isEditable,
+  isInTerminal,
   scrollToId,
   openSettings,
   terminalName as terminalLabel,
@@ -47,6 +48,7 @@ export function Workbox({ machineId }: { machineId: string }) {
   const report = useAppStore((s) => s.reportError);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
+  const compact = useAppStore((s) => s.settings?.row_density === "compact");
 
   const nowMs = useNow(30_000);
   const { current: terminal } = useTerminals();
@@ -82,7 +84,12 @@ export function Workbox({ machineId }: { machineId: string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (sheet || useAppStore.getState().dialogOpen > 0) return;
-      if (e.metaKey && e.key === "n" && !isEditable(e.target)) {
+      if (
+        e.metaKey &&
+        e.key === "n" &&
+        !isEditable(e.target) &&
+        !isInTerminal(e.target)
+      ) {
         e.preventDefault();
         openNewSession({ machineId });
       }
@@ -352,7 +359,7 @@ export function Workbox({ machineId }: { machineId: string }) {
   const label = machine?.label ?? machineId;
 
   return (
-    <div className="app">
+    <div className={`app${compact ? " density-compact" : ""}`}>
       <header className="header" data-tauri-drag-region>
         <nav className="breadcrumb" aria-label="Breadcrumb">
           <button type="button" className="crumb" onClick={goHome}>
@@ -366,7 +373,7 @@ export function Workbox({ machineId }: { machineId: string }) {
             type="button"
             className="btn"
             disabled={machine === null}
-            onClick={() => run(invokeTyped("open_full_herdr", { machineId }))}
+            onClick={() => void openFull(machineId, label)}
           >
             Open full Herdr ↗
           </button>

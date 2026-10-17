@@ -84,6 +84,12 @@ const DEFAULT_SETTINGS: Settings = {
   group_by: "project",
   global_shortcut_enabled: true,
   open_after_create: true,
+  open_target: "app",
+  terminal_placement: "bottom",
+  terminal_panel_size: 320,
+  terminal_font_size: 13,
+  sidebar_collapsed: false,
+  row_density: "comfortable",
 };
 
 const KINDS = ["claude", "codex"];
@@ -602,7 +608,7 @@ describe("NewSession after create", () => {
 
   it("queues the open and the selection for when the row appears, and closes the sheet", async () => {
     const user = setup();
-    expect(screen.getByLabelText("Open in Ghostty when ready")).toBeChecked();
+    expect(screen.getByLabelText("Open here when ready")).toBeChecked();
     await createValid(user);
     await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
     // The pane is not in the state yet, so open_session must wait for Home.
@@ -616,20 +622,28 @@ describe("NewSession after create", () => {
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p1");
   });
 
+  it("names the terminal in the option when open_target is external", () => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, open_target: "external" },
+    });
+    setup();
+    expect(screen.getByLabelText("Open in Ghostty when ready")).toBeChecked();
+    expect(screen.queryByLabelText("Open here when ready")).toBeNull();
+    useAppStore.setState({ settings: null });
+  });
+
   it("starts unchecked when the settings say not to open after creating", () => {
     useAppStore.setState({
       settings: { ...DEFAULT_SETTINGS, open_after_create: false },
     });
     setup();
-    expect(
-      screen.getByLabelText("Open in Ghostty when ready"),
-    ).not.toBeChecked();
+    expect(screen.getByLabelText("Open here when ready")).not.toBeChecked();
     useAppStore.setState({ settings: null });
   });
 
   it("queues no open when the box is unchecked", async () => {
     const user = setup();
-    await user.click(screen.getByLabelText("Open in Ghostty when ready"));
+    await user.click(screen.getByLabelText("Open here when ready"));
     await createValid(user);
     await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
     expect(useAppStore.getState().pendingOpen).toBeNull();

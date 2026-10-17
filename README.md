@@ -14,12 +14,14 @@ Screenshots coming soon.
 
 - **Needs you first.** Blocked and done agents sit at the top of Home, ahead of everything else.
 - **Group by project, workbox or status.** Switch views instantly; the sidebar jumps to any group.
-- **Open in your terminal.** One click (or ⌘↩) attaches the pane in Ghostty, iTerm2, Terminal, Warp, WezTerm, Kitty, Alacritty, or a command of your own.
+- **Terminal inside the app.** One click (or ⌘↩) attaches the pane in a tab at the bottom or right of the window, with several tabs open at once. If you would rather use another terminal, "Open in {Terminal}" attaches it in Ghostty, iTerm2, Terminal, Warp, WezTerm, Kitty, Alacritty, or a command of your own.
+- **Command palette and fast navigation.** ⌘K finds agents, projects, workboxes and commands; ⌘J jumps to the next agent that needs you.
+- **Split view and a native menu.** ⌘\ moves the terminal panel between the bottom and the right edge. The macOS menu bar carries every shortcut, and they work while a terminal has the keyboard.
 - **Live preview and reply.** The inspector follows a pane's recent output and lets you answer an idle agent. A blocked agent is never answered for you.
 - **New session.** Start a shell or an agent in a new tab, a split, a new workspace or a worktree, with the exact commands shown before you run them.
 - **Workbox management.** Check, reconnect, rename, enable, disable and remove workboxes. Add one through a guided sheet around `herdr machine add`.
 - **Menu bar and notifications.** A tray icon with a count, a compact "Needs you" popover, and a notification when an agent becomes blocked or done.
-- **Activity drawer.** The `herdr` commands the app runs are listed, with a Copy button. That includes commands it hands to your terminal. Quiet probes (`herdr --version` and `agent start --help`) are not logged.
+- **Activity drawer.** The `herdr` commands the app runs are listed, with a Copy button. That includes the attach commands it runs in a tab of its own window ("opened in Crafted Herdr") and the ones it hands to your terminal. Quiet probes (`herdr --version` and `agent start --help`) are not logged.
 
 ## Requirements
 
@@ -54,8 +56,8 @@ Crafted Herdr talks to herdr only through its public CLI. It has no private prot
 | What you do | What it runs |
 |---|---|
 | Keep state fresh | `herdr api snapshot`, `herdr machine list --json`, `herdr machine status <id> --json`, `herdr --version` |
-| Open a pane | your terminal runs `herdr terminal attach <terminal_id>`, or `ssh -t <target> …` for a remote workbox |
-| Open full Herdr | `herdr`, or `herdr --remote <target> [--session <name>]`, in your terminal |
+| Open a pane | a tab in the app, or your terminal, runs `herdr terminal attach <terminal_id>`, or `ssh -t <target> …` for a remote workbox |
+| Open full Herdr | `herdr`, or `herdr --remote <target> [--session <name>]`, in a tab or your terminal |
 | New session | `tab create`, `pane split`, `workspace create` or `worktree create`, then `agent start` |
 | Rename | `agent rename` (agents) or `pane rename` (shells); `tab rename`, `workspace rename` |
 | Close | `pane close`, `tab close`, `workspace close`, always after a confirmation |
@@ -65,9 +67,24 @@ Crafted Herdr talks to herdr only through its public CLI. It has no private prot
 | Manage workboxes | `machine rename`, `machine enable`, `machine disable`, `machine remove`, `machine reconnect` |
 | Add a workbox | `machine add <target> [--label …] [--remote-session …]` |
 
-The commands are visible in the **Activity drawer** (⌘⇧A): the calls the app runs itself, and the ones it opens in your terminal (marked "opened in …", since the app can't see how they end). The version and help probes (`herdr --version`, `herdr agent start --help`) are not logged. The app never installs herdr, stops or replaces a server, answers a blocked agent, or passes `--takeover` or `--trust-repository` without an explicit click from you.
+The commands are visible in the **Activity drawer** (⌘⇧A): the calls the app runs itself, and the ones it opens in a tab of its own window (marked "opened in Crafted Herdr") or in your terminal (marked "opened in …", since the app can't see how they end). The version and help probes (`herdr --version`, `herdr agent start --help`) are not logged. The app never installs herdr, stops or replaces a server, answers a blocked agent, or passes `--takeover` or `--trust-repository` without an explicit click from you.
+
+## Terminal inside the app
+
+"Open" attaches the pane in a terminal tab inside the window. The tab runs the same command "Open in {Terminal}" runs: `herdr terminal attach <terminal_id>` for a local pane, `ssh -t <target> …` for a remote one, or the full herdr UI when Settings › Terminal › "Attach as" is "Full herdr UI on that workbox". The app only ever runs the command it builds itself; nothing you type is turned into a command.
+
+- **Panel and tabs.** The panel sits at the bottom of the window or on its right (⌘\ switches). Drag its edge to resize it, and show or hide it with ⌃`. Each tab shows the agent's name, the workbox and the live status with its text label, and a tab whose agent needs you is highlighted. Tabs stay open when you move between Home and a Workbox screen. Opening a pane that already has a tab focuses that tab. At most 16 tabs can be open at once.
+- **Closing only detaches.** Closing a tab (⌘W), quitting the app or a crash ends the attach client and nothing else: your herdr pane and agent keep running. "Close pane" is a separate action and always asks first. When an attach ends by itself (herdr's detach key, an SSH drop, another client taking the session), the tab stays open as "Detached", with **Reattach** (Enter) and **Close tab** (⌘W).
+- **Tabs are not restored at launch.** The app never reattaches by itself, so it never takes a session over without you.
+- **Takeover prompts and "herdr not found"** appear inside the tab, and you answer them there.
+- **Typing belongs to the terminal.** Keys typed in the panel (Backspace, arrows, ⌃C and the rest) never trigger Home's list shortcuts. Menu shortcuts still work. ⌘C and ⌘V copy and paste. ⌘F finds in the active tab, and ⌘+, ⌘− and ⌘0 change the font size (saved).
+- **Links are copy-only.** ⌘-click on a URL copies it and shows "Link copied". The app opens no web link other than https://herdr.dev.
+- **Open in still available.** Settings › Terminal › "Open sessions" (In Crafted Herdr, or in your terminal app) chooses what "Open" does everywhere (rows, needs-you cards, the Inspector, ⌘↩, the palette, notifications and the menu-bar popover): open here, or in your terminal app. The Inspector and the needs-you cards always offer the other choice as a second button, and ⌘↩ in the palette opens the other way.
+- **Layout settings.** Window size and position, panel placement and size, terminal font size, the collapsed sidebar and row density (comfortable or compact, in Settings › Appearance) are remembered.
 
 ## Terminal support
+
+These are the external terminals "Open in {Terminal}" can use.
 
 | Terminal | How a session opens |
 |---|---|
@@ -84,16 +101,35 @@ iTerm2 and Terminal are driven with AppleScript, so macOS asks for **Automation*
 
 ## Keyboard shortcuts
 
+The native menu bar owns these, so they work while a terminal has the keyboard, and you can find them in the menus.
+
+| Shortcut | Menu | Action |
+|---|---|---|
+| ⌘K | View | Command palette |
+| ⌃` | View | Show or hide the terminal panel |
+| ⌘\ | View | Move the terminal panel between the bottom and the right |
+| ⌘B | View | Collapse or expand the sidebar |
+| ⌘J | View | Open the next agent that needs you |
+| ⌘F | View | Find: searches the active terminal tab when the terminal has focus, otherwise focuses Home's search |
+| ⌘= / ⌘− / ⌘0 | View | Bigger, smaller, reset terminal font |
+| ⇧⌘A | View | Activity drawer |
+| ⌘W | Terminal | Close (detach) the active tab |
+| ⌃Tab / ⌃⇧Tab | Terminal | Next / previous tab |
+| ⌘1 … ⌘9 | Terminal | Go to tab 1 … 9 |
+| ⌘, | Crafted Herdr | Settings |
+
+Edit has the usual Undo, Redo, Cut, Copy, Paste and Select All. Crafted Herdr has About, Hide, Hide Others, Show All and Quit (⌘H, ⌥⌘H, ⌘Q), and Window has Minimize and Bring All to Front (⌘M for Minimize). There is no Close Window item, so ⌘W with no tab open does nothing; the red button still hides the window.
+
+These work on Home when the focus is not in a terminal:
+
 | Shortcut | Action |
 |---|---|
-| ⌘K | Focus search |
 | ⌘N | New session |
-| ⌘↩ | Open the selected row in your terminal |
+| ⌘↩ | Open the selected row (here or in your terminal, by your Settings choice) |
 | ⌘R | Refresh |
 | ⌫ | Close the selected session (asks first) |
-| ⌘, | Settings |
-| ⌘⇧A | Activity drawer |
-| ⌃⌥⌘H | Show or hide the app from anywhere (global; can be turned off in Settings) |
+
+One shortcut is global rather than in a menu: ⌃⌥⌘H shows or hides the app from anywhere (it can be turned off in Settings).
 
 ## Privacy
 
@@ -101,7 +137,8 @@ iTerm2 and Terminal are driven with AppleScript, so macOS asks for **Automation*
 - The app makes no network calls of its own. Everything goes through your `herdr` CLI, and SSH is done by herdr and OpenSSH.
 - Your SSH keys and agent stay with OpenSSH. The app stores no passwords, keys or tokens, and only reads `Host` aliases from `~/.ssh/config` to suggest targets.
 - No telemetry, no analytics, no accounts.
-- The one link it can open is https://herdr.dev, from the "herdr wasn't found" screen.
+- The one link it can open is https://herdr.dev, from the "herdr wasn't found" screen. Links in a terminal tab are copied, never opened.
+- The terminal fonts and code are bundled with the app; nothing is loaded from the web.
 
 ## Development
 

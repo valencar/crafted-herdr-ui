@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { useAppStore } from "../store/appStore";
+import type { Settings } from "./bindings/Settings";
 import type { TerminalId } from "./bindings/TerminalId";
 import type { TerminalList } from "./bindings/TerminalList";
 import { TERMINAL_LABEL } from "./format";
@@ -68,6 +69,17 @@ export function openSettings(): void {
   );
 }
 
+/** Focuses and selects Home's search box. False if the current screen has none. */
+export function focusSearch(): boolean {
+  const input = document.querySelector<HTMLInputElement>(
+    'input[type="search"]',
+  );
+  if (!input) return false;
+  input.focus();
+  input.select();
+  return true;
+}
+
 /** Focuses a row's button and scrolls it into view. False if no such row is on screen. */
 export function focusRowButton(key: string): boolean {
   const li = [...document.querySelectorAll<HTMLElement>("[data-row-key]")].find(
@@ -101,6 +113,16 @@ export function isEditable(target: EventTarget | null): boolean {
 }
 
 /**
+ * Whether a key press landed inside the terminal panel. What is typed there belongs to the
+ * program in the terminal, never to a screen's shortcuts.
+ */
+export function isInTerminal(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element && target.closest(".terminal-panel") !== null
+  );
+}
+
+/**
  * The one page the app opens in the browser. Nothing is fetched: the default browser loads it,
  * and the capability allows this URL and no other.
  */
@@ -108,4 +130,16 @@ export const INSTALL_URL = "https://herdr.dev";
 
 export function openInstallPage(): Promise<void> {
   return openUrl(INSTALL_URL);
+}
+
+/** Saves part of the settings; the store follows the saved result, and a failure goes to the toast. */
+export function saveSettings(patch: Partial<Settings>): void {
+  const { setSettings, reportError } = useAppStore.getState();
+  invokeTyped("set_settings", { patch }).then(setSettings).catch(reportError);
+}
+
+/** Collapses the sidebar to its rail, or brings the full sidebar back. */
+export function toggleSidebar(): void {
+  const collapsed = useAppStore.getState().settings?.sidebar_collapsed ?? false;
+  saveSettings({ sidebar_collapsed: !collapsed });
 }

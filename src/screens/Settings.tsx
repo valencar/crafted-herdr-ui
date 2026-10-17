@@ -4,6 +4,7 @@ import { StoreToast } from "../components/Toast";
 import type { GroupBy } from "../lib/bindings/GroupBy";
 import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
 import type { OpenMode } from "../lib/bindings/OpenMode";
+import type { RowDensity } from "../lib/bindings/RowDensity";
 import type { AttachMode } from "../lib/bindings/AttachMode";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
@@ -20,6 +21,7 @@ import { useAppStore } from "../store/appStore";
 type SectionId =
   | "general"
   | "terminal"
+  | "appearance"
   | "workboxes"
   | "notifications"
   | "herdr"
@@ -28,6 +30,7 @@ type SectionId =
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "general", label: "General" },
   { id: "terminal", label: "Terminal" },
+  { id: "appearance", label: "Appearance" },
   { id: "workboxes", label: "Workboxes" },
   { id: "notifications", label: "Notifications" },
   { id: "herdr", label: "herdr CLI" },
@@ -43,6 +46,10 @@ const TITLES: Record<SectionId, { title: string; blurb: string }> = {
     title: "Your terminal",
     blurb:
       "Crafted Herdr never draws terminals itself. “Open” hands the session to the app you use every day.",
+  },
+  appearance: {
+    title: "Appearance",
+    blurb: "How much of the agent list fits on screen.",
   },
   workboxes: {
     title: "Workboxes",
@@ -81,6 +88,9 @@ const TEMPLATE_EXAMPLE = "open -na Ghostty --args -e {attach}";
 const SHORTCUTS: [keys: string, what: string][] = [
   ["⌘K", "Search and jump"],
   ["⌘N", "New session"],
+  ["⌘J", "Next agent that needs you"],
+  ["⌘\\", "Move the terminal panel between the bottom and the right"],
+  ["⌘B", "Collapse or expand the sidebar"],
   ["⌘↩", "Open the selected session"],
   ["⌘,", "Settings"],
   ["⌘R", "Refresh now"],
@@ -303,6 +313,7 @@ function TerminalSection({
   update: Update;
 }) {
   const [list, setList] = useState<TerminalList | null>(null);
+  const targetId = useId();
   const whereId = useId();
   const attachId = useId();
   useEffect(() => {
@@ -333,8 +344,37 @@ function TerminalSection({
   const installed = (id: TerminalId) =>
     id === "custom" || (list?.installed.includes(id) ?? false);
 
+  const terminalLabel = selected ? TERMINAL_LABEL[selected] : "your terminal";
+
   return (
     <div className="settings-stack">
+      <div
+        role="group"
+        aria-labelledby={targetId}
+        className="settings-fieldset"
+      >
+        <div id={targetId} className="settings-label">
+          Open sessions
+        </div>
+        <div className="segmented settings-segmented">
+          {(
+            [
+              ["app", "In Crafted Herdr"],
+              ["external", `In ${terminalLabel}`],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={settings.open_target === value}
+              onClick={() => void update({ open_target: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <fieldset className="settings-fieldset">
         <legend className="settings-label">Open sessions in</legend>
         <div className="opt-grid opt-grid-4">
@@ -418,6 +458,49 @@ function TerminalSection({
           void update({ terminal_custom_template })
         }
       />
+    </div>
+  );
+}
+
+function Appearance({
+  settings,
+  update,
+}: {
+  settings: SettingsData;
+  update: Update;
+}) {
+  const densityId = useId();
+  return (
+    <div className="settings-stack">
+      <div
+        role="group"
+        aria-labelledby={densityId}
+        className="settings-fieldset"
+      >
+        <div id={densityId} className="settings-label">
+          Row density
+        </div>
+        <div className="segmented settings-segmented">
+          {(
+            [
+              ["comfortable", "Comfortable"],
+              ["compact", "Compact"],
+            ] as [RowDensity, string][]
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={settings.row_density === value}
+              onClick={() => void update({ row_density: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="muted settings-hint">
+          Compact tightens the space around each agent so more of them fit.
+        </p>
+      </div>
     </div>
   );
 }
@@ -669,6 +752,8 @@ export function Settings() {
           <General settings={settings} update={update} />
         ) : section === "terminal" ? (
           <TerminalSection settings={settings} update={update} />
+        ) : section === "appearance" ? (
+          <Appearance settings={settings} update={update} />
         ) : section === "workboxes" ? (
           <Workboxes />
         ) : section === "notifications" ? (

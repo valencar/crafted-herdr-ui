@@ -15,7 +15,9 @@ import type { AppState } from "../lib/bindings/AppState";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
+import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
+import { useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
 import { Home } from "./Home";
 
@@ -123,6 +125,10 @@ beforeEach(() => {
       emitPreview = cb;
       return () => {};
     });
+  // Most tests are about the external terminal; the app target has its own tests.
+  useAppStore.setState({
+    settings: { open_target: "external" } as unknown as Settings,
+  });
   invoke.mockReset();
   invoke.mockImplementation(async (name: string, args?: { id?: string }) =>
     name === "get_terminals"
@@ -138,6 +144,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  useAppStore.setState({ settings: null });
+  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
 });
 
 describe("Home", () => {
@@ -158,6 +166,44 @@ describe("Home", () => {
     expect(within(cards[0]).queryByText("Mark seen")).toBeNull();
     expect(within(cards[2]).getByText("Mark seen")).toBeInTheDocument();
     expect(await screen.findAllByText("Open in Ghostty ↗")).toHaveLength(4);
+  });
+
+  it("needs_you_cards_pair_the_default_open_with_the_other_way", async () => {
+    setup();
+    await screen.findAllByText("Open in Ghostty ↗");
+    const card = () => within(screen.getAllByRole("article")[0]);
+    expect(
+      card().getByRole("button", { name: "Open in Ghostty ↗" }),
+    ).toHaveClass("btn-primary");
+    expect(card().getByRole("button", { name: "Open here" })).not.toHaveClass(
+      "btn-primary",
+    );
+    cleanup();
+    useAppStore.setState({
+      settings: { open_target: "app" } as unknown as Settings,
+    });
+    setup();
+    await screen.findAllByText("Open in Ghostty");
+    expect(card().getByRole("button", { name: "Open here" })).toHaveClass(
+      "btn-primary",
+    );
+    expect(
+      card().getByRole("button", { name: "Open in Ghostty" }),
+    ).not.toHaveClass("btn-primary");
+  });
+
+  it("open_here_on_a_card_opens_a_tab_without_open_session", async () => {
+    useAppStore.setState({
+      settings: { open_target: "app" } as unknown as Settings,
+    });
+    const user = setup();
+    await user.click(
+      within(screen.getAllByRole("article")[0]).getByRole("button", {
+        name: "Open here",
+      }),
+    );
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
 
   it("selection_is_machine_scoped", async () => {
@@ -339,10 +385,10 @@ describe("Home", () => {
     expect(useAppStore.getState().sheet).toBe("new-session");
   });
 
-  it("cmd_k_focuses_search", async () => {
+  it("cmd_k_is_left_to_the_native_menu", async () => {
     const user = setup();
     await user.keyboard("{Meta>}k{/Meta}");
-    expect(screen.getByRole("searchbox")).toHaveFocus();
+    expect(screen.getByRole("searchbox")).not.toHaveFocus();
   });
 
   it("cmd_r_refreshes", async () => {
@@ -362,6 +408,19 @@ describe("Home", () => {
     expect(second).not.toBe(first);
     await user.keyboard("{ArrowUp}");
     expect(useAppStore.getState().selectedKey).toBe(first);
+  });
+
+  it("cmd_enter_follows_open_target", async () => {
+    useAppStore.setState({
+      settings: { open_target: "app" } as unknown as Settings,
+    });
+    const user = setup();
+    useAppStore.setState({ selectedKey: "buildbox::w1:p1" });
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+      "buildbox::w1:p1",
+    ]);
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
 
   it("cmd_enter_opens_the_selection", async () => {
@@ -428,6 +487,71 @@ describe("Home", () => {
     await user.click(screen.getByRole("searchbox"));
     await user.keyboard("ab{Backspace}");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("typing Backspace, arrows or ⌘↩ inside the terminal panel never reaches Home's list shortcuts", async () => {
+    const user = setup(defaultState(), (home) => (
+      <>
+        {home}
+        <section className="terminal-panel">
+          {/* xterm's own input is a textarea, and so is the find bar's field a plain input. */}
+          <textarea aria-label="terminal input" />
+          <button type="button">Close tab</button>
+        </section>
+      </>
+    ));
+    useAppStore.setState({ selectedKey: "gpubox::w2:p1" });
+    const terminal = screen.getByLabelText("terminal input");
+    terminal.focus();
+    await user.keyboard("{Backspace}{ArrowDown}{ArrowUp}{Delete}");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await user.keyboard("{Meta>}n{/Meta}{Meta>}r{/Meta}");
+    // A non-editable target inside the panel (a tab button) stays the panel's too.
+    screen.getByRole("button", { name: "Close tab" }).focus();
+    await user.keyboard("{Backspace}{ArrowDown}");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useAppStore.getState().selectedKey).toBe("gpubox::w2:p1");
+    expect(useAppStore.getState().sheet).toBeNull();
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("refresh_now", {});
+  });
+
+  it("hides the Inspector while the terminal panel is open on the right", () => {
+    useAppStore.setState({
+      settings: {
+        terminal_placement: "right",
+      } as unknown as Settings,
+    });
+    useTerminalStore.setState({
+      tabs: [
+        {
+          tabKey: "buildbox::w1:p1",
+          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          title: "api-service",
+          machineLabel: "buildbox",
+          state: "live",
+          error: null,
+          termId: 1,
+        },
+      ],
+      activeKey: "buildbox::w1:p1",
+      panelOpen: true,
+    });
+    setup();
+    expect(screen.queryByLabelText("Selected agent")).toBeNull();
+
+    act(() => useTerminalStore.setState({ panelOpen: false }));
+    expect(screen.getByLabelText("Selected agent")).toBeInTheDocument();
+
+    act(() => {
+      useTerminalStore.setState({ panelOpen: true });
+      useAppStore.setState({
+        settings: { terminal_placement: "bottom" } as unknown as Settings,
+      });
+    });
+    expect(screen.getByLabelText("Selected agent")).toBeInTheDocument();
   });
 
   it("clears_the_selection_when_the_row_disappears", async () => {
@@ -644,6 +768,26 @@ describe("Home", () => {
       act(() => useAppStore.getState().setState(withNewPane()));
       expect(useAppStore.getState().selectedKey).toBe(KEY);
       expect(useAppStore.getState().pendingSelectKey).toBeNull();
+    });
+
+    it("is_opened_in_a_tab_when_the_setting_says_app", () => {
+      useAppStore.setState({
+        settings: { open_target: "app" } as unknown as Settings,
+      });
+      setup();
+      act(() =>
+        useAppStore
+          .getState()
+          .setPendingOpen({ key: KEY, machineId: "buildbox", paneId: "w9:p9" }),
+      );
+      act(() => useAppStore.getState().setState(withNewPane()));
+      expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+        KEY,
+      ]);
+      expect(invoke).not.toHaveBeenCalledWith(
+        "open_session",
+        expect.anything(),
+      );
     });
 
     it("is_opened_only_after_its_row_shows_up_and_only_once", () => {

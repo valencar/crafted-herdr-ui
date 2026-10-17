@@ -203,6 +203,9 @@ describe("ActivityDrawer", () => {
   });
 
   it("waits_for_a_slow_read_instead_of_starting_another", async () => {
+    // Exact 1999/2000 ms boundaries: time must move only when the test moves it.
+    vi.useRealTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: false });
     let finish: (log: CommandLogEntry[]) => void = () => {};
     invoke.mockReset();
     invoke.mockImplementation(

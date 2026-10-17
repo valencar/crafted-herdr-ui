@@ -44,6 +44,40 @@ pub enum GroupBy {
     Status,
 }
 
+/// Where a click on a session opens it: in a tab inside this app, or in the user's own terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum OpenTarget {
+    #[default]
+    App,
+    External,
+}
+
+/// Which edge of the main window the terminal panel docks to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum TerminalPlacement {
+    #[default]
+    Bottom,
+    Right,
+}
+
+/// How tightly the session rows are packed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum RowDensity {
+    #[default]
+    Comfortable,
+    Compact,
+}
+
+/// The terminal panel's size in points: its height when docked at the bottom, its width on the right.
+pub const PANEL_SIZE_RANGE: std::ops::RangeInclusive<u32> = 120..=2000;
+pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=24;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
@@ -66,6 +100,13 @@ pub struct Settings {
     pub global_shortcut_enabled: bool,
     /// The default of "Open in <Terminal> when ready" in the New session sheet.
     pub open_after_create: bool,
+    /// Whether "Open" shows the pane in the in-app terminal panel or in the user's terminal.
+    pub open_target: OpenTarget,
+    pub terminal_placement: TerminalPlacement,
+    pub terminal_panel_size: u32,
+    pub terminal_font_size: u8,
+    pub sidebar_collapsed: bool,
+    pub row_density: RowDensity,
 }
 
 impl Default for Settings {
@@ -83,6 +124,12 @@ impl Default for Settings {
             group_by: GroupBy::default(),
             global_shortcut_enabled: true,
             open_after_create: true,
+            open_target: OpenTarget::default(),
+            terminal_placement: TerminalPlacement::default(),
+            terminal_panel_size: 320,
+            terminal_font_size: 13,
+            sidebar_collapsed: false,
+            row_density: RowDensity::default(),
         }
     }
 }
@@ -124,6 +171,20 @@ impl Settings {
                     "{name} must be at least {MIN_POLL_INTERVAL_MS} (1 second)."
                 ));
             }
+        }
+        if !PANEL_SIZE_RANGE.contains(&self.terminal_panel_size) {
+            return Err(format!(
+                "terminal_panel_size must be between {} and {}.",
+                PANEL_SIZE_RANGE.start(),
+                PANEL_SIZE_RANGE.end()
+            ));
+        }
+        if !FONT_SIZE_RANGE.contains(&self.terminal_font_size) {
+            return Err(format!(
+                "terminal_font_size must be between {} and {}.",
+                FONT_SIZE_RANGE.start(),
+                FONT_SIZE_RANGE.end()
+            ));
         }
         Ok(())
     }
@@ -367,7 +428,14 @@ mod tests {
         assert_eq!(s.group_by, GroupBy::Project);
         assert!(s.global_shortcut_enabled);
         assert!(s.open_after_create);
-        // The keys are exactly the spec's (section 8.8) plus `open_after_create`.
+        assert_eq!(s.open_target, OpenTarget::App);
+        assert_eq!(s.terminal_placement, TerminalPlacement::Bottom);
+        assert_eq!(s.terminal_panel_size, 320);
+        assert_eq!(s.terminal_font_size, 13);
+        assert!(!s.sidebar_collapsed);
+        assert_eq!(s.row_density, RowDensity::Comfortable);
+        // The keys are exactly the spec's (section 8.8) plus `open_after_create` and the v0.2
+        // terminal and layout keys.
         let keys: std::collections::BTreeSet<_> = serde_json::to_value(&s)
             .unwrap()
             .as_object()
@@ -388,10 +456,46 @@ mod tests {
             "group_by",
             "global_shortcut_enabled",
             "open_after_create",
+            "open_target",
+            "terminal_placement",
+            "terminal_panel_size",
+            "terminal_font_size",
+            "sidebar_collapsed",
+            "row_density",
         ]
         .map(String::from)
         .into();
         assert_eq!(keys, expected);
+    }
+
+    #[test]
+    fn terminal_font_size_out_of_range_is_rejected() {
+        let base = Settings::default();
+        for ok in [9, 24] {
+            let s = base.merged(&json!({"terminal_font_size": ok})).unwrap();
+            assert_eq!(s.terminal_font_size, ok);
+        }
+        for bad in [8, 25, 300] {
+            assert!(
+                base.merged(&json!({"terminal_font_size": bad})).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn panel_size_out_of_range_is_rejected() {
+        let base = Settings::default();
+        for ok in [120, 2000] {
+            let s = base.merged(&json!({"terminal_panel_size": ok})).unwrap();
+            assert_eq!(s.terminal_panel_size, ok);
+        }
+        for bad in [119, 2001] {
+            assert!(
+                base.merged(&json!({"terminal_panel_size": bad})).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
@@ -449,6 +553,16 @@ mod tests {
                 .merged(&json!({"open_mode": "tabs"}))
                 .is_err()
         );
+        let v2 = Settings::default()
+            .merged(&json!({
+                "open_target": "external",
+                "terminal_placement": "right",
+                "row_density": "compact"
+            }))
+            .unwrap();
+        assert_eq!(v2.open_target, OpenTarget::External);
+        assert_eq!(v2.terminal_placement, TerminalPlacement::Right);
+        assert_eq!(v2.row_density, RowDensity::Compact);
     }
 
     #[test]

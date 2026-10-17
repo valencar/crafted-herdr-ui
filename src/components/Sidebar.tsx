@@ -1,6 +1,8 @@
 import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Group } from "../lib/grouping";
+import { toggleSidebar } from "../lib/uiHelpers";
+import { useAppStore } from "../store/appStore";
 
 const WORST_FIRST: RowStatus[] = [
   "blocked",
@@ -52,7 +54,77 @@ export function Sidebar({
   activityOpen,
   onActivity,
 }: Props) {
+  const collapsed = useAppStore((s) => s.settings?.sidebar_collapsed ?? false);
   const localOnly = machines.length === 1 && machines[0].is_local;
+  if (collapsed) {
+    return (
+      <nav className="sidebar is-collapsed" aria-label="Sidebar">
+        <button
+          type="button"
+          className="rail-item rail-needs"
+          aria-label={`Needs you: ${needsCount} waiting`}
+          title={`Needs you: ${needsCount} waiting`}
+          onClick={() => onJump("needs-you")}
+        >
+          <span
+            className={`count${needsCount > 0 ? " count-needs" : ""}`}
+            aria-hidden="true"
+          >
+            {needsCount}
+          </span>
+        </button>
+        {machines.map((m) => {
+          const label = `${m.label}: ${HEALTH_LABEL[m.health.kind]}`;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              className={`rail-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
+              aria-label={label}
+              aria-current={m.id === activeWorkbox ? "page" : undefined}
+              title={label}
+              onClick={() => onWorkbox(m.id)}
+            >
+              <span className="rail-icon" aria-hidden="true">
+                {m.label.slice(0, 1).toUpperCase()}
+              </span>
+              <span
+                className="health rail-health"
+                data-health={m.health.kind}
+                aria-hidden="true"
+              >
+                <span className="dot" />
+              </span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className="rail-item"
+          aria-label="Add workbox"
+          title="Add workbox"
+          onClick={onAddWorkbox}
+        >
+          <span className="rail-icon" aria-hidden="true">
+            +
+          </span>
+        </button>
+        <div className="sidebar-foot">
+          <button
+            type="button"
+            className="rail-item"
+            aria-label="Expand sidebar"
+            title="Expand sidebar ⌘B"
+            onClick={toggleSidebar}
+          >
+            <span className="rail-icon" aria-hidden="true">
+              »
+            </span>
+          </button>
+        </div>
+      </nav>
+    );
+  }
   return (
     <nav className="sidebar" aria-label="Sidebar">
       <button
@@ -148,6 +220,9 @@ export function Sidebar({
         </button>
         <button type="button" className="nav-link" onClick={onSettings}>
           Settings ⌘,
+        </button>
+        <button type="button" className="nav-link" onClick={toggleSidebar}>
+          Collapse sidebar ⌘B
         </button>
       </div>
     </nav>

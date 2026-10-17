@@ -2,7 +2,10 @@
 import type { AttachMode } from "./AttachMode";
 import type { GroupBy } from "./GroupBy";
 import type { OpenMode } from "./OpenMode";
+import type { OpenTarget } from "./OpenTarget";
+import type { RowDensity } from "./RowDensity";
 import type { TerminalId } from "./TerminalId";
+import type { TerminalPlacement } from "./TerminalPlacement";
 
 export type Settings = { 
 /**
@@ -20,4 +23,8 @@ terminal_custom_template: string, open_mode: OpenMode, attach_mode: AttachMode, 
 /**
  * The default of "Open in <Terminal> when ready" in the New session sheet.
  */
-open_after_create: boolean, };
+open_after_create: boolean, 
+/**
+ * Whether "Open" shows the pane in the in-app terminal panel or in the user's terminal.
+ */
+open_target: OpenTarget, terminal_placement: TerminalPlacement, terminal_panel_size: number, terminal_font_size: number, sidebar_collapsed: boolean, row_density: RowDensity, };

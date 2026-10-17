@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { formatAge } from "../lib/format";
 import type { Row } from "../lib/grouping";
+import { useAppStore } from "../store/appStore";
 import { KindBadge } from "./KindBadge";
 import { StatusPill } from "./StatusPill";
 
@@ -29,6 +30,9 @@ export const AgentRow = memo(function AgentRow({
   onSelect,
   onOpen,
 }: Props) {
+  const inApp = useAppStore(
+    (s) => (s.settings?.open_target ?? "app") === "app",
+  );
   const title = row.title || row.name;
   const age = formatAge(row.sinceMs, nowMs);
   return (
@@ -59,7 +63,11 @@ export const AgentRow = memo(function AgentRow({
       <button
         type="button"
         className="btn btn-small"
-        aria-label={`Open ${row.name} in ${terminalName}`}
+        aria-label={
+          inApp
+            ? `Open ${row.name} here`
+            : `Open ${row.name} in ${terminalName}`
+        }
         onClick={() => onOpen(row)}
       >
         Open ↗

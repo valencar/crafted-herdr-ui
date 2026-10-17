@@ -738,6 +738,8 @@ kbd {
 
 .scrim {
   position: fixed;
+  /* Above the terminal panel, below the Activity drawer (30) and the toast (40). */
+  z-index: 25;
   inset: 0;
   display: flex;
   align-items: center;
@@ -1562,4 +1564,385 @@ select.field {
 }
 .activity-error {
   grid-area: err;
+}
+
+/* ---------- terminal tab view ---------- */
+
+.term-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+.term-view[hidden] {
+  display: none;
+}
+.term-host {
+  position: absolute;
+  inset: 0;
+}
+/* The padding sits on xterm's own element so the fit addon subtracts it. */
+.term-host .xterm {
+  padding: 6px 0 0 8px;
+}
+.term-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg);
+  color: var(--text-2);
+}
+.term-overlay-title {
+  margin: 0;
+  font-size: 13px;
+}
+.term-overlay-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- terminal panel ---------- */
+
+/* The screens and the terminal panel side by side; the panel keeps its tabs across screens. */
+.shell {
+  height: 100%;
+  display: flex;
+  background: var(--bg);
+}
+.shell.placement-bottom {
+  flex-direction: column;
+}
+.shell.placement-right {
+  flex-direction: row;
+}
+.shell-content {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.shell-content > .app {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+.terminal-panel {
+  position: relative;
+  /* Keeps xterm's own z-indexes inside the panel, under dialogs and sheets. */
+  isolation: isolate;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  min-width: 0;
+  min-height: 0;
+}
+/* Hidden (toggled closed), never collapsed: a zero-sized terminal would fit to one row. */
+.terminal-panel[hidden] {
+  display: none;
+}
+.placement-bottom > .terminal-panel {
+  border-top: 1px solid var(--border);
+  max-height: 80%;
+}
+.placement-right > .terminal-panel {
+  border-left: 1px solid var(--border);
+  max-width: 80%;
+}
+.term-resize {
+  position: absolute;
+  z-index: 2;
+  background: transparent;
+}
+.placement-bottom .term-resize {
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 6px;
+  cursor: row-resize;
+}
+.placement-right .term-resize {
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+}
+.term-resize:hover {
+  background: var(--border-strong);
+}
+.term-resize:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.term-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 6px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+.term-tab {
+  flex: 0 0 auto;
+  max-width: 280px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-s) var(--radius-s) 0 0;
+  color: var(--text-3);
+}
+.term-tab[data-active="true"] {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+.term-tab[data-needs="true"] {
+  box-shadow: inset 0 2px 0 var(--st-needs);
+}
+.term-tab-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 4px 5px 10px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+.term-tab-main:focus-visible,
+.term-tab .icon-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.term-tab-status {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 11px;
+}
+.term-tab[data-needs="true"] .term-tab-status {
+  color: var(--st-needs);
+}
+.term-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-tab-machine {
+  flex-shrink: 0;
+  color: var(--text-4);
+  font-size: 11px;
+}
+.term-find {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.term-find input {
+  flex: 0 1 280px;
+  min-width: 0;
+  background: var(--input);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  padding: 4px 8px;
+}
+.term-find input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.term-find-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+/* A real size for each view to fill, even while the tab strip or find bar changes. */
+.term-stack {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+.term-stack > .term-view {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+}
+
+/* The ⌘K command palette. It sits on `.scrim` (z-index 25): above the terminal panel, below the
+   Activity drawer and the toast. */
+.palette-scrim {
+  align-items: flex-start;
+  padding-top: 14vh;
+}
+.palette {
+  width: min(600px, calc(100vw - 32px));
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+.palette-input {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 14px 16px;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+}
+.palette-input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+.palette-option {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-m);
+  cursor: default;
+}
+.palette-option.is-active {
+  background: var(--raised);
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+}
+.palette-label {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.palette-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-4);
+  font-size: 12px;
+}
+.palette-tag {
+  flex: none;
+  color: var(--text-4);
+  font-size: 11px;
+}
+.palette-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--text-3);
+}
+.palette-hint {
+  margin: 0;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-4);
+  font-size: 11.5px;
+}
+
+/* ---------- collapsed sidebar rail ---------- */
+
+.sidebar.is-collapsed {
+  flex: 0 0 56px;
+  align-items: center;
+  padding: 12px 6px;
+  overflow-x: hidden;
+}
+.rail-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.rail-item:hover {
+  background: var(--nav-hover);
+}
+.rail-item[aria-current="page"] {
+  background: var(--selected);
+}
+.rail-item.is-dim {
+  opacity: 0.5;
+}
+.rail-needs {
+  margin-bottom: 8px;
+}
+.rail-icon {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+.rail-health {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+}
+.sidebar.is-collapsed .sidebar-foot {
+  padding: 8px 0 0;
+  align-items: center;
+  border-top: 0;
+}
+
+/* ---------- compact row density ---------- */
+
+.density-compact .row-main {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  gap: 8px;
+}
+.density-compact .agent-row {
+  gap: 6px;
+}
+.density-compact .group-head {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.density-compact .group {
+  margin-bottom: 8px;
+}
+.density-compact .card {
+  padding: 8px 12px;
+  gap: 6px;
+}
+.density-compact .cards {
+  gap: 8px;
+}
+.density-compact .main {
+  gap: 18px;
 }

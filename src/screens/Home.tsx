@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { EmptyState } from "../components/EmptyState";
@@ -33,6 +33,7 @@ import {
   useTerminals,
 } from "../lib/uiHelpers";
 import { useAppStore, type GroupBy } from "../store/appStore";
+import { useTerminalStore } from "../terminal/terminalStore";
 import { NewSession } from "./NewSession";
 
 const GROUP_TITLE: Record<GroupBy, string> = {
@@ -82,11 +83,19 @@ export function Home() {
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
 
+  // A panel docked on the right takes the Inspector's place while it is open.
+  const panelShown = useTerminalStore((s) => s.panelOpen && s.tabs.length > 0);
+  const placedRight = useAppStore(
+    (s) => s.settings?.terminal_placement === "right",
+  );
+  const panelOnRight = panelShown && placedRight;
+
+  const compact = useAppStore((s) => s.settings?.row_density === "compact");
+
   const nowMs = useNow(30_000);
   const [query, setQuery] = useState("");
   const { current: terminal, installed } = useTerminals();
   const [closingKey, setClosingKey] = useState<string | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const machines = useMemo(
@@ -162,7 +171,7 @@ export function Home() {
     return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
   };
 
-  useHomeShortcuts({ navRows, actionRow, searchRef, onClose: setClosingKey });
+  useHomeShortcuts({ navRows, actionRow, onClose: setClosingKey });
 
   const needsMachines = new Set(needs.map((r) => r.machineId)).size;
   const hasAnyRows = rows.length > 0;
@@ -187,12 +196,11 @@ export function Home() {
     (m) => !m.is_local && m.health.kind === "attention",
   );
   return (
-    <div className="app">
+    <div className={`app${compact ? " density-compact" : ""}`}>
       <Header
         herdrVersion={state?.herdr_version ?? null}
         query={query}
         onQuery={setQuery}
-        searchRef={searchRef}
         terminal={terminal}
         installed={installed}
         onNewSession={() => openNewSession()}
@@ -362,7 +370,7 @@ export function Home() {
           )}
         </main>
 
-        {selectedRow && selectedMachine ? (
+        {panelOnRight ? null : selectedRow && selectedMachine ? (
           <Inspector
             key={selectedRow.key}
             row={selectedRow}
