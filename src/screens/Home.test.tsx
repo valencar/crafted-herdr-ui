@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler, type ReactElement } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { ActionError } from "../lib/bindings/ActionError";
 import type { AppState } from "../lib/bindings/AppState";
@@ -113,6 +113,10 @@ function rowItem(key: string): HTMLElement {
 }
 
 beforeEach(() => {
+  // Ages are formatted against `Date.now()` at render, so pin it: a slow runner can't tip 40s into 41s.
+  // Only `Date` is faked; timers stay real for user-event and `findBy*`.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   vi.mocked(onPreview)
     .mockReset()
     .mockImplementation(async (cb) => {
@@ -130,6 +134,10 @@ beforeEach(() => {
           ? `herdr machine reconnect ${args?.id}`
           : null,
   );
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("Home", () => {
@@ -680,7 +688,7 @@ describe("Home", () => {
     });
 
     it("reports_an_open_whose_row_never_shows_up", () => {
-      vi.useFakeTimers();
+      vi.useFakeTimers({ now: NOW });
       try {
         setup();
         act(() =>
@@ -706,7 +714,7 @@ describe("Home", () => {
     });
 
     it("is_dropped_after_10_seconds_if_it_never_shows_up", () => {
-      vi.useFakeTimers();
+      vi.useFakeTimers({ now: NOW });
       try {
         setup();
         act(() => useAppStore.getState().setPendingSelectKey(KEY));
@@ -723,7 +731,7 @@ describe("Home", () => {
   });
 
   it("shows_a_reported_error_and_dismisses_it_after_8_seconds", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ now: NOW });
     try {
       setup();
       act(() =>
@@ -841,13 +849,9 @@ describe("Home states", () => {
         machine(
           "gpubox",
           { kind: "reconnecting", retry_in_ms: 5000, error: "timed out" },
-          { last_ok_ms: Date.now() - 40_000 },
+          { last_ok_ms: NOW - 40_000 },
         ),
-        machine(
-          "stagingbox",
-          { kind: "online" },
-          { last_ok_ms: Date.now() - 90_000 },
-        ),
+        machine("stagingbox", { kind: "online" }, { last_ok_ms: NOW - 90_000 }),
       ),
     );
     expect(rowItem("gpubox::w1:p1")).toHaveTextContent(
@@ -940,7 +944,7 @@ describe("Home states", () => {
           "gpubox",
           { kind: "attention", error: "ssh: connection refused" },
           {
-            last_ok_ms: Date.now() - 40_000,
+            last_ok_ms: NOW - 40_000,
             label: "gpu box",
             snapshot: null,
           },
@@ -990,7 +994,7 @@ describe("Home states", () => {
           machine(
             "gpubox",
             { kind: "attention", error: "ssh: connection refused" },
-            { last_ok_ms: Date.now() - 40_000 },
+            { last_ok_ms: NOW - 40_000 },
           ),
         ),
       );

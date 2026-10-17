@@ -85,6 +85,10 @@ function calls(name: string): unknown[] {
 }
 
 beforeEach(() => {
+  // Ages are formatted against `Date.now()` at render, so pin it to `NOW`. Only `Date` is faked;
+  // timers stay real for user-event and `findBy*`.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   answers = {
     get_terminals: () => ({ installed: ["ghostty"], default: "ghostty" }),
     preview_reconnect: (args: { id: string }) =>
@@ -311,7 +315,7 @@ describe("Workbox", () => {
   });
 
   it("check_now_stores_the_time_and_counts_up", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
     answers.machine_status = () => [
       { id: "buildbox", label: "buildbox", status: "ok", error: null },
     ];
@@ -667,7 +671,7 @@ describe("Workbox pane tails", () => {
   }
 
   it("tails_refresh_every_10s_for_at_most_12_panes_agents_first", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
     useAppStore.setState({
       state: appState(manyPanes(20)),
       view: { kind: "workbox", machineId: "buildbox" },
@@ -697,7 +701,7 @@ describe("Workbox pane tails", () => {
   });
 
   it("tails_stop_when_the_screen_goes_away", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
     useAppStore.setState({
       state: appState(machine("buildbox")),
       view: { kind: "workbox", machineId: "buildbox" },
@@ -716,7 +720,7 @@ describe("Workbox pane tails", () => {
   });
 
   it("a_machine_that_is_not_answering_is_not_read", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
     useAppStore.setState({
       state: appState(
         machine("buildbox", {}, { kind: "attention", error: "denied" }),
@@ -831,7 +835,7 @@ describe("Workbox pane tails", () => {
     afterEach(() => hide(false));
 
     it("does_not_read_the_first_tails_and_reads_them_once_it_shows_again", async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
       hide(true);
       setup();
       await act(async () => {
