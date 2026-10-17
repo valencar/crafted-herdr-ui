@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crafted_herdr_ui_lib::machine_setup::{
-    Emit, ExitHook, MachineSetup, PtyControl, PtySpawner, RunExit, SetupEvent, SetupPrompt,
-    SetupStep, SpawnedPty, StepState,
+    Emit, ExitHook, MachineSetup, RunExit, SetupEvent, SetupPrompt, SetupStep, StepState,
 };
+use crafted_herdr_ui_lib::pty::{PtyControl, PtySpawner, SpawnedPty};
 
 /// The argv and environment a process was started with.
 type Spawn = (Vec<String>, Vec<(String, String)>);
