@@ -26,6 +26,7 @@ fn fixture(name: &str) -> String {
 struct Harness {
     dir: TempDir,
     actions: Actions,
+    cli: HerdrCli,
     refreshed: Arc<Mutex<Vec<Option<String>>>>,
 }
 
@@ -42,8 +43,9 @@ impl Harness {
         let bin = Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/fake-herdr");
         let refreshed: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
         let sink = refreshed.clone();
+        let cli = HerdrCli::new(bin, env);
         let actions = Actions::new(
-            HerdrCli::new(bin, env),
+            cli.clone(),
             Arc::new(move |m| sink.lock().unwrap().push(m.map(str::to_owned))),
         )
         .with_timeouts(Timeouts {
@@ -54,6 +56,7 @@ impl Harness {
         Self {
             dir,
             actions,
+            cli,
             refreshed,
         }
     }
@@ -378,6 +381,31 @@ async fn machine_commands_are_local_and_tolerate_plain_text_output() {
     );
     // Config changes refresh every machine and the machine list.
     assert_eq!(h.refreshed(), [None, None, None]);
+}
+
+#[tokio::test]
+async fn successful_machine_config_commands_are_logged_as_successes() {
+    let h = Harness::new();
+    h.put("machine_rename_buildbox_--label_Build box.json", "Renamed.");
+    h.put("machine_disable_buildbox.json", "");
+    h.put("machine_remove_buildbox.exit", "0");
+
+    h.actions
+        .machine_rename("buildbox", "Build box")
+        .await
+        .unwrap();
+    h.actions
+        .machine_set_enabled("buildbox", false)
+        .await
+        .unwrap();
+    h.actions.machine_remove("buildbox").await.unwrap();
+
+    let log = h.cli.log_snapshot();
+    assert_eq!(log.len(), 3);
+    for entry in &log {
+        assert_eq!(entry.error, None, "{:?}", entry.argv);
+        assert_eq!(entry.exit_code, Some(0), "{:?}", entry.argv);
+    }
 }
 
 #[tokio::test]

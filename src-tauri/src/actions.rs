@@ -583,11 +583,11 @@ impl Actions {
     }
 
     /// Saved-machine changes are local configuration, so they never carry `--machine`. These
-    /// commands print plain text rather than JSON, so output that is not JSON is not an error.
+    /// commands print plain text rather than JSON, so they go through `run_text`.
     async fn machine_config(&self, args: Vec<String>) -> Result<(), ActionError> {
-        let result = self.cli.run(None, &args, self.timeouts.default).await;
+        let result = self.cli.run_text(None, &args, self.timeouts.default).await;
         match result {
-            Ok(_) | Err(HerdrError::Parse { .. }) => {
+            Ok(_) => {
                 (self.refresh)(None);
                 Ok(())
             }
