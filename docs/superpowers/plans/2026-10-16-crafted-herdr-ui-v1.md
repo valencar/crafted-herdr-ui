@@ -457,7 +457,7 @@ README.md, CONTRIBUTING.md, docs/qa-checklist.md
   - The Settings window (label `settings`, 880×640, opened by ⌘, and the sidebar link) follows spec §9.5 with sections General, Terminal, Workboxes (list with enable toggles), Notifications, herdr CLI (path, version, Choose binary…), and Shortcuts (read-only list plus the global shortcut toggle).
   - Tray: a monochrome template icon. The title shows the needs-you count when > 0. Left click toggles the `popover` window (380×560, frameless, `alwaysOnTop`, hidden on blur, positioned under the tray via `tauri-plugin-positioner` `TrayCenter`). The right-click menu has Open Crafted Herdr, New session…, Settings…, and Quit. Closing `main` hides it (app keeps running); ⌘Q quits.
   - `notify.rs` consumes `Transition`s. A transition to `blocked` notifies (if `notify_blocked`) with title `"<display name> needs you"` and body `"<project folder name> · <machine label>"`. A transition to `done` notifies (if `notify_done`) with title `"<display name> finished"`. Clicking a notification shows `main` and emits `"focus-row"` with the row key. There are no notifications for first-sight states.
-  - Global shortcut ⌥⌘H toggles `main` when `global_shortcut_enabled`.
+  - Global shortcut ⌃⌥⌘H (ruling: ⌥⌘H is macOS Hide Others) toggles `main` when `global_shortcut_enabled`.
   - MenuBar screen per spec §9.6, reusing `needsYou`/`toRows`.
 - [ ] **Step 1:** Failing tests:
   - Rust: `settings_defaults_match_spec`, `settings_patch_validates_intervals`, `notification_text_for_blocked_and_done`, `no_notification_on_first_sight`.
