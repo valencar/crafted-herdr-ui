@@ -69,7 +69,12 @@ beforeEach(() => {
 
 afterEach(() => {
   // A test that opened a sheet or the drawer must not leave it open for the next one.
-  useAppStore.setState({ sheet: null, activityOpen: false, dialogOpen: 0 });
+  useAppStore.setState({
+    sheet: null,
+    activityOpen: false,
+    paletteOpen: false,
+    dialogOpen: 0,
+  });
   useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
 });
 
@@ -390,11 +395,21 @@ describe("menu events", () => {
     useAppStore.setState({ view: { kind: "home" } });
   });
 
-  it("palette focuses the Home search box until the palette exists", async () => {
+  it("palette opens the command palette, and Esc closes it", async () => {
     render(<App />);
-    const search = await screen.findByRole("searchbox");
+    await screen.findByRole("searchbox");
     await menu("palette");
-    expect(search).toHaveFocus();
+    const palette = await screen.findByRole("dialog", {
+      name: "Command palette",
+    });
+    expect(screen.getByRole("combobox")).toHaveFocus();
+    expect(useAppStore.getState().dialogOpen).toBe(1);
+    // A second ⌘K while it is open does nothing.
+    await menu("palette");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.keyDown(palette, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(useAppStore.getState().dialogOpen).toBe(0);
   });
 
   it("menu events are ignored while a sheet or dialog is open", async () => {
@@ -409,6 +424,7 @@ describe("menu events", () => {
     await menu("palette");
     await menu("activity");
     expect(search).not.toHaveFocus();
+    expect(useAppStore.getState().paletteOpen).toBe(false);
     expect(useAppStore.getState().activityOpen).toBe(false);
 
     act(() => useAppStore.setState({ sheet: null }));
@@ -418,6 +434,7 @@ describe("menu events", () => {
     await menu("palette");
     await menu("activity");
     expect(search).not.toHaveFocus();
+    expect(useAppStore.getState().paletteOpen).toBe(false);
     expect(useAppStore.getState().activityOpen).toBe(false);
   });
 

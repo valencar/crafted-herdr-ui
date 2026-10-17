@@ -199,3 +199,5 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] Notification click opens the tab.
 - [ ] Popover Open brings the main window with the tab.
 - [ ] Open in {Terminal} still launches the external app.
+- [ ] ⌘K opens the command palette from Home, the Workbox screen and while a terminal has focus; it sits above the terminal panel (dimmed scrim over it) and under the Activity drawer; ↑/↓ move, Enter runs, ⌘Enter opens an agent the other way (here vs. the external terminal), Esc closes and returns focus to where it was.
+- [ ] In the palette, typing finds agents, projects, workboxes and commands; an empty query lists needs-you agents first, then commands; choosing a project scrolls Home to its group, and a workbox opens its screen. While it is open, typing never reaches the terminal behind it.

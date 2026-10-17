@@ -34,6 +34,8 @@ type AppStore = {
   sheetPrefill: SheetPrefill | null;
   view: View;
   activityOpen: boolean;
+  /** The ⌘K command palette is showing. */
+  paletteOpen: boolean;
   /**
    * The herdr version whose "older than supported" banner was dismissed (`""` for an unreadable
    * one). Kept here so it survives going between Home and a Workbox screen.
@@ -66,6 +68,7 @@ type AppStore = {
   openNewSession: (prefill?: SheetPrefill) => void;
   setView: (view: View) => void;
   setActivityOpen: (open: boolean) => void;
+  setPaletteOpen: (open: boolean) => void;
   dismissVersionBanner: (version: string) => void;
   /** Shows an action error. Every report restarts the auto-dismiss timer. */
   reportError: (e: unknown) => void;
@@ -120,6 +123,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   sheetPrefill: null,
   view: { kind: "home" },
   activityOpen: false,
+  paletteOpen: false,
   dismissedVersion: null,
   toast: null,
   toastTone: "error",
@@ -137,6 +141,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ sheet: "new-session", sheetPrefill: prefill ?? null }),
   setView: (view) => set({ view }),
   setActivityOpen: (activityOpen) => set({ activityOpen }),
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   dismissVersionBanner: (dismissedVersion) => set({ dismissedVersion }),
   reportError: (e) => {
     get().showToast(actionErrorMessage(toActionError(e)), "error");

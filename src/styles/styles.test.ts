@@ -42,4 +42,16 @@ describe("app.css", () => {
     expect(z(".activity")).toBeGreaterThan(z(".scrim"));
     expect(z(".toast")).toBeGreaterThan(z(".scrim"));
   });
+
+  it("keeps_the_command_palette_on_the_scrim_above_the_panel_and_below_the_drawer", () => {
+    // The palette renders inside `.scrim`; its own modifier must not lower the stacking.
+    expect(rule(".palette-scrim")).not.toMatch(/z-index/);
+    const z = (selector: string) =>
+      Number(/z-index:\s*(\d+)/.exec(rule(selector))?.[1] ?? 0);
+    expect(z(".scrim")).toBeGreaterThanOrEqual(25);
+    expect(z(".scrim")).toBeGreaterThan(z(".terminal-panel"));
+    expect(z(".activity")).toBeGreaterThan(z(".scrim"));
+    expect(z(".toast")).toBeGreaterThan(z(".scrim"));
+    expect(rule(".palette")).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
 });

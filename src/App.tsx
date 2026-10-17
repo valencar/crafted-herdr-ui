@@ -1,43 +1,19 @@
 import { useEffect } from "react";
 import { ActivityDrawer } from "./components/ActivityDrawer";
+import { CommandPalette } from "./components/CommandPalette";
 import { toRows } from "./lib/grouping";
-import {
-  invokeTyped,
-  onFocusRow,
-  onMenu,
-  onNewSession,
-  onOpenRow,
-} from "./lib/ipc";
+import { onFocusRow, onMenu, onNewSession, onOpenRow } from "./lib/ipc";
+import { runMenuAction } from "./lib/menuActions";
 import { openRow } from "./lib/openRow";
-import { focusRowElement, focusSearch, isInTerminal } from "./lib/uiHelpers";
+import { focusRowElement } from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
 import { Home } from "./screens/Home";
 import { Onboarding } from "./screens/Onboarding";
 import { Workbox } from "./screens/Workbox";
 import { useAppStore } from "./store/appStore";
-import {
-  DEFAULT_FONT_SIZE,
-  MAX_FONT_SIZE,
-  MIN_FONT_SIZE,
-  requestTerminalFind,
-  TerminalPanel,
-} from "./terminal/TerminalPanel";
+import { TerminalPanel } from "./terminal/TerminalPanel";
 import { useTerminalStore } from "./terminal/terminalStore";
-
-/** Saves the terminal font size one step up or down (within 9 to 24), or back to the default. */
-function saveFontSize(id: "font-bigger" | "font-smaller" | "font-reset") {
-  const { settings, setSettings, reportError } = useAppStore.getState();
-  const current = settings?.terminal_font_size ?? DEFAULT_FONT_SIZE;
-  const step = id === "font-bigger" ? 1 : id === "font-smaller" ? -1 : 0;
-  const next =
-    id === "font-reset"
-      ? DEFAULT_FONT_SIZE
-      : Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, current + step));
-  invokeTyped("set_settings", { patch: { terminal_font_size: next } })
-    .then(setSettings)
-    .catch(reportError);
-}
 
 function App() {
   const view = useAppStore((s) => s.view);
@@ -49,6 +25,8 @@ function App() {
   const machines = useAppStore((s) => s.state?.machines);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
+  const paletteOpen = useAppStore((s) => s.paletteOpen);
+  const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
   const placement = useAppStore(
     (s) => s.settings?.terminal_placement ?? "bottom",
   );
@@ -109,68 +87,7 @@ function App() {
     onMenu((id) => {
       const { sheet: openSheet, dialogOpen } = useAppStore.getState();
       if (openSheet !== null || dialogOpen > 0) return;
-      switch (id) {
-        // Until the command palette exists, it does what ⌘K did: focus Home's search.
-        case "palette":
-          focusSearch();
-          break;
-        case "activity": {
-          const { state: current, activityOpen: open } = useAppStore.getState();
-          // Without herdr there is no command log to show.
-          if (current?.herdr_path !== null) setActivityOpen(!open);
-          break;
-        }
-        case "toggle-terminal":
-          if (useTerminalStore.getState().tabs.length === 0) {
-            useAppStore
-              .getState()
-              .showToast("Open a session to start a terminal.", "info");
-          } else {
-            useTerminalStore.getState().togglePanel();
-          }
-          break;
-        case "close-tab": {
-          const { activeKey, closeTab } = useTerminalStore.getState();
-          if (activeKey) closeTab(activeKey);
-          break;
-        }
-        // A tab shortcut shows the tab: it also brings back a hidden panel.
-        case "next-tab":
-        case "prev-tab": {
-          const terminals = useTerminalStore.getState();
-          if (terminals.tabs.length === 0) break;
-          terminals.cycle(id === "next-tab" ? 1 : -1);
-          terminals.setPanelOpen(true);
-          break;
-        }
-        case "tab1":
-        case "tab2":
-        case "tab3":
-        case "tab4":
-        case "tab5":
-        case "tab6":
-        case "tab7":
-        case "tab8":
-        case "tab9": {
-          const terminals = useTerminalStore.getState();
-          const at = Number(id.slice(3)) - 1;
-          if (at < terminals.tabs.length) {
-            terminals.activateIndex(at);
-            terminals.setPanelOpen(true);
-          }
-          break;
-        }
-        case "font-bigger":
-        case "font-smaller":
-        case "font-reset":
-          saveFontSize(id);
-          break;
-        // In a terminal, Find searches its scrollback; anywhere else it is Home's search.
-        case "find":
-          if (isInTerminal(document.activeElement)) requestTerminalFind();
-          else focusSearch();
-          break;
-      }
+      runMenuAction(id);
     })
       .then((un) => (alive ? (stop = un) : un()))
       .catch(() => {});
@@ -178,7 +95,7 @@ function App() {
       alive = false;
       stop?.();
     };
-  }, [setActivityOpen]);
+  }, []);
 
   if (herdrMissing) return <Onboarding />;
 
@@ -197,6 +114,7 @@ function App() {
       </div>
       {/* Here rather than in a screen, so it works on Home and on the Workbox screen. */}
       {sheet === "add-workbox" && <AddWorkbox />}
+      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
       {activityOpen && (
         <ActivityDrawer
           machines={machines ?? []}
