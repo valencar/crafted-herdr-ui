@@ -259,6 +259,32 @@ describe("ActivityDrawer", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
+  describe("while the window is hidden", () => {
+    const hide = (hidden: boolean) =>
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => hidden,
+      });
+    afterEach(() => hide(false));
+
+    it("does_not_read_the_log_until_the_window_shows_again", async () => {
+      await open();
+      expect(invoke).toHaveBeenCalledTimes(1);
+
+      hide(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6000);
+      });
+      expect(invoke).toHaveBeenCalledTimes(1);
+
+      hide(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(invoke).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("hides_successful_reads_until_show_reads_is_on", async () => {
     log = [
       entry({ atMs: at(9, 0, 1), argv: ["api", "snapshot"] }),

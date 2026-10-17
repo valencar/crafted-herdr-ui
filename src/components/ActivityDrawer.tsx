@@ -40,7 +40,7 @@ function newestFirst(entries: CommandLogEntry[]): CommandLogEntry[] {
 
 /**
  * Every herdr call the app has made, as the command it ran (spec section 8.2). Refreshes every
- * 2 s while it is open. Successful reads (the poller's snapshots, the previews' pane reads)
+ * 2 s while it is open and the window is visible. Successful reads (the poller's snapshots, the previews' pane reads)
  * are hidden unless "Show reads" is on, because they would bury everything else.
  */
 export function ActivityDrawer({ machines, onClose }: Props) {
@@ -56,6 +56,11 @@ export function ActivityDrawer({ machines, onClose }: Props) {
     let alive = true;
     let timer: number | undefined;
     const load = () => {
+      // Nobody is looking: skip the read (and the re-render of up to 200 rows), keep the beat.
+      if (document.hidden) {
+        timer = window.setTimeout(load, REFRESH_MS);
+        return;
+      }
       invokeTyped("get_command_log")
         .then((log) => {
           if (!alive) return;
