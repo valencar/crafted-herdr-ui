@@ -2,6 +2,27 @@
 
 GUI-only checks that implementers skip; run them in a final pass with the maintainer.
 
+## Before release
+
+Run these first, in order, on the built app (`pnpm tauri build`, then the `.app` or `.dmg`). They cover the highest-risk behavior. Use the test workbox (`$HERDR_UI_TEST_MACHINE`) and only the `herdr-ui-qa` workspace or session on it. The per-task sections below hold the rest.
+
+- [ ] Launch the built `Crafted Herdr.app` from Finder (not from a terminal): herdr is found through the login shell, Local shows Online, and every remote workbox shows Online (SSH agent auth works from a GUI-launched app). This verifies the login-shell PATH and environment capture.
+- [ ] Open a session in each installed terminal (Ghostty, iTerm2, Terminal, Warp, WezTerm, Kitty, Alacritty, and a Custom template): each opens a window running the attach command and lands in the pane. iTerm2 and Terminal ask for Automation permission on first use.
+- [ ] Remote attach plus takeover: open a pane on a remote workbox, then open it again while another client is attached. The shell asks "Another client owns this session. Take over? [y/N]"; `n` leaves it alone and `y` takes over. A normal detach (`ctrl+b q`) shows no prompt.
+- [ ] A done agent marks seen when you open it: Open on a done row, and on the next poll the agent shows idle (see the Task 7 `agent focus` check).
+- [ ] Notifications: an agent that becomes blocked fires one "<agent> needs you" with "<project> · <workbox>"; one that finishes fires "<agent> finished"; nothing fires for agents already blocked or done at startup or on reconnect. Clicking one brings the window forward with that row selected. Check it from the built app, not `tauri dev`.
+- [ ] The tray: the monochrome `>_` icon follows light and dark menu bars, the count shows while agents are blocked or done and disappears at 0, left-click opens the popover, right-click shows the menu, and closing the window with the red button leaves the app in the menu bar.
+- [ ] Add workbox via terminal on the test workbox: "Add workbox", remote session `herdr-ui-qa`, label `herdr-ui-qa`, then "Continue in <Terminal>" and finish setup there. The sheet closes and "Added herdr-ui-qa" shows. Clean up with `herdr machine remove <new profile id>` and stop and delete the `herdr-ui-qa` session on the target.
+
+Carried from the reviews (coordinator notes):
+
+- [ ] `env -0` works for the login-shell capture on macOS 13 (the environment is read correctly when launched from Finder there). If `env -0` is not supported, the fallback still yields `PATH` and `SSH_AUTH_SOCK`.
+- [ ] iTerm2 parses quoted commands that contain `'\''` (a command with a single quote in an argument, such as a reply or a name, runs as typed).
+- [ ] Ghostty `-e` argv is not re-joined into a shell string: an argument with spaces or quotes arrives as one argument and the attach command runs unchanged.
+- [ ] A session name or id with odd characters (spaces, quotes, `;`, `$`, newlines) is refused with a clear message instead of being opened.
+- [ ] Mutating herdr commands (rename, close, focus) return JSON on success; when one does not (plain text, or a timeout), the app shows "may have been applied" and refreshes rather than reporting a plain failure, and never retries on its own.
+- [ ] The release build renders fonts and styles under the restrictive CSP with no violations in the devtools console, and the app icon (a light `>_` on a graphite rounded square) shows in the Dock, the DMG and the app switcher.
+
 ## Task 0
 
 - [ ] `pnpm tauri dev` opens a single window titled "Crafted Herdr" (1280x820, overlay title bar, minimum size 900x600) showing the heading "Crafted Herdr".
@@ -128,3 +149,8 @@ None of these were run by the implementer (they need a real GUI session and a ma
 - [ ] Disable a workbox that has a cached snapshot: it is dimmed in the sidebar and labelled "Disabled", and its Workbox screen shows 0 for all four counts.
 - [ ] With only Local, Home shows the "Only this computer so far" card; its "Add workbox" opens the sheet. With no agents anywhere, "No agents yet / Start one with ⌘N." shows.
 - [ ] Keyboard: Tab to a row in a project card; the focus ring is fully visible (not clipped by the card's rounded corner). VoiceOver reads a pane box on the Workbox screen as "Open <name>", then its status and last line; a kind badge reads as the full kind name.
+
+## Task 17
+
+- [ ] From a pushed `v*` tag, the Release workflow finishes and leaves a draft GitHub Release with a universal `.dmg`. On an Apple Silicon Mac, download it, drag the app to Applications, and confirm the first-launch steps in the README (right-click › Open, or `xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"`) are enough to start it (the build is ad-hoc signed, not notarized).
+- [ ] `pnpm tauri build` (full bundle with the DMG step, in a GUI session) opens the DMG window with the new icon, and `Crafted Herdr.app` inside shows it too.
