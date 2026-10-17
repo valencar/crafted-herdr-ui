@@ -164,7 +164,7 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] With herdr not running locally (or the binary renamed), Home shows "Local isn't answering" with herdr's error, the hint to start herdr, and "Retry now". Start herdr and press Retry now: the card goes away and Local's rows show.
 - [ ] Attach to a pane on a remote workbox whose non-interactive ssh PATH lacks herdr: the terminal prints "herdr not found on <target> (check PATH for non-interactive ssh)" and offers no takeover prompt.
 - [ ] Settings › Terminal › Rescan: install or remove a terminal (or move its .app between /Applications and ~/Applications) and press Rescan: the radio list updates. A terminal Spotlight doesn't know (indexing off) is still found in /Applications.
-- [ ] Settings › herdr CLI › "Attach as: Full herdr UI": the inspector's "what Open runs" box shows the full-UI command (`herdr --remote <target>`), and switching back shows the attach command without reselecting.
+- [ ] Settings › Terminal › "Attach as: Full herdr UI": the inspector's "what Open runs" box shows the full-UI command (`herdr --remote <target>`), and switching back shows the attach command without reselecting.
 - [ ] Add workbox for a host that already has a profile, with a different remote session: the button is enabled. With the same session (or none, when the profile is `default`) it says "Already added as <label>".
 - [ ] Unplug the network for one poll interval (a blip of 1-2 failed polls) while an agent becomes blocked: a notification fires after the machine recovers. After a longer outage (3 or more failed polls), nothing fires for what changed meanwhile.
 

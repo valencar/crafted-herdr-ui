@@ -110,15 +110,15 @@ The native menu bar owns these, so they work while a terminal has the keyboard, 
 | ⌘\ | View | Move the terminal panel between the bottom and the right |
 | ⌘B | View | Collapse or expand the sidebar |
 | ⌘J | View | Open the next agent that needs you |
-| ⌘F | View | Find (in the active terminal tab, else Home's search) |
-| ⌘+ / ⌘− / ⌘0 | View | Bigger, smaller, reset terminal font |
+| ⌘F | View | Find: searches the active terminal tab when the terminal has focus, otherwise focuses Home's search |
+| ⌘= / ⌘− / ⌘0 | View | Bigger, smaller, reset terminal font |
 | ⇧⌘A | View | Activity drawer |
 | ⌘W | Terminal | Close (detach) the active tab |
 | ⌃Tab / ⌃⇧Tab | Terminal | Next / previous tab |
 | ⌘1 … ⌘9 | Terminal | Go to tab 1 … 9 |
 | ⌘, | Crafted Herdr | Settings |
 
-Edit has the usual Undo, Redo, Cut, Copy, Paste and Select All. Crafted Herdr has About, Hide, Hide Others and Quit (⌘H, ⌥⌘H, ⌘Q), and Window has Minimize (⌘M). There is no Close Window item, so ⌘W with no tab open does nothing; the red button still hides the window.
+Edit has the usual Undo, Redo, Cut, Copy, Paste and Select All. Crafted Herdr has About, Hide, Hide Others, Show All and Quit (⌘H, ⌥⌘H, ⌘Q), and Window has Minimize and Bring All to Front (⌘M for Minimize). There is no Close Window item, so ⌘W with no tab open does nothing; the red button still hides the window.
 
 These work on Home when the focus is not in a terminal:
 
@@ -128,7 +128,8 @@ These work on Home when the focus is not in a terminal:
 | ⌘↩ | Open the selected row (here or in your terminal, by your Settings choice) |
 | ⌘R | Refresh |
 | ⌫ | Close the selected session (asks first) |
-| ⌃⌥⌘H | Show or hide the app from anywhere (global; can be turned off in Settings) |
+
+One shortcut is global rather than in a menu: ⌃⌥⌘H shows or hides the app from anywhere (it can be turned off in Settings).
 
 ## Privacy
 
