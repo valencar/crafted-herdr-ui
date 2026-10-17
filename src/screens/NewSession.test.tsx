@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
@@ -95,6 +102,8 @@ function setup(
     toast: null,
     dialogOpen: 0,
     pendingSelectKey: null,
+    pendingOpen: null,
+    sheetPrefill: null,
     ...store,
   });
   const user = userEvent.setup();
@@ -407,23 +416,18 @@ describe("NewSession form", () => {
     });
   });
 
-  it("offers up to six distinct recent folders of the chosen machine", async () => {
+  it("offers exactly six distinct recent folders of the chosen machine", async () => {
     const snap = structuredClone(fixture);
-    snap.panes = snap.panes.map((p, i) => ({
-      ...p,
-      cwd: `/home/dev/projects/p${i}`,
+    snap.agents = [];
+    const template = snap.panes[0];
+    // Nine distinct folders (and a repeat of the first) on seven panes' worth of rows.
+    snap.panes = [...Array.from({ length: 9 }, (_, i) => i), 0].map((n, i) => ({
+      ...template,
+      pane_id: `w1:p${i + 1}`,
+      terminal_id: `term-${i + 1}`,
+      cwd: `/home/dev/projects/p${n}`,
       foreground_cwd: null,
     }));
-    snap.agents = snap.agents.map((a, i) => ({
-      ...a,
-      cwd: `/home/dev/projects/a${i}`,
-      foreground_cwd: null,
-    }));
-    snap.panes.push({
-      ...snap.panes[0],
-      pane_id: "w9:p1",
-      cwd: "/home/dev/projects/p0",
-    });
     const user = setup(
       appState(machine("buildbox", { snapshot: snap }), machine("gpubox")),
     );
@@ -432,10 +436,10 @@ describe("NewSession form", () => {
       .filter((b) =>
         b.getAttribute("title")?.startsWith("/home/dev/projects/"),
       );
-    expect(recent.length).toBeLessThanOrEqual(6);
-    expect(recent.length).toBeGreaterThan(0);
     const titles = recent.map((b) => b.getAttribute("title"));
-    expect(new Set(titles).size).toBe(titles.length);
+    expect(titles).toEqual(
+      [0, 1, 2, 3, 4, 5].map((n) => `/home/dev/projects/p${n}`),
+    );
     await user.click(recent[0]);
     expect(screen.getByLabelText("Project folder")).toHaveValue(titles[0]);
     // The other machine's folders are its own.
@@ -528,6 +532,51 @@ describe("NewSession form", () => {
   });
 });
 
+describe("NewSession prefill and ids", () => {
+  it("seeds the workbox and folder from the prefill", () => {
+    setup(undefined, {
+      sheetPrefill: { machineId: "gpubox", folder: "/home/dev/projects/infra" },
+    });
+    expect(screen.getByRole("radio", { name: /gpubox/ })).toBeChecked();
+    expect(screen.getByLabelText("Project folder")).toHaveValue(
+      "/home/dev/projects/infra",
+    );
+  });
+
+  it("ignores a prefilled workbox that is not available", () => {
+    setup(undefined, { sheetPrefill: { machineId: "gone" } });
+    expect(screen.getByRole("radio", { name: /buildbox/ })).toBeChecked();
+  });
+
+  it("gives each radio group its own name, so two sheets never share one", async () => {
+    setup();
+    await screen.findByRole("radio", { name: "claude" });
+    const names = (group: string) =>
+      new Set(
+        within(screen.getByRole("group", { name: group }))
+          .getAllByRole("radio")
+          .map((r) => r.getAttribute("name")),
+      );
+    const machine = names("Workbox");
+    const kind = names("Run");
+    expect(machine.size).toBe(1);
+    expect(kind.size).toBe(1);
+    expect(machine).not.toContain("machine");
+    expect(kind).not.toContain("kind");
+  });
+
+  it("checks the trimmed branch for a leading dash", async () => {
+    const user = setup();
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    await user.click(
+      screen.getByRole("checkbox", { name: "Work in a new git worktree" }),
+    );
+    await user.type(screen.getByLabelText("branch"), "  -x");
+    expect(createButton()).toBeDisabled();
+  });
+});
+
 describe("NewSession after create", () => {
   async function createValid(user: ReturnType<typeof userEvent.setup>) {
     await fillFolder(user, "/home/dev/projects/api-service");
@@ -535,44 +584,82 @@ describe("NewSession after create", () => {
     await user.click(createButton());
   }
 
-  it("opens the new pane in the terminal, queues its selection and closes the sheet", async () => {
+  it("queues the open and the selection for when the row appears, and closes the sheet", async () => {
     const user = setup();
     expect(screen.getByLabelText("Open in Ghostty when ready")).toBeChecked();
     await createValid(user);
     await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
-    expect(invoke).toHaveBeenCalledWith("open_session", {
+    // The pane is not in the state yet, so open_session must wait for Home.
+    expect(callsTo("open_session")).toHaveLength(0);
+    expect(callsTo("mark_seen")).toHaveLength(0);
+    expect(useAppStore.getState().pendingOpen).toEqual({
+      key: "buildbox::w3:p1",
       machineId: "buildbox",
       paneId: "w3:p1",
     });
-    expect(callsTo("mark_seen")).toHaveLength(0);
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p1");
   });
 
-  it("does not open the terminal when the box is unchecked", async () => {
+  it("queues no open when the box is unchecked", async () => {
     const user = setup();
     await user.click(screen.getByLabelText("Open in Ghostty when ready"));
     await createValid(user);
     await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
-    expect(callsTo("open_session")).toHaveLength(0);
+    expect(useAppStore.getState().pendingOpen).toBeNull();
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p1");
   });
 
-  it("reports a failed open as a toast, after the sheet closed", async () => {
+  it("reports a failure to the toast when the sheet was closed while creating", async () => {
     const user = setup();
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    let fail: (e: unknown) => void = () => {};
     invoke.mockImplementation(
       async (name: string, args?: { req: NewSessionRequest }) => {
-        if (name === "open_session")
-          throw { kind: "invalid", message: "no terminal" };
-        if (name === "create_session") return CREATED;
+        if (name === "create_session") {
+          return new Promise((_, reject) => {
+            fail = reject;
+          });
+        }
         if (name === "list_agent_kinds") return KINDS;
         return args ? fakePreview(args.req) : null;
       },
     );
-    await createValid(user);
+    await user.click(createButton());
+    await user.keyboard("{Escape}");
+    cleanup();
+    fail({ kind: "invalid", message: "Folder can't be empty." });
     await vi.waitFor(() =>
-      expect(useAppStore.getState().toast).toBe("no terminal"),
+      expect(useAppStore.getState().toast).toBe("Folder can't be empty."),
     );
-    expect(useAppStore.getState().sheet).toBeNull();
+  });
+
+  it("keeps a maybe-applied message until it is dismissed, even when the form changes", async () => {
+    const user = setup();
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    createErrors.push({
+      kind: "maybeApplied",
+      argv: [],
+      message: "The pane w3:p1 was created; the agent may not have started.",
+    });
+    await user.click(createButton());
+    expect(await screen.findByText(/may not have started/)).toBeInTheDocument();
+    await fillName(user, "x");
+    expect(screen.getByText(/may not have started/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/may not have started/)).not.toBeInTheDocument();
+  });
+
+  it("drops an ordinary error as soon as the form changes", async () => {
+    const user = setup();
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    createErrors.push({ kind: "invalid", message: "Nope." });
+    await user.click(createButton());
+    expect(await screen.findByText("Nope.")).toBeInTheDocument();
+    await fillName(user, "x");
+    expect(screen.queryByText("Nope.")).not.toBeInTheDocument();
   });
 
   it("keeps the sheet open and shows the error when creating fails", async () => {

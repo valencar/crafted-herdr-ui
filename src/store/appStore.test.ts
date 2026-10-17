@@ -139,4 +139,68 @@ describe("appStore", () => {
     setPendingSelectKey(null);
     expect(useAppStore.getState().pendingSelectKey).toBeNull();
   });
+
+  it("holds a pending open on the same 10 s window and reports it if the row never appears", () => {
+    const { setPendingOpen } = useAppStore.getState();
+    const target = {
+      key: "buildbox::w3:p1",
+      machineId: "buildbox",
+      paneId: "w3:p1",
+    };
+    setPendingOpen(target);
+    expect(useAppStore.getState().pendingOpen).toEqual(target);
+    vi.advanceTimersByTime(9_999);
+    expect(useAppStore.getState().pendingOpen).toEqual(target);
+    expect(useAppStore.getState().toast).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(useAppStore.getState().pendingOpen).toBeNull();
+    expect(useAppStore.getState().toast).toBe(
+      "The new session hasn't appeared yet; open it from the list when it does.",
+    );
+  });
+
+  it("does not report a pending open that was cleared in time", () => {
+    const { setPendingOpen } = useAppStore.getState();
+    setPendingOpen({
+      key: "buildbox::w3:p1",
+      machineId: "buildbox",
+      paneId: "w3:p1",
+    });
+    setPendingOpen(null);
+    vi.advanceTimersByTime(20_000);
+    expect(useAppStore.getState().toast).toBeNull();
+  });
+
+  it("keeps the window running for a pending open when only the selection is applied", () => {
+    const { setPendingOpen, setPendingSelectKey } = useAppStore.getState();
+    setPendingSelectKey("buildbox::w3:p1");
+    setPendingOpen({
+      key: "buildbox::w3:p1",
+      machineId: "buildbox",
+      paneId: "w3:p1",
+    });
+    setPendingSelectKey(null);
+    vi.advanceTimersByTime(10_000);
+    expect(useAppStore.getState().toast).not.toBeNull();
+  });
+
+  it("opens the new-session sheet with a prefill and clears the prefill when the sheet closes", () => {
+    const s = useAppStore.getState();
+    s.openNewSession({
+      machineId: "buildbox",
+      folder: "/home/dev/projects/infra",
+    });
+    expect(useAppStore.getState()).toMatchObject({
+      sheet: "new-session",
+      sheetPrefill: {
+        machineId: "buildbox",
+        folder: "/home/dev/projects/infra",
+      },
+    });
+    s.setSheet(null);
+    expect(useAppStore.getState().sheet).toBeNull();
+    expect(useAppStore.getState().sheetPrefill).toBeNull();
+    s.openNewSession();
+    expect(useAppStore.getState().sheetPrefill).toBeNull();
+  });
 });

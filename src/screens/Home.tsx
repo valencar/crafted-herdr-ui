@@ -90,12 +90,15 @@ export function Home() {
   const select = useAppStore((s) => s.select);
   const setGroupBy = useAppStore((s) => s.setGroupBy);
   const setSheet = useAppStore((s) => s.setSheet);
+  const openNewSession = useAppStore((s) => s.openNewSession);
   const toast = useAppStore((s) => s.toast);
   const preview = useAppStore((s) => s.preview);
   const report = useAppStore((s) => s.reportError);
   const dismissToast = useAppStore((s) => s.clearToast);
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
+  const pendingOpen = useAppStore((s) => s.pendingOpen);
+  const setPendingOpen = useAppStore((s) => s.setPendingOpen);
 
   const nowMs = useNow(30_000);
   const [query, setQuery] = useState("");
@@ -131,13 +134,29 @@ export function Home() {
     }
   }, [state, rows, selectedKey, select]);
 
-  // A session was just created: select its row once the next poll lists it.
+  // A session was just created: select it and open it once the next poll lists its row.
+  // (`open_session` reads the pane from the state, so it can't run before then.)
   useEffect(() => {
     if (pendingSelectKey && rows.some((r) => r.key === pendingSelectKey)) {
       select(pendingSelectKey);
       setPendingSelectKey(null);
     }
-  }, [pendingSelectKey, rows, select, setPendingSelectKey]);
+    if (pendingOpen && rows.some((r) => r.key === pendingOpen.key)) {
+      setPendingOpen(null);
+      invokeTyped("open_session", {
+        machineId: pendingOpen.machineId,
+        paneId: pendingOpen.paneId,
+      }).catch(report);
+    }
+  }, [
+    pendingSelectKey,
+    pendingOpen,
+    rows,
+    select,
+    setPendingSelectKey,
+    setPendingOpen,
+    report,
+  ]);
 
   const visible = useMemo(
     () => rows.filter((r) => matches(r, query)),
@@ -204,7 +223,7 @@ export function Home() {
           searchRef.current?.select();
         } else if (e.key === "n") {
           e.preventDefault();
-          setSheet("new-session");
+          openNewSession();
         } else if (e.key === "r") {
           e.preventDefault();
           invokeTyped("refresh_now", {}).catch(report);
@@ -237,7 +256,16 @@ export function Home() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheet, actionRow, selectedKey, navRows, select, setSheet, open, report]);
+  }, [
+    sheet,
+    actionRow,
+    selectedKey,
+    navRows,
+    select,
+    openNewSession,
+    open,
+    report,
+  ]);
 
   const needsMachines = new Set(needs.map((r) => r.machineId)).size;
   const hasAnyRows = rows.length > 0;
@@ -250,7 +278,7 @@ export function Home() {
         onQuery={setQuery}
         searchRef={searchRef}
         terminalName={terminal ? terminalName : null}
-        onNewSession={() => setSheet("new-session")}
+        onNewSession={() => openNewSession()}
       />
       <div className="body">
         <Sidebar
@@ -352,7 +380,13 @@ export function Home() {
                     key={g.key}
                     group={g}
                     showSession={groupBy === "project"}
-                    onNewSession={() => setSheet("new-session")}
+                    onNewSession={() =>
+                      openNewSession({
+                        machineId: g.machineId,
+                        // A loose-sessions group has no project folder.
+                        folder: g.tier !== 3 && g.folder ? g.folder : undefined,
+                      })
+                    }
                   >
                     {g.rows.map((r) => (
                       <AgentRow

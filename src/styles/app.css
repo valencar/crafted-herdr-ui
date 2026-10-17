@@ -963,3 +963,11 @@ select.field {
   margin: 0;
   color: var(--st-needs);
 }
+.sheet-failure {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.sheet-failure .btn {
+  flex-shrink: 0;
+}

@@ -65,7 +65,9 @@ function setup(state: AppState | null = defaultState()) {
     toast: null,
     preview: null,
     dialogOpen: 0,
+    sheetPrefill: null,
     pendingSelectKey: null,
+    pendingOpen: null,
   });
   const user = userEvent.setup();
   render(<Home />);
@@ -498,6 +500,27 @@ describe("Home", () => {
     expect(button).toHaveFocus();
   });
 
+  it("a_project_cards_plus_session_prefills_its_workbox_and_folder", async () => {
+    const user = setup();
+    const group = screen
+      .getAllByRole("region", { name: "web-app" })
+      .find((g) => within(g).queryByText("gpubox"))!;
+    await user.click(
+      within(group).getByRole("button", { name: /^New session in web-app/ }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "New session" });
+    expect(useAppStore.getState().sheetPrefill).toEqual({
+      machineId: "gpubox",
+      folder: "/home/dev/projects/web-app",
+    });
+    expect(within(dialog).getByRole("radio", { name: /gpubox/ })).toBeChecked();
+    expect(within(dialog).getByLabelText("Project folder")).toHaveValue(
+      "/home/dev/projects/web-app",
+    );
+    await user.keyboard("{Escape}");
+    expect(useAppStore.getState().sheetPrefill).toBeNull();
+  });
+
   describe("a_just_created_session", () => {
     const KEY = "buildbox::w9:p9";
     const withNewPane = () => {
@@ -517,6 +540,73 @@ describe("Home", () => {
       act(() => useAppStore.getState().setState(withNewPane()));
       expect(useAppStore.getState().selectedKey).toBe(KEY);
       expect(useAppStore.getState().pendingSelectKey).toBeNull();
+    });
+
+    it("is_opened_only_after_its_row_shows_up_and_only_once", () => {
+      setup();
+      const target = { key: KEY, machineId: "buildbox", paneId: "w9:p9" };
+      act(() => useAppStore.getState().setPendingOpen(target));
+      // Another poll that does not list the pane yet.
+      act(() => useAppStore.getState().setState(defaultState()));
+      expect(invoke).not.toHaveBeenCalledWith(
+        "open_session",
+        expect.anything(),
+      );
+      act(() => useAppStore.getState().setState(withNewPane()));
+      expect(invoke).toHaveBeenCalledWith("open_session", {
+        machineId: "buildbox",
+        paneId: "w9:p9",
+      });
+      expect(useAppStore.getState().pendingOpen).toBeNull();
+      act(() => useAppStore.getState().setState(withNewPane()));
+      expect(
+        invoke.mock.calls.filter((c) => c[0] === "open_session"),
+      ).toHaveLength(1);
+      expect(invoke).not.toHaveBeenCalledWith("mark_seen", expect.anything());
+    });
+
+    it("reports_a_failed_open_as_a_toast", async () => {
+      setup();
+      invoke.mockImplementation(async (name: string) => {
+        if (name === "open_session")
+          throw { kind: "invalid", message: "no terminal" };
+        return null;
+      });
+      act(() =>
+        useAppStore
+          .getState()
+          .setPendingOpen({ key: KEY, machineId: "buildbox", paneId: "w9:p9" }),
+      );
+      act(() => useAppStore.getState().setState(withNewPane()));
+      await waitFor(() =>
+        expect(useAppStore.getState().toast).toBe("no terminal"),
+      );
+    });
+
+    it("reports_an_open_whose_row_never_shows_up", () => {
+      vi.useFakeTimers();
+      try {
+        setup();
+        act(() =>
+          useAppStore.getState().setPendingOpen({
+            key: KEY,
+            machineId: "buildbox",
+            paneId: "w9:p9",
+          }),
+        );
+        act(() => {
+          vi.advanceTimersByTime(10_000);
+        });
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          "The new session hasn't appeared yet; open it from the list when it does.",
+        );
+        expect(invoke).not.toHaveBeenCalledWith(
+          "open_session",
+          expect.anything(),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("is_dropped_after_10_seconds_if_it_never_shows_up", () => {

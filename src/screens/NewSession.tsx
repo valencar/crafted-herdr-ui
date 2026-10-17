@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { KindBadge } from "../components/KindBadge";
 import { Sheet } from "../components/Sheet";
 import type { ActionError } from "../lib/bindings/ActionError";
@@ -61,15 +61,22 @@ export function NewSession({ terminalName }: Props) {
   const setSheet = useAppStore((s) => s.setSheet);
   const reportError = useAppStore((s) => s.reportError);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
+  const setPendingOpen = useAppStore((s) => s.setPendingOpen);
+  // Read once: the prefill only seeds the form.
+  const [prefill] = useState(() => useAppStore.getState().sheetPrefill);
 
   const folderId = useId();
   const nameId = useId();
   const placeId = useId();
   const argsId = useId();
   const branchId = useId();
+  const machineGroup = useId();
+  const kindGroup = useId();
 
-  const [machineChoice, setMachineChoice] = useState<string | null>(null);
-  const [folder, setFolder] = useState("");
+  const [machineChoice, setMachineChoice] = useState<string | null>(
+    prefill?.machineId ?? null,
+  );
+  const [folder, setFolder] = useState(prefill?.folder ?? "");
   const [worktree, setWorktree] = useState(false);
   const [branch, setBranch] = useState("");
   const [kinds, setKinds] = useState<string[] | null>(null);
@@ -84,8 +91,17 @@ export function NewSession({ terminalName }: Props) {
   const [failure, setFailure] = useState<{
     message: string;
     trust: boolean;
+    /** The create may have partly happened: stays until dismissed, whatever the form says. */
+    sticky: boolean;
     forRequest: string;
   } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [preview, setPreview] = useState<{
     lines: string[];
     error: string | null;
@@ -174,7 +190,7 @@ export function NewSession({ terminalName }: Props) {
     !isAgent && placement.kind === "splitBeside",
   );
   const branchOk =
-    !worktree || (branch.trim() !== "" && !branch.startsWith("-"));
+    !worktree || (branch.trim() !== "" && !branch.trim().startsWith("-"));
   const canCreate =
     machineId !== null &&
     kinds !== null &&
@@ -235,26 +251,35 @@ export function NewSession({ terminalName }: Props) {
         : request;
     try {
       const created = await invokeTyped("create_session", { req: sent });
-      setPendingSelectKey(`${sent.machineId}::${created.paneId}`);
-      close();
+      const key = `${sent.machineId}::${created.paneId}`;
+      setPendingSelectKey(key);
       if (openAfter) {
-        // The new row is not in the state yet, so there is nothing to mark seen.
-        invokeTyped("open_session", {
+        // `open_session` needs the pane in the state, which the next poll brings; Home opens
+        // it then. There is nothing to mark seen for a new session.
+        setPendingOpen({
+          key,
           machineId: sent.machineId,
           paneId: created.paneId,
-        }).catch(reportError);
+        });
       }
+      // Closing a sheet the user already left could close the next one they opened.
+      if (mounted.current) close();
     } catch (e) {
       const err = toActionError(e);
+      if (!mounted.current) {
+        reportError(err);
+        return;
+      }
       const trustText =
         request.placement.kind === "worktree" ? trustMessage(err) : null;
       setFailure({
         message: trustText ?? actionErrorMessage(err),
         trust: trustText !== null,
+        sticky: err.kind === "maybeApplied",
         forRequest: requestJson ?? "",
       });
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -271,7 +296,10 @@ export function NewSession({ terminalName }: Props) {
     }
   }
 
-  const shownFailure = failure?.forRequest === requestJson ? failure : null;
+  const shownFailure =
+    failure && (failure.sticky || failure.forRequest === requestJson)
+      ? failure
+      : null;
 
   return (
     <Sheet
@@ -325,7 +353,7 @@ export function NewSession({ terminalName }: Props) {
                   <span className="opt-line">
                     <input
                       type="radio"
-                      name="machine"
+                      name={machineGroup}
                       checked={m.id === machineId}
                       onChange={() => setMachineChoice(m.id)}
                     />
@@ -417,7 +445,7 @@ export function NewSession({ terminalName }: Props) {
               >
                 <input
                   type="radio"
-                  name="kind"
+                  name={kindGroup}
                   checked={k === kind}
                   onChange={() => setKindChoice(k)}
                 />
@@ -529,9 +557,18 @@ export function NewSession({ terminalName }: Props) {
         </div>
       )}
       {shownFailure && !shownFailure.trust && (
-        <p className="field-error" role="alert">
-          {shownFailure.message}
-        </p>
+        <div className="sheet-failure" role="alert">
+          <p className="field-error">{shownFailure.message}</p>
+          {shownFailure.sticky && (
+            <button
+              type="button"
+              className="btn btn-small btn-ghost"
+              onClick={() => setFailure(null)}
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
       )}
     </Sheet>
   );
