@@ -43,11 +43,32 @@ pub enum MenuId {
 }
 
 impl MenuId {
-    /// The item id the menu carries and the event payload: the kebab-case name.
-    fn key(self) -> String {
-        match serde_json::to_value(self) {
-            Ok(serde_json::Value::String(s)) => s,
-            _ => unreachable!("a MenuId serializes to a string"),
+    /// The item id the menu carries and the event payload: the kebab-case name, which is what
+    /// serde gives the variant (a test keeps the two in step).
+    fn key(self) -> &'static str {
+        match self {
+            MenuId::Palette => "palette",
+            MenuId::ToggleTerminal => "toggle-terminal",
+            MenuId::ToggleSplit => "toggle-split",
+            MenuId::ToggleSidebar => "toggle-sidebar",
+            MenuId::NextNeedsYou => "next-needs-you",
+            MenuId::Find => "find",
+            MenuId::FontBigger => "font-bigger",
+            MenuId::FontSmaller => "font-smaller",
+            MenuId::FontReset => "font-reset",
+            MenuId::Activity => "activity",
+            MenuId::CloseTab => "close-tab",
+            MenuId::NextTab => "next-tab",
+            MenuId::PrevTab => "prev-tab",
+            MenuId::Tab1 => "tab1",
+            MenuId::Tab2 => "tab2",
+            MenuId::Tab3 => "tab3",
+            MenuId::Tab4 => "tab4",
+            MenuId::Tab5 => "tab5",
+            MenuId::Tab6 => "tab6",
+            MenuId::Tab7 => "tab7",
+            MenuId::Tab8 => "tab8",
+            MenuId::Tab9 => "tab9",
         }
     }
 
@@ -217,5 +238,12 @@ mod tests {
         assert_eq!(MenuId::NextNeedsYou.key(), "next-needs-you");
         assert_eq!(MenuId::Tab1.key(), "tab1");
         assert_eq!(MenuId::Tab9.key(), "tab9");
+    }
+
+    #[test]
+    fn every_key_is_the_name_the_event_payload_serializes_to() {
+        for (id, ..) in items() {
+            assert_eq!(serde_json::to_value(id).unwrap(), id.key(), "{id:?}");
+        }
     }
 }

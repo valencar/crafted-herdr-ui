@@ -382,6 +382,14 @@ impl TermTarget {
     }
 }
 
+/// The environment a terminal session spawns with; empty until herdr's environment is resolved.
+fn term_env(cli: &HerdrCli) -> Result<Vec<(String, String)>, ActionError> {
+    match cli.env() {
+        [] => Err(ActionError::invalid(STILL_STARTING)),
+        env => Ok(env.to_vec()),
+    }
+}
+
 /// Runs the target's command in the app's terminal panel and streams its output to `on_event`.
 /// Returns the id the other `term_*` commands take.
 #[tauri::command]
@@ -396,11 +404,9 @@ pub async fn term_open(
     rows: u16,
     on_event: Channel<TermEvent>,
 ) -> Result<TermId, ActionError> {
+    // Asked first: before the environment is ready, nothing else is worth checking.
+    let env = term_env(&cli)?;
     let (argv, log_args) = term_argv(&poller.current_state(), &cli, &settings.get(), &target)?;
-    let env = cli.env().to_vec();
-    if env.is_empty() {
-        return Err(ActionError::invalid(STILL_STARTING));
-    }
     let started = crate::now_ms();
     let sink: TermSink = Arc::new(move |event| on_event.send(event).is_ok());
     let sessions = Arc::clone(&sessions);
@@ -812,6 +818,24 @@ mod tests {
 
     fn herdr() -> HerdrCli {
         HerdrCli::new("/opt/herdr/bin/herdr".into(), vec![])
+    }
+
+    #[test]
+    fn a_terminal_waits_for_herdrs_environment_and_says_so() {
+        let starting = HerdrCli::without_env("/opt/herdr/bin/herdr".into());
+        let err = term_env(&starting).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "herdr is still starting. Try again in a moment."
+        );
+        let ready = HerdrCli::new(
+            "/opt/herdr/bin/herdr".into(),
+            vec![("PATH".into(), "/usr/bin".into())],
+        );
+        assert_eq!(
+            term_env(&ready).unwrap(),
+            vec![("PATH".to_string(), "/usr/bin".to_string())]
+        );
     }
 
     #[test]
