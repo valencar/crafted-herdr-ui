@@ -77,3 +77,19 @@ it("styles the confirm button as dangerous unless told otherwise", () => {
     "btn-danger",
   );
 });
+
+it("shows herdr's own words as is under the body", () => {
+  render(
+    <ConfirmDialog
+      title="Stop the herdr server?"
+      body="This stops it."
+      detail={"server: v0.8.2\nprepared binary: 0.9.4"}
+      confirmLabel="Stop"
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  expect(screen.getByText(/server: v0\.8\.2/)).toHaveTextContent(
+    "prepared binary: 0.9.4",
+  );
+});

@@ -3,6 +3,7 @@ pub mod activity;
 pub mod commands;
 pub mod env;
 pub mod herdr;
+pub mod machine_setup;
 pub mod poller;
 pub mod ssh_config;
 pub mod state;
@@ -17,6 +18,7 @@ use actions::Actions;
 use activity::ActivityTracker;
 use commands::{AgentKindsCache, PREVIEW_EVENT, PreviewManager};
 use herdr::cli::HerdrCli;
+use machine_setup::{MachineSetup, PortablePty};
 use poller::{Poller, PollerConfig};
 use terminal::InstalledCache;
 
@@ -83,6 +85,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(actions);
     app.manage(AgentKindsCache::default());
     app.manage(InstalledCache::default());
+    app.manage(MachineSetup::new(Arc::new(PortablePty)));
     app.manage(poller.clone());
 
     if herdr_bin.is_some() {
@@ -143,6 +146,9 @@ pub fn run() {
             commands::list_ssh_hosts,
             commands::machine_add_argv,
             commands::preview_machine_add,
+            commands::start_machine_add,
+            commands::answer_machine_setup,
+            commands::cancel_machine_setup,
             commands::read_pane_tail,
             commands::list_terminals,
             commands::copy_attach_command,

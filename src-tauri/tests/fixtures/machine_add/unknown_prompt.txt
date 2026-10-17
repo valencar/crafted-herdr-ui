@@ -1,0 +1,3 @@
+The authenticity of host 'buildbox (192.0.2.10)' can't be established.
+ED25519 key fingerprint is SHA256:examplefingerprint.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? 

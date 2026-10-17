@@ -80,3 +80,16 @@ GUI-only checks that implementers skip; run them in a final pass with the mainta
 - [ ] "Continue in <Terminal>" opens the default terminal running `herdr machine add <target> …` (use a throwaway target, never a live default session). Finish setup there: within about 2 s the sheet closes, "Added <label>" shows as a toast, and the new workbox opens.
 - [ ] Cancel while waiting stops the polling (no more `machine list` calls in the Activity drawer). After 10 minutes with nothing new, the "Didn't see the new workbox yet…" message shows.
 - [ ] A host that is already a profile shows "Already added as <label>" and the button is disabled.
+
+## Task 14
+
+Live QA of the native `machine add` layer was not run by the implementer. Run these by hand; `HERDR_UI_LIVE=1` and `$HERDR_UI_TEST_MACHINE` are for the maintainer's own machine only.
+
+- [ ] Test workbox: on `$HERDR_UI_TEST_MACHINE`'s SSH target, "Add workbox" with Remote session `herdr-ui-qa` and label `herdr-ui-qa`. The checklist advances, the sheet closes within a few seconds of herdr finishing, and "Added herdr-ui-qa" shows. Clean up with `herdr machine remove <new profile id>`, then `ssh <target> 'herdr session stop herdr-ui-qa && herdr session delete herdr-ui-qa'`.
+- [ ] Install prompt: start a Docker sshd container (`linuxserver/openssh-server`, arm64, no herdr) on localhost:2222 with a throwaway key generated in `fixtures-raw/`. "Add workbox" for it shows "Install herdr on <target>?" and nothing is installed until "Install herdr" is clicked; Cancel (or Escape) leaves the container without herdr and the sheet shows "herdr stopped before the workbox was added". Remove the container and the key afterwards.
+- [ ] Never answer "Stop server and continue" for a `default` session on a machine with live agents: the dialog says "This stops the running herdr server on <target> and the agents in its panes.", Cancel is focused first, and Enter or Escape answers no. Check this only with the `herdr-ui-qa` session or a throwaway container.
+- [ ] Session picker: with two running sessions on the target and no Remote session given, the "Which session on <target>?" dialog lists them in herdr's order, and choosing the second one adds that session (check `herdr machine list`). Cancel in the dialog stops the run and adds nothing.
+- [ ] A host that asks something the app does not know (an unknown host key, an ssh passphrase): after about 5 s the sheet says herdr has gone quiet. "Continue in <Terminal>" stops the hidden run first (no stray `herdr machine add` process is left, check `ps`), then opens the terminal and the existing waiting flow.
+- [ ] Closing the sheet or "Cancel" while a hidden run is under way leaves no `herdr machine add` process behind.
+- [ ] After a native run finishes, "machine add" shows in the Activity drawer with exit 0 (or 1 for a failure).
+

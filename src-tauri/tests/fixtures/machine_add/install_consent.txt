@@ -1,0 +1,2 @@
+matching herdr 0.9.4 is not installed on buildbox (session default) for linux-x86_64.
+Install the 0.9.4 stable asset for linux-x86_64 to /home/dev/.local/bin/herdr? [Y/n] 

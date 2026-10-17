@@ -1,0 +1,2 @@
+error: remote server startup failed: Permission denied (publickey).; machine was not saved
+hint: verify SSH access first with `ssh buildbox`.

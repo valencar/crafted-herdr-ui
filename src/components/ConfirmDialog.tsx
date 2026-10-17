@@ -4,6 +4,8 @@ import { useModalOpen } from "../store/appStore";
 type Props = {
   title: string;
   body: string;
+  /** Text shown as is, in monospace, under the body (herdr's own words). */
+  detail?: string;
   confirmLabel: string;
   /** Styles the confirm button as dangerous. */
   danger?: boolean;
@@ -19,6 +21,7 @@ type Props = {
 export function ConfirmDialog({
   title,
   body,
+  detail,
   confirmLabel,
   danger = true,
   onConfirm,
@@ -69,6 +72,7 @@ export function ConfirmDialog({
         <p id={bodyId} className="dialog-body">
           {body}
         </p>
+        {detail && <pre className="dialog-detail">{detail}</pre>}
         <div className="dialog-actions">
           <button
             ref={cancelRef}

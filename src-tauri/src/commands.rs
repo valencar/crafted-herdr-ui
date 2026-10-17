@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use ts_rs::TS;
@@ -16,6 +16,7 @@ use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
 use crate::herdr::cli::{CommandLogEntry, HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
+use crate::machine_setup::{Emit, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::poller::Poller;
 use crate::ssh_config;
 use crate::state::{AppState, MachineView};
@@ -406,6 +407,56 @@ pub fn machine_add_argv(
     let full =
         checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
     Ok(full[1..].to_vec())
+}
+
+/// Runs `herdr machine add …` in a hidden terminal and streams `"machine-setup"` events. The
+/// argv is the same allowlisted one `open_in_terminal` takes, so only the form's three fields
+/// reach herdr. A second call while one setup runs is refused.
+#[tauri::command]
+pub fn start_machine_add(
+    app: AppHandle,
+    cli: State<'_, HerdrCli>,
+    setup: State<'_, MachineSetup>,
+    poller: State<'_, Poller>,
+    target: String,
+    label: Option<String>,
+    session: Option<String>,
+) -> Result<(), ActionError> {
+    let mut argv =
+        checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
+    let logged = argv[1..].to_vec();
+    argv[0] = cli.bin().to_string_lossy().into_owned();
+    let started_ms = crate::herdr::cli::now_ms();
+    let (log_cli, poller) = (cli.inner().clone(), poller.inner().clone());
+    let emit: Emit = Arc::new(move |event| {
+        if let SetupEvent::Finished { ok } = &event {
+            let error = (!ok).then(|| "machine add did not finish".to_owned());
+            log_cli.record(logged.clone(), started_ms, Some(i32::from(!ok)), error);
+            if *ok {
+                // The new machine should show up without waiting for the next tick.
+                poller.refresh_now(None);
+            }
+        }
+        // Nobody listening (the sheet closed) is fine.
+        let _ = app.emit(SETUP_EVENT, event);
+    });
+    setup.start(&argv, cli.env(), emit).map_err(invalid)
+}
+
+/// Types the user's answer to the prompt the setup is showing: `"yes"` or `"no"` for a
+/// confirmation, the session's index for the picker.
+#[tauri::command]
+pub fn answer_machine_setup(
+    setup: State<'_, MachineSetup>,
+    choice: String,
+) -> Result<(), ActionError> {
+    setup.answer(&choice).map_err(invalid)
+}
+
+/// Stops the running setup (the user chose the terminal instead, or closed the sheet).
+#[tauri::command]
+pub fn cancel_machine_setup(setup: State<'_, MachineSetup>) {
+    setup.cancel();
 }
 
 /// The `machine add` command line as the user would type it, for the Add workbox sheet.

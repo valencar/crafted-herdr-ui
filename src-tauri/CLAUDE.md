@@ -19,7 +19,7 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 
 ## Rules
 
-- **Every herdr call goes through `HerdrCli::run`.** No other `Command::new("herdr")`, except the two plain-text reads `env::herdr_version` (`--version`) and `env::herdr_agent_kinds` (`agent start --help`), both via `env::run_plain_text`; neither prints JSON. The only other processes spawned are terminal launchers (`open`, `osascript`, `/bin/sh -c` for custom templates), the login shell for env capture, `mdfind`, and `ssh` inside attach commands.
+- **Every herdr call goes through `HerdrCli::run`.** No other `Command::new("herdr")`, except the two plain-text reads `env::herdr_version` (`--version`) and `env::herdr_agent_kinds` (`agent start --help`), both via `env::run_plain_text`; neither prints JSON. `machine_setup.rs` also starts `herdr machine add` on a pty (its prompts need a tty), with the argv from `checked_machine_add_argv` and a command-log entry when it ends. The only other processes spawned are terminal launchers (`open`, `osascript`, `/bin/sh -c` for custom templates), the login shell for env capture, `mdfind`, and `ssh` inside attach commands.
 - **Pass `--machine <profile id>` first**, before the subcommand. Local is the machine id `"local"`, which maps to no `--machine` flag.
 - **Mutations never retry automatically.** A timeout becomes `ActionError::MaybeApplied` and triggers `Poller::refresh_now`.
 - **Quoting:** any user- or herdr-derived string that reaches a shell or AppleScript goes through `shell_quote` / AppleScript escaping. Test it with hostile strings (`' " $ \` ; |`, unicode).

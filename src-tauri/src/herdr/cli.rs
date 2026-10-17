@@ -72,7 +72,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -149,6 +149,25 @@ impl HerdrCli {
             error: result.as_ref().err().map(ToString::to_string),
         });
         result
+    }
+
+    /// Adds a call that ran outside `run` (the pty-driven `machine add`) to the command log.
+    /// `argv` is what follows the herdr binary; `started_ms` is a Unix time in milliseconds.
+    pub fn record(
+        &self,
+        argv: Vec<String>,
+        started_ms: u64,
+        exit_code: Option<i32>,
+        error: Option<String>,
+    ) {
+        lock(&self.log).push(CommandLogEntry {
+            at_ms: started_ms,
+            machine: None,
+            argv,
+            exit_code,
+            duration_ms: now_ms().saturating_sub(started_ms),
+            error,
+        });
     }
 
     /// The resolved `herdr` binary, for the few calls that print plain text instead of JSON.

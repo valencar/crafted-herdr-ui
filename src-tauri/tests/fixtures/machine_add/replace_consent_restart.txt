@@ -1,0 +1,7 @@
+remote herdr server on buildbox (session default) is currently running:
+  server: v0.8.2
+  prepared binary: 0.9.4
+
+the remote server must restart to enable saved SSH endpoint health checks.
+This stops active remote pane processes, including shells, agents, dev servers, and tests.
+stop and update the remote server, then continue attaching? [y/N] 

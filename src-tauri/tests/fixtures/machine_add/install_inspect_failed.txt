@@ -1,0 +1,2 @@
+could not inspect the running remote herdr server on buildbox (session default) before installing: remote server status failed
+continue installing the remote herdr binary? [y/N] 

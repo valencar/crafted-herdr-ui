@@ -1,0 +1,6 @@
+remote herdr server on buildbox (session default) is currently running:
+  server: v0.8.2
+To complete the remote update, Herdr must stop the running remote server after installing.
+This stops active remote pane processes, including shells, agents, dev servers, and tests.
+
+Install 0.9.4 and stop the remote server now? [y/N] 

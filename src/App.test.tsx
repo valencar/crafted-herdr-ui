@@ -7,6 +7,7 @@ import App from "./App";
 const ipc = vi.hoisted(() => ({
   getState: vi.fn(),
   onState: vi.fn(),
+  onMachineSetup: vi.fn(),
   invokeTyped: vi.fn(),
   toActionError: (e: unknown) => e,
 }));
@@ -23,6 +24,7 @@ beforeEach(() => {
   useAppStore.setState({ state: null });
   ipc.getState.mockReset().mockResolvedValue(state);
   ipc.onState.mockReset().mockResolvedValue(() => {});
+  ipc.onMachineSetup.mockReset().mockResolvedValue(() => {});
   ipc.invokeTyped
     .mockReset()
     .mockResolvedValue({ installed: [], default: "ghostty" });

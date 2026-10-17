@@ -7,6 +7,7 @@ import type { CreatedSession } from "./bindings/CreatedSession";
 import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
+import type { SetupEvent } from "./bindings/SetupEvent";
 import type { TerminalList } from "./bindings/TerminalList";
 
 /** Every Tauri command the UI may call, mapped to its result. A Rust `()` arrives as `null`. */
@@ -37,6 +38,9 @@ export type CommandResults = {
   list_ssh_hosts: string[];
   machine_add_argv: string[];
   preview_machine_add: string;
+  start_machine_add: null;
+  answer_machine_setup: null;
+  cancel_machine_setup: null;
   read_pane_tail: string;
   list_terminals: TerminalList;
   copy_attach_command: string;
@@ -88,6 +92,11 @@ export type CommandArgs = {
   machine_add_argv: MachineAddFields;
   /** The `machine add` command line, as text. */
   preview_machine_add: MachineAddFields;
+  /** Runs `machine add` in a hidden terminal; progress arrives as `"machine-setup"` events. */
+  start_machine_add: MachineAddFields;
+  /** `"yes"` or `"no"` for a confirmation, the session's index (as text) for the picker. */
+  answer_machine_setup: { choice: string };
+  cancel_machine_setup: undefined;
   read_pane_tail: { machineId: string; paneId: string };
   list_terminals: undefined;
   copy_attach_command: { machineId: string; paneId: string };
@@ -156,4 +165,11 @@ export function onPreview(
   cb: (frame: PreviewFrame) => void,
 ): Promise<() => void> {
   return listen<PreviewFrame>("preview", (event) => cb(event.payload));
+}
+
+/** Subscribes to the `"machine-setup"` event (the hidden `machine add` run). */
+export function onMachineSetup(
+  cb: (event: SetupEvent) => void,
+): Promise<() => void> {
+  return listen<SetupEvent>("machine-setup", (event) => cb(event.payload));
 }

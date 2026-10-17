@@ -1,0 +1,4 @@
+Running sessions on buildbox:
+[1m> default[0m
+  agents
+↑/↓ select · Enter confirm · Esc cancel
