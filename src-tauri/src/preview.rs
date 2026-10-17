@@ -17,7 +17,7 @@ use crate::herdr::errors::HerdrError;
 use crate::lock;
 
 /// The one-line read behind a pane box in the Workbox screen.
-pub fn pane_tail_argv(pane_id: &str) -> Vec<String> {
+pub(crate) fn pane_tail_argv(pane_id: &str) -> Vec<String> {
     [
         "pane",
         "read",
@@ -34,7 +34,7 @@ pub fn pane_tail_argv(pane_id: &str) -> Vec<String> {
 }
 
 /// The last line with something on it, trimmed; empty when the pane has printed nothing.
-pub fn last_nonempty_line(text: &str) -> String {
+pub(crate) fn last_nonempty_line(text: &str) -> String {
     text.lines()
         .map(str::trim)
         .rfind(|l| !l.is_empty())
@@ -44,7 +44,7 @@ pub fn last_nonempty_line(text: &str) -> String {
 
 const PREVIEW_EVERY: Duration = Duration::from_secs(2);
 /// The event `PreviewFrame`s are emitted on.
-pub const PREVIEW_EVENT: &str = "preview";
+pub(crate) const PREVIEW_EVENT: &str = "preview";
 
 /// One frame of the live preview, sent to the UI as the `"preview"` event. `key` is
 /// `<machineId>::<paneId>`, the same key the UI uses for a row.
@@ -63,12 +63,12 @@ pub type PreviewEmit = Arc<dyn Fn(PreviewFrame) + Send + Sync>;
 pub type IsVisible = Arc<dyn Fn() -> bool + Send + Sync>;
 
 /// The row key the UI uses for a pane.
-pub fn preview_key(machine_id: &str, pane_id: &str) -> String {
+pub(crate) fn preview_key(machine_id: &str, pane_id: &str) -> String {
     format!("{machine_id}::{pane_id}")
 }
 
 /// The read command for a pane: `agent read` for an agent, `pane read` for a shell.
-pub fn preview_argv(pane_id: &str, is_agent: bool) -> Vec<String> {
+pub(crate) fn preview_argv(pane_id: &str, is_agent: bool) -> Vec<String> {
     let group = if is_agent { "agent" } else { "pane" };
     [
         group,

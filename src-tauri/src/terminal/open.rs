@@ -69,7 +69,7 @@ fn local_bin(cli: &HerdrCli) -> Result<String, ActionError> {
 
 /// The herdr arguments the command log shows for an attach: the plain `terminal attach`, not
 /// the wrapper script around it.
-pub fn attach_log_args(state: &AppState, machine_id: &str, pane_id: &str) -> Vec<String> {
+pub(crate) fn attach_log_args(state: &AppState, machine_id: &str, pane_id: &str) -> Vec<String> {
     let id = find_machine(state, machine_id)
         .and_then(|m| pane_terminal_id(m, pane_id))
         .unwrap_or(pane_id);
@@ -77,7 +77,7 @@ pub fn attach_log_args(state: &AppState, machine_id: &str, pane_id: &str) -> Vec
 }
 
 /// The attach command for a pane: what the terminal runs, as argv.
-pub fn attach_for_pane(
+pub(crate) fn attach_for_pane(
     state: &AppState,
     cli: &HerdrCli,
     machine_id: &str,
@@ -119,9 +119,9 @@ fn launch_spec(
 
 /// What the Activity drawer shows for a command that was handed to a terminal: the herdr
 /// arguments (without the binary) and the machine they were for.
-pub struct LaunchLog<'a> {
-    pub machine: Option<&'a str>,
-    pub args: Vec<String>,
+pub(crate) struct LaunchLog<'a> {
+    pub(crate) machine: Option<&'a str>,
+    pub(crate) args: Vec<String>,
 }
 
 /// The note on a command-log entry for a launch: the app can't see how the command ends, so
@@ -132,7 +132,7 @@ fn opened_in(terminal: TerminalId) -> String {
 
 /// Opens `argv` in the user's terminal, as the settings say (read now, so a change applies to
 /// the next open), and adds the launch to the command log.
-pub async fn launch_in_terminal(
+pub(crate) async fn launch_in_terminal(
     home: PathBuf,
     cli: &HerdrCli,
     installed: &InstalledCache,
@@ -161,7 +161,7 @@ pub async fn launch_in_terminal(
 }
 
 /// The full herdr UI for a machine, in the user's terminal.
-pub async fn open_full(
+pub(crate) async fn open_full(
     home: PathBuf,
     state: &AppState,
     cli: &HerdrCli,
@@ -182,7 +182,7 @@ pub async fn open_full(
 
 /// What "Open" runs for a pane, as argv: the pane's attach command, or the machine's full herdr
 /// UI when Settings say so.
-pub fn open_argv(
+pub(crate) fn open_argv(
     state: &AppState,
     cli: &HerdrCli,
     mode: AttachMode,

@@ -426,22 +426,25 @@ impl Inner {
             return;
         }
         let now = now_ms();
-        let (transitions, ages) = {
+        let (transitions, keys_changed, ages) = {
             let mut tracker = lock(&self.tracker);
-            let transitions = if resync {
+            let (transitions, keys_changed) = if resync {
                 tracker.resync(id, &snapshot);
-                Vec::new()
+                (Vec::new(), false)
             } else {
-                tracker.observe(id, &snapshot, now)
+                let observed = tracker.observe(id, &snapshot, now);
+                (observed.transitions, observed.keys_changed)
             };
             let ages: HashMap<String, u64> = snapshot
                 .agents
                 .iter()
                 .filter_map(|a| Some((a.terminal_id.clone(), tracker.since(id, &a.terminal_id)?)))
                 .collect();
-            (transitions, ages)
+            (transitions, keys_changed, ages)
         };
-        if resync || !transitions.is_empty() {
+        // Status times only change on a transition or a resync; a key that appeared or went away
+        // also changes the file, because a key that comes back later has an unknown age again.
+        if resync || keys_changed || !transitions.is_empty() {
             lock(&self.save).dirty = true;
         }
         // Everything below stays under the core lock, so states and transitions keep their order.

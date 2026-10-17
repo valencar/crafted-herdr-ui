@@ -62,8 +62,12 @@ impl Harness {
         }
     }
 
+    /// Writes through a temp file and a rename, so a read that fires meanwhile never sees a
+    /// half-written (or empty) fixture.
     fn put(&self, file: &str, contents: &str) {
-        fs::write(self.dir.path().join(file), contents).unwrap();
+        let tmp = self.dir.path().join(format!(".{file}.tmp"));
+        fs::write(&tmp, contents).unwrap();
+        fs::rename(&tmp, self.dir.path().join(file)).unwrap();
     }
 
     fn calls(&self) -> Vec<String> {
@@ -240,8 +244,7 @@ async fn a_pane_id_that_looks_like_a_flag_is_refused_without_calling_herdr() {
 async fn an_unchanged_read_is_emitted_once() {
     let h = Harness::new();
     h.put(&format!("{AGENT_P1}.json"), &fixture("pane_read_text.txt"));
-    // Faster than the other tests, so several reads fit in the wait.
-    let preview = h.preview.clone().with_every(Duration::from_millis(50));
+    let preview = &h.preview;
 
     preview.start("local", "w1:p1", true).unwrap();
     tokio::time::sleep(Duration::from_millis(400)).await;

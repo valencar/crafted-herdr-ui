@@ -361,16 +361,16 @@ mod tests {
         let state = state_with(first.clone());
         let settings = Settings::default();
         // The same snapshot again: still no change.
-        let none = tracker.observe("buildbox", &first, 1);
+        let none = tracker.observe("buildbox", &first, 1).transitions;
         assert!(none.is_empty());
 
         // A real change after that does notify.
         let later = snapshot(AgentStatus::Idle);
-        let changes = tracker.observe("buildbox", &later, 2);
+        let changes = tracker.observe("buildbox", &later, 2).transitions;
         assert_eq!(changes.len(), 1);
         assert_eq!(notification_for(&changes[0], &state, &settings), None);
         let again = snapshot(AgentStatus::Blocked);
-        let changes = tracker.observe("buildbox", &again, 3);
+        let changes = tracker.observe("buildbox", &again, 3).transitions;
         assert_eq!(changes.len(), 1);
         assert!(notification_for(&changes[0], &state, &settings).is_some());
     }
