@@ -82,67 +82,75 @@ fn blank_view(id: &str, label: &str, target: Option<String>, session: &str) -> M
     }
 }
 
-/// True when two views would render the same. `last_ok_ms` is ignored on purpose: it moves on
-/// every good poll, and the UI only needs it when something else changes (a failure).
-fn same_content(a: &MachineView, b: &MachineView) -> bool {
-    a.id == b.id
-        && a.label == b.label
-        && a.target == b.target
-        && a.session == b.session
-        && a.is_local == b.is_local
-        && a.health == b.health
-        && a.ages == b.ages
-        && a.snapshot == b.snapshot
+/// Whether a poll result would change what the UI shows for `view`. `last_ok_ms` is not part of
+/// it on purpose: it moves on every good poll, and the UI only needs it when something else
+/// changes (a failure). The snapshot's own counters (`revision` and the like) do count.
+fn view_changed(
+    view: &MachineView,
+    health: &Health,
+    snapshot: &Snapshot,
+    ages: &HashMap<String, u64>,
+) -> bool {
+    view.health != *health || view.ages != *ages || view.snapshot.as_ref() != Some(snapshot)
 }
 
-fn same_machines(a: &[MachineView], b: &[MachineView]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| same_content(x, y))
-}
-
-/// The machines and the last state handed to the UI.
+/// The machines the UI shows.
 #[derive(Debug)]
 struct Core {
     /// Local first, then the profiles in herdr's order.
     machines: Vec<MachineView>,
-    last_emitted: Option<AppState>,
 }
 
 impl Core {
     fn new() -> Self {
         Self {
             machines: vec![blank_view(LOCAL, "Local", None, "default")],
-            last_emitted: None,
         }
     }
 
     /// Replaces the profile list. Known machines keep their snapshot and health; a profile that
-    /// is disabled drops them; a profile that is gone disappears.
-    fn set_profiles(&mut self, profiles: &[MachineProfile]) {
+    /// is disabled drops them; a profile that is gone disappears. Returns whether the list, or
+    /// any machine's label, target, session or health, changed.
+    fn set_profiles(&mut self, profiles: &[MachineProfile]) -> bool {
+        let old_ids: Vec<String> = self.machines.iter().map(|m| m.id.clone()).collect();
         let mut old: HashMap<String, MachineView> = std::mem::take(&mut self.machines)
             .into_iter()
             .map(|m| (m.id.clone(), m))
             .collect();
-        let local = old
-            .remove(LOCAL)
-            .unwrap_or_else(|| blank_view(LOCAL, "Local", None, "default"));
+        let mut changed = false;
+        let local = old.remove(LOCAL).unwrap_or_else(|| {
+            changed = true;
+            blank_view(LOCAL, "Local", None, "default")
+        });
         self.machines.push(local);
         for p in profiles.iter().filter(|p| p.id != LOCAL) {
-            let mut view = old
-                .remove(&p.id)
-                .unwrap_or_else(|| blank_view(&p.id, &p.label, None, &p.session));
+            let mut view = old.remove(&p.id).unwrap_or_else(|| {
+                changed = true;
+                blank_view(&p.id, &p.label, None, &p.session)
+            });
+            let target = Some(p.target.clone());
+            changed |= view.label != p.label || view.target != target || view.session != p.session;
             view.label = p.label.clone();
-            view.target = Some(p.target.clone());
+            view.target = target;
             view.session = p.session.clone();
             if !p.enabled {
+                changed |= view.health != Health::Disabled;
                 view.health = Health::Disabled;
                 view.snapshot = None;
                 view.last_ok_ms = None;
                 view.ages.clear();
             } else if view.health == Health::Disabled {
+                changed = true;
                 view.health = pending_health();
             }
             self.machines.push(view);
         }
+        changed
+            || old_ids.len() != self.machines.len()
+            || old_ids
+                .iter()
+                .zip(&self.machines)
+                .any(|(id, m)| *id != m.id)
     }
 
     /// The machines that should have a polling task.
@@ -162,14 +170,14 @@ impl Core {
 }
 
 /// Whether the tracker should be written now: it changed, and the last write is old enough.
-fn should_save(changed: bool, last_saved: Option<Instant>, now: Instant) -> bool {
-    changed && last_saved.is_none_or(|t| now.duration_since(t) >= SAVE_EVERY)
+fn should_save(dirty: bool, last_saved: Option<Instant>, now: Instant) -> bool {
+    dirty && last_saved.is_none_or(|t| now.duration_since(t) >= SAVE_EVERY)
 }
 
 #[derive(Debug)]
 struct SaveState {
-    /// What is on disk (as far as we know).
-    saved: ActivityTracker,
+    /// A status change or a resync happened since the last successful write.
+    dirty: bool,
     last_at: Option<Instant>,
 }
 
@@ -214,7 +222,7 @@ impl Poller {
                 visible: AtomicBool::new(true),
                 core: Mutex::new(Core::new()),
                 save: Mutex::new(SaveState {
-                    saved: tracker.clone(),
+                    dirty: false,
                     last_at: None,
                 }),
                 tracker: Mutex::new(tracker),
@@ -233,12 +241,14 @@ impl Poller {
 
         // Local does not wait for the machine list.
         inner.reconcile(&mut tasks, &mut running);
-        inner.publish();
+        self.emit_current();
         loop {
             if let Some(profiles) = inner.load_profiles().await {
-                inner.apply_profiles(&profiles);
+                let changed = inner.apply_profiles(&profiles);
                 inner.reconcile(&mut tasks, &mut running);
-                inner.publish();
+                if changed {
+                    self.emit_current();
+                }
             }
             tokio::select! {
                 _ = tokio::time::sleep(RELOAD_EVERY) => {}
@@ -318,10 +328,8 @@ impl Poller {
 
     /// Emits the current state even if it was emitted before (used when nothing will be polled).
     pub fn emit_current(&self) {
-        let mut core = lock(&self.inner.core);
-        let state = self.inner.state_now(&core);
-        core.last_emitted = Some(state.clone());
-        (self.inner.emit)(state);
+        let core = lock(&self.inner.core);
+        (self.inner.emit)(self.inner.state_now(&core));
     }
 }
 
@@ -350,33 +358,19 @@ impl Inner {
         }
     }
 
-    /// Emits the state if the machines differ from the last emitted one.
-    fn publish(&self) {
-        let mut core = lock(&self.core);
-        let unchanged = core
-            .last_emitted
-            .as_ref()
-            .is_some_and(|prev| same_machines(&prev.machines, &core.machines));
-        if unchanged {
-            return;
-        }
-        let state = self.state_now(&core);
-        core.last_emitted = Some(state.clone());
-        (self.emit)(state);
-    }
-
     async fn load_profiles(&self) -> Option<Vec<MachineProfile>> {
         let args = ["machine", "list", "--json"].map(String::from);
         let value = self.cli.run(None, &args, T_DEFAULT).await.ok()?;
         parse_machine_list(&value).ok()
     }
 
-    fn apply_profiles(&self, profiles: &[MachineProfile]) {
+    /// Returns whether the machine list or a profile field changed.
+    fn apply_profiles(&self, profiles: &[MachineProfile]) -> bool {
         let ids: Vec<String> = std::iter::once(LOCAL.to_owned())
             .chain(profiles.iter().map(|p| p.id.clone()))
             .collect();
         lock(&self.tracker).retain_machines(&ids);
-        lock(&self.core).set_profiles(profiles);
+        lock(&self.core).set_profiles(profiles)
     }
 
     /// Starts a polling task for every polled machine that lacks one, and stops the others.
@@ -385,6 +379,8 @@ impl Inner {
         tasks: &mut JoinSet<()>,
         running: &mut HashMap<String, AbortHandle>,
     ) {
+        // Reap tasks that ended (aborted or panicked) so the set doesn't grow.
+        while tasks.try_join_next().is_some() {}
         let wanted = lock(&self.core).polled_ids();
         running.retain(|id, handle| {
             let keep = wanted.contains(id) && !handle.is_finished();
@@ -436,6 +432,10 @@ impl Inner {
     }
 
     fn record_snapshot(&self, id: &str, snapshot: Snapshot, resync: bool) {
+        // A machine that was just removed or disabled must not notify or emit.
+        if lock(&self.core).view_mut(id).is_none() {
+            return;
+        }
         let now = now_ms();
         let (transitions, ages) = {
             let mut tracker = lock(&self.tracker);
@@ -452,18 +452,27 @@ impl Inner {
                 .collect();
             (transitions, ages)
         };
-        if let Some(view) = lock(&self.core).view_mut(id) {
-            view.health = Health::Online;
-            view.snapshot = Some(snapshot);
-            view.last_ok_ms = Some(now);
-            view.ages = ages;
+        if resync || !transitions.is_empty() {
+            lock(&self.save).dirty = true;
         }
+        // Everything below stays under the core lock, so states and transitions keep their order.
+        let mut core = lock(&self.core);
+        let Some(view) = core.view_mut(id) else {
+            return;
+        };
+        let changed = view_changed(view, &Health::Online, &snapshot, &ages);
+        view.health = Health::Online;
+        view.snapshot = Some(snapshot);
+        view.last_ok_ms = Some(now);
+        view.ages = ages;
         // Before the state, so a listener that sees the new state has the transition queued.
         for transition in transitions {
             // No receivers is fine.
             let _ = self.transitions.send(transition);
         }
-        self.publish();
+        if changed {
+            (self.emit)(self.state_now(&core));
+        }
     }
 
     /// Keeps the previous snapshot and ages; only the health changes.
@@ -472,27 +481,32 @@ impl Inner {
         if let Health::Reconnecting { retry_in_ms, .. } = &mut health {
             *retry_in_ms = retry_in.as_millis() as u64;
         }
-        if let Some(view) = lock(&self.core).view_mut(id) {
+        let mut core = lock(&self.core);
+        let Some(view) = core.view_mut(id) else {
+            return;
+        };
+        if view.health != health {
             view.health = health;
+            (self.emit)(self.state_now(&core));
         }
-        self.publish();
     }
 
-    /// Writes `activity.json` if it changed and the last write was at least 5 s ago.
+    /// Writes `activity.json` if a status changed since the last write and that was at least 5 s ago.
     fn maybe_save(&self) {
         let Some(path) = &self.config.activity_path else {
             return;
         };
-        let current = lock(&self.tracker).clone();
         let mut save = lock(&self.save);
         let now = Instant::now();
-        if !should_save(current != save.saved, save.last_at, now) {
+        if !should_save(save.dirty, save.last_at, now) {
             return;
         }
         save.last_at = Some(now);
+        // Holding `save` while cloning means a change made meanwhile marks `dirty` afterwards.
+        let current = lock(&self.tracker).clone();
         match current.save(path) {
-            Ok(()) => save.saved = current,
-            // Stays unsaved, so the next tick after 5 s retries.
+            Ok(()) => save.dirty = false,
+            // Stays dirty, so the next tick after 5 s retries.
             Err(e) => eprintln!("could not save activity.json: {e}"),
         }
     }
@@ -576,14 +590,62 @@ mod tests {
         assert_eq!(core.machines[1].health, Health::Online);
     }
 
+    fn empty_snapshot() -> Snapshot {
+        serde_json::from_value(serde_json::json!({})).unwrap()
+    }
+
     #[test]
     fn last_ok_ms_alone_is_not_a_change() {
-        let mut a = blank_view("a", "A", None, "default");
-        let mut b = a.clone();
-        b.last_ok_ms = Some(99);
-        assert!(same_content(&a, &b));
-        a.health = Health::Online;
-        assert!(!same_content(&a, &b));
+        let snapshot = empty_snapshot();
+        let mut view = blank_view("a", "A", None, "default");
+        view.health = Health::Online;
+        view.snapshot = Some(snapshot.clone());
+        view.last_ok_ms = Some(1);
+        assert!(!view_changed(&view, &Health::Online, &snapshot, &view.ages));
+
+        // A later good poll differs only in `last_ok_ms`, which `view_changed` never sees.
+        view.last_ok_ms = Some(99);
+        assert!(!view_changed(&view, &Health::Online, &snapshot, &view.ages));
+    }
+
+    #[test]
+    fn a_new_health_snapshot_or_age_is_a_change() {
+        let snapshot = empty_snapshot();
+        let mut view = blank_view("a", "A", None, "default");
+        // Pending, with no snapshot yet.
+        assert!(view_changed(&view, &Health::Online, &snapshot, &view.ages));
+
+        view.health = Health::Online;
+        view.snapshot = Some(snapshot.clone());
+        assert!(view_changed(
+            &view,
+            &Health::Disabled,
+            &snapshot,
+            &view.ages
+        ));
+
+        let mut newer = snapshot.clone();
+        newer.protocol += 1;
+        assert!(view_changed(&view, &Health::Online, &newer, &view.ages));
+
+        let ages = HashMap::from([("t1".to_owned(), 5)]);
+        assert!(view_changed(&view, &Health::Online, &snapshot, &ages));
+    }
+
+    #[test]
+    fn set_profiles_reports_only_real_changes() {
+        let mut core = Core::new();
+        assert!(core.set_profiles(&[profile("a", true), profile("b", true)]));
+        assert!(!core.set_profiles(&[profile("a", true), profile("b", true)]));
+
+        let mut renamed = profile("a", true);
+        renamed.label = "Renamed".into();
+        assert!(core.set_profiles(&[renamed.clone(), profile("b", true)]));
+        assert!(core.set_profiles(&[profile("b", true), renamed.clone()]));
+        assert!(core.set_profiles(&[renamed.clone()]));
+        assert!(core.set_profiles(&[profile("a", false)]));
+        assert!(!core.set_profiles(&[profile("a", false)]));
+        assert!(core.set_profiles(&[profile("a", true)]));
     }
 
     #[test]
