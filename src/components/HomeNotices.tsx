@@ -1,15 +1,21 @@
+import { isSupportedVersion } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
 
-/** The banner for a herdr older than the app supports. */
-export function VersionBanner({
-  version,
-  onDismiss,
-}: {
-  version: string | null;
-  onDismiss: (version: string) => void;
-}) {
+/** The banner for a herdr older than the app supports, until the user dismisses it. */
+export function VersionBanner() {
+  // `undefined` before the first state; `null` when herdr didn't report a version.
+  const version = useAppStore((s) => s.state?.herdr_version);
+  const dismissed = useAppStore((s) => s.dismissedVersion);
+  const dismiss = useAppStore((s) => s.dismissVersionBanner);
+  if (
+    version === undefined ||
+    isSupportedVersion(version) ||
+    dismissed === (version ?? "")
+  ) {
+    return null;
+  }
   return (
     <div className="banner" role="status">
       <span>
@@ -19,7 +25,7 @@ export function VersionBanner({
       <button
         type="button"
         className="btn btn-small btn-ghost"
-        onClick={() => onDismiss(version ?? "")}
+        onClick={() => dismiss(version ?? "")}
       >
         Dismiss
       </button>

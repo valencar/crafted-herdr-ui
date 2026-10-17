@@ -15,7 +15,6 @@ function useSynced<T>(
   get: () => Promise<T | null>,
   on: (cb: (value: T) => void) => Promise<() => void>,
   set: (value: T) => void,
-  onListenError?: (error: unknown) => void,
 ): void {
   useEffect(() => {
     let alive = true;
@@ -38,27 +37,24 @@ function useSynced<T>(
         if (!pushed) fetchCurrent();
       })
       .catch((e) => {
-        if (alive) onListenError?.(e);
+        // Without the event the window would silently go stale.
+        if (alive) useAppStore.getState().reportError(e);
       });
     return () => {
       alive = false;
       unlisten?.();
     };
-  }, [get, on, set, onListenError]);
+  }, [get, on, set]);
 }
 
 /** Keeps the store's `state` current. */
 export function useStateSync(): void {
   const setState = useAppStore((s) => s.setState);
-  // Without the event the screen would silently go stale.
-  const reportError = useAppStore((s) => s.reportError);
-  useSynced<AppState>(getState, onState, setState, reportError);
+  useSynced<AppState>(getState, onState, setState);
 }
 
 /** Keeps the store's `settings` current. */
 export function useSettingsSync(): void {
   const setSettings = useAppStore((s) => s.setSettings);
-  // Without the event the Settings window would silently show stale values.
-  const reportError = useAppStore((s) => s.reportError);
-  useSynced<Settings>(getSettings, onSettings, setSettings, reportError);
+  useSynced<Settings>(getSettings, onSettings, setSettings);
 }

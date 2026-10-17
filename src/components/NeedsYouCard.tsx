@@ -13,7 +13,7 @@ type Props = {
   nowMs: number;
   terminalName: string;
   /** The last few lines of the live preview; only the selected card has any. */
-  previewLines: string[];
+  previewLines: readonly string[];
   onSelect: (key: string) => void;
   onOpen: (row: Row) => void;
   onMarkSeen: (row: Row) => void;

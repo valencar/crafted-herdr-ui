@@ -77,8 +77,7 @@ export function Workbox({ machineId }: { machineId: string }) {
   );
   const tails = usePaneTails(machineId, targets);
 
-  const rowKeys = useMemo(() => new Set(rows.map((r) => r.key)), [rows]);
-  useOpenWhenListed(rowKeys);
+  useOpenWhenListed(rows);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -389,7 +388,6 @@ export function Workbox({ machineId }: { machineId: string }) {
         dialog={dialog}
         machine={machine}
         machineId={machineId}
-        label={label}
         onClose={close}
         onRemoved={goHome}
         onCloseWorkspace={closeWorkspace}

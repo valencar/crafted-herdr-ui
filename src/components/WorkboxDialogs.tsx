@@ -32,8 +32,6 @@ type Props = {
   dialog: WorkboxDialog | null;
   machine: MachineView | null;
   machineId: string;
-  /** The workbox's name for messages: its label, or its id before it is listed. */
-  label: string;
   onClose: () => void;
   /** The workbox was removed: leave its screen. */
   onRemoved: () => void;
@@ -45,15 +43,13 @@ export function WorkboxDialogs({
   dialog,
   machine,
   machineId,
-  label,
   onClose: close,
   onRemoved: goHome,
   onCloseWorkspace: closeWorkspace,
 }: Props) {
   const report = useAppStore((s) => s.reportError);
-  const run = (action: Promise<unknown>) => {
-    action.catch(report);
-  };
+  // The workbox's name for messages: its label, or its id before it is listed.
+  const label = machine?.label ?? machineId;
   return (
     <>
       {machine && dialog?.kind === "rename-box" && (
@@ -90,12 +86,10 @@ export function WorkboxDialogs({
           danger={false}
           onConfirm={() => {
             close();
-            run(
-              invokeTyped("machine_set_enabled", {
-                id: machine.id,
-                enabled: false,
-              }),
-            );
+            invokeTyped("machine_set_enabled", {
+              id: machine.id,
+              enabled: false,
+            }).catch(report);
           }}
           onCancel={close}
         />
@@ -201,7 +195,9 @@ export function WorkboxDialogs({
           onConfirm={() => {
             const { tab } = dialog;
             close();
-            run(invokeTyped("close_tab", { machineId, tabId: tab.tab_id }));
+            invokeTyped("close_tab", { machineId, tabId: tab.tab_id }).catch(
+              report,
+            );
           }}
           onCancel={close}
         />

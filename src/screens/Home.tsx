@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { EmptyState } from "../components/EmptyState";
@@ -11,13 +11,7 @@ import { ReconnectBox } from "../components/ReconnectBox";
 import { Sidebar } from "../components/Sidebar";
 import { StoreToast } from "../components/Toast";
 import type { MachineView } from "../lib/bindings/MachineView";
-import {
-  formatStaleness,
-  isPending,
-  isSupportedVersion,
-  lastLines,
-  plural,
-} from "../lib/format";
+import { formatStaleness, isPending, lastLines, plural } from "../lib/format";
 import {
   groupByProject,
   groupByStatus,
@@ -58,7 +52,7 @@ const GROUPERS: Record<GroupBy, (rows: Row[]) => Group[]> = {
 };
 
 /** Shared by every card but the selected one, so a memoized card sees the same prop. */
-const NO_LINES: string[] = [];
+const NO_LINES: readonly string[] = [];
 
 function matches(row: Row, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -83,8 +77,6 @@ export function Home() {
     s.preview && s.preview.key === s.selectedKey ? s.preview.text : null,
   );
   const report = useAppStore((s) => s.reportError);
-  const dismissedVersion = useAppStore((s) => s.dismissedVersion);
-  const dismissVersionBanner = useAppStore((s) => s.dismissVersionBanner);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
@@ -119,8 +111,7 @@ export function Home() {
       setPendingSelectKey(null);
     }
   }, [pendingSelectKey, rows, select, setPendingSelectKey]);
-  const rowKeys = useMemo(() => new Set(rows.map((r) => r.key)), [rows]);
-  useOpenWhenListed(rowKeys);
+  useOpenWhenListed(rows);
 
   // No search: `visible` is `rows` itself, so the project groups built for the sidebar are
   // the ones to show.
@@ -171,15 +162,7 @@ export function Home() {
     return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
   };
 
-  const closeRow = useCallback((row: Row) => setClosingKey(row.key), []);
-  useHomeShortcuts({
-    navRows,
-    actionRow,
-    selectedKey,
-    sheet,
-    searchRef,
-    onClose: closeRow,
-  });
+  useHomeShortcuts({ navRows, actionRow, searchRef, onClose: setClosingKey });
 
   const needsMachines = new Set(needs.map((r) => r.machineId)).size;
   const hasAnyRows = rows.length > 0;
@@ -203,11 +186,6 @@ export function Home() {
   const attentionMachines = allMachines.filter(
     (m) => !m.is_local && m.health.kind === "attention",
   );
-  const unsupported =
-    state !== null &&
-    !isSupportedVersion(state.herdr_version) &&
-    dismissedVersion !== (state.herdr_version ?? "");
-
   return (
     <div className="app">
       <Header
@@ -219,12 +197,7 @@ export function Home() {
         installed={installed}
         onNewSession={() => openNewSession()}
       />
-      {unsupported && (
-        <VersionBanner
-          version={state.herdr_version}
-          onDismiss={dismissVersionBanner}
-        />
-      )}
+      <VersionBanner />
       <div className="body">
         <Sidebar
           needsCount={needsYou(rows).length}

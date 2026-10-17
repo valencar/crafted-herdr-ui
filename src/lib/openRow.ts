@@ -26,19 +26,19 @@ export function markSeen(row: Row): void {
 }
 
 /**
- * A session was just created with "Open when ready": opens it once its row is in `rowKeys`
+ * A session was just created with "Open when ready": opens it once its row is in `rows`
  * (`open_session` reads the pane from the state, so it can't run before then).
  */
-export function useOpenWhenListed(rowKeys: ReadonlySet<string>): void {
+export function useOpenWhenListed(rows: Row[]): void {
   const pendingOpen = useAppStore((s) => s.pendingOpen);
   const setPendingOpen = useAppStore((s) => s.setPendingOpen);
   const report = useAppStore((s) => s.reportError);
   useEffect(() => {
-    if (!pendingOpen || !rowKeys.has(pendingOpen.key)) return;
+    if (!pendingOpen || !rows.some((r) => r.key === pendingOpen.key)) return;
     setPendingOpen(null);
     invokeTyped("open_session", {
       machineId: pendingOpen.machineId,
       paneId: pendingOpen.paneId,
     }).catch(report);
-  }, [pendingOpen, rowKeys, setPendingOpen, report]);
+  }, [pendingOpen, rows, setPendingOpen, report]);
 }

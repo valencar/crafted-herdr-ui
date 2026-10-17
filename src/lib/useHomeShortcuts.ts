@@ -1,5 +1,5 @@
 import { useEffect, type RefObject } from "react";
-import { useAppStore, type Sheet } from "../store/appStore";
+import { useAppStore } from "../store/appStore";
 import type { Row } from "./grouping";
 import { invokeTyped } from "./ipc";
 import { openRow } from "./openRow";
@@ -10,23 +10,21 @@ type Options = {
   navRows: Row[];
   /** The selected row, when it is visible in the list: the one ⌘↩ and Delete act on. */
   actionRow: Row | null;
-  selectedKey: string | null;
-  /** A sheet is open: the shortcuts stand down. */
-  sheet: Sheet;
   searchRef: RefObject<HTMLInputElement | null>;
   /** Delete or Backspace on the selected row. */
-  onClose: (row: Row) => void;
+  onClose: (key: string) => void;
 };
 
 /** Home's keyboard shortcuts: ⌘K, ⌘N, ⌘R, ⌘↩, the arrow keys and Delete. */
 export function useHomeShortcuts({
   navRows,
   actionRow,
-  selectedKey,
-  sheet,
   searchRef,
   onClose,
 }: Options): void {
+  // A sheet is open: the shortcuts stand down.
+  const sheet = useAppStore((s) => s.sheet);
+  const selectedKey = useAppStore((s) => s.selectedKey);
   const select = useAppStore((s) => s.select);
   const openNewSession = useAppStore((s) => s.openNewSession);
   const report = useAppStore((s) => s.reportError);
@@ -68,7 +66,7 @@ export function useHomeShortcuts({
       } else if (e.key === "Backspace" || e.key === "Delete") {
         if (actionRow) {
           e.preventDefault();
-          onClose(actionRow);
+          onClose(actionRow.key);
         }
       }
     };
