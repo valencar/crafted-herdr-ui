@@ -9,6 +9,13 @@ import { useTerminalStore, type TermTab } from "./terminalStore";
 type Size = { cols: number; rows: number };
 
 /**
+ * Keystrokes headed for one live session. Each `term_write` is its own async call, so they could
+ * overtake one another: at most one is in flight, and what is typed meanwhile waits in `pending`
+ * and goes out as one write, in order, when the one in flight settles.
+ */
+type Writer = { id: number; busy: boolean; pending: string };
+
+/**
  * One tab's session with the Rust side: opens it into `termRef`'s terminal on mount, streams
  * its output, forwards keystrokes, and closes it on unmount. `reattach` opens a fresh session
  * into the same terminal (after a detach or an error). Declare this hook after the effect that
@@ -25,6 +32,8 @@ export function useTermSession(
   // Bumped by every open and by unmount; callbacks of an older session check it and stand down.
   const generation = useRef(0);
   const sentSize = useRef<Size | null>(null);
+  // The live session's writer; null when there is no session. Dropping it drops what is pending.
+  const writer = useRef<Writer | null>(null);
 
   /** Tells the session the terminal's size; does nothing without a session or a change. */
   const resize = useCallback((cols: number, rows: number) => {
@@ -54,6 +63,7 @@ export function useTermSession(
         }
         exited = true;
         idRef.current = null;
+        writer.current = null;
         useTerminalStore
           .getState()
           .updateTab(tabKey, { state: "detached", termId: null });
@@ -65,6 +75,7 @@ export function useTermSession(
       }
       if (exited) return;
       idRef.current = id;
+      writer.current = { id, busy: false, pending: "" };
       useTerminalStore
         .getState()
         .updateTab(tabKey, { state: "live", termId: id });
@@ -83,8 +94,10 @@ export function useTermSession(
     void open();
     const generations = generation;
     const id = idRef;
+    const writers = writer;
     return () => {
       generations.current += 1;
+      writers.current = null;
       if (id.current !== null) {
         invokeTyped("term_close", { id: id.current }).catch(() => {});
         id.current = null;
@@ -92,20 +105,32 @@ export function useTermSession(
     };
   }, [open]);
 
-  // Keystrokes go to the session while there is one.
+  // Keystrokes go to the session while there is one, in the order they were typed.
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
+    const send = (w: Writer, data: string) => {
+      w.busy = true;
+      invokeTyped("term_write", { id: w.id, data })
+        .catch((e: unknown) => {
+          // A write racing the session's exit is not worth reporting.
+          if (writer.current !== w) return;
+          useAppStore
+            .getState()
+            .showToast(actionErrorMessage(toActionError(e)), "error");
+        })
+        .finally(() => {
+          w.busy = false;
+          const next = w.pending;
+          w.pending = "";
+          if (next && writer.current === w) send(w, next);
+        });
+    };
     const sub = term.onData((data) => {
-      const id = idRef.current;
-      if (id === null) return;
-      invokeTyped("term_write", { id, data }).catch((e: unknown) => {
-        // A write racing the session's exit is not worth reporting.
-        if (idRef.current !== id) return;
-        useAppStore
-          .getState()
-          .showToast(actionErrorMessage(toActionError(e)), "error");
-      });
+      const w = writer.current;
+      if (!w) return;
+      if (w.busy) w.pending += data;
+      else send(w, data);
     });
     return () => sub.dispose();
   }, [termRef]);

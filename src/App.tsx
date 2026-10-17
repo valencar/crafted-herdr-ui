@@ -4,7 +4,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { toRows } from "./lib/grouping";
 import { onFocusRow, onMenu, onNewSession, onOpenRow } from "./lib/ipc";
 import { runMenuAction } from "./lib/menuActions";
-import { openRow } from "./lib/openRow";
+import { defaultOpenHow, openRow } from "./lib/openRow";
 import { focusRowElement } from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
@@ -53,10 +53,12 @@ function App() {
       const current = useAppStore.getState().state;
       return (current ? toRows(current) : []).find((r) => r.key === key);
     };
-    // A notification click selects the row (v1), then opens it the way the setting says.
+    // A notification click selects the row (v1), then opens it the way the setting says. When
+    // it opens in the app, the terminal keeps the keyboard: moving focus to the Home row would
+    // put the user's next keys (Backspace closes a session) on the wrong thing.
     onFocusRow((key) => {
       focusRow(key);
-      focusRowElement(key);
+      if (defaultOpenHow() !== "app") focusRowElement(key);
       const row = rowFor(key);
       if (row) void openRow(row);
     })

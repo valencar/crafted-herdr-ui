@@ -208,6 +208,79 @@ describe("TerminalView", () => {
     expect(invoke).toHaveBeenCalledWith("term_write", { id: 7, data: "ls\r" });
   });
 
+  it("keystrokes_typed_while_a_write_is_in_flight_go_out_as_one_write_after_it", async () => {
+    render(<Harness />);
+    await flush();
+    const writes = () =>
+      invoke.mock.calls.filter(([name]) => name === "term_write");
+    const settle: (() => void)[] = [];
+    invoke.mockImplementation(
+      (name: string) =>
+        new Promise<null>((resolve) => {
+          if (name === "term_write") settle.push(() => resolve(null));
+          else resolve(null);
+        }),
+    );
+    term().dataHandler?.("a");
+    term().dataHandler?.("b");
+    term().dataHandler?.("c");
+    await flush();
+    // Only "a" is out; "b" and "c" wait for it.
+    expect(writes()).toEqual([["term_write", { id: 7, data: "a" }]]);
+    settle[0]();
+    await flush();
+    expect(writes()).toEqual([
+      ["term_write", { id: 7, data: "a" }],
+      ["term_write", { id: 7, data: "bc" }],
+    ]);
+    // Still one at a time: "d" waits for "bc".
+    term().dataHandler?.("d");
+    await flush();
+    expect(writes()).toHaveLength(2);
+    settle[1]();
+    await flush();
+    expect(writes()[2]).toEqual(["term_write", { id: 7, data: "d" }]);
+    settle[2]();
+    await flush();
+    expect(writes()).toHaveLength(3);
+  });
+
+  it("pending_keystrokes_are_dropped_when_the_session_exits", async () => {
+    render(<Harness />);
+    await flush();
+    let settle: () => void = () => {};
+    invoke.mockReturnValueOnce(
+      new Promise<null>((resolve) => {
+        settle = () => resolve(null);
+      }),
+    );
+    term().dataHandler?.("a");
+    term().dataHandler?.("b");
+    emit({ kind: "exit", code: 0 });
+    invoke.mockClear();
+    settle();
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("pending_keystrokes_are_dropped_when_the_tab_unmounts", async () => {
+    const { unmount } = render(<Harness />);
+    await flush();
+    let settle: () => void = () => {};
+    invoke.mockReturnValueOnce(
+      new Promise<null>((resolve) => {
+        settle = () => resolve(null);
+      }),
+    );
+    term().dataHandler?.("a");
+    term().dataHandler?.("b");
+    unmount();
+    invoke.mockClear();
+    settle();
+    await flush();
+    expect(invoke).not.toHaveBeenCalledWith("term_write", expect.anything());
+  });
+
   it("an_exit_shows_Detached_and_Reattach_opens_a_new_session", async () => {
     const user = userEvent.setup();
     render(<Harness />);
@@ -345,6 +418,31 @@ describe("TerminalView", () => {
     );
     expect(writeText).not.toHaveBeenCalled();
     expect(useAppStore.getState().toast).toBeNull();
+  });
+
+  it("osc8_hyperlinks_are_copy_only_too", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const windowOpen = vi.fn();
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    vi.stubGlobal("open", windowOpen);
+    render(<Harness />);
+    await flush();
+    const handler = term().options.linkHandler as {
+      activate(event: { metaKey: boolean }, uri: string): void;
+      allowNonHttpProtocols: boolean;
+    };
+    expect(handler.allowNonHttpProtocols).toBe(false);
+    await act(async () =>
+      handler.activate({ metaKey: false }, "https://x.dev/a"),
+    );
+    expect(writeText).not.toHaveBeenCalled();
+    expect(useAppStore.getState().toast).toBeNull();
+    await act(async () =>
+      handler.activate({ metaKey: true }, "https://x.dev/a"),
+    );
+    expect(writeText).toHaveBeenCalledWith("https://x.dev/a");
+    expect(useAppStore.getState().toast).toBe("Link copied");
+    expect(windowOpen).not.toHaveBeenCalled();
   });
 
   it("lets_command_shortcuts_through_to_the_menu", async () => {

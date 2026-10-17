@@ -322,6 +322,47 @@ it("focus-row selects and opens", async () => {
   useAppStore.setState({ selectedKey: null, settings: null });
 });
 
+it("a notification click that opens in the app leaves the Home row unfocused; an external one focuses it", async () => {
+  useAppStore.setState({
+    view: { kind: "home" },
+    selectedKey: null,
+    settings: { open_target: "app" } as unknown as Settings,
+  });
+  listBuildbox();
+  render(<App />);
+  await waitFor(() => expect(ipc.onFocusRow).toHaveBeenCalled());
+  await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+  const li = await waitFor(() => {
+    const el = document.querySelector<HTMLElement>(
+      '[data-row-key="buildbox::w1:p1"]',
+    );
+    expect(el).not.toBeNull();
+    return el as HTMLElement;
+  });
+  const button = li.querySelector<HTMLElement>(
+    "button.row-main",
+  ) as HTMLElement;
+  vi.useFakeTimers();
+  try {
+    act(() => handler(ipc.onFocusRow)("buildbox::w1:p1"));
+    act(() => vi.advanceTimersByTime(500));
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
+    expect(document.activeElement).not.toBe(button);
+
+    useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+    useAppStore.setState({
+      settings: { open_target: "external" } as unknown as Settings,
+    });
+    act(() => handler(ipc.onFocusRow)("buildbox::w1:p1"));
+    act(() => vi.advanceTimersByTime(500));
+    expect(document.activeElement).toBe(button);
+  } finally {
+    vi.useRealTimers();
+  }
+  useAppStore.setState({ selectedKey: null, settings: null });
+});
+
 it("open-row event opens the tab", async () => {
   // The popover asks for "app" explicitly, whatever this window's setting says.
   useAppStore.setState({

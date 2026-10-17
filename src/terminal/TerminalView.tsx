@@ -20,13 +20,28 @@ import { xtermTheme } from "./xtermTheme";
 
 const RESIZE_DEBOUNCE_MS = 50;
 
-/** What the find bar (in the panel) can ask of a tab's terminal. */
+/**
+ * What a click on a terminal link does: ⌘-click copies it and says so; a plain click does
+ * nothing. The app opens no URL but herdr.dev, so there is no way to follow a link.
+ */
+function copyLink(event: { metaKey: boolean }, uri: string): void {
+  if (!event.metaKey) return;
+  navigator.clipboard.writeText(uri).then(
+    () => useAppStore.getState().showToast("Link copied", "info"),
+    (e: unknown) =>
+      useAppStore
+        .getState()
+        .showToast(actionErrorMessage(toActionError(e)), "error"),
+  );
+}
+
 /** A sheet or a dialog is open, so the terminal must not take keyboard focus. */
 function modalOpen(): boolean {
   const { sheet, dialogOpen } = useAppStore.getState();
   return sheet !== null || dialogOpen > 0;
 }
 
+/** What the find bar (in the panel) can ask of a tab's terminal. */
 export type TerminalHandle = {
   findNext(q: string): boolean;
   findPrevious(q: string): boolean;
@@ -64,24 +79,15 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
       theme: xtermTheme(styles),
       allowProposedApi: false,
       macOptionIsMeta: false,
+      // OSC 8 hyperlinks: without a handler xterm would confirm() and window.open() them.
+      linkHandler: { activate: copyLink, allowNonHttpProtocols: false },
     });
     const fit = new FitAddon();
     const search = new SearchAddon();
     term.loadAddon(fit);
     term.loadAddon(search);
-    // Links are copy-only: the app opens no URL but herdr.dev.
-    term.loadAddon(
-      new WebLinksAddon((event, uri) => {
-        if (!event.metaKey) return;
-        navigator.clipboard.writeText(uri).then(
-          () => useAppStore.getState().showToast("Link copied", "info"),
-          (e: unknown) =>
-            useAppStore
-              .getState()
-              .showToast(actionErrorMessage(toActionError(e)), "error"),
-        );
-      }),
-    );
+    // Plain-text URLs are copy-only too.
+    term.loadAddon(new WebLinksAddon(copyLink));
     // ⌘ shortcuts belong to the menu, not to the program in the terminal.
     term.attachCustomKeyEventHandler((e) => !e.metaKey);
     term.open(host);
