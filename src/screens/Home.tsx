@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { EmptyState } from "../components/EmptyState";
 import { Header } from "../components/Header";
+import { LocalDownCard, VersionBanner } from "../components/HomeNotices";
 import { Inspector } from "../components/Inspector";
 import { NeedsYouCard } from "../components/NeedsYouCard";
 import { ProjectGroup } from "../components/ProjectGroup";
@@ -29,9 +30,8 @@ import {
 } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { markSeen, openRow, useOpenWhenListed } from "../lib/openRow";
+import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import {
-  focusRowButton,
-  isEditable,
   openSettings,
   scrollToId,
   terminalName as terminalLabel,
@@ -171,60 +171,15 @@ export function Home() {
     return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
   };
 
-  const open = openRow;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (sheet || useAppStore.getState().dialogOpen > 0) return;
-      if (e.metaKey) {
-        if (e.key === "k") {
-          e.preventDefault();
-          searchRef.current?.focus();
-          searchRef.current?.select();
-        } else if (e.key === "n") {
-          e.preventDefault();
-          openNewSession();
-        } else if (e.key === "r") {
-          e.preventDefault();
-          invokeTyped("refresh_now", {}).catch(report);
-        } else if (e.key === "Enter" && actionRow) {
-          e.preventDefault();
-          open(actionRow);
-        }
-        return;
-      }
-      if (e.ctrlKey || e.altKey || isEditable(e.target)) return;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        if (navRows.length === 0) return;
-        e.preventDefault();
-        const at = navRows.findIndex((r) => r.key === selectedKey);
-        const down = e.key === "ArrowDown";
-        const next =
-          at < 0
-            ? down
-              ? 0
-              : navRows.length - 1
-            : Math.min(navRows.length - 1, Math.max(0, at + (down ? 1 : -1)));
-        select(navRows[next].key);
-        focusRowButton(navRows[next].key);
-      } else if (e.key === "Backspace" || e.key === "Delete") {
-        if (actionRow) {
-          e.preventDefault();
-          setClosingKey(actionRow.key);
-        }
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [
-    sheet,
+  const closeRow = useCallback((row: Row) => setClosingKey(row.key), []);
+  useHomeShortcuts({
+    navRows,
     actionRow,
     selectedKey,
-    navRows,
-    select,
-    openNewSession,
-    open,
-    report,
-  ]);
+    sheet,
+    searchRef,
+    onClose: closeRow,
+  });
 
   const needsMachines = new Set(needs.map((r) => r.machineId)).size;
   const hasAnyRows = rows.length > 0;
@@ -265,19 +220,10 @@ export function Home() {
         onNewSession={() => openNewSession()}
       />
       {unsupported && (
-        <div className="banner" role="status">
-          <span>
-            herdr {state.herdr_version ?? "(unknown version)"} is older than
-            this app supports (0.9.0+). Some actions may fail.
-          </span>
-          <button
-            type="button"
-            className="btn btn-small btn-ghost"
-            onClick={() => dismissVersionBanner(state.herdr_version ?? "")}
-          >
-            Dismiss
-          </button>
-        </div>
+        <VersionBanner
+          version={state.herdr_version}
+          onDismiss={dismissVersionBanner}
+        />
       )}
       <div className="body">
         <Sidebar
@@ -301,23 +247,7 @@ export function Home() {
         />
 
         <main className="main">
-          {localDown && (
-            <EmptyState
-              title="Local isn’t answering"
-              action={{
-                label: "Retry now",
-                onClick: () =>
-                  invokeTyped("refresh_now", { machineId: "local" }).catch(
-                    report,
-                  ),
-              }}
-            >
-              <p>{localError || "herdr isn’t answering yet"}</p>
-              <p>
-                Start herdr with <code>herdr</code> in a terminal, then retry.
-              </p>
-            </EmptyState>
-          )}
+          {localDown && <LocalDownCard error={localError} />}
           {/* Once per machine, rows or not: an unreachable box must never vanish from Home. */}
           {attentionMachines.map((m) => (
             <EmptyState key={m.id} title={`${m.label} needs attention`}>
@@ -383,7 +313,7 @@ export function Home() {
                           r.key === selectedKey ? previewLines : NO_LINES
                         }
                         onSelect={select}
-                        onOpen={open}
+                        onOpen={openRow}
                         onMarkSeen={markSeen}
                       />
                     ))}
@@ -449,7 +379,7 @@ export function Home() {
                         nowMs={nowMs}
                         terminalName={terminalName}
                         onSelect={select}
-                        onOpen={open}
+                        onOpen={openRow}
                       />
                     ))}
                   </ProjectGroup>
