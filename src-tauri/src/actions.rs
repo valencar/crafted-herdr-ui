@@ -72,6 +72,15 @@ pub enum ActionError {
     Invalid { message: String },
 }
 
+impl ActionError {
+    /// A request refused before herdr was called.
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::Invalid {
+            message: message.into(),
+        }
+    }
+}
+
 /// Stands in for the new pane's id in the `agent start` step until the first step has run.
 pub const PANE_PLACEHOLDER: &str = "{PANE}";
 
@@ -184,19 +193,15 @@ pub fn preview_new_session(req: &NewSessionRequest, machine_label: Option<&str>)
         .collect()
 }
 
-fn invalid(message: impl Into<String>) -> ActionError {
-    ActionError::Invalid {
-        message: message.into(),
-    }
-}
-
 /// Values that herdr would read as a flag, or that are empty, never reach the CLI.
 fn check_arg(what: &str, value: &str) -> Result<(), ActionError> {
     if value.trim().is_empty() {
-        return Err(invalid(format!("{what} can't be empty.")));
+        return Err(ActionError::invalid(format!("{what} can't be empty.")));
     }
     if value.starts_with('-') {
-        return Err(invalid(format!("{what} can't start with '-'.")));
+        return Err(ActionError::invalid(format!(
+            "{what} can't start with '-'."
+        )));
     }
     Ok(())
 }
@@ -211,7 +216,7 @@ fn validate_request(req: &NewSessionRequest) -> Result<(), ActionError> {
     }
     if let Some(kind) = &req.kind {
         check_arg("Agent kind", kind)?;
-        validate_name(&req.name).map_err(invalid)?;
+        validate_name(&req.name).map_err(ActionError::invalid)?;
     } else if !matches!(req.placement, Placement::SplitBeside { .. }) {
         check_arg("Name", &req.name)?;
     }
@@ -341,6 +346,19 @@ impl Actions {
         }
     }
 
+    /// The create step: the reply, and the new pane's id read from it.
+    async fn create_first_step(
+        &self,
+        machine: &str,
+        step: Vec<String>,
+    ) -> Result<(Value, String), ActionError> {
+        let created = self
+            .mutate(machine, step.clone(), self.timeouts.create)
+            .await?;
+        let pane_id = created_pane(&created, step)?;
+        Ok((created, pane_id))
+    }
+
     /// Creates the pane and, for an agent, starts it there. If the agent fails to start, the
     /// new pane stays open and the error says so.
     pub async fn create_session(
@@ -350,23 +368,18 @@ impl Actions {
         validate_request(req)?;
         let mut steps = plan_new_session(req).into_iter();
         let Some(first) = steps.next() else {
-            return Err(invalid("Nothing to create."));
+            return Err(ActionError::invalid("Nothing to create."));
         };
-        let (created, pane_id) = async {
-            let created = self
-                .mutate(&req.machine_id, first.clone(), self.timeouts.create)
-                .await?;
-            let pane_id = created_pane(&created, first)?;
-            Ok((created, pane_id))
-        }
-        .await
-        .map_err(|e| {
-            if req.kind.is_some() {
-                agent_not_started(e)
-            } else {
-                e
-            }
-        })?;
+        let (created, pane_id) = self
+            .create_first_step(&req.machine_id, first)
+            .await
+            .map_err(|e| {
+                if req.kind.is_some() {
+                    agent_not_started(e)
+                } else {
+                    e
+                }
+            })?;
         let session = CreatedSession {
             terminal_id: created_terminal_id(&created),
             pane_id,
@@ -415,7 +428,7 @@ impl Actions {
     ) -> Result<(), ActionError> {
         check_arg("Pane", pane_id)?;
         if is_agent {
-            validate_name(name).map_err(invalid)?;
+            validate_name(name).map_err(ActionError::invalid)?;
         } else {
             check_arg("Name", name)?;
         }
@@ -569,17 +582,17 @@ impl Actions {
     ) -> Result<(), ActionError> {
         check_arg("Pane", pane_id)?;
         if text.trim().is_empty() {
-            return Err(invalid("Reply can't be empty."));
+            return Err(ActionError::invalid("Reply can't be empty."));
         }
         match cached_status {
             None | Some(AgentStatus::Idle | AgentStatus::Done) => {}
             Some(AgentStatus::Blocked) => {
-                return Err(invalid(
+                return Err(ActionError::invalid(
                     "This agent is waiting for approval. Open it to answer there.",
                 ));
             }
             Some(AgentStatus::Working | AgentStatus::Unknown) => {
-                return Err(invalid("Reply when the agent is idle."));
+                return Err(ActionError::invalid("Reply when the agent is idle."));
             }
         }
         let mut args = argv(&["agent", "prompt", pane_id]);

@@ -13,7 +13,8 @@ pub mod terminal;
 pub mod tray;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tokio::sync::watch;
@@ -30,6 +31,19 @@ use terminal::InstalledCache;
 use tray::{MAIN_WINDOW, POPOVER_WINDOW, PopoverGuard};
 
 const FALLBACK_SHELL: &str = "/bin/zsh";
+
+/// Locks, recovering the data if another thread panicked while holding the lock.
+pub(crate) fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Milliseconds since the Unix epoch (0 if the clock is before it).
+pub(crate) fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// Startup wiring: read the settings, find herdr, build the CLI runner and the poller, hand them
 /// to Tauri state, start polling, and set up the tray, notifications and the global shortcut.
@@ -157,7 +171,7 @@ async fn locate_and_poll(handle: tauri::AppHandle) {
 
 /// Runs `herdr status` once and adds it to the command log.
 async fn log_startup_status(cli: &HerdrCli, bin: PathBuf) {
-    let started = herdr::cli::now_ms();
+    let started = now_ms();
     let answered = env::herdr_status(&bin, cli.env(), settings::VERSION_TIMEOUT).await;
     cli.record(
         None,

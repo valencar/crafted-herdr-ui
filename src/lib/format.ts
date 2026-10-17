@@ -111,7 +111,7 @@ export function lastLines(text: string | null, count: number): string[] {
     .slice(-count);
 }
 
-/** The first herdr version the app is built against (`env.rs` `MIN_VERSION`). */
+/** The first herdr version the app is built against. The only place the floor lives. */
 const MIN_VERSION: [number, number, number] = [0, 9, 0];
 
 /**

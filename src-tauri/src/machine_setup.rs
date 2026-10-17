@@ -21,12 +21,14 @@
 
 use std::io::{self, Read, Write};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::Serialize;
 use ts_rs::TS;
+
+use crate::lock;
 
 /// The event the UI listens to.
 pub const SETUP_EVENT: &str = "machine-setup";
@@ -720,10 +722,6 @@ impl PtySpawner for PortablePty {
 
 /// Where the events go (Tauri's `emit` in the app).
 pub type Emit = Arc<dyn Fn(SetupEvent) + Send + Sync>;
-
-fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 struct Active {
     run: SetupRun,

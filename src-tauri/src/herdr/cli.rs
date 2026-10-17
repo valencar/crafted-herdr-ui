@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -11,6 +11,7 @@ use tokio::sync::Semaphore;
 use ts_rs::TS;
 
 use super::errors::HerdrError;
+use crate::{lock, now_ms};
 
 pub const T_DEFAULT: Duration = Duration::from_secs(10);
 pub const T_CREATE: Duration = Duration::from_secs(30);
@@ -71,18 +72,6 @@ pub struct HerdrCli {
     env: Arc<OnceLock<Vec<(String, String)>>>,
     log: Arc<Mutex<CommandLog>>,
     limits: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
-}
-
-/// Locks, recovering the data if another thread panicked while holding the lock.
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-pub(crate) fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 impl HerdrCli {
@@ -188,15 +177,7 @@ impl HerdrCli {
         exit_code: Option<i32>,
         error: Option<String>,
     ) {
-        lock(&self.log).push(CommandLogEntry {
-            at_ms: started_ms,
-            machine: machine.filter(|m| *m != LOCAL).map(str::to_owned),
-            argv,
-            exit_code,
-            duration_ms: now_ms().saturating_sub(started_ms),
-            error,
-            note: None,
-        });
+        self.push_entry(machine, argv, started_ms, exit_code, error, None);
     }
 
     /// Adds a command that was handed to the user's terminal. Its outcome is unknown, so the
@@ -209,14 +190,27 @@ impl HerdrCli {
         started_ms: u64,
         note: String,
     ) {
+        self.push_entry(machine, argv, started_ms, None, None, Some(note));
+    }
+
+    /// One entry for a call that ran outside `run`: it ended just now, `started_ms` ago.
+    fn push_entry(
+        &self,
+        machine: Option<&str>,
+        argv: Vec<String>,
+        started_ms: u64,
+        exit_code: Option<i32>,
+        error: Option<String>,
+        note: Option<String>,
+    ) {
         lock(&self.log).push(CommandLogEntry {
             at_ms: started_ms,
             machine: machine.filter(|m| *m != LOCAL).map(str::to_owned),
             argv,
-            exit_code: None,
+            exit_code,
             duration_ms: now_ms().saturating_sub(started_ms),
-            error: None,
-            note: Some(note),
+            error,
+            note,
         });
     }
 

@@ -2,7 +2,7 @@
 //! state and hands off to `Actions` (or the poller). Names are snake_case in Rust and in
 //! `invoke()`; argument keys are camelCase, which is Tauri's default.
 
-use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -16,6 +16,7 @@ use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
 use crate::herdr::cli::{CommandLogEntry, HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
+use crate::lock;
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::poller::Poller;
 use crate::settings::{
@@ -265,26 +266,19 @@ pub async fn list_agent_kinds(
     Ok(cache.get(&cli).await)
 }
 
-fn invalid(message: impl Into<String>) -> ActionError {
-    ActionError::Invalid {
-        message: message.into(),
-    }
-}
-
 fn find_machine<'a>(state: &'a AppState, machine_id: &str) -> Result<&'a MachineView, ActionError> {
     state
         .machines
         .iter()
         .find(|m| m.id == machine_id)
-        .ok_or_else(|| invalid(format!("Unknown machine {machine_id}.")))
+        .ok_or_else(|| ActionError::invalid(format!("Unknown machine {machine_id}.")))
 }
 
 /// The terminal id of a pane, from the last snapshot. A pane with none can't be attached.
 fn pane_terminal_id<'a>(machine: &'a MachineView, pane_id: &str) -> Result<&'a str, ActionError> {
-    let snapshot = machine
-        .snapshot
-        .as_ref()
-        .ok_or_else(|| invalid(format!("{} has not reported its panes yet.", machine.label)))?;
+    let snapshot = machine.snapshot.as_ref().ok_or_else(|| {
+        ActionError::invalid(format!("{} has not reported its panes yet.", machine.label))
+    })?;
     let from_panes = snapshot
         .panes
         .iter()
@@ -298,11 +292,13 @@ fn pane_terminal_id<'a>(machine: &'a MachineView, pane_id: &str) -> Result<&'a s
             .map(|a| a.terminal_id.as_str())
     };
     match from_panes.or_else(from_agents) {
-        Some(id) if !id.is_empty() => check_terminal_id(id).map(|()| id).map_err(invalid),
-        Some(_) => Err(invalid(format!(
+        Some(id) if !id.is_empty() => check_terminal_id(id)
+            .map(|()| id)
+            .map_err(ActionError::invalid),
+        Some(_) => Err(ActionError::invalid(format!(
             "Pane {pane_id} has no terminal to attach to."
         ))),
-        None => Err(invalid(format!(
+        None => Err(ActionError::invalid(format!(
             "Pane {pane_id} is not on {}.",
             machine.label
         ))),
@@ -313,9 +309,11 @@ fn pane_terminal_id<'a>(machine: &'a MachineView, pane_id: &str) -> Result<&'a s
 fn local_bin(cli: &HerdrCli) -> Result<String, ActionError> {
     let bin = cli.bin().to_string_lossy().into_owned();
     if bin.is_empty() {
-        return Err(invalid("herdr was not found on this computer."));
+        return Err(ActionError::invalid(
+            "herdr was not found on this computer.",
+        ));
     }
-    check_bin(&bin).map_err(invalid)?;
+    check_bin(&bin).map_err(ActionError::invalid)?;
     Ok(bin)
 }
 
@@ -336,7 +334,7 @@ fn attach_for_pane(
     pane_id: &str,
 ) -> Result<Vec<String>, ActionError> {
     let machine = find_machine(state, machine_id)?;
-    check_openable(machine).map_err(invalid)?;
+    check_openable(machine).map_err(ActionError::invalid)?;
     let terminal_id = pane_terminal_id(machine, pane_id)?;
     let bin = if machine.is_local {
         local_bin(cli)?
@@ -393,11 +391,15 @@ async fn launch_in_terminal(
     title: &str,
     log: LaunchLog<'_>,
 ) -> Result<(), ActionError> {
-    let home = app.path().home_dir().map_err(|e| invalid(e.to_string()))?;
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|e| ActionError::invalid(e.to_string()))?;
     let settings = settings.get();
     let installed = installed.get().await;
-    let spec = launch_spec(&settings, &installed, home, argv, title).map_err(invalid)?;
-    let started = crate::herdr::cli::now_ms();
+    let spec =
+        launch_spec(&settings, &installed, home, argv, title).map_err(ActionError::invalid)?;
+    let started = crate::now_ms();
     terminal::launch(&spec, cli.env())
         .await
         .map_err(|message| ActionError::Herdr {
@@ -422,7 +424,7 @@ async fn open_full(
     machine_id: &str,
 ) -> Result<(), ActionError> {
     let machine = find_machine(state, machine_id)?;
-    check_openable(machine).map_err(invalid)?;
+    check_openable(machine).map_err(ActionError::invalid)?;
     // Remote machines too: `herdr --remote` is the local client.
     let argv = full_ui_argv(machine, &local_bin(cli)?);
     let log = LaunchLog {
@@ -489,7 +491,7 @@ pub async fn open_in_terminal(
     argv: Vec<String>,
 ) -> Result<(), ActionError> {
     let bin = cli.bin().to_string_lossy().into_owned();
-    let full = allowed_herdr_argv(&bin, &argv).map_err(invalid)?;
+    let full = allowed_herdr_argv(&bin, &argv).map_err(ActionError::invalid)?;
     let log = LaunchLog {
         machine: None,
         args: argv,
@@ -505,8 +507,8 @@ pub fn machine_add_argv(
     label: Option<String>,
     session: Option<String>,
 ) -> Result<Vec<String>, ActionError> {
-    let full =
-        checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
+    let full = checked_machine_add_argv(&target, label.as_deref(), session.as_deref())
+        .map_err(ActionError::invalid)?;
     Ok(full[1..].to_vec())
 }
 
@@ -523,11 +525,11 @@ pub fn start_machine_add(
     label: Option<String>,
     session: Option<String>,
 ) -> Result<(), ActionError> {
-    let mut argv =
-        checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
+    let mut argv = checked_machine_add_argv(&target, label.as_deref(), session.as_deref())
+        .map_err(ActionError::invalid)?;
     let logged = argv[1..].to_vec();
     argv[0] = cli.bin().to_string_lossy().into_owned();
-    let started_ms = crate::herdr::cli::now_ms();
+    let started_ms = crate::now_ms();
     let (log_cli, poller) = (cli.inner().clone(), poller.inner().clone());
     let on_exit: ExitHook = Arc::new(move |exit| {
         let error = if exit.cancelled {
@@ -549,7 +551,7 @@ pub fn start_machine_add(
     });
     setup
         .start(&argv, cli.env(), emit, on_exit)
-        .map_err(invalid)
+        .map_err(ActionError::invalid)
 }
 
 /// Types the user's answer to the prompt the setup is showing: `"yes"` or `"no"` for a
@@ -559,7 +561,7 @@ pub fn answer_machine_setup(
     setup: State<'_, MachineSetup>,
     choice: String,
 ) -> Result<(), ActionError> {
-    setup.answer(&choice).map_err(invalid)
+    setup.answer(&choice).map_err(ActionError::invalid)
 }
 
 /// Stops the running setup (the user chose the terminal instead, or closed the sheet).
@@ -575,8 +577,8 @@ pub fn preview_machine_add(
     label: Option<String>,
     session: Option<String>,
 ) -> Result<String, ActionError> {
-    let full =
-        checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
+    let full = checked_machine_add_argv(&target, label.as_deref(), session.as_deref())
+        .map_err(ActionError::invalid)?;
     Ok(join_quoted(&full))
 }
 
@@ -626,7 +628,7 @@ fn open_argv(
     match mode {
         AttachMode::FullUi => {
             let machine = find_machine(state, machine_id)?;
-            check_openable(machine).map_err(invalid)?;
+            check_openable(machine).map_err(ActionError::invalid)?;
             Ok(full_ui_argv(machine, &local_bin(cli)?))
         }
         AttachMode::Pane => attach_for_pane(state, cli, machine_id, pane_id),
@@ -658,7 +660,7 @@ pub fn copy_attach_command(
 #[tauri::command]
 pub fn preview_reconnect(id: String) -> Result<String, ActionError> {
     let args = ["machine", "reconnect", id.as_str()].map(str::to_owned);
-    let full = allowed_herdr_argv("herdr", &args).map_err(invalid)?;
+    let full = allowed_herdr_argv("herdr", &args).map_err(ActionError::invalid)?;
     Ok(join_quoted(&full))
 }
 
@@ -685,11 +687,11 @@ pub async fn set_settings(
     // One change at a time, from reading the old values to applying the new ones.
     let _update = shared.begin_update().await;
     let old = shared.get();
-    let new = old.merged(&patch).map_err(invalid)?;
+    let new = old.merged(&patch).map_err(ActionError::invalid)?;
     if new == old {
         return Ok(new);
     }
-    settings::save(&app, &new).map_err(invalid)?;
+    settings::save(&app, &new).map_err(ActionError::invalid)?;
     shared.set(new.clone());
 
     let todo = changes(&old, &new);
@@ -755,7 +757,7 @@ pub fn show_main_new_session(app: AppHandle) {
 
 #[tauri::command]
 pub fn open_settings(app: AppHandle) -> Result<(), ActionError> {
-    tray::open_settings(&app).map_err(|e| invalid(e.to_string()))
+    tray::open_settings(&app).map_err(|e| ActionError::invalid(e.to_string()))
 }
 
 /// The one-line read behind a pane box in the Workbox screen.
@@ -792,7 +794,7 @@ pub async fn read_pane_tail(
     pane_id: String,
 ) -> Result<String, ActionError> {
     if machine_id.trim().is_empty() || pane_id.trim().is_empty() || pane_id.starts_with('-') {
-        return Err(invalid("Pick a pane to read."));
+        return Err(ActionError::invalid("Pick a pane to read."));
     }
     let text = cli
         .run_text(Some(&machine_id), &pane_tail_argv(&pane_id), T_DEFAULT)
@@ -871,10 +873,6 @@ pub struct PreviewManager {
     active: Arc<StdMutex<Active>>,
 }
 
-fn lock_active(m: &StdMutex<Active>) -> MutexGuard<'_, Active> {
-    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 impl PreviewManager {
     pub fn new(cli: HerdrCli, visible: IsVisible, emit: PreviewEmit) -> Self {
         Self {
@@ -903,9 +901,9 @@ impl PreviewManager {
         is_agent: bool,
     ) -> Result<(), ActionError> {
         if machine_id.trim().is_empty() || pane_id.trim().is_empty() || pane_id.starts_with('-') {
-            return Err(invalid("Pick a pane to preview."));
+            return Err(ActionError::invalid("Pick a pane to preview."));
         }
-        let mut active = lock_active(&self.active);
+        let mut active = lock(&self.active);
         if let Some(old) = active.task.take() {
             old.abort();
         }
@@ -922,7 +920,7 @@ impl PreviewManager {
 
     /// Stops the preview, if one is running.
     pub fn stop(&self) {
-        let mut active = lock_active(&self.active);
+        let mut active = lock(&self.active);
         active.generation += 1;
         if let Some(old) = active.task.take() {
             old.abort();
@@ -932,7 +930,7 @@ impl PreviewManager {
     /// Emits only while `generation` is still the current one. The check and the emit happen
     /// under one lock, so `start`/`stop` returning means no stale frame follows.
     fn emit_current(&self, generation: u64, frame: PreviewFrame) {
-        let active = lock_active(&self.active);
+        let active = lock(&self.active);
         if active.generation == generation {
             (self.emit)(frame);
         }

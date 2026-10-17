@@ -15,6 +15,7 @@ use tauri_plugin_store::StoreExt;
 use ts_rs::TS;
 
 use crate::herdr::cli::HerdrCli;
+use crate::lock;
 use crate::terminal::{OpenMode, TerminalId};
 
 pub const MIN_POLL_INTERVAL_MS: u64 = 1000;
@@ -242,11 +243,11 @@ pub struct ShortcutState(Mutex<ShortcutStatus>);
 
 impl ShortcutState {
     pub fn record(&self, status: ShortcutStatus) {
-        *self.0.lock().unwrap_or_else(|p| p.into_inner()) = status;
+        *lock(&self.0) = status;
     }
 
     pub fn get(&self) -> ShortcutStatus {
-        self.0.lock().unwrap_or_else(|p| p.into_inner()).clone()
+        lock(&self.0).clone()
     }
 }
 
@@ -303,24 +304,17 @@ impl HerdrLocator {
 
     /// Sets what the login shell found, once startup has asked it.
     pub fn set_login_hit(&self, hit: Option<PathBuf>) {
-        *self.login_hit.lock().unwrap_or_else(|p| p.into_inner()) = hit;
+        *lock(&self.login_hit) = hit;
     }
 
     pub fn status(&self) -> HerdrStatus {
-        self.status
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
+        lock(&self.status).clone()
     }
 
     /// Resolves herdr for `saved`, points `cli` at it, reads its version and remembers the
     /// result. Without herdr, `cli` gets an empty path (every call then fails `NotFound`).
     pub async fn locate(&self, saved: Option<&str>, cli: &HerdrCli) -> HerdrStatus {
-        let login_hit = self
-            .login_hit
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
+        let login_hit = lock(&self.login_hit).clone();
         let resolved = resolve_with_saved(saved, login_hit, &self.home, &|p| p.is_file());
         cli.set_bin(resolved.path.clone().unwrap_or_default());
         let version = match &resolved.path {
@@ -332,7 +326,7 @@ impl HerdrLocator {
             version,
             saved_missing: resolved.saved_missing,
         };
-        *self.status.lock().unwrap_or_else(|p| p.into_inner()) = status.clone();
+        *lock(&self.status) = status.clone();
         status
     }
 }

@@ -510,6 +510,31 @@ async fn a_create_reply_without_a_pane_says_the_agent_was_not_started() {
 }
 
 #[tokio::test]
+async fn a_create_timeout_says_the_agent_was_not_started() {
+    let h = Harness::new();
+    h.put(&format!("{SPLIT}.json"), &fixture("pane_split.json"));
+    h.put(&format!("{SPLIT}.sleep"), "3");
+
+    let err = h
+        .actions
+        .create_session(&split_agent_request())
+        .await
+        .unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(message.contains("did not answer in time"), "{message}");
+            assert!(
+                message.ends_with(" The agent was not started."),
+                "{message}"
+            );
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+    assert!(h.calls().iter().all(|c| !c.starts_with("agent start")));
+}
+
+#[tokio::test]
 async fn an_unreadable_create_reply_without_an_agent_keeps_the_plain_message() {
     let h = Harness::new();
     h.put(&format!("{SPLIT}.json"), "not json");

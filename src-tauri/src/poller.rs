@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use tokio::sync::{Notify, broadcast};
 use tokio::task::{AbortHandle, JoinSet};
@@ -19,6 +19,7 @@ use crate::herdr::cli::{HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{MachineProfile, Snapshot, parse_machine_list, parse_snapshot};
 use crate::state::{AppState, Health, MachineView, PollIntervals, classify_error, next_delay};
+use crate::{lock, now_ms};
 
 /// Receives each new `AppState`. It is called while the poller holds an internal lock (that is
 /// what keeps states in order), so it must not call back into the `Poller`.
@@ -36,18 +37,6 @@ pub struct PollerConfig {
     pub activity_path: Option<PathBuf>,
     pub herdr_version: Option<String>,
     pub herdr_path: Option<String>,
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-/// Locks, recovering the data if another thread panicked while holding the lock.
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn pending_health() -> Health {
