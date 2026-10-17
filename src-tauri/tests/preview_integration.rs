@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crafted_herdr_ui_lib::commands::{PreviewFrame, PreviewManager};
 use crafted_herdr_ui_lib::herdr::cli::HerdrCli;
+use crafted_herdr_ui_lib::preview::{PreviewFrame, PreviewManager};
 use tempfile::TempDir;
 
 const AGENT_P1: &str = "agent_read_w1:p1_--source_recent-unwrapped_--lines_60_--format_text";

@@ -12,8 +12,9 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 | `env.rs` | login-shell env capture, herdr binary resolution, the plain-text herdr reads (captured and resolved after the window is up; `get_state` answers `null` until then). The 0.9.0 version floor lives in the UI (`lib/format.ts`) |
 | `activity.rs` | `ActivityTracker`: observed status-change times persisted to `activity.json` |
 | `state.rs`, `poller.rs` | `AppState`/`MachineView`/`Health`, per-machine polling, `"state"` event, `Transition` broadcast |
-| `actions.rs`, `commands.rs` | argv builders (pure) plus `#[tauri::command]` wrappers |
-| `terminal/` | `attach_argv`, `shell_quote`, one launcher per terminal app |
+| `actions.rs`, `commands.rs` | argv builders (pure) plus `#[tauri::command]` wrappers (`commands.rs` holds only the wrappers and their small helpers) |
+| `terminal/` | `attach_argv`, `shell_quote`, one launcher per terminal app; `open.rs` is what "Open" runs (attach or full UI, the launch spec, the command-log entry) and takes the home dir, so it knows nothing of Tauri |
+| `preview.rs` | `PreviewManager` (the live preview, emitting only changed frames), `PreviewFrame`, the one-line pane read |
 | `ssh_config.rs`, `machine_setup.rs` | Host alias parsing; pty-driven `machine add` |
 | `settings.rs` | `Settings` (merge + validation), the `settings.json` store, herdr re-resolution (`HerdrLocator`) |
 | `notify.rs`, `tray.rs` | notifications from `Transition`s; tray, badge, popover and Settings windows, global shortcut |

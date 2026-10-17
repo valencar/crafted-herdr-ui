@@ -5,6 +5,7 @@
 
 pub mod attach;
 pub mod launchers;
+pub mod open;
 pub mod quote;
 
 use std::path::PathBuf;

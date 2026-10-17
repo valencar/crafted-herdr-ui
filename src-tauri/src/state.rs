@@ -148,6 +148,49 @@ pub fn classify_error(e: &HerdrError) -> Health {
     }
 }
 
+/// Sample states for the unit tests of the modules that read an `AppState`.
+#[cfg(test)]
+pub(crate) mod fixtures {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::herdr::model::parse_snapshot;
+
+    fn view(id: &str, label: &str, is_local: bool, with_snapshot: bool) -> MachineView {
+        let snapshot = with_snapshot.then(|| {
+            let path = format!(
+                "{}/tests/fixtures/snapshot_buildbox.json",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let text = std::fs::read_to_string(path).unwrap();
+            parse_snapshot(&serde_json::from_str(&text).unwrap()).unwrap()
+        });
+        MachineView {
+            id: id.into(),
+            label: label.into(),
+            target: None,
+            session: "default".into(),
+            is_local,
+            health: Health::Online,
+            snapshot,
+            last_ok_ms: None,
+            ages: HashMap::new(),
+        }
+    }
+
+    pub fn state() -> AppState {
+        AppState {
+            machines: vec![
+                view("local", "Local", true, false),
+                view("buildbox", "Build box", false, true),
+            ],
+            herdr_version: None,
+            herdr_path: None,
+            generated_at_ms: 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
