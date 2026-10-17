@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { Terminal } from "@xterm/xterm";
+import type { TermTarget } from "../lib/bindings/TermTarget";
 import { actionErrorMessage } from "../lib/format";
 import { invokeTyped, openTerm, toActionError } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
@@ -17,7 +18,9 @@ export function useTermSession(
   tab: Pick<TermTab, "tabKey" | "target">,
   termRef: RefObject<Terminal | null>,
 ) {
-  const { tabKey, target } = tab;
+  const { tabKey } = tab;
+  // Compared by value: the store builds new tab objects, but the session must outlive them.
+  const targetJson = JSON.stringify(tab.target);
   const idRef = useRef<number | null>(null);
   // Bumped by every open and by unmount; callbacks of an older session check it and stand down.
   const generation = useRef(0);
@@ -36,6 +39,7 @@ export function useTermSession(
   const open = useCallback(async () => {
     const term = termRef.current;
     if (!term) return;
+    const target = JSON.parse(targetJson) as TermTarget;
     const mine = ++generation.current;
     const { updateTab } = useTerminalStore.getState();
     updateTab(tabKey, { state: "opening", error: null });
@@ -73,7 +77,7 @@ export function useTermSession(
         error: actionErrorMessage(toActionError(e)),
       });
     }
-  }, [tabKey, target, termRef, resize]);
+  }, [tabKey, targetJson, termRef, resize]);
 
   useEffect(() => {
     void open();

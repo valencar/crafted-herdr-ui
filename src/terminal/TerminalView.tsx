@@ -91,15 +91,7 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     termRef.current = term;
     fitRef.current = fit;
     searchRef.current = search;
-    // The bundled font may still be loading when the cell size is measured; measure again.
-    let disposed = false;
-    void document.fonts
-      ?.load(`${initialFontSize.current}px ${fontFamily}`)
-      .then(() => {
-        if (!disposed) term.options.fontFamily = `${fontFamily}, monospace`;
-      });
     return () => {
-      disposed = true;
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -119,6 +111,26 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     fit.fit();
     resize(term.cols, term.rows);
   }, [resize]);
+
+  // The bundled font may still be loading when xterm measures a cell. Once it is loaded, make
+  // xterm measure again (it only does so when the option changes), then refit.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const family = term.options.fontFamily ?? "";
+    let stale = false;
+    document.fonts
+      ?.load(`${initialFontSize.current}px ${family}`)
+      .then(() => {
+        if (stale) return;
+        term.options.fontFamily = `${family.trim()} `;
+        fitNow();
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [fitNow]);
 
   // Follow the box's size, but only while this tab is the visible one.
   useEffect(() => {
@@ -146,9 +158,12 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     fitNow();
   }, [fontSize, fitNow]);
 
+  // Focus the terminal when it becomes visible, and again once a reattach or retry succeeds
+  // (the overlay button that had focus is gone by then).
+  const live = tab.state === "live";
   useEffect(() => {
     if (active) termRef.current?.focus();
-  }, [active]);
+  }, [active, live]);
 
   // The overlay's default button takes focus, so Enter reattaches or retries.
   const overlay = tab.state === "detached" || tab.state === "error";

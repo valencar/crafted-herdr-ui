@@ -375,6 +375,52 @@ describe("TerminalView", () => {
     expect(term().focus).toHaveBeenCalled();
   });
 
+  it("refits_and_resizes_the_session_once_the_font_has_loaded", async () => {
+    let loaded: () => void = () => {};
+    const load = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          loaded = resolve;
+        }),
+    );
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { load },
+    });
+    try {
+      render(<Harness />);
+      await flush();
+      expect(load).toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
+      const before = term().options.fontFamily;
+      h.fitDims = { cols: 110, rows: 35 }; // the real font's grid
+      await act(async () => loaded());
+      expect(term().options.fontFamily).not.toBe(before);
+      expect(invoke).toHaveBeenCalledWith("term_resize", {
+        id: 7,
+        cols: 110,
+        rows: 35,
+      });
+    } finally {
+      Reflect.deleteProperty(document, "fonts");
+    }
+  });
+
+  it("keeps_the_session_when_the_tab_object_changes_but_the_target_does_not", async () => {
+    render(<Harness />);
+    await flush();
+    act(() =>
+      useTerminalStore.getState().updateTab(KEY, {
+        title: "renamed",
+        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+      }),
+    );
+    await flush();
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(invoke).not.toHaveBeenCalledWith("term_close", expect.anything());
+    expect(tabState()).toMatchObject({ state: "live", termId: 7 });
+  });
+
   describe("resizing", () => {
     it("fits_and_sends_term_resize_debounced_to_50ms", async () => {
       render(<Harness />);
@@ -413,7 +459,7 @@ describe("TerminalView", () => {
       await flush();
       vi.useFakeTimers();
       h.fitDims = { cols: 120, rows: 40 };
-      h.observers.forEach((o) => o.cb());
+      expect(h.observers).toHaveLength(0); // nothing observes a hidden tab
       act(() => void vi.advanceTimersByTime(60));
       expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
       // Showing it again fits straight away.
