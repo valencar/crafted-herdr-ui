@@ -434,6 +434,8 @@ describe("AddWorkbox", () => {
         kind: "confirmInstall",
         version: "0.9.4",
         path: "/home/dev/.local/bin/herdr",
+        detail:
+          "matching herdr 0.9.4 is not installed on buildbox (session default) for linux-x86_64.",
       },
     });
     const install = screen.getByRole("dialog", {
@@ -442,6 +444,9 @@ describe("AddWorkbox", () => {
     expect(install).toHaveAccessibleDescription(
       /herdr 0\.9\.4 needs to be installed on buildbox, at \/home\/dev\/\.local\/bin\/herdr/,
     );
+    expect(
+      screen.getByText(/is not installed on buildbox \(session/),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Install herdr" }));
     expect(callsTo("answer_machine_setup")[1]).toEqual([
       "answer_machine_setup",
@@ -599,5 +604,59 @@ describe("AddWorkbox", () => {
       "A workbox setup is already running.",
     );
     expect(screen.getByRole("button", { name: "Add workbox" })).toBeEnabled();
+  });
+
+  it("a_refused_answer_brings_the_question_back", async () => {
+    const user = setup();
+    await startNative(user);
+    await emitSetup({
+      kind: "prompt",
+      data: { kind: "confirmInstall", version: null, path: null, detail: null },
+    });
+    const base = invoke.getMockImplementation() as
+      ((name: string, args?: unknown) => unknown) | undefined;
+    invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "answer_machine_setup") {
+        throw { kind: "invalid", message: "Nothing is waiting for an answer." };
+      }
+      return base?.(name, args);
+    });
+    await user.click(screen.getByRole("button", { name: "Install herdr" }));
+    await advance(0);
+    // herdr never got the answer, so the dialog is still there and the reason is shown.
+    expect(
+      screen.getByRole("dialog", { name: "Install herdr on buildbox?" }),
+    ).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Nothing is waiting for an answer.",
+    );
+  });
+
+  it("a_refused_answer_after_the_run_ended_does_not_reopen_the_dialog", async () => {
+    const user = setup();
+    await startNative(user);
+    await emitSetup({
+      kind: "prompt",
+      data: {
+        kind: "confirmReplace",
+        message: "restart the remote server now?",
+      },
+    });
+    const base = invoke.getMockImplementation() as
+      ((name: string, args?: unknown) => unknown) | undefined;
+    let refuse: (e: unknown) => void = () => {};
+    invoke.mockImplementation((name: string, args?: unknown) =>
+      name === "answer_machine_setup"
+        ? new Promise((_, reject) => (refuse = reject))
+        : base?.(name, args),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Stop server and continue" }),
+    );
+    await emitSetup({ kind: "finished", data: { ok: false } });
+    await act(async () => refuse({ kind: "invalid", message: "Too late." }));
+    expect(
+      screen.queryByRole("dialog", { name: /Stop the herdr server/ }),
+    ).toBeNull();
   });
 });

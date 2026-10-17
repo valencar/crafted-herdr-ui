@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crafted_herdr_ui_lib::machine_setup::{
-    Emit, MachineSetup, PtyControl, PtySpawner, SetupEvent, SetupPrompt, SetupStep, SpawnedPty,
-    StepState,
+    Emit, ExitHook, MachineSetup, PtyControl, PtySpawner, RunExit, SetupEvent, SetupPrompt,
+    SetupStep, SpawnedPty, StepState,
 };
 
 /// The argv and environment a process was started with.
@@ -45,7 +45,10 @@ impl Write for ReplayInput {
         };
         let mut tx = lock(&self.0.tx);
         if let (Some(chunk), Some(tx)) = (next, tx.as_ref()) {
-            let _ = tx.send(chunk);
+            // A NUL splits one scripted reply into separate reads.
+            for part in chunk.split(|b| *b == 0) {
+                let _ = tx.send(part.to_vec());
+            }
         }
         // The last scripted chunk is the end of the process's output.
         if lock(&self.0.script).is_empty() {
@@ -59,7 +62,9 @@ impl Write for ReplayInput {
 }
 
 struct ReplayControl {
-    ok: bool,
+    code: i32,
+    /// The process is gone although its output is still open.
+    exited_early: bool,
     killed: Arc<Mutex<bool>>,
     tx: Arc<Replay>,
 }
@@ -69,8 +74,11 @@ impl PtyControl for ReplayControl {
         *lock(&self.killed) = true;
         *lock(&self.tx.tx) = None;
     }
-    fn wait_ok(&self) -> bool {
-        self.ok
+    fn wait(&self) -> i32 {
+        self.code
+    }
+    fn try_wait(&self) -> Option<i32> {
+        self.exited_early.then_some(self.code)
     }
 }
 
@@ -85,6 +93,8 @@ struct ReplaySpawner {
     spawned_with: Mutex<Vec<Spawn>>,
     /// Output stays open after the script (a process that hangs).
     hang: bool,
+    /// The process exits after the first output but something keeps the terminal open.
+    exits_while_open: bool,
 }
 
 impl ReplaySpawner {
@@ -100,6 +110,7 @@ impl ReplaySpawner {
             killed: Arc::default(),
             spawned_with: Mutex::default(),
             hang: false,
+            exits_while_open: false,
         })
     }
 }
@@ -124,7 +135,8 @@ impl PtySpawner for ReplaySpawner {
             output,
             input: Box::new(ReplayInput(replay.clone())),
             control: Arc::new(ReplayControl {
-                ok: self.ok,
+                code: i32::from(!self.ok),
+                exited_early: self.exits_while_open,
                 killed: self.killed.clone(),
                 tx: replay,
             }),
@@ -136,6 +148,17 @@ fn collect() -> (Emit, Arc<Mutex<Vec<SetupEvent>>>) {
     let events: Arc<Mutex<Vec<SetupEvent>>> = Arc::default();
     let sink = events.clone();
     (Arc::new(move |e| lock(&sink).push(e)), events)
+}
+
+/// An exit hook that remembers how the run ended.
+fn exits() -> (ExitHook, Arc<Mutex<Vec<RunExit>>>) {
+    let seen: Arc<Mutex<Vec<RunExit>>> = Arc::default();
+    let sink = seen.clone();
+    (Arc::new(move |e| lock(&sink).push(e)), seen)
+}
+
+fn ignore_exit() -> ExitHook {
+    Arc::new(|_| {})
 }
 
 fn wait_for(events: &Arc<Mutex<Vec<SetupEvent>>>, what: &str, f: impl Fn(&SetupEvent) -> bool) {
@@ -169,7 +192,9 @@ fn session_flow_types_the_answers_the_prompts_need() {
     let setup = MachineSetup::new(spawner.clone());
     let (emit, events) = collect();
     let env = vec![("PATH".to_owned(), "/usr/bin".to_owned())];
-    setup.start(&argv(), &env, emit).expect("start");
+    setup
+        .start(&argv(), &env, emit, ignore_exit())
+        .expect("start");
     assert_eq!(lock(&spawner.spawned_with)[0], (argv(), env));
 
     // 1. The picker: choose the second session.
@@ -232,8 +257,11 @@ fn only_one_setup_runs_at_a_time() {
     Arc::get_mut(&mut spawner).expect("unique").hang = true;
     let setup = MachineSetup::new(spawner.clone());
     let (emit, events) = collect();
-    setup.start(&argv(), &[], emit.clone()).expect("first");
-    let second = setup.start(&argv(), &[], emit);
+    let (on_exit, exited) = exits();
+    setup
+        .start(&argv(), &[], emit.clone(), on_exit)
+        .expect("first");
+    let second = setup.start(&argv(), &[], emit, ignore_exit());
     assert!(second.is_err_and(|e| e.contains("already running")));
     assert_eq!(lock(&spawner.spawned_with).len(), 1);
 
@@ -242,9 +270,17 @@ fn only_one_setup_runs_at_a_time() {
         matches!(e, SetupEvent::Finished { ok: false })
     });
     assert!(*lock(&spawner.killed));
+    // A cancel is reported as one, apart from whatever code the kill left.
+    assert_eq!(
+        lock(&exited).as_slice(),
+        [RunExit {
+            code: 1,
+            cancelled: true
+        }]
+    );
     // The slot is free again.
     let (emit, _) = collect();
-    assert!(setup.start(&argv(), &[], emit).is_ok());
+    assert!(setup.start(&argv(), &[], emit, ignore_exit()).is_ok());
     setup.cancel();
 }
 
@@ -255,7 +291,9 @@ fn silence_without_a_prompt_stalls_once_and_a_prompt_never_stalls() {
     Arc::get_mut(&mut quiet).expect("unique").hang = true;
     let setup = MachineSetup::with_stall(quiet, Duration::from_millis(60));
     let (emit, events) = collect();
-    setup.start(&argv(), &[], emit).expect("start");
+    setup
+        .start(&argv(), &[], emit, ignore_exit())
+        .expect("start");
     wait_for(&events, "stall", |e| *e == SetupEvent::Stalled);
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(
@@ -274,7 +312,9 @@ fn silence_without_a_prompt_stalls_once_and_a_prompt_never_stalls() {
     Arc::get_mut(&mut waiting).expect("unique").hang = true;
     let setup = MachineSetup::with_stall(waiting, Duration::from_millis(60));
     let (emit, events) = collect();
-    setup.start(&argv(), &[], emit).expect("start");
+    setup
+        .start(&argv(), &[], emit, ignore_exit())
+        .expect("start");
     wait_for(&events, "prompt", |e| matches!(e, SetupEvent::Prompt(_)));
     std::thread::sleep(Duration::from_millis(250));
     assert!(!lock(&events).contains(&SetupEvent::Stalled));
@@ -286,10 +326,19 @@ fn a_failed_run_reports_the_failure_and_not_ok() {
     let spawner = ReplaySpawner::new(&fixture("failure_not_saved"), &[], false);
     let setup = MachineSetup::new(spawner);
     let (emit, events) = collect();
-    setup.start(&argv(), &[], emit).expect("start");
+    let (on_exit, exited) = exits();
+    setup.start(&argv(), &[], emit, on_exit).expect("start");
     wait_for(&events, "finish", |e| {
         matches!(e, SetupEvent::Finished { ok: false })
     });
+    // herdr's own exit code reaches the hook, and it was not a cancel.
+    assert_eq!(
+        lock(&exited).as_slice(),
+        [RunExit {
+            code: 1,
+            cancelled: false
+        }]
+    );
     assert!(lock(&events).iter().any(|e| matches!(
         e,
         SetupEvent::Step {
@@ -297,4 +346,100 @@ fn a_failed_run_reports_the_failure_and_not_ok() {
             ..
         }
     )));
+}
+
+#[test]
+fn picker_redraws_after_the_answer_never_hide_or_pre_answer_the_consent() {
+    // herdr draws the whole picker again for the Down key, then asks whether to install.
+    let redraw_then_install = format!(
+        "{}\0{}",
+        fixture("session_picker_redrawn"),
+        fixture("install_consent")
+    );
+    let spawner = ReplaySpawner::new(
+        &fixture("session_picker"),
+        &[&redraw_then_install, &fixture("success_already_installed")],
+        true,
+    );
+    let setup = MachineSetup::new(spawner.clone());
+    let (emit, events) = collect();
+    setup
+        .start(&argv(), &[], emit, ignore_exit())
+        .expect("start");
+
+    wait_for(&events, "picker", |e| {
+        matches!(e, SetupEvent::Prompt(SetupPrompt::PickSession { .. }))
+    });
+    setup.answer("1").expect("pick");
+    wait_for(&events, "install", |e| {
+        matches!(e, SetupEvent::Prompt(SetupPrompt::ConfirmInstall { .. }))
+    });
+    // Only the explicit yes goes to herdr; there is no second picker to "answer" with Enter.
+    assert!(setup.answer("0").is_err());
+    setup.answer("yes").expect("install");
+    wait_for(&events, "finish", |e| {
+        matches!(e, SetupEvent::Finished { .. })
+    });
+
+    assert_eq!(lock(&spawner.typed).as_slice(), b"\x1b[B\ry\n");
+    let prompts: Vec<SetupPrompt> = lock(&events)
+        .iter()
+        .filter_map(|e| match e {
+            SetupEvent::Prompt(p) => Some(p.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(prompts.len(), 2, "{prompts:?}");
+    assert!(matches!(prompts[0], SetupPrompt::PickSession { .. }));
+    assert!(matches!(prompts[1], SetupPrompt::ConfirmInstall { .. }));
+}
+
+#[test]
+fn a_redraw_does_not_hide_the_stall_either() {
+    let mut spawner = ReplaySpawner::new(
+        &fixture("session_picker"),
+        &[&fixture("session_picker_redrawn")],
+        false,
+    );
+    Arc::get_mut(&mut spawner).expect("unique").hang = true;
+    let setup = MachineSetup::with_stall(spawner, Duration::from_millis(60));
+    let (emit, events) = collect();
+    setup
+        .start(&argv(), &[], emit, ignore_exit())
+        .expect("start");
+    wait_for(&events, "picker", |e| matches!(e, SetupEvent::Prompt(_)));
+    setup.answer("1").expect("pick");
+    // herdr redraws and then says nothing the app knows: the stall must still be reported.
+    wait_for(&events, "stall", |e| *e == SetupEvent::Stalled);
+    setup.cancel();
+}
+
+#[test]
+fn the_run_ends_when_the_process_exits_even_if_the_terminal_stays_open() {
+    let mut spawner = ReplaySpawner::new(&fixture("success_already_installed"), &[], true);
+    {
+        let spawner = Arc::get_mut(&mut spawner).expect("unique");
+        spawner.hang = true;
+        spawner.exits_while_open = true;
+    }
+    let setup = MachineSetup::new(spawner);
+    let (emit, events) = collect();
+    let (on_exit, exited) = exits();
+    setup.start(&argv(), &[], emit, on_exit).expect("start");
+    wait_for(&events, "finish", |e| {
+        matches!(e, SetupEvent::Finished { ok: true })
+    });
+    // Its last words came first.
+    let events = lock(&events).clone();
+    let saved = events
+        .iter()
+        .position(|e| matches!(e, SetupEvent::Output(t) if t.contains("Saved SSH machine")));
+    assert!(saved.is_some_and(|i| i < events.len() - 1), "{events:?}");
+    assert_eq!(
+        lock(&exited).as_slice(),
+        [RunExit {
+            code: 0,
+            cancelled: false
+        }]
+    );
 }

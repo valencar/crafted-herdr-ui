@@ -341,12 +341,17 @@ export function AddWorkbox() {
   }
 
   async function answer(choice: string) {
+    const asked = prompt;
     setPrompt(null);
     setStalled(false);
     try {
       await invokeTyped("answer_machine_setup", { choice });
     } catch (e) {
-      if (mounted.current) setFailure(actionErrorMessage(toActionError(e)));
+      if (!mounted.current) return;
+      setFailure(actionErrorMessage(toActionError(e)));
+      // herdr never got the answer, so it is still asking. Ask again, unless the run is over
+      // or a newer question has come in.
+      if (runRef.current) setPrompt((current) => current ?? asked);
     }
   }
 
@@ -611,6 +616,7 @@ export function AddWorkbox() {
         <ConfirmDialog
           title={`Install herdr on ${promptTarget}?`}
           body={`${prompt.version ? `herdr ${prompt.version}` : "herdr"} needs to be installed on ${promptTarget}${prompt.path ? `, at ${prompt.path}` : ""}. Nothing is installed unless you say so.`}
+          detail={prompt.detail ?? undefined}
           confirmLabel="Install herdr"
           danger={false}
           onConfirm={() => void answer("yes")}

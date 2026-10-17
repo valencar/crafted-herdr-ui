@@ -89,6 +89,8 @@ pub enum SetupPrompt {
     ConfirmInstall {
         version: Option<String>,
         path: Option<String>,
+        /// herdr's own lines just before the question, as is.
+        detail: Option<String>,
     },
     /// herdr wants to stop or restart the server that is running on the target. `message` is
     /// herdr's own explanation.
@@ -172,6 +174,7 @@ fn confirmation(tail: &str) -> Option<SetupPrompt> {
         return Some(SetupPrompt::ConfirmInstall {
             version: install_version(trimmed),
             path: install_path(question),
+            detail: context_before_question(trimmed),
         });
     }
     None
@@ -189,6 +192,22 @@ fn replace_message(trimmed: &str, question: &str) -> String {
     let mut message: Vec<&str> = body[start..].iter().map(|l| l.trim_end()).collect();
     message.push(question);
     message.join("\n").trim().to_owned()
+}
+
+/// The lines herdr printed right before the question (up to 4, back to the last blank line).
+fn context_before_question(trimmed: &str) -> Option<String> {
+    let lines: Vec<&str> = trimmed.lines().collect();
+    let body = &lines[..lines.len().saturating_sub(1)];
+    let mut context: Vec<&str> = body
+        .iter()
+        .rev()
+        .take_while(|l| !l.trim().is_empty())
+        .take(4)
+        .map(|l| l.trim_end())
+        .collect();
+    context.reverse();
+    let text = context.join("\n");
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// `matching herdr <version> is not installed on …`
@@ -389,6 +408,9 @@ pub struct SetupRun {
     /// The line being read.
     line: String,
     pending: Option<SetupPrompt>,
+    /// The session picker was answered. herdr redraws the whole picker for every arrow key
+    /// before it reads Enter, so from then on a picker block is a redraw, not a new question.
+    picked: bool,
     states: [Option<StepState>; 4],
     /// The step a failure is blamed on: the last one that went active.
     active: Option<SetupStep>,
@@ -402,6 +424,7 @@ impl SetupRun {
             tail: String::new(),
             line: String::new(),
             pending: None,
+            picked: false,
             states: [None; 4],
             active: None,
         };
@@ -472,9 +495,20 @@ impl SetupRun {
             }
         }
         events.insert(0, SetupEvent::Output(text));
-        if self.pending.is_none()
-            && let Some(prompt) = classify(&self.tail)
-        {
+        let found = if self.picked {
+            confirmation(&self.tail)
+        } else {
+            classify(&self.tail)
+        };
+        // A confirmation always wins over an unanswered picker; nothing replaces a confirmation.
+        let replaceable = match &self.pending {
+            None => true,
+            Some(SetupPrompt::PickSession { .. }) => {
+                matches!(found, Some(ref p) if !matches!(p, SetupPrompt::PickSession { .. }))
+            }
+            Some(_) => false,
+        };
+        if replaceable && let Some(prompt) = found {
             if let SetupPrompt::ConfirmInstall { .. } = prompt {
                 self.set_step(SetupStep::Ssh, StepState::Done, None, &mut events);
                 self.set_step(
@@ -526,6 +560,7 @@ impl SetupRun {
                 // The picker starts on the first entry; Down moves one entry.
                 let mut keys = b"\x1b[B".repeat(index);
                 keys.push(b'\r');
+                self.picked = true;
                 (keys, None)
             }
             SetupPrompt::ConfirmInstall { .. } | SetupPrompt::ConfirmReplace { .. } => {
@@ -555,10 +590,29 @@ impl SetupRun {
 
 /// What the driver needs from a running process, besides its output and input.
 pub trait PtyControl: Send + Sync {
-    /// Kills the process. Safe to call more than once and while `wait_ok` is blocked.
+    /// Kills the process. Safe to call more than once and while `wait` is blocked.
     fn kill(&self);
-    /// Waits for the process to end; true when it exited 0.
-    fn wait_ok(&self) -> bool;
+    /// Waits for the process to end and returns its exit code (-1 when it can't be read).
+    fn wait(&self) -> i32;
+    /// The exit code if the process has ended, without waiting. The output can stay open after
+    /// that when something else still holds the terminal.
+    fn try_wait(&self) -> Option<i32>;
+}
+
+/// How a run ended, for the command log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunExit {
+    /// The process's exit code.
+    pub code: i32,
+    /// The user stopped it (the code is then whatever the kill left).
+    pub cancelled: bool,
+}
+
+/// Called once when a run ends, just before its `Finished` event.
+pub type ExitHook = Arc<dyn Fn(RunExit) + Send + Sync>;
+
+fn exit_code(status: &portable_pty::ExitStatus) -> i32 {
+    i32::try_from(status.exit_code()).unwrap_or(-1)
 }
 
 /// A started process: its output as chunks (the channel closes at end of output), the way to
@@ -590,11 +644,19 @@ impl PtyControl for PortableControl {
         let _ = lock(&self.killer).kill();
     }
 
-    fn wait_ok(&self) -> bool {
+    fn wait(&self) -> i32 {
         lock(&self.child)
             .wait()
-            .map(|status| status.success())
-            .unwrap_or(false)
+            .map(|status| exit_code(&status))
+            .unwrap_or(-1)
+    }
+
+    fn try_wait(&self) -> Option<i32> {
+        match lock(&self.child).try_wait() {
+            Ok(status) => status.map(|s| exit_code(&s)),
+            // Can't tell; the output ending will settle it.
+            Err(_) => None,
+        }
     }
 }
 
@@ -662,6 +724,7 @@ struct Active {
     input: Box<dyn Write + Send>,
     control: Arc<dyn PtyControl>,
     emit: Emit,
+    on_exit: ExitHook,
     last_activity: Instant,
     stalled: bool,
     cancelled: bool,
@@ -687,13 +750,14 @@ impl MachineSetup {
         }
     }
 
-    /// Starts `argv` (the herdr binary first) and streams its events to `emit`. Refused while
-    /// another setup is running.
+    /// Starts `argv` (the herdr binary first) and streams its events to `emit`; `on_exit` hears
+    /// how it ended. Refused while another setup is running.
     pub fn start(
         &self,
         argv: &[String],
         env: &[(String, String)],
         emit: Emit,
+        on_exit: ExitHook,
     ) -> Result<(), String> {
         let mut slot = lock(&self.active);
         if slot.is_some() {
@@ -713,6 +777,7 @@ impl MachineSetup {
             input: spawned.input,
             control: spawned.control,
             emit,
+            on_exit,
             last_activity: Instant::now(),
             stalled: false,
             cancelled: false,
@@ -756,33 +821,54 @@ impl MachineSetup {
     }
 }
 
-/// Reads output until the process ends, reporting what it says and when it goes quiet.
+/// Hands a chunk of output to the run and its events to the listener.
+fn deliver(active: &Mutex<Option<Active>>, bytes: &[u8]) -> bool {
+    let mut slot = lock(active);
+    let Some(a) = slot.as_mut() else { return false };
+    a.last_activity = Instant::now();
+    a.stalled = false;
+    let events = a.run.feed(bytes);
+    let emit = a.emit.clone();
+    drop(slot);
+    for event in events {
+        emit(event);
+    }
+    true
+}
+
+/// How long to keep reading after the process is gone, for output still on its way.
+const DRAIN: Duration = Duration::from_millis(200);
+
+/// Reads output until the process ends, reporting what it says and when it goes quiet. The end
+/// is the output closing or the process exiting, whichever comes first (a child of herdr can
+/// keep the terminal open after herdr itself is gone).
 fn drive(
     active: &Mutex<Option<Active>>,
     output: mpsc::Receiver<Vec<u8>>,
     control: Arc<dyn PtyControl>,
     stall_after: Duration,
 ) {
+    let mut exited = None;
     loop {
         match output.recv_timeout(POLL.min(stall_after)) {
             Ok(bytes) => {
-                let mut slot = lock(active);
-                let Some(a) = slot.as_mut() else { break };
-                a.last_activity = Instant::now();
-                a.stalled = false;
-                let events = a.run.feed(&bytes);
-                let emit = a.emit.clone();
-                drop(slot);
-                for event in events {
-                    emit(event);
+                if !deliver(active, &bytes) {
+                    break;
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                let mut slot = lock(active);
-                let Some(a) = slot.as_mut() else { break };
-                if a.cancelled {
+                if lock(active).as_ref().is_none_or(|a| a.cancelled) {
                     break;
                 }
+                if let Some(code) = control.try_wait() {
+                    exited = Some(code);
+                    while let Ok(bytes) = output.recv_timeout(DRAIN) {
+                        deliver(active, &bytes);
+                    }
+                    break;
+                }
+                let mut slot = lock(active);
+                let Some(a) = slot.as_mut() else { break };
                 if !a.stalled && !a.run.has_prompt() && a.last_activity.elapsed() >= stall_after {
                     a.stalled = true;
                     let emit = a.emit.clone();
@@ -795,16 +881,18 @@ fn drive(
     }
     // A cancelled run can still have a grandchild holding the terminal open; the kill and the
     // hang-up when the terminal is dropped take care of it.
-    if lock(active).as_ref().is_some_and(|a| a.cancelled) {
+    let cancelled = lock(active).as_ref().is_some_and(|a| a.cancelled);
+    if cancelled {
         control.kill();
     }
-    let ok = control.wait_ok();
+    let code = exited.unwrap_or_else(|| control.wait());
     // The slot is freed only after `Finished` went out, so a new setup can't start before the
     // listener has seen the old one end.
     let mut slot = lock(active);
     if let Some(a) = slot.as_mut() {
-        let ok = ok && !a.cancelled;
-        for event in a.run.finish(ok) {
+        let cancelled = a.cancelled;
+        (a.on_exit)(RunExit { code, cancelled });
+        for event in a.run.finish(code == 0 && !cancelled) {
             (a.emit)(event);
         }
     }
@@ -834,6 +922,10 @@ mod tests {
             Some(SetupPrompt::ConfirmInstall {
                 version: Some("0.9.4".into()),
                 path: Some("/home/dev/.local/bin/herdr".into()),
+                detail: Some(
+                    "matching herdr 0.9.4 is not installed on buildbox (session default) for linux-x86_64."
+                        .into()
+                ),
             })
         );
         // The "could not inspect the running server" variant has no version or path to show.
@@ -842,6 +934,10 @@ mod tests {
             Some(SetupPrompt::ConfirmInstall {
                 version: None,
                 path: None,
+                detail: Some(
+                    "could not inspect the running remote herdr server on buildbox (session default) before installing: remote server status failed"
+                        .into()
+                ),
             })
         );
     }
@@ -985,6 +1081,54 @@ mod tests {
         assert_eq!(run.answer("yes").map(|(k, _)| k), Ok(b"y\n".to_vec()));
     }
 
+    #[test]
+    fn picker_redraws_after_an_answer_are_not_a_new_question() {
+        let (mut run, _) = SetupRun::start();
+        run.feed(fixture("session_picker").as_bytes());
+        assert_eq!(run.answer("1").map(|(k, _)| k), Ok(b"\x1b[B\r".to_vec()));
+
+        // herdr draws the whole picker again for the Down key, then goes on to ask for consent.
+        let events = run.feed(fixture("session_picker_redrawn").as_bytes());
+        assert!(
+            !events.iter().any(|e| matches!(e, SetupEvent::Prompt(_))),
+            "{events:?}"
+        );
+        assert!(
+            !run.has_prompt(),
+            "a redraw must not hide the next question or the stall"
+        );
+
+        let events = run.feed(fixture("install_consent").as_bytes());
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, SetupEvent::Prompt(SetupPrompt::ConfirmInstall { .. }))),
+            "{events:?}"
+        );
+        // Answering this one types `y`, never a bare Enter that herdr would read as the default.
+        assert_eq!(run.answer("yes").map(|(k, _)| k), Ok(b"y\n".to_vec()));
+    }
+
+    #[test]
+    fn a_confirmation_replaces_an_unanswered_picker_but_not_another_confirmation() {
+        let (mut run, _) = SetupRun::start();
+        run.feed(fixture("session_picker").as_bytes());
+        let events = run.feed(fixture("replace_consent_restart").as_bytes());
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, SetupEvent::Prompt(SetupPrompt::ConfirmReplace { .. }))),
+            "{events:?}"
+        );
+        assert!(run.answer("0").is_err(), "the picker is gone");
+        // A second question while one waits is left alone.
+        let events = run.feed(fixture("install_consent").as_bytes());
+        assert!(
+            !events.iter().any(|e| matches!(e, SetupEvent::Prompt(_))),
+            "{events:?}"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_real_pty_carries_output_and_keystrokes() {
@@ -1017,6 +1161,6 @@ mod tests {
             }
         }
         assert!(seen.contains("got=y"), "{seen:?}");
-        assert!(pty.control.wait_ok());
+        assert_eq!(pty.control.wait(), 0);
     }
 }

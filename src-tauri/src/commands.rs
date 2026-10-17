@@ -16,7 +16,7 @@ use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
 use crate::herdr::cli::{CommandLogEntry, HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
-use crate::machine_setup::{Emit, MachineSetup, SETUP_EVENT, SetupEvent};
+use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::poller::Poller;
 use crate::ssh_config;
 use crate::state::{AppState, MachineView};
@@ -428,19 +428,27 @@ pub fn start_machine_add(
     argv[0] = cli.bin().to_string_lossy().into_owned();
     let started_ms = crate::herdr::cli::now_ms();
     let (log_cli, poller) = (cli.inner().clone(), poller.inner().clone());
+    let on_exit: ExitHook = Arc::new(move |exit| {
+        let error = if exit.cancelled {
+            Some("cancelled".to_owned())
+        } else if exit.code != 0 {
+            Some(format!("herdr exited {}", exit.code))
+        } else {
+            None
+        };
+        log_cli.record(logged.clone(), started_ms, Some(exit.code), error);
+    });
     let emit: Emit = Arc::new(move |event| {
-        if let SetupEvent::Finished { ok } = &event {
-            let error = (!ok).then(|| "machine add did not finish".to_owned());
-            log_cli.record(logged.clone(), started_ms, Some(i32::from(!ok)), error);
-            if *ok {
-                // The new machine should show up without waiting for the next tick.
-                poller.refresh_now(None);
-            }
+        if matches!(event, SetupEvent::Finished { ok: true }) {
+            // The new machine should show up without waiting for the next tick.
+            poller.refresh_now(None);
         }
         // Nobody listening (the sheet closed) is fine.
         let _ = app.emit(SETUP_EVENT, event);
     });
-    setup.start(&argv, cli.env(), emit).map_err(invalid)
+    setup
+        .start(&argv, cli.env(), emit, on_exit)
+        .map_err(invalid)
 }
 
 /// Types the user's answer to the prompt the setup is showing: `"yes"` or `"no"` for a
