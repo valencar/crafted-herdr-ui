@@ -7,15 +7,16 @@ import {
   useState,
 } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { SessionPicker } from "../components/SessionPicker";
 import { Sheet } from "../components/Sheet";
+import { SetupChecklist, type StepInfo } from "../components/SetupChecklist";
 import type { SetupEvent } from "../lib/bindings/SetupEvent";
 import type { SetupPrompt } from "../lib/bindings/SetupPrompt";
 import type { SetupStep } from "../lib/bindings/SetupStep";
-import type { StepState } from "../lib/bindings/StepState";
 import { actionErrorMessage } from "../lib/format";
 import { invokeTyped, onMachineSetup, toActionError } from "../lib/ipc";
 import { terminalName, useTerminals } from "../lib/uiHelpers";
-import { useAppStore, useModalOpen } from "../store/appStore";
+import { useAppStore } from "../store/appStore";
 
 const POLL_MS = 2000;
 const GIVE_UP_MS = 10 * 60_000;
@@ -25,38 +26,6 @@ const APP_TIMEOUT_MESSAGE =
   "herdr finished, but the new workbox hasn't shown up yet. Check the sidebar.";
 /** The most herdr output kept for the "Show herdr output" log. */
 const LOG_LIMIT = 100_000;
-
-const STEP_ORDER: SetupStep[] = [
-  "ssh",
-  "herdrInstalled",
-  "serverStarted",
-  "sessionsFound",
-];
-const STATE_TEXT: Record<StepState | "pending", string> = {
-  pending: "Waiting",
-  active: "In progress",
-  done: "Done",
-  failed: "Failed",
-};
-const STATE_ICON: Record<StepState | "pending", string> = {
-  pending: "○",
-  active: "…",
-  done: "✓",
-  failed: "✕",
-};
-
-function stepLabel(step: SetupStep, target: string): string {
-  switch (step) {
-    case "ssh":
-      return "SSH connection";
-    case "herdrInstalled":
-      return `herdr on ${target}`;
-    case "serverStarted":
-      return "Server started";
-    case "sessionsFound":
-      return "Sessions found";
-  }
-}
 
 // The characters `open_in_terminal` accepts (Rust `is_plain`); a value never starts with "-".
 const PLAIN = "A-Za-z0-9_@%+=:,./-";
@@ -88,8 +57,6 @@ type Run = {
 
 /** What the sheet is waiting for. `via` is who is doing the setup: the user's terminal, or the app. */
 type Waiting = Run & { via: "terminal" | "app" };
-
-type StepInfo = { state: StepState; meta: string | null };
 
 /**
  * The Add workbox sheet. "Add workbox" runs `herdr machine add …` in a hidden terminal and turns
@@ -565,75 +532,20 @@ export function AddWorkbox() {
         )}
 
         {(started || waiting || timedOut || runFailure) && (
-          <div className="checklist" aria-live="polite">
-            <p className="checklist-title">
-              Setting up {run?.target ?? waiting?.target ?? setupTarget}
-            </p>
-            {started &&
-              STEP_ORDER.map((step) => {
-                const info = steps[step];
-                const state = info?.state ?? "pending";
-                return (
-                  <div className="checklist-row" key={step}>
-                    <span
-                      className={`checklist-icon checklist-icon-${state}`}
-                      aria-hidden="true"
-                    >
-                      {STATE_ICON[state]}
-                    </span>
-                    <span className="checklist-row-text">
-                      <span>{stepLabel(step, promptTarget)}</span>
-                      {info?.state === "failed" && info.meta && (
-                        <span className="checklist-note mono">{info.meta}</span>
-                      )}
-                    </span>
-                    <span className="checklist-state">{STATE_TEXT[state]}</span>
-                  </div>
-                );
-              })}
-            {waiting && (
-              <div className="checklist-row">
-                <span
-                  className="checklist-icon checklist-icon-active"
-                  aria-hidden="true"
-                >
-                  …
-                </span>
-                <span>
-                  {waiting.via === "terminal"
-                    ? `Waiting for setup in ${terminalLabel}…`
-                    : `Waiting for ${waiting.target} to show up…`}
-                </span>
-              </div>
-            )}
-            {stalled && (
-              <p className="muted sheet-note" role="status">
-                herdr has gone quiet. It may be waiting for something this sheet
-                can’t answer, like an SSH passphrase. Continue in{" "}
-                {terminalLabel} to answer it there.
-              </p>
-            )}
-            {runFailure && (
-              <p className="field-error" role="alert">
-                {runFailure}
-              </p>
-            )}
-            {timedOut && (
-              <p className="field-error" role="alert">
-                {timedOut}
-              </p>
-            )}
-            {started && (
-              <details
-                className="setup-log"
-                open={showLog}
-                onToggle={(e) => setShowLog(e.currentTarget.open)}
-              >
-                <summary>Show herdr output</summary>
-                <pre aria-label="herdr output">{log || "No output yet."}</pre>
-              </details>
-            )}
-          </div>
+          <SetupChecklist
+            setupTarget={run?.target ?? waiting?.target ?? setupTarget}
+            target={promptTarget}
+            terminalLabel={terminalLabel}
+            steps={steps}
+            started={started}
+            waiting={waiting}
+            stalled={stalled}
+            runFailure={runFailure}
+            timedOut={timedOut}
+            log={log}
+            showLog={showLog}
+            onToggleLog={setShowLog}
+          />
         )}
       </Sheet>
       {prompt?.kind === "pickSession" && (
@@ -666,95 +578,5 @@ export function AddWorkbox() {
         />
       )}
     </>
-  );
-}
-
-/** Which of the running sessions on the target to add. */
-function SessionPicker({
-  target,
-  options,
-  onChoose,
-  onCancel,
-}: {
-  target: string;
-  options: string[];
-  onChoose: (index: number) => void;
-  onCancel: () => void;
-}) {
-  useModalOpen();
-  const titleId = useId();
-  const name = useId();
-  const [index, setIndex] = useState(0);
-  const panel = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    panel.current?.querySelector<HTMLElement>("input")?.focus();
-    return () => previous?.focus?.();
-  }, []);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      onCancel();
-    } else if (e.key === "Tab" && panel.current) {
-      const stops = [
-        ...panel.current.querySelectorAll<HTMLElement>("input:checked, button"),
-      ];
-      const first = stops[0];
-      const last = stops[stops.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
-    }
-  };
-
-  return (
-    <div className="scrim">
-      <div
-        ref={panel}
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onKeyDown={onKeyDown}
-      >
-        <h2 id={titleId} className="dialog-title">
-          Which session on {target}?
-        </h2>
-        <fieldset className="session-list">
-          <legend className="dialog-body">
-            herdr found {options.length} running sessions there.
-          </legend>
-          {options.map((option, i) => (
-            <label key={option} className="session-option">
-              <input
-                type="radio"
-                name={name}
-                checked={i === index}
-                onChange={() => setIndex(i)}
-              />
-              {option}
-            </label>
-          ))}
-        </fieldset>
-        <div className="dialog-actions">
-          <button type="button" className="btn" onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => onChoose(index)}
-          >
-            Use this session
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
