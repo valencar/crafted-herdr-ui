@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
+import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { toRows } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
@@ -102,6 +103,34 @@ describe("Inspector details", () => {
       machineId: "buildbox",
       paneId: "w1:p1",
     });
+  });
+});
+
+describe("Inspector command box and the attach mode", () => {
+  const settings = (attach_mode: "pane" | "full_ui") =>
+    ({ attach_mode }) as unknown as Settings;
+  const FULL_UI = "/opt/herdr/bin/herdr --remote buildbox";
+
+  it("asks_again_and_shows_the_full_ui_command_when_the_attach_mode_changes", async () => {
+    invoke.mockImplementation(async (name: string) =>
+      name === "copy_attach_command"
+        ? useAppStore.getState().settings?.attach_mode === "full_ui"
+          ? FULL_UI
+          : ATTACH
+        : null,
+    );
+    useAppStore.setState({ settings: settings("pane") });
+    setup();
+    expect(await screen.findByText(/terminal attach term-1/)).toHaveTextContent(
+      `$ ${ATTACH}`,
+    );
+
+    act(() => useAppStore.setState({ settings: settings("full_ui") }));
+    expect(await screen.findByText(/--remote buildbox/)).toHaveTextContent(
+      `$ ${FULL_UI}`,
+    );
+    expect(screen.queryByText(/terminal attach term-1/)).toBeNull();
+    useAppStore.setState({ settings: null });
   });
 });
 

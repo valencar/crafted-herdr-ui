@@ -1,21 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
-import { CommandBox } from "../components/CommandBox";
 import { EmptyState } from "../components/EmptyState";
 import { Header } from "../components/Header";
 import { Inspector } from "../components/Inspector";
 import { NeedsYouCard } from "../components/NeedsYouCard";
 import { ProjectGroup } from "../components/ProjectGroup";
+import { ReconnectBox } from "../components/ReconnectBox";
 import { Sidebar } from "../components/Sidebar";
 import { Toast } from "../components/Toast";
 import type { MachineView } from "../lib/bindings/MachineView";
-import {
-  formatStaleness,
-  isSupportedVersion,
-  lastLines,
-  reconnectCommand,
-} from "../lib/format";
+import { formatStaleness, isSupportedVersion, lastLines } from "../lib/format";
 import {
   groupByProject,
   groupByStatus,
@@ -331,11 +326,7 @@ export function Home() {
                 {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
                 {formatStaleness(m.last_ok_ms, nowMs)}
               </p>
-              <CommandBox
-                command={reconnectCommand(m.label)}
-                caption="to reconnect, run this in a terminal"
-                copyable
-              />
+              <ReconnectBox machineId={m.id} />
             </EmptyState>
           ))}
           {state === null ? (

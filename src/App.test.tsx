@@ -69,6 +69,19 @@ it("loads the state on mount, then subscribes to pushes", async () => {
   );
 });
 
+it("keeps saying Connecting while startup is still looking for herdr, then takes the pushed state", async () => {
+  ipc.getState.mockResolvedValue(null);
+  render(<App />);
+  await waitFor(() => expect(ipc.onState).toHaveBeenCalled());
+  await Promise.resolve();
+  expect(useAppStore.getState().state).toBeNull();
+  expect(screen.queryByText(/herdr isn’t installed|Choose binary/i)).toBeNull();
+
+  const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+  push(state);
+  await waitFor(() => expect(useAppStore.getState().state).toEqual(state));
+});
+
 it("reports it when the state event cannot be listened to", async () => {
   useAppStore.setState({ toast: null });
   ipc.onState.mockRejectedValue(new Error("event system unavailable"));
@@ -207,7 +220,7 @@ it("selects a row and shows Home when a notification is clicked", async () => {
   });
   // The Inspector asks for the attach command of the selected row.
   ipc.invokeTyped.mockImplementation(async (name: string) =>
-    name === "list_terminals" ? { installed: [], default: "ghostty" } : "",
+    name === "get_terminals" ? { installed: [], default: "ghostty" } : "",
   );
   render(<App />);
   await waitFor(() => expect(ipc.onFocusRow).toHaveBeenCalled());

@@ -6,7 +6,7 @@ import { openSettings } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 
 type Props = {
-  /** `null` until `list_terminals` answers. */
+  /** `null` until `get_terminals` answers. */
   terminal: TerminalId | null;
   installed: TerminalId[];
 };

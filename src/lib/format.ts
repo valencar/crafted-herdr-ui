@@ -161,11 +161,6 @@ export function formatDuration(ms: number): string {
   return ms < SECOND ? `${ms} ms` : `${(ms / SECOND).toFixed(1)} s`;
 }
 
-/** The command that fixes a machine that needs attention; the label is quoted if needed. */
-export function reconnectCommand(label: string): string {
-  return `herdr machine reconnect ${shellQuote(label)}`;
-}
-
 /**
  * A successful read-only call: `api snapshot`, or `<noun> read …` (`pane read`, `agent read`).
  * The poller and the previews make these every couple of seconds, so the Activity drawer hides

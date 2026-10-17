@@ -39,10 +39,7 @@ export function CopyButton({
   );
 }
 
-/**
- * The exact command an action runs. The text comes from Rust, never rebuilt in TS (a few
- * suggestions, like the reconnect line, are built in `lib/format` and say so in the caption).
- */
+/** The exact command an action runs. The text comes from Rust, never rebuilt in TS. */
 export function CommandBox({
   command,
   caption = "what “Open” runs",

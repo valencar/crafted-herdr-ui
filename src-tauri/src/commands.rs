@@ -596,7 +596,17 @@ pub async fn list_ssh_hosts(app: AppHandle) -> Result<Vec<String>, ActionError> 
     )
 }
 
-/// The installed terminals (detected again) and the default one.
+/// The installed terminals as detected the first time (kept for the life of the app) and the
+/// default one. For the screens that mount often.
+#[tauri::command]
+pub async fn get_terminals(
+    installed: State<'_, InstalledCache>,
+) -> Result<TerminalList, ActionError> {
+    // Tauri needs a `Result` from an async command that borrows state; this never fails.
+    Ok(TerminalList::new(installed.get().await))
+}
+
+/// The installed terminals, detected again (Settings › Terminal › Rescan), and the default one.
 #[tauri::command]
 pub async fn list_terminals(
     installed: State<'_, InstalledCache>,
@@ -605,16 +615,52 @@ pub async fn list_terminals(
     Ok(TerminalList::new(installed.refresh().await))
 }
 
-/// The one-line command that attaches a pane, for the user to paste into any terminal.
+/// What "Open" runs for a pane, as argv: the pane's attach command, or the machine's full herdr
+/// UI when Settings say so.
+fn open_argv(
+    state: &AppState,
+    cli: &HerdrCli,
+    mode: AttachMode,
+    machine_id: &str,
+    pane_id: &str,
+) -> Result<Vec<String>, ActionError> {
+    match mode {
+        AttachMode::FullUi => {
+            let machine = find_machine(state, machine_id)?;
+            check_openable(machine).map_err(invalid)?;
+            Ok(full_ui_argv(machine, &local_bin(cli)?))
+        }
+        AttachMode::Pane => attach_for_pane(state, cli, machine_id, pane_id),
+    }
+}
+
+/// The one-line command "Open" runs for a pane (so the attach command, or the full herdr UI in
+/// that attach mode), for the user to paste into any terminal.
 #[tauri::command]
 pub fn copy_attach_command(
     poller: State<'_, Poller>,
     cli: State<'_, HerdrCli>,
+    settings: State<'_, SharedSettings>,
     machine_id: String,
     pane_id: String,
 ) -> Result<String, ActionError> {
-    let argv = attach_for_pane(&poller.current_state(), &cli, &machine_id, &pane_id)?;
+    let argv = open_argv(
+        &poller.current_state(),
+        &cli,
+        settings.get().attach_mode,
+        &machine_id,
+        &pane_id,
+    )?;
     Ok(join_quoted(&argv))
+}
+
+/// `herdr machine reconnect <id>` as the user would type it, for the cards that suggest it.
+/// The id goes through the same allowlist `open_in_terminal` uses, so the text is what runs.
+#[tauri::command]
+pub fn preview_reconnect(id: String) -> Result<String, ActionError> {
+    let args = ["machine", "reconnect", id.as_str()].map(str::to_owned);
+    let full = allowed_herdr_argv("herdr", &args).map_err(invalid)?;
+    Ok(join_quoted(&full))
 }
 
 /// The event Settings changes are announced on, so every window shows the same values.
@@ -975,6 +1021,32 @@ mod tests {
             herdr_path: None,
             generated_at_ms: 0,
         }
+    }
+
+    #[test]
+    fn open_shows_the_full_ui_command_in_that_attach_mode() {
+        let mut state = state();
+        state.machines[1].target = Some("buildbox".into());
+        let cli = HerdrCli::new(std::path::PathBuf::from("/opt/herdr/bin/herdr"), vec![]);
+        let pane = state.machines[1].snapshot.as_ref().unwrap().panes[0].clone();
+        let attach = open_argv(&state, &cli, AttachMode::Pane, "buildbox", &pane.pane_id).unwrap();
+        assert_eq!(attach[0], "ssh");
+        assert!(attach[3].contains("terminal attach"));
+        let full = open_argv(&state, &cli, AttachMode::FullUi, "buildbox", &pane.pane_id).unwrap();
+        assert_eq!(full, ["/opt/herdr/bin/herdr", "--remote", "buildbox"]);
+        let local = open_argv(&state, &cli, AttachMode::FullUi, "local", "w1:p1").unwrap();
+        assert_eq!(local, ["/opt/herdr/bin/herdr"]);
+    }
+
+    #[test]
+    fn the_reconnect_preview_uses_the_profile_id_and_refuses_odd_ids() {
+        assert_eq!(
+            preview_reconnect("buildbox".into()).unwrap(),
+            "herdr machine reconnect buildbox"
+        );
+        assert!(preview_reconnect("a b".into()).is_err());
+        assert!(preview_reconnect("-oProxyCommand=x".into()).is_err());
+        assert!(preview_reconnect(String::new()).is_err());
     }
 
     #[test]

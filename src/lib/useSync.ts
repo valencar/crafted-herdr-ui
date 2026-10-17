@@ -18,7 +18,7 @@ export function useStateSync(): void {
     let pushed = false;
     getState()
       .then((s) => {
-        if (alive && !pushed) setState(s);
+        if (alive && !pushed && s) setState(s);
       })
       .catch(() => {});
     onState((s) => {

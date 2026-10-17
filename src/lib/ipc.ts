@@ -15,7 +15,8 @@ import type { TerminalList } from "./bindings/TerminalList";
 
 /** Every Tauri command the UI may call, mapped to its result. A Rust `()` arrives as `null`. */
 export type CommandResults = {
-  get_state: AppState;
+  /** `null` while startup is still looking for herdr; a "state" event follows. */
+  get_state: AppState | null;
   create_session: CreatedSession;
   preview_new_session: string[];
   rename_session: null;
@@ -41,10 +42,12 @@ export type CommandResults = {
   list_ssh_hosts: string[];
   machine_add_argv: string[];
   preview_machine_add: string;
+  preview_reconnect: string;
   start_machine_add: null;
   answer_machine_setup: null;
   cancel_machine_setup: null;
   read_pane_tail: string;
+  get_terminals: TerminalList;
   list_terminals: TerminalList;
   copy_attach_command: string;
   start_preview: null;
@@ -103,12 +106,15 @@ export type CommandArgs = {
   machine_add_argv: MachineAddFields;
   /** The `machine add` command line, as text. */
   preview_machine_add: MachineAddFields;
+  /** `herdr machine reconnect <id>` as text, for the cards that suggest it. */
+  preview_reconnect: { id: string };
   /** Runs `machine add` in a hidden terminal; progress arrives as `"machine-setup"` events. */
   start_machine_add: MachineAddFields;
   /** `"yes"` or `"no"` for a confirmation, the session's index (as text) for the picker. */
   answer_machine_setup: { choice: string };
   cancel_machine_setup: undefined;
   read_pane_tail: { machineId: string; paneId: string };
+  get_terminals: undefined;
   list_terminals: undefined;
   copy_attach_command: { machineId: string; paneId: string };
   start_preview: { machineId: string; paneId: string; isAgent: boolean };
@@ -172,7 +178,7 @@ export async function invokeTyped<K extends CommandName>(
 }
 
 /** The current state, for a UI that started after the first `"state"` event. */
-export function getState(): Promise<AppState> {
+export function getState(): Promise<AppState | null> {
   return invokeTyped("get_state");
 }
 

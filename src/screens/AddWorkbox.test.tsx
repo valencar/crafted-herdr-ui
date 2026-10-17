@@ -106,7 +106,7 @@ beforeEach(() => {
         session?: string | null;
       };
       switch (name) {
-        case "list_terminals":
+        case "get_terminals":
           return { installed: ["ghostty"], default: "ghostty" };
         case "list_ssh_hosts":
           return ["buildbox", "gpubox", "staging"];

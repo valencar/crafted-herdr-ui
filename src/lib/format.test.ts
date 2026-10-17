@@ -13,7 +13,6 @@ import {
   formatStaleness,
   isSupportedVersion,
   parseVersion,
-  reconnectCommand,
   shellJoin,
   shellQuote,
   shortPath,
@@ -197,17 +196,6 @@ describe("activity formats", () => {
     expect(formatDuration(999)).toBe("999 ms");
     expect(formatDuration(1000)).toBe("1.0 s");
     expect(formatDuration(12_340)).toBe("12.3 s");
-  });
-});
-
-describe("reconnectCommand", () => {
-  it("names the machine and quotes a label with spaces", () => {
-    expect(reconnectCommand("buildbox")).toBe(
-      "herdr machine reconnect buildbox",
-    );
-    expect(reconnectCommand("build box")).toBe(
-      "herdr machine reconnect 'build box'",
-    );
   });
 });
 

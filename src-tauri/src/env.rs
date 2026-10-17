@@ -159,7 +159,7 @@ pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
 
 /// Runs `<bin> <args…>` with exactly `env` and returns its stdout when it exits 0 in time.
 /// For the few herdr calls that print plain text instead of JSON, so they don't go through
-/// `HerdrCli`: `--version` and `agent start --help`.
+/// `HerdrCli`: `--version`, `status` and `agent start --help`.
 async fn run_plain_text(
     bin: &Path,
     env: &[(String, String)],
@@ -193,6 +193,13 @@ pub async fn herdr_version(
     let text = run_plain_text(bin, env, &["--version"], limit).await?;
     let (major, minor, patch) = parse_version(&text)?;
     Some(format!("{major}.{minor}.{patch}"))
+}
+
+/// Runs `<bin> status` with exactly `env` and returns what it prints. The spec asks for it at
+/// startup; the answer is only logged, nothing depends on it. `None` if it fails or hangs.
+pub async fn herdr_status(bin: &Path, env: &[(String, String)], limit: Duration) -> Option<String> {
+    let text = run_plain_text(bin, env, &["status"], limit).await?;
+    Some(text.trim().to_owned())
 }
 
 /// Agent kinds offered when `herdr agent start --help` cannot be read.
@@ -508,6 +515,25 @@ mod tests {
         );
         assert!(parse_agent_kinds("no list here").is_empty());
         assert!(parse_agent_kinds("--kind <KIND>\n[possible values: ]").is_empty());
+    }
+
+    #[tokio::test]
+    async fn herdr_status_runs_status_and_returns_its_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let ok = fake_shell(
+            dir.path(),
+            "status-ok",
+            r#"[ "$1" = status ] && printf 'server running\n'"#,
+        );
+        let limit = Duration::from_secs(5);
+        assert_eq!(
+            herdr_status(Path::new(&ok), &[], limit).await.as_deref(),
+            Some("server running")
+        );
+        let fail = fake_shell(dir.path(), "status-fail", "echo 'no server'; exit 1");
+        assert_eq!(herdr_status(Path::new(&fail), &[], limit).await, None);
+        let missing = herdr_status(Path::new("/nonexistent/herdr"), &[], limit);
+        assert_eq!(missing.await, None);
     }
 
     #[tokio::test]

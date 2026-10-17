@@ -20,7 +20,7 @@ use crate::terminal::{OpenMode, TerminalId};
 pub const MIN_POLL_INTERVAL_MS: u64 = 1000;
 /// The store file, in the app data folder.
 pub const SETTINGS_FILE: &str = "settings.json";
-const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+pub const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// What a click on a session opens: just that pane, or the whole herdr UI on its workbox.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
@@ -287,7 +287,7 @@ pub fn resolve_with_saved(
 /// Finds herdr again when the saved path changes. It keeps what only startup can learn (the
 /// login shell's hit and the home folder) and the last result.
 pub struct HerdrLocator {
-    login_hit: Option<PathBuf>,
+    login_hit: Mutex<Option<PathBuf>>,
     home: PathBuf,
     status: Mutex<HerdrStatus>,
 }
@@ -295,10 +295,15 @@ pub struct HerdrLocator {
 impl HerdrLocator {
     pub fn new(login_hit: Option<PathBuf>, home: PathBuf) -> Self {
         Self {
-            login_hit,
+            login_hit: Mutex::new(login_hit),
             home,
             status: Mutex::default(),
         }
+    }
+
+    /// Sets what the login shell found, once startup has asked it.
+    pub fn set_login_hit(&self, hit: Option<PathBuf>) {
+        *self.login_hit.lock().unwrap_or_else(|p| p.into_inner()) = hit;
     }
 
     pub fn status(&self) -> HerdrStatus {
@@ -311,8 +316,12 @@ impl HerdrLocator {
     /// Resolves herdr for `saved`, points `cli` at it, reads its version and remembers the
     /// result. Without herdr, `cli` gets an empty path (every call then fails `NotFound`).
     pub async fn locate(&self, saved: Option<&str>, cli: &HerdrCli) -> HerdrStatus {
-        let resolved =
-            resolve_with_saved(saved, self.login_hit.clone(), &self.home, &|p| p.is_file());
+        let login_hit = self
+            .login_hit
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let resolved = resolve_with_saved(saved, login_hit, &self.home, &|p| p.is_file());
         cli.set_bin(resolved.path.clone().unwrap_or_default());
         let version = match &resolved.path {
             Some(bin) => crate::env::herdr_version(bin, cli.env(), VERSION_TIMEOUT).await,

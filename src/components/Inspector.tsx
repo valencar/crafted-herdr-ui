@@ -61,7 +61,8 @@ export function Inspector({
   const where = [workspace?.label, tab?.label].filter(Boolean).join(" · ");
   const agentName = snapshot?.agents.find((a) => a.pane_id === paneId)?.name;
 
-  // What "Open" runs; the text comes from Rust.
+  // What "Open" runs; the text comes from Rust, and follows the attach mode in Settings.
+  const attachMode = useAppStore((s) => s.settings?.attach_mode);
   const [command, setCommand] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -71,7 +72,7 @@ export function Inspector({
     return () => {
       alive = false;
     };
-  }, [machineId, paneId, row.terminalId]);
+  }, [machineId, paneId, row.terminalId, attachMode]);
 
   // Reply
   const replyId = useId();

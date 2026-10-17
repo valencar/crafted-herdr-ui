@@ -86,7 +86,9 @@ function calls(name: string): unknown[] {
 
 beforeEach(() => {
   answers = {
-    list_terminals: () => ({ installed: ["ghostty"], default: "ghostty" }),
+    get_terminals: () => ({ installed: ["ghostty"], default: "ghostty" }),
+    preview_reconnect: (args: { id: string }) =>
+      `herdr machine reconnect ${args.id}`,
     read_pane_tail: (args: { paneId: string }) => `tail of ${args.paneId}`,
   };
   invoke.mockReset();
@@ -793,7 +795,9 @@ describe("Workbox pane tails", () => {
       configurable: true,
     });
     const summary = screen.getByRole("region", { name: "buildbox" });
-    expect(summary).toHaveTextContent("herdr machine reconnect buildbox");
+    expect(
+      await within(summary).findByText(/herdr machine reconnect buildbox/),
+    ).toBeVisible();
     await user.click(
       within(summary).getByRole("button", { name: /^Copy command/ }),
     );

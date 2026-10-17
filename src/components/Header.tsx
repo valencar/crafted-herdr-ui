@@ -7,7 +7,7 @@ type Props = {
   query: string;
   onQuery: (q: string) => void;
   searchRef: Ref<HTMLInputElement>;
-  /** `null` until `list_terminals` answers. */
+  /** `null` until `get_terminals` answers. */
   terminal: TerminalId | null;
   installed: TerminalId[];
   onNewSession: () => void;

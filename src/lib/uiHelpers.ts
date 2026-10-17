@@ -16,9 +16,9 @@ export function useNow(everyMs: number): number {
   return now;
 }
 
-/** The terminals `list_terminals` found, and the one sessions open in. */
+/** The terminals `get_terminals` found, and the one sessions open in. */
 export type Terminals = {
-  /** The chosen terminal, or the default one; `null` until `list_terminals` has answered. */
+  /** The chosen terminal, or the default one; `null` until `get_terminals` has answered. */
   current: TerminalId | null;
   installed: TerminalId[];
 };
@@ -32,7 +32,7 @@ export function useTerminals(): Terminals {
   const [list, setList] = useState<TerminalList | null>(null);
   useEffect(() => {
     let cancelled = false;
-    invokeTyped("list_terminals")
+    invokeTyped("get_terminals")
       .then((t) => {
         if (!cancelled) setList(t);
       })

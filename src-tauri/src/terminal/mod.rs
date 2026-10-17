@@ -60,6 +60,21 @@ impl TerminalId {
         }
     }
 
+    /// The app's name on disk (`/Applications/<name>.app`), for when Spotlight doesn't know it
+    /// (indexing off or not finished). `Custom` has none.
+    pub fn app_name(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Ghostty => "Ghostty",
+            Self::ITerm2 => "iTerm",
+            Self::TerminalApp => "Terminal",
+            Self::Warp => "Warp",
+            Self::WezTerm => "WezTerm",
+            Self::Kitty => "kitty",
+            Self::Alacritty => "Alacritty",
+            Self::Custom => return None,
+        })
+    }
+
     /// The macOS bundle id used to detect the app. `Custom` has none.
     pub fn bundle_id(self) -> Option<&'static str> {
         Some(match self {
@@ -169,13 +184,46 @@ async fn bundle_installed(bundle_id: &str) -> bool {
     }
 }
 
-/// The installed terminals, found with `mdfind`. Terminal is always among them.
+/// Whether `<dir>/<app name>.app` exists in one of the folders apps are installed to.
+fn app_on_disk(
+    id: TerminalId,
+    dirs: &[PathBuf],
+    exists: &dyn Fn(&std::path::Path) -> bool,
+) -> bool {
+    id.app_name().is_some_and(|name| {
+        dirs.iter()
+            .any(|dir| exists(&dir.join(format!("{name}.app"))))
+    })
+}
+
+/// Where apps are installed: `/Applications` and the user's own `~/Applications`.
+fn app_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![PathBuf::from("/Applications")];
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(home).join("Applications"));
+    }
+    dirs
+}
+
+/// The installed terminals: Spotlight (`mdfind`) is asked about all of them at once, and an app
+/// it doesn't know is looked for by name in the Applications folders. Terminal is always among
+/// them.
 pub async fn detect_installed() -> Vec<TerminalId> {
-    let mut found = Vec::new();
+    let dirs = app_dirs();
+    let mut checks = tokio::task::JoinSet::new();
     for id in DETECTABLE {
-        if let Some(bundle) = id.bundle_id()
-            && bundle_installed(bundle).await
-        {
+        let dirs = dirs.clone();
+        checks.spawn(async move {
+            let known = match id.bundle_id() {
+                Some(bundle) => bundle_installed(bundle).await,
+                None => false,
+            };
+            (id, known || app_on_disk(id, &dirs, &|p| p.exists()))
+        });
+    }
+    let mut found = Vec::new();
+    while let Some(done) = checks.join_next().await {
+        if let Ok((id, true)) = done {
             found.push(id);
         }
     }
@@ -378,6 +426,33 @@ mod tests {
             with_terminal_app(&[T::Kitty, T::Ghostty, T::Custom, T::Kitty]),
             [T::Ghostty, T::TerminalApp, T::Kitty]
         );
+    }
+
+    #[test]
+    fn an_app_spotlight_missed_is_found_by_name_in_the_applications_folders() {
+        let dirs = [
+            PathBuf::from("/Applications"),
+            PathBuf::from("/Users/dev/Applications"),
+        ];
+        let only = |path: &'static str| move |p: &std::path::Path| p == std::path::Path::new(path);
+        assert!(app_on_disk(
+            TerminalId::Ghostty,
+            &dirs,
+            &only("/Applications/Ghostty.app")
+        ));
+        assert!(app_on_disk(
+            TerminalId::Kitty,
+            &dirs,
+            &only("/Users/dev/Applications/kitty.app")
+        ));
+        // iTerm's bundle is named `iTerm`, not after the product.
+        assert!(app_on_disk(
+            TerminalId::ITerm2,
+            &dirs,
+            &only("/Applications/iTerm.app")
+        ));
+        assert!(!app_on_disk(TerminalId::Warp, &dirs, &|_| false));
+        assert!(!app_on_disk(TerminalId::Custom, &dirs, &|_| true));
     }
 
     #[test]

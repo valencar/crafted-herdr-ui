@@ -302,7 +302,7 @@ function TerminalSection({
   const attachId = useId();
   useEffect(() => {
     let cancelled = false;
-    invokeTyped("list_terminals")
+    invokeTyped("get_terminals")
       .then((l) => {
         if (!cancelled) setList(l);
       })
@@ -311,6 +311,18 @@ function TerminalSection({
       cancelled = true;
     };
   }, []);
+  // Detects again, for a terminal installed while Settings was open.
+  const [scanning, setScanning] = useState(false);
+  const rescan = async () => {
+    setScanning(true);
+    try {
+      setList(await invokeTyped("list_terminals"));
+    } catch {
+      // The list from before stays.
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const selected = settings.terminal ?? list?.default ?? null;
   const installed = (id: TerminalId) =>
@@ -352,6 +364,16 @@ function TerminalSection({
               </label>
             );
           })}
+        </div>
+        <div>
+          <button
+            type="button"
+            className="btn btn-small btn-ghost"
+            disabled={scanning}
+            onClick={() => void rescan()}
+          >
+            {scanning ? "Scanning…" : "Rescan"}
+          </button>
         </div>
       </fieldset>
 

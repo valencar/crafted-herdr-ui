@@ -101,11 +101,27 @@ pub fn attach_argv(machine: &MachineView, terminal_id: &str, local_bin: &str) ->
     };
     let id = shell_quote(terminal_id);
     // The attach runs where the app can't watch it. If another client owns the terminal it
-    // fails, and only an explicit "y" reruns it with `--takeover`. The constant text uses
-    // double quotes only, so quoting the whole script never produces `\\'` sequences.
+    // fails, and only an explicit "y" reruns it with `--takeover`. Exit 127 means the shell
+    // couldn't find herdr (over ssh, often a PATH that a non-interactive session doesn't set),
+    // and taking over would not help, so it says so instead. The constant text uses double
+    // quotes only, so quoting the whole script never produces `\\'` sequences.
+    let not_found = if machine.is_local {
+        "herdr not found on this computer".to_owned()
+    } else {
+        let target = remote_target(machine);
+        // The target is checked by `check_openable`; a name that isn't plain is never put in.
+        let target = if is_plain(target) {
+            target
+        } else {
+            "the remote machine"
+        };
+        format!("herdr not found on {target} (check PATH for non-interactive ssh)")
+    };
     let script = format!(
-        "{prefix}{herdr} terminal attach {id} || {{ printf \"\\nAnother client owns this session. \
-         Take over? [y/N] \"; read a; [ \"$a\" = y ] && exec {herdr} terminal attach {id} --takeover; }}",
+        "{prefix}{herdr} terminal attach {id} || {{ s=$?; [ $s -eq 127 ] && {{ \
+         printf \"\\n%s\\nPress Enter to close. \" \"{not_found}\"; read a; exit 127; }}; \
+         printf \"\\nAnother client owns this session. Take over? [y/N] \"; read a; \
+         [ \"$a\" = y ] && exec {herdr} terminal attach {id} --takeover; }}",
         prefix = session_prefix(machine),
     );
     if machine.is_local {
@@ -592,6 +608,87 @@ mod tests {
             let (ok, calls) = run_local_attach("default", "term_1", answer);
             assert!(!ok, "answer {answer:?}");
             assert_eq!(calls, ["session=|terminal|attach|term_1"], "{answer:?}");
+        }
+    }
+
+    /// Runs the attach command for `m` under `/bin/sh` against a fake `herdr` that exits with
+    /// `herdr_exit`, answering `answer` to any prompt. The remote command is run through the
+    /// same `sh -c '…'` it would get over ssh, with the fake first on PATH. Returns the exit
+    /// code and what the terminal showed.
+    fn run_attach_exit(m: &MachineView, herdr_exit: i32, answer: &str) -> (Option<i32>, String) {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("herdr");
+        std::fs::write(&bin, format!("#!/bin/sh\nexit {herdr_exit}\n")).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let argv = attach_argv(m, "term_1", bin.to_str().unwrap());
+        let (program, args): (&str, Vec<&str>) = if m.is_local {
+            ("/bin/sh", vec!["-c", &argv[2]])
+        } else {
+            // What ssh would hand the remote login shell.
+            ("/bin/sh", vec!["-c", &argv[3]])
+        };
+        let path = format!("{}:/usr/bin:/bin", dir.path().display());
+        let mut child = Command::new(program)
+            .args(args)
+            .env("PATH", path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(answer.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    }
+
+    #[test]
+    fn exit_127_says_herdr_is_missing_and_never_offers_takeover() {
+        let remote = machine("buildbox", Some("buildbox"), "default");
+        let (code, shown) = run_attach_exit(&remote, 127, "y\n");
+        assert_eq!(code, Some(127));
+        assert!(
+            shown.contains("herdr not found on buildbox (check PATH for non-interactive ssh)"),
+            "{shown}"
+        );
+        assert!(!shown.contains("Take over"), "{shown}");
+
+        let local = machine("local", None, "default");
+        let (code, shown) = run_attach_exit(&local, 127, "y\n");
+        assert_eq!(code, Some(127));
+        assert!(
+            shown.contains("herdr not found on this computer"),
+            "{shown}"
+        );
+        assert!(!shown.contains("Take over"), "{shown}");
+    }
+
+    #[test]
+    fn other_non_zero_exits_still_offer_takeover_and_success_is_quiet() {
+        for m in [
+            machine("local", None, "default"),
+            machine("buildbox", Some("buildbox"), "default"),
+        ] {
+            for exit in [1, 2, 255] {
+                let (code, shown) = run_attach_exit(&m, exit, "n\n");
+                assert!(shown.contains("Take over? [y/N]"), "exit {exit}: {shown}");
+                assert!(!shown.contains("not found"), "exit {exit}: {shown}");
+                assert_ne!(code, Some(0));
+            }
+            let (code, shown) = run_attach_exit(&m, 0, "");
+            assert_eq!(code, Some(0));
+            assert_eq!(shown, "");
         }
     }
 

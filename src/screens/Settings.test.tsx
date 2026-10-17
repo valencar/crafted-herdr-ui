@@ -93,8 +93,13 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(async (name: string, args?: unknown) => {
       switch (name) {
-        case "list_terminals":
+        case "get_terminals":
           return { installed: ["ghostty", "terminalApp"], default: "ghostty" };
+        case "list_terminals":
+          return {
+            installed: ["ghostty", "warp", "terminalApp"],
+            default: "ghostty",
+          };
         case "herdr_status":
           return herdr;
         case "shortcut_status":
@@ -142,6 +147,22 @@ describe("Settings", () => {
       patch: { terminal: "terminalApp" },
     });
     await waitFor(() => expect(radio(/^Terminal/)).toBeChecked());
+  });
+
+  it("rescan_detects_terminals_again_but_mounting_does_not", async () => {
+    const user = await setup({}, "Terminal");
+    const group = await screen.findByRole("group", {
+      name: "Open sessions in",
+    });
+    expect(invoke).toHaveBeenCalledWith("get_terminals");
+    expect(invoke).not.toHaveBeenCalledWith("list_terminals");
+    expect(within(group).getByRole("radio", { name: /^Warp/ })).toBeDisabled();
+
+    await user.click(within(group).getByRole("button", { name: "Rescan" }));
+    await waitFor(() =>
+      expect(within(group).getByRole("radio", { name: /^Warp/ })).toBeEnabled(),
+    );
+    expect(invoke).toHaveBeenCalledWith("list_terminals");
   });
 
   it("a saved terminal wins over the default", async () => {

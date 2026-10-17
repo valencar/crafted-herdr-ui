@@ -100,12 +100,15 @@ beforeEach(() => {
       return () => {};
     });
   invoke.mockReset();
-  invoke.mockImplementation(async (name: string) =>
-    name === "list_terminals"
+  invoke.mockImplementation(async (name: string, args?: { id?: string }) =>
+    name === "get_terminals"
       ? { installed: ["ghostty"], default: "ghostty" }
       : name === "list_agent_kinds"
         ? ["claude"]
-        : null,
+        : // The text Rust builds from the profile id.
+          name === "preview_reconnect"
+          ? `herdr machine reconnect ${args?.id}`
+          : null,
   );
 });
 
@@ -273,7 +276,7 @@ describe("Home", () => {
     };
     invoke.mockImplementation(async (name: string) => {
       if (name === "open_session") throw err;
-      return name === "list_terminals"
+      return name === "get_terminals"
         ? { installed: [], default: "ghostty" }
         : null;
     });
@@ -873,7 +876,13 @@ describe("Home states", () => {
       });
       expect(card).toHaveTextContent("ssh: connection refused");
       expect(card).toHaveTextContent("last updated 40s ago");
-      expect(card).toHaveTextContent("herdr machine reconnect 'gpu box'");
+      // The profile id, which is what the Reconnect button runs, not the label.
+      expect(
+        await within(card).findByText(/herdr machine reconnect gpubox/),
+      ).toBeVisible();
+      expect(invoke).toHaveBeenCalledWith("preview_reconnect", {
+        id: "gpubox",
+      });
       // Exactly one reconnect line on the whole screen, and the online rows are still there.
       expect(screen.getAllByText(/herdr machine reconnect/)).toHaveLength(1);
       expect(rowItem("buildbox::w1:p1")).toBeInTheDocument();
@@ -889,14 +898,14 @@ describe("Home states", () => {
         within(card).getByRole("button", { name: /^Copy command/ }),
       );
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        "herdr machine reconnect 'gpu box'",
+        "herdr machine reconnect gpubox",
       );
       expect(
         await within(card).findByRole("button", { name: "Copied" }),
       ).toBeVisible();
     });
 
-    it("keeps_the_card_on_top_when_the_machine_has_cached_rows_that_stay_dim", () => {
+    it("keeps_the_card_on_top_when_the_machine_has_cached_rows_that_stay_dim", async () => {
       setup(
         appState(
           machine("buildbox"),
@@ -907,7 +916,9 @@ describe("Home states", () => {
           ),
         ),
       );
-      expect(screen.getAllByText(/herdr machine reconnect/)).toHaveLength(1);
+      expect(
+        await screen.findAllByText(/herdr machine reconnect/),
+      ).toHaveLength(1);
       const dim = rowItem("gpubox::w1:p1");
       expect(dim).toHaveAttribute("data-dim", "true");
       expect(dim).toHaveTextContent("ssh: connection refused");
@@ -1013,7 +1024,7 @@ describe("Home states", () => {
       if (name === "set_settings") {
         throw { kind: "invalid", message: "settings file is read-only" };
       }
-      return name === "list_terminals"
+      return name === "get_terminals"
         ? { installed: ["ghostty"], default: "ghostty" }
         : null;
     });

@@ -38,39 +38,26 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     let settings = settings::load(&handle);
 
-    let shell = std::env::var("SHELL")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| FALLBACK_SHELL.to_owned());
-    let (login, login_hit) = tauri::async_runtime::block_on(async {
-        tokio::join!(
-            env::capture_login_env(&shell),
-            env::login_which_herdr(&shell)
-        )
-    });
-    let forwarded = env::forwarded_env(&login);
-
-    // An empty path makes every call fail with `NotFound`, which is what we want without herdr.
-    // `locate` points the runner at the binary it finds (the saved path first).
+    // The login shell and the version check are slow, so they run after the window is up (see
+    // the end of this function). Until then the runner has no environment and no binary, and
+    // the UI shows "Connecting to herdr…".
     let home = app.path().home_dir()?;
-    let cli = HerdrCli::new(PathBuf::new(), forwarded);
-    let locator = HerdrLocator::new(login_hit, home);
-    let herdr =
-        tauri::async_runtime::block_on(locator.locate(settings.herdr_path.as_deref(), &cli));
+    let cli = HerdrCli::without_env(PathBuf::new());
+    let locator = HerdrLocator::new(None, home);
 
     let activity_path = app.path().app_data_dir()?.join("activity.json");
     let config = PollerConfig {
         activity_path: Some(activity_path.clone()),
-        herdr_version: herdr.version.clone(),
-        herdr_path: herdr.path.clone(),
+        herdr_version: None,
+        herdr_path: None,
     };
     // Everything that reacts to the state without calling the poller (the tray badge, the
     // notifications) reads this channel. The poller calls `emit` while it holds its core lock,
     // so `emit` only does non-blocking things: send the event, replace the watched value.
     let (state_tx, state_rx) = watch::channel(AppState {
         machines: Vec::new(),
-        herdr_version: herdr.version.clone(),
-        herdr_path: herdr.path.clone(),
+        herdr_version: None,
+        herdr_path: None,
         generated_at_ms: 0,
     });
     let emit_handle = handle.clone();
@@ -115,7 +102,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let tray_icon = tray::create_tray(&handle)?;
     tray::start_badge(tray_icon, state_rx.clone());
-    notify::start(&handle, &poller, state_rx, shared);
+    notify::start(&handle, &poller, state_rx, shared.clone());
     let shortcut = ShortcutState::default();
     if settings.global_shortcut_enabled {
         shortcut.record(ShortcutStatus::after(
@@ -125,12 +112,58 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     app.manage(shortcut);
 
-    if herdr.path.is_some() && poller.claim_start() {
-        tauri::async_runtime::spawn(async move { poller.run().await });
-    } else {
-        poller.emit_current();
-    }
+    // The settings can't change herdr's path while startup is still resolving it.
+    let update = tauri::async_runtime::block_on(shared.begin_update());
+    tauri::async_runtime::spawn(locate_and_poll(handle, update));
     Ok(())
+}
+
+/// The slow part of startup, off the setup path: capture the login environment, find herdr and
+/// read its version, tell the UI, then start polling. Also asks `herdr status` once and logs it
+/// (the spec's startup check); nothing depends on the answer.
+async fn locate_and_poll(handle: tauri::AppHandle, update: tokio::sync::OwnedMutexGuard<()>) {
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| FALLBACK_SHELL.to_owned());
+    let (login, login_hit) = tokio::join!(
+        env::capture_login_env(&shell),
+        env::login_which_herdr(&shell)
+    );
+    let (cli, locator, poller, shared) = (
+        handle.state::<HerdrCli>(),
+        handle.state::<HerdrLocator>(),
+        handle.state::<Poller>(),
+        handle.state::<SharedSettings>(),
+    );
+    cli.set_env(env::forwarded_env(&login));
+    locator.set_login_hit(login_hit);
+    let herdr = locator
+        .locate(shared.get().herdr_path.as_deref(), &cli)
+        .await;
+    poller.set_herdr(herdr.path.clone(), herdr.version.clone());
+    drop(update);
+    let Some(path) = herdr.path else { return };
+    if poller.claim_start() {
+        let runner = poller.inner().clone();
+        tauri::async_runtime::spawn(async move { runner.run().await });
+    }
+    log_startup_status(&cli, PathBuf::from(path)).await;
+}
+
+/// Runs `herdr status` once and adds it to the command log.
+async fn log_startup_status(cli: &HerdrCli, bin: PathBuf) {
+    let started = herdr::cli::now_ms();
+    let answered = env::herdr_status(&bin, cli.env(), settings::VERSION_TIMEOUT).await;
+    cli.record(
+        None,
+        vec!["status".to_owned()],
+        started,
+        answered.is_some().then_some(0),
+        answered
+            .is_none()
+            .then(|| "herdr status did not answer".to_owned()),
+    );
 }
 
 /// Polls fast only while the main window is on screen.
@@ -209,10 +242,12 @@ pub fn run() {
             commands::list_ssh_hosts,
             commands::machine_add_argv,
             commands::preview_machine_add,
+            commands::preview_reconnect,
             commands::start_machine_add,
             commands::answer_machine_setup,
             commands::cancel_machine_setup,
             commands::read_pane_tail,
+            commands::get_terminals,
             commands::list_terminals,
             commands::copy_attach_command,
             commands::start_preview,
