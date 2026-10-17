@@ -17,11 +17,12 @@ use crate::herdr::cli::{CommandLogEntry, HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::poller::Poller;
+use crate::ssh_config;
 use crate::state::{AppState, MachineView};
 use crate::terminal::{
     self, InstalledCache, LaunchSpec, OpenMode, TerminalList, allowed_herdr_argv, attach_argv,
-    check_bin, check_openable, check_terminal_id, default_terminal, full_ui_argv, join_quoted,
-    launcher_for,
+    check_bin, check_openable, check_terminal_id, checked_machine_add_argv, default_terminal,
+    full_ui_argv, join_quoted, launcher_for,
 };
 
 const LOCAL: &str = "local";
@@ -392,6 +393,46 @@ pub async fn open_in_terminal(
     let bin = cli.bin().to_string_lossy().into_owned();
     let full = allowed_herdr_argv(&bin, &argv).map_err(invalid)?;
     launch_in_terminal(&app, &cli, &installed, &full, "herdr").await
+}
+
+/// What follows the herdr binary in `machine add`, for the form's fields. The UI hands this to
+/// `open_in_terminal`, so the call and the preview below come from one builder.
+#[tauri::command]
+pub fn machine_add_argv(
+    target: String,
+    label: Option<String>,
+    session: Option<String>,
+) -> Result<Vec<String>, ActionError> {
+    let full =
+        checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
+    Ok(full[1..].to_vec())
+}
+
+/// The `machine add` command line as the user would type it, for the Add workbox sheet.
+#[tauri::command]
+pub fn preview_machine_add(
+    target: String,
+    label: Option<String>,
+    session: Option<String>,
+) -> Result<String, ActionError> {
+    let full =
+        checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
+    Ok(join_quoted(&full))
+}
+
+/// The `Host` aliases of `~/.ssh/config` (and its `Include`s, one level deep): names only.
+/// A missing or unreadable file gives an empty list.
+#[tauri::command]
+pub async fn list_ssh_hosts(app: AppHandle) -> Result<Vec<String>, ActionError> {
+    let Ok(home) = app.path().home_dir() else {
+        return Ok(Vec::new());
+    };
+    // A slow disk must not block the UI thread.
+    Ok(
+        tokio::task::spawn_blocking(move || ssh_config::ssh_hosts_in(&home.join(".ssh")))
+            .await
+            .unwrap_or_default(),
+    )
 }
 
 /// The installed terminals (detected again) and the default one.

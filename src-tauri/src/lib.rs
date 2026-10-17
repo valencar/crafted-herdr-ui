@@ -4,6 +4,7 @@ pub mod commands;
 pub mod env;
 pub mod herdr;
 pub mod poller;
+pub mod ssh_config;
 pub mod state;
 pub mod terminal;
 
@@ -139,6 +140,9 @@ pub fn run() {
             commands::open_session,
             commands::open_full_herdr,
             commands::open_in_terminal,
+            commands::list_ssh_hosts,
+            commands::machine_add_argv,
+            commands::preview_machine_add,
             commands::read_pane_tail,
             commands::list_terminals,
             commands::copy_attach_command,

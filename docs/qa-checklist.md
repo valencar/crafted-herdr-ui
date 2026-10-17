@@ -73,3 +73,10 @@ GUI-only checks that implementers skip; run them in a final pass with the mainta
 - [ ] Rename, Disable, Enable and Remove on a throwaway workbox; Remove returns to Home and the sessions keep running on the machine.
 - [ ] Closing a workspace that has linked worktree workspaces shows herdr's message with the "close its linked worktree workspaces first" note (needs a real worktree setup; use a `herdr-ui-qa` workspace).
 - [ ] "Check now" on an unreachable workbox reports herdr's error and shows no "checked" time.
+
+## Task 13
+
+- [ ] "+ Add workbox" (Home sidebar and Workbox screen) opens the sheet. The chips match the `Host` aliases in your `~/.ssh/config` (and files it `Include`s), with no wildcards.
+- [ ] "Continue in <Terminal>" opens the default terminal running `herdr machine add <target> …` (use a throwaway target, never a live default session). Finish setup there: within about 2 s the sheet closes, "Added <label>" shows as a toast, and the new workbox opens.
+- [ ] Cancel while waiting stops the polling (no more `machine list` calls in the Activity drawer). After 10 minutes with nothing new, the "Didn't see the new workbox yet…" message shows.
+- [ ] A host that is already a profile shows "Already added as <label>" and the button is disabled.

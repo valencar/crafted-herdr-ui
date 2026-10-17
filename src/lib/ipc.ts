@@ -34,6 +34,9 @@ export type CommandResults = {
   open_session: null;
   open_full_herdr: null;
   open_in_terminal: null;
+  list_ssh_hosts: string[];
+  machine_add_argv: string[];
+  preview_machine_add: string;
   read_pane_tail: string;
   list_terminals: TerminalList;
   copy_attach_command: string;
@@ -41,6 +44,13 @@ export type CommandResults = {
   stop_preview: null;
 };
 export type CommandName = keyof CommandResults;
+
+/** The Add workbox form's fields; an empty or missing option is left out of the command. */
+export type MachineAddFields = {
+  target: string;
+  label?: string | null;
+  session?: string | null;
+};
 
 /** The arguments of each command. Keys are camelCase, which is what Tauri expects. */
 export type CommandArgs = {
@@ -73,6 +83,11 @@ export type CommandArgs = {
   open_full_herdr: { machineId: string };
   /** What follows the herdr binary; the Rust side allows only a few shapes. */
   open_in_terminal: { argv: string[] };
+  list_ssh_hosts: undefined;
+  /** What follows the herdr binary in `machine add`: the argv `open_in_terminal` expects. */
+  machine_add_argv: MachineAddFields;
+  /** The `machine add` command line, as text. */
+  preview_machine_add: MachineAddFields;
   read_pane_tail: { machineId: string; paneId: string };
   list_terminals: undefined;
   copy_attach_command: { machineId: string; paneId: string };

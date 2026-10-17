@@ -90,3 +90,40 @@ it("shows the Workbox screen when the view is a workbox, and Home otherwise", as
   useAppStore.setState({ view: { kind: "home" } });
   expect(await screen.findByRole("searchbox")).toBeInTheDocument();
 });
+
+it("renders the Add workbox sheet over both Home and the Workbox screen", async () => {
+  ipc.getState.mockResolvedValue({
+    ...state,
+    machines: [
+      {
+        id: "buildbox",
+        label: "buildbox",
+        target: "buildbox",
+        session: "default",
+        is_local: false,
+        health: { kind: "online" },
+        snapshot: null,
+        last_ok_ms: null,
+        ages: {},
+      },
+    ],
+  });
+  ipc.invokeTyped.mockImplementation(async (name: string) =>
+    name === "list_ssh_hosts" ? [] : { installed: [], default: "ghostty" },
+  );
+  useAppStore.setState({
+    view: { kind: "workbox", machineId: "buildbox" },
+    sheet: "add-workbox",
+  });
+  const { rerender } = render(<App />);
+  expect(
+    await screen.findByRole("dialog", { name: "Add workbox" }),
+  ).toBeInTheDocument();
+
+  useAppStore.setState({ view: { kind: "home" } });
+  rerender(<App />);
+  expect(
+    await screen.findByRole("dialog", { name: "Add workbox" }),
+  ).toBeInTheDocument();
+  useAppStore.setState({ sheet: null });
+});

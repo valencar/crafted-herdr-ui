@@ -11,6 +11,7 @@ export type Sheet = null | "new-session" | "add-workbox";
 export type SheetPrefill = { machineId?: string; folder?: string };
 /** A just-created pane to open in the terminal once the state lists it. */
 export type PendingOpen = { key: string; machineId: string; paneId: string };
+export type ToastTone = "info" | "error";
 export type View = { kind: "home" } | { kind: "workbox"; machineId: string };
 
 const TOAST_MS = 8000;
@@ -30,8 +31,9 @@ type AppStore = {
   sheetPrefill: SheetPrefill | null;
   view: View;
   activityOpen: boolean;
-  /** The error shown in the toast, if any. */
+  /** The message shown in the toast, if any: an error unless `toastTone` says otherwise. */
   toast: string | null;
+  toastTone: ToastTone;
   /** How many modals (confirm dialogs, sheets) are mounted. Above 0 the shortcuts stand down. */
   dialogOpen: number;
   /**
@@ -55,6 +57,8 @@ type AppStore = {
   setActivityOpen: (open: boolean) => void;
   /** Shows an action error. Every report restarts the auto-dismiss timer. */
   reportError: (e: unknown) => void;
+  /** Shows a message in the toast; the tone defaults to `"error"`. Restarts the timer. */
+  showToast: (message: string, tone?: ToastTone) => void;
   clearToast: () => void;
   setPreview: (frame: PreviewFrame | null) => void;
   openDialog: () => void;
@@ -104,6 +108,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   view: { kind: "home" },
   activityOpen: false,
   toast: null,
+  toastTone: "error",
   preview: null,
   dialogOpen: 0,
   pendingSelectKey: null,
@@ -117,8 +122,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setView: (view) => set({ view }),
   setActivityOpen: (activityOpen) => set({ activityOpen }),
   reportError: (e) => {
+    get().showToast(actionErrorMessage(toActionError(e)), "error");
+  },
+  showToast: (toast, toastTone = "error") => {
     clearTimeout(toastTimer);
-    set({ toast: actionErrorMessage(toActionError(e)) });
+    set({ toast, toastTone });
     toastTimer = setTimeout(() => get().clearToast(), TOAST_MS);
   },
   clearToast: () => {

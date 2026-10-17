@@ -215,6 +215,37 @@ pub fn allowed_herdr_argv(herdr_bin: &str, args: &[String]) -> Result<Vec<String
     Ok(argv)
 }
 
+/// The command that adds a machine: `herdr machine add <target> [--label L] [--remote-session S]`.
+/// The UI's preview and the call to `open_in_terminal` both come from here, so what the user
+/// reads is what runs. Empty options are left out.
+pub fn machine_add_argv(target: &str, label: Option<&str>, session: Option<&str>) -> Vec<String> {
+    let mut argv: Vec<String> = ["herdr", "machine", "add", target]
+        .map(str::to_owned)
+        .into();
+    for (flag, value) in [("--label", label), ("--remote-session", session)] {
+        if let Some(value) = value.filter(|v| !v.is_empty()) {
+            argv.push(flag.to_owned());
+            argv.push(value.to_owned());
+        }
+    }
+    argv
+}
+
+/// `machine_add_argv` for the form's raw fields (trimmed; empty means not given), checked
+/// against the same allowlist `open_in_terminal` applies.
+pub fn checked_machine_add_argv(
+    target: &str,
+    label: Option<&str>,
+    session: Option<&str>,
+) -> Result<Vec<String>, String> {
+    fn given(v: Option<&str>) -> Option<&str> {
+        v.map(str::trim).filter(|v| !v.is_empty())
+    }
+    let argv = machine_add_argv(target.trim(), given(label), given(session));
+    allowed_herdr_argv("herdr", &argv[1..])?;
+    Ok(argv)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,6 +373,59 @@ mod tests {
             "--remote-session",
             "two words"
         ]));
+    }
+
+    #[test]
+    fn argv_with_label_and_session() {
+        assert_eq!(
+            machine_add_argv("buildbox", Some("Build box"), Some("work")),
+            strs(&[
+                "herdr",
+                "machine",
+                "add",
+                "buildbox",
+                "--label",
+                "Build box",
+                "--remote-session",
+                "work"
+            ])
+        );
+        assert_eq!(
+            machine_add_argv("buildbox", None, None),
+            strs(&["herdr", "machine", "add", "buildbox"])
+        );
+        assert_eq!(
+            machine_add_argv("buildbox", Some(""), Some("work")),
+            strs(&[
+                "herdr",
+                "machine",
+                "add",
+                "buildbox",
+                "--remote-session",
+                "work"
+            ])
+        );
+    }
+
+    #[test]
+    fn built_machine_add_commands_pass_the_allowlist() {
+        let full = checked_machine_add_argv(" buildbox ", Some(" Build box "), Some("  ")).unwrap();
+        assert_eq!(
+            full,
+            strs(&[
+                "herdr",
+                "machine",
+                "add",
+                "buildbox",
+                "--label",
+                "Build box"
+            ])
+        );
+        assert!(allowed_herdr_argv("herdr", &full[1..]).is_ok());
+        assert!(checked_machine_add_argv("-oProxyCommand=x", None, None).is_err());
+        assert!(checked_machine_add_argv("", None, None).is_err());
+        assert!(checked_machine_add_argv("buildbox", Some("it's"), None).is_err());
+        assert!(checked_machine_add_argv("buildbox", None, Some("two words")).is_err());
     }
 
     #[test]

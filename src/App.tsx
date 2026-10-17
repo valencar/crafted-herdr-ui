@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { getState, onState } from "./lib/ipc";
+import { AddWorkbox } from "./screens/AddWorkbox";
 import { Home } from "./screens/Home";
 import { Workbox } from "./screens/Workbox";
 import { useAppStore } from "./store/appStore";
@@ -8,6 +9,7 @@ function App() {
   const setState = useAppStore((s) => s.setState);
   const reportError = useAppStore((s) => s.reportError);
   const view = useAppStore((s) => s.view);
+  const sheet = useAppStore((s) => s.sheet);
 
   useEffect(() => {
     let alive = true;
@@ -38,10 +40,16 @@ function App() {
     };
   }, [setState, reportError]);
 
-  return view.kind === "workbox" ? (
-    <Workbox key={view.machineId} machineId={view.machineId} />
-  ) : (
-    <Home />
+  return (
+    <>
+      {view.kind === "workbox" ? (
+        <Workbox key={view.machineId} machineId={view.machineId} />
+      ) : (
+        <Home />
+      )}
+      {/* Here rather than in a screen, so it works on Home and on the Workbox screen. */}
+      {sheet === "add-workbox" && <AddWorkbox />}
+    </>
   );
 }
 

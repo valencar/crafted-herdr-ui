@@ -15,7 +15,8 @@ use tokio::sync::Mutex;
 use ts_rs::TS;
 
 pub use attach::{
-    allowed_herdr_argv, attach_argv, check_bin, check_openable, check_terminal_id, full_ui_argv,
+    allowed_herdr_argv, attach_argv, check_bin, check_openable, check_terminal_id,
+    checked_machine_add_argv, full_ui_argv, machine_add_argv,
 };
 pub use quote::{join_quoted, shell_quote};
 

@@ -65,6 +65,7 @@ export function Workbox({ machineId }: { machineId: string }) {
   const state = useAppStore((s) => s.state);
   const sheet = useAppStore((s) => s.sheet);
   const toast = useAppStore((s) => s.toast);
+  const toastTone = useAppStore((s) => s.toastTone);
   const setView = useAppStore((s) => s.setView);
   const setSheet = useAppStore((s) => s.setSheet);
   const setGroupBy = useAppStore((s) => s.setGroupBy);
@@ -567,7 +568,9 @@ export function Workbox({ machineId }: { machineId: string }) {
       {sheet === "new-session" && (
         <NewSession terminalName={terminalLabel(terminal)} />
       )}
-      {toast && <Toast message={toast} onDismiss={dismissToast} />}
+      {toast && (
+        <Toast message={toast} tone={toastTone} onDismiss={dismissToast} />
+      )}
     </div>
   );
 }

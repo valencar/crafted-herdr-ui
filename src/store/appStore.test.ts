@@ -81,6 +81,25 @@ describe("appStore", () => {
     );
   });
 
+  it("showToast shows an info toast that auto-dismisses; reportError resets the tone", () => {
+    const { showToast, reportError } = useAppStore.getState();
+    showToast("Added buildbox", "info");
+    expect(useAppStore.getState()).toMatchObject({
+      toast: "Added buildbox",
+      toastTone: "info",
+    });
+    vi.advanceTimersByTime(8_000);
+    expect(useAppStore.getState().toast).toBeNull();
+    showToast("Added buildbox", "info");
+    reportError("boom");
+    expect(useAppStore.getState()).toMatchObject({
+      toast: "boom",
+      toastTone: "error",
+    });
+    showToast("plain");
+    expect(useAppStore.getState().toastTone).toBe("error");
+  });
+
   it("clearToast removes the toast and its timer", () => {
     const { reportError, clearToast } = useAppStore.getState();
     reportError("boom");

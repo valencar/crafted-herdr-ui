@@ -81,6 +81,7 @@ export function Home() {
   const setView = useAppStore((s) => s.setView);
   const openNewSession = useAppStore((s) => s.openNewSession);
   const toast = useAppStore((s) => s.toast);
+  const toastTone = useAppStore((s) => s.toastTone);
   const preview = useAppStore((s) => s.preview);
   const report = useAppStore((s) => s.reportError);
   const dismissToast = useAppStore((s) => s.clearToast);
@@ -403,7 +404,9 @@ export function Home() {
         <CloseConfirm row={closingRow} onDone={() => setClosingKey(null)} />
       )}
       {sheet === "new-session" && <NewSession terminalName={terminalName} />}
-      {toast && <Toast message={toast} onDismiss={dismissToast} />}
+      {toast && (
+        <Toast message={toast} tone={toastTone} onDismiss={dismissToast} />
+      )}
     </div>
   );
 }
