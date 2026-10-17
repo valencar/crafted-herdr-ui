@@ -695,6 +695,132 @@ describe("terminal menu ids", () => {
   });
 });
 
+describe("next-needs-you, split and sidebar menu ids", () => {
+  const buildboxState = (): AppState => ({
+    ...state,
+    machines: [
+      {
+        id: "buildbox",
+        label: "buildbox",
+        target: "buildbox",
+        session: "default",
+        is_local: false,
+        health: { kind: "online" },
+        snapshot: raw.result.snapshot as unknown as Snapshot,
+        last_ok_ms: 1,
+        ages: {},
+      },
+    ],
+  });
+  const saved = () =>
+    ipc.invokeTyped.mock.calls
+      .filter(([n]) => n === "set_settings")
+      .map(([, a]) => (a as { patch: object }).patch);
+
+  beforeEach(() => {
+    useAppStore.setState({
+      view: { kind: "home" },
+      settings: SETTINGS as unknown as Settings,
+      selectedKey: null,
+      toast: null,
+    });
+    ipc.invokeTyped.mockImplementation(async (name: string, args?: unknown) =>
+      name === "set_settings"
+        ? { ...SETTINGS, ...(args as { patch: object }).patch }
+        : { installed: [], default: "ghostty" },
+    );
+  });
+  afterEach(() => {
+    useAppStore.setState({ settings: null, selectedKey: null, toast: null });
+  });
+
+  it("⌘J opens the next needs-you or toasts", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    // Nobody is waiting: say so, open nothing.
+    await menu("next-needs-you");
+    expect(useAppStore.getState().toast).toBe("Nobody needs you right now.");
+    expect(useAppStore.getState().toastTone).toBe("info");
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+
+    // The next state push carries a blocked and a done agent.
+    const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+    act(() => push(buildboxState()));
+    await waitFor(() =>
+      expect(useAppStore.getState().state?.machines).toHaveLength(1),
+    );
+    useAppStore.setState({ toast: null });
+
+    // Blocked first: selects it, shows Home and opens its tab.
+    await menu("next-needs-you");
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(activeKey()).toBe("buildbox::w1:p1");
+    // Then the done one, which is marked seen once opened.
+    await menu("next-needs-you");
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w2:p1");
+    expect(activeKey()).toBe("buildbox::w2:p1");
+    await waitFor(() =>
+      expect(ipc.invokeTyped).toHaveBeenCalledWith("mark_seen", {
+        machineId: "buildbox",
+        paneId: "w2:p1",
+      }),
+    );
+    // And round again.
+    await menu("next-needs-you");
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(useAppStore.getState().toast).toBeNull();
+  });
+
+  it("toggle-split flips terminal_placement and shows the panel", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    // No tabs: the setting still flips, and there is no panel to show.
+    await menu("toggle-split");
+    expect(saved()).toEqual([{ terminal_placement: "right" }]);
+    expect(useTerminalStore.getState().panelOpen).toBe(false);
+    await waitFor(() =>
+      expect(useAppStore.getState().settings?.terminal_placement).toBe("right"),
+    );
+
+    openTabs("w1:p1");
+    const panel = await screen.findByRole("region", { name: "Terminal" });
+    act(() => useTerminalStore.getState().setPanelOpen(false));
+    expect(panel).not.toBeVisible();
+    await menu("toggle-split");
+    expect(saved()[1]).toEqual({ terminal_placement: "bottom" });
+    expect(panel).toBeVisible();
+  });
+
+  it("toggle-sidebar saves sidebar_collapsed", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
+    expect(sidebar).not.toHaveClass("is-collapsed");
+
+    await menu("toggle-sidebar");
+    expect(saved()).toEqual([{ sidebar_collapsed: true }]);
+    await waitFor(() => expect(sidebar).toHaveClass("is-collapsed"));
+    await menu("toggle-sidebar");
+    expect(saved()[1]).toEqual({ sidebar_collapsed: false });
+    await waitFor(() => expect(sidebar).not.toHaveClass("is-collapsed"));
+  });
+
+  it("the row density setting becomes a class on the screen", async () => {
+    const { container } = render(<App />);
+    await screen.findByRole("searchbox");
+    expect(container.querySelector(".app")).not.toHaveClass("density-compact");
+    act(() =>
+      useAppStore.setState({
+        settings: {
+          ...SETTINGS,
+          row_density: "compact",
+        } as unknown as Settings,
+      }),
+    );
+    expect(container.querySelector(".app")).toHaveClass("density-compact");
+  });
+});
+
 it("stops listening for the window events on unmount", async () => {
   const stopFocus = vi.fn();
   const stopNew = vi.fn();

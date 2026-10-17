@@ -1867,3 +1867,82 @@ select.field {
   color: var(--text-4);
   font-size: 11.5px;
 }
+
+/* ---------- collapsed sidebar rail ---------- */
+
+.sidebar.is-collapsed {
+  flex: 0 0 56px;
+  align-items: center;
+  padding: 12px 6px;
+  overflow-x: hidden;
+}
+.rail-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.rail-item:hover {
+  background: var(--nav-hover);
+}
+.rail-item[aria-current="page"] {
+  background: var(--selected);
+}
+.rail-item.is-dim {
+  opacity: 0.5;
+}
+.rail-needs {
+  margin-bottom: 8px;
+}
+.rail-icon {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+.rail-health {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+}
+.sidebar.is-collapsed .sidebar-foot {
+  padding: 8px 0 0;
+  align-items: center;
+  border-top: 0;
+}
+
+/* ---------- compact row density ---------- */
+
+.density-compact .row-main {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  gap: 8px;
+}
+.density-compact .agent-row {
+  gap: 6px;
+}
+.density-compact .group-head {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.density-compact .group {
+  margin-bottom: 8px;
+}
+.density-compact .card {
+  padding: 8px 12px;
+  gap: 6px;
+}
+.density-compact .cards {
+  gap: 8px;
+}
+.density-compact .main {
+  gap: 18px;
+}

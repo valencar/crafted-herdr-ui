@@ -54,4 +54,12 @@ describe("app.css", () => {
     expect(z(".toast")).toBeGreaterThan(z(".scrim"));
     expect(rule(".palette")).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
+
+  it("makes_the_collapsed_sidebar_a_56px_rail_and_compact_density_css_only", () => {
+    expect(rule(".sidebar.is-collapsed")).toMatch(/flex:\s*0 0 56px/);
+    expect(rule(".density-compact .row-main")).toMatch(/padding-top/);
+    for (const selector of [".rail-item", ".density-compact .card"]) {
+      expect(rule(selector)).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    }
+  });
 });

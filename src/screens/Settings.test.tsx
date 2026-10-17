@@ -320,6 +320,31 @@ describe("Settings", () => {
     ).toBeInTheDocument();
   });
 
+  it("Row density saves row_density", async () => {
+    const user = await setup({ row_density: "comfortable" }, "Appearance");
+    const group = await screen.findByRole("group", { name: "Row density" });
+    const comfortable = within(group).getByRole("button", {
+      name: "Comfortable",
+    });
+    const compact = within(group).getByRole("button", { name: "Compact" });
+    expect(comfortable).toHaveAttribute("aria-pressed", "true");
+    expect(compact).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(compact);
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { row_density: "compact" },
+    });
+    await waitFor(() =>
+      expect(
+        within(group).getByRole("button", { name: "Compact" }),
+      ).toHaveAttribute("aria-pressed", "true"),
+    );
+    await user.click(comfortable);
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { row_density: "comfortable" },
+    });
+  });
+
   it("lists the shortcuts and switches the global one", async () => {
     const user = await setup({}, "Shortcuts");
     expect(screen.getByText("Search and jump")).toBeInTheDocument();

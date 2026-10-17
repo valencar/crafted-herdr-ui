@@ -48,6 +48,7 @@ export function Workbox({ machineId }: { machineId: string }) {
   const report = useAppStore((s) => s.reportError);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
+  const compact = useAppStore((s) => s.settings?.row_density === "compact");
 
   const nowMs = useNow(30_000);
   const { current: terminal } = useTerminals();
@@ -358,7 +359,7 @@ export function Workbox({ machineId }: { machineId: string }) {
   const label = machine?.label ?? machineId;
 
   return (
-    <div className="app">
+    <div className={`app${compact ? " density-compact" : ""}`}>
       <header className="header" data-tauri-drag-region>
         <nav className="breadcrumb" aria-label="Breadcrumb">
           <button type="button" className="crumb" onClick={goHome}>

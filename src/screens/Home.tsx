@@ -90,6 +90,8 @@ export function Home() {
   );
   const panelOnRight = panelShown && placedRight;
 
+  const compact = useAppStore((s) => s.settings?.row_density === "compact");
+
   const nowMs = useNow(30_000);
   const [query, setQuery] = useState("");
   const { current: terminal, installed } = useTerminals();
@@ -194,7 +196,7 @@ export function Home() {
     (m) => !m.is_local && m.health.kind === "attention",
   );
   return (
-    <div className="app">
+    <div className={`app${compact ? " density-compact" : ""}`}>
       <Header
         herdrVersion={state?.herdr_version ?? null}
         query={query}

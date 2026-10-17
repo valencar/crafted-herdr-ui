@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { useAppStore } from "../store/appStore";
+import type { Settings } from "./bindings/Settings";
 import type { TerminalId } from "./bindings/TerminalId";
 import type { TerminalList } from "./bindings/TerminalList";
 import { TERMINAL_LABEL } from "./format";
@@ -129,4 +130,16 @@ export const INSTALL_URL = "https://herdr.dev";
 
 export function openInstallPage(): Promise<void> {
   return openUrl(INSTALL_URL);
+}
+
+/** Saves part of the settings; the store follows the saved result, and a failure goes to the toast. */
+export function saveSettings(patch: Partial<Settings>): void {
+  const { setSettings, reportError } = useAppStore.getState();
+  invokeTyped("set_settings", { patch }).then(setSettings).catch(reportError);
+}
+
+/** Collapses the sidebar to its rail, or brings the full sidebar back. */
+export function toggleSidebar(): void {
+  const collapsed = useAppStore.getState().settings?.sidebar_collapsed ?? false;
+  saveSettings({ sidebar_collapsed: !collapsed });
 }

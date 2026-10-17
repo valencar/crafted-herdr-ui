@@ -201,3 +201,7 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] Open in {Terminal} still launches the external app.
 - [ ] ⌘K opens the command palette from Home, the Workbox screen and while a terminal has focus; it sits above the terminal panel (dimmed scrim over it) and under the Activity drawer; ↑/↓ move, Enter runs, ⌘Enter opens an agent the other way (here vs. the external terminal), Esc closes and returns focus to where it was.
 - [ ] In the palette, typing finds agents, projects, workboxes and commands; an empty query lists needs-you agents first, then commands; choosing a project scrolls Home to its group, and a workbox opens its screen. While it is open, typing never reaches the terminal behind it.
+- [ ] Compact density and collapsed sidebar look right at 50+ agents.
+- [ ] ⌘J cycles through the agents that need you (blocked first), selects each on Home and opens it in the terminal panel; with nobody waiting it shows "Nobody needs you right now."
+- [ ] ⌘\ moves the terminal panel between the bottom and the right edge (and shows it if hidden), and the choice survives a relaunch.
+- [ ] ⌘B collapses the sidebar to a 56 px rail (workbox initials with health dots, tooltips naming each workbox and its health) and back, on Home and on the Workbox screen; the rail's expand button works.

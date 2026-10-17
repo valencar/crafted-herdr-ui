@@ -11,7 +11,8 @@ The UI renders `AppState` pushed from Rust (`"state"` event) and calls typed Tau
 | `lib/useSync.ts` | `useStateSync` / `useSettingsSync`: every window (main, popover, Settings) keeps its own store current |
 | `lib/openRow.ts` | `openRow(row, how?)` and `openFull(machineId, label, how?)` (Open in a terminal tab here, or in the external terminal; `how` defaults to `settings.open_target`; a "done" agent is marked seen after it opened), `markSeen`, `useOpenWhenListed` (opens a row once it shows up in the list, following the same setting) |
 | `lib/useHomeShortcuts.ts` | Home's keyboard shortcuts: ⌘N, ⌘R, ⌘↩, the arrow keys, Delete |
-| `lib/menuActions.ts` | `runMenuAction(id)`: what each native menu item does; the menu listener in `App` and the command palette both call it (an id nobody handles yet does nothing) |
+| `lib/menuActions.ts` | `runMenuAction(id)`: what each native menu item does; the menu listener in `App` and the command palette both call it; ⌘J, ⌘\ (panel bottom ↔ right) and ⌘B (sidebar rail) live here too, saved through `saveSettings` in `uiHelpers` |
+| `lib/nextNeedsYou.ts` | `nextNeedsYou(rows, currentKey)`: the next row in `needsYou` order after the selected one, wrapping round (⌘J) |
 | `lib/fuzzy.ts`, `lib/palette.ts` | `fuzzyScore`, and the ⌘K palette's `buildItems` / `rankItems` (pure); `components/CommandPalette.tsx` is the dialog (on `.scrim`, `useModalOpen`) |
 | `lib/grouping.ts`, `lib/format.ts` | `toRows`, `needsYou`, `groupByProject/Workbox/Status`, `displayName`, `formatAge`, `shortPath` |
 | `store/appStore.ts` | Zustand: state, `selectedKey`, `groupBy`, sheet, view, `activityOpen` |
