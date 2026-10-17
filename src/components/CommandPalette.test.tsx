@@ -1,6 +1,8 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { groupByProject, toRows } from "../lib/grouping";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Settings } from "../lib/bindings/Settings";
@@ -47,6 +49,19 @@ const state: AppState = {
 };
 
 const onClose = vi.fn();
+
+/** Mounts the palette the way App does: it unmounts when it asks to close. */
+function Harness() {
+  const [shown, setShown] = useState(true);
+  return shown ? (
+    <CommandPalette
+      onClose={() => {
+        onClose();
+        setShown(false);
+      }}
+    />
+  ) : null;
+}
 
 function open() {
   const user = userEvent.setup();
@@ -138,6 +153,81 @@ describe("CommandPalette", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  describe("focus", () => {
+    function openFrom(button: HTMLElement) {
+      button.focus();
+      expect(button).toHaveFocus();
+      const user = userEvent.setup();
+      render(<Harness />);
+      expect(screen.getByRole("combobox")).toHaveFocus();
+      return user;
+    }
+
+    it("returns_to_where_it_was_on_escape", async () => {
+      render(<button>before</button>);
+      const user = openFrom(screen.getByRole("button", { name: "before" }));
+      await user.keyboard("{Escape}");
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "before" })).toHaveFocus(),
+      );
+    });
+
+    it("returns_to_where_it_was_after_running_an_item_that_takes_no_focus", async () => {
+      render(<button>before</button>);
+      const user = openFrom(screen.getByRole("button", { name: "before" }));
+      await user.type(screen.getByRole("combobox"), "refresh");
+      await user.keyboard("{Enter}");
+      expect(invoke).toHaveBeenCalledWith("refresh_now", {});
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "before" })).toHaveFocus(),
+      );
+    });
+
+    it("leaves_focus_alone_when_the_item_moved_it", async () => {
+      render(
+        <>
+          <button>before</button>
+          <button>elsewhere</button>
+        </>,
+      );
+      const user = openFrom(screen.getByRole("button", { name: "before" }));
+      await user.type(screen.getByRole("combobox"), "refresh");
+      // What an item that opens a sheet or a tab does: it takes focus as the palette goes.
+      invoke.mockImplementationOnce(() => {
+        screen.getByRole("button", { name: "elsewhere" }).focus();
+        return Promise.resolve(null);
+      });
+      await user.keyboard("{Enter}");
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.getByRole("button", { name: "elsewhere" })).toHaveFocus();
+    });
+  });
+
+  it("switches_to_project_grouping_and_scrolls_to_the_group_when_a_project_is_chosen", async () => {
+    const project = groupByProject(toRows(state)).find((g) => g.folder);
+    expect(project).toBeDefined();
+    const target = document.createElement("div");
+    target.id = `group-${project?.key}`;
+    target.scrollIntoView = vi.fn();
+    document.body.append(target);
+    useAppStore.setState({
+      groupBy: "workbox",
+      view: { kind: "workbox", machineId: "buildbox" },
+    });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), project?.name ?? "");
+    const option = screen
+      .getAllByRole("option")
+      .find((o) => o.querySelector(".palette-tag")?.textContent === "Projects");
+    expect(option).toBeDefined();
+    await user.click(option as HTMLElement);
+    expect(useAppStore.getState().groupBy).toBe("project");
+    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalled());
+    target.remove();
+    useAppStore.setState({ groupBy: "project", view: { kind: "home" } });
+  });
+
   it("says_so_when_nothing_matches", async () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "qqqqzz");
@@ -170,5 +260,6 @@ describe("CommandPalette", () => {
     expect(useAppStore.getState().sheet).toBeNull();
     act(() => rerender(<Home />));
     expect(useAppStore.getState().dialogOpen).toBe(0);
+    openNewSession.mockRestore();
   });
 });

@@ -93,9 +93,9 @@ describe("rankItems", () => {
 
   it("opens_an_agent_by_default_and_the_other_way_with_alt", () => {
     const { items, open } = setup("app");
-    const planner = items.find((i) => i.label === "builder");
-    planner?.run("default");
-    planner?.run("alt");
+    const builder = items.find((i) => i.label === "builder");
+    builder?.run("default");
+    builder?.run("alt");
     expect(open).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ name: "builder" }),
@@ -141,7 +141,20 @@ describe("rankItems", () => {
     expect(rankItems(items, "qqqq")).toEqual([]);
   });
 
-  it("keeps_the_group_order_on_equal_scores_and_caps_the_list", () => {
+  it("keeps_the_build_order_on_equal_scores", () => {
+    const { items } = setup();
+    const twins = [
+      { ...items[0], id: "a", label: "same", detail: "", keywords: "" },
+      { ...items[0], id: "b", label: "same", detail: "", keywords: "" },
+    ];
+    expect(rankItems(twins, "sam").map((i) => i.id)).toEqual(["a", "b"]);
+    expect(rankItems([twins[1], twins[0]], "sam").map((i) => i.id)).toEqual([
+      "b",
+      "a",
+    ]);
+  });
+
+  it("caps_the_list_at_the_limit", () => {
     const { items } = setup();
     const many = Array.from({ length: 80 }, (_, n) => ({
       ...items[0],

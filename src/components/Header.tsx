@@ -46,7 +46,7 @@ export function Header({
             }
           }}
         />
-        <kbd>⌘K</kbd>
+        <kbd>⌘F</kbd>
       </label>
       <div className="header-actions">
         <TerminalMenu terminal={terminal} installed={installed} />

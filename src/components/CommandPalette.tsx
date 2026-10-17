@@ -4,7 +4,7 @@ import { toRows } from "../lib/grouping";
 import { runMenuAction } from "../lib/menuActions";
 import { openRow } from "../lib/openRow";
 import { buildItems, rankItems, type PaletteItem } from "../lib/palette";
-import { openSettings, scrollToId } from "../lib/uiHelpers";
+import { focusSearch, openSettings, scrollToId } from "../lib/uiHelpers";
 import { useAppStore, useModalOpen } from "../store/appStore";
 
 /** Scrolls the active option into view as the arrow keys move. */
@@ -26,17 +26,29 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Focus goes back to where it was only when the palette is dismissed; after running an item
-  // the item decides what is focused (a new tab, a sheet, a search box).
-  const restoreFocus = useRef(false);
+  // Whatever had focus when the palette was asked for, read while rendering so that
+  // StrictMode's second effect run does not mistake the palette's own input for it.
+  const [previousFocus] = useState(
+    () => document.activeElement as HTMLElement | null,
+  );
 
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
     inputRef.current?.focus();
     return () => {
-      if (restoreFocus.current) previous?.focus?.();
+      // Once the palette is gone: an item that moved focus (a new tab, a sheet, a search box)
+      // keeps it; otherwise focus goes back to where it was, never to the page body.
+      window.setTimeout(() => {
+        const now = document.activeElement;
+        if (now && now !== document.body) return;
+        const previous = previousFocus;
+        if (previous?.isConnected && previous !== document.body) {
+          previous.focus();
+        } else {
+          focusSearch();
+        }
+      }, 0);
     };
-  }, []);
+  }, [previousFocus]);
 
   const items = useMemo(() => {
     const store = useAppStore.getState();
@@ -85,7 +97,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       ],
       open: (row, how) => void openRow(row, how),
       goToProject: (key) => {
+        // The group is only on the page when Home is grouped by project (as the sidebar does).
         store.setView({ kind: "home" });
+        store.setGroupBy("project");
         scrollToId(`group-${key}`);
       },
       goToWorkbox: (machineId) => store.setView({ kind: "workbox", machineId }),
@@ -110,16 +124,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
-  const dismiss = () => {
-    restoreFocus.current = true;
-    onClose();
-  };
-
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
     if (e.key === "Escape") {
       e.stopPropagation();
-      dismiss();
+      onClose();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
       move(at + 1);
@@ -139,7 +148,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     <div
       className="scrim palette-scrim"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) dismiss();
+        if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
