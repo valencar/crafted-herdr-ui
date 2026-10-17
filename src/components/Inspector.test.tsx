@@ -1,6 +1,13 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
@@ -8,6 +15,7 @@ import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { toRows } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
+import { useTerminalStore } from "../terminal/terminalStore";
 import { Inspector } from "./Inspector";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -247,7 +255,68 @@ describe("Inspector reply", () => {
 });
 
 describe("Inspector actions", () => {
+  const openSessionsIn = (open_target: "app" | "external") =>
+    useAppStore.setState({ settings: { open_target } as unknown as Settings });
+  afterEach(() => {
+    useAppStore.setState({ settings: null });
+    useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  });
+
+  it("primary follows open_target and the secondary does the other", () => {
+    openSessionsIn("app");
+    setup();
+    const buttons = () =>
+      screen
+        .getAllByRole("button", { name: /^Open (here|in Ghostty)/ })
+        .map((b) => [b.textContent, b.classList.contains("btn-primary")]);
+    expect(buttons()).toEqual([
+      ["Open here ⌘↩", true],
+      ["Open in Ghostty", false],
+    ]);
+    cleanup();
+    openSessionsIn("external");
+    setup();
+    expect(buttons()).toEqual([
+      ["Open in Ghostty ⌘↩", true],
+      ["Open here", false],
+    ]);
+  });
+
+  it("⌘↩ uses the default", () => {
+    // The shortcut itself is Home's (it calls openRow with no target); the hint sits on the
+    // primary button, so it moves with the setting.
+    for (const target of ["app", "external"] as const) {
+      openSessionsIn(target);
+      setup();
+      const hint = screen.getByText("⌘↩");
+      expect(hint.closest("button")).toHaveClass("btn-primary");
+      expect(screen.getAllByText("⌘↩")).toHaveLength(1);
+      cleanup();
+    }
+  });
+
+  it("open_here_opens_a_tab_and_open_in_runs_open_session", async () => {
+    openSessionsIn("external");
+    const { user } = setup();
+    await user.click(screen.getByRole("button", { name: "Open here" }));
+    expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+      "buildbox::w1:p1",
+    ]);
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
+    cleanup();
+    openSessionsIn("app");
+    const second = setup();
+    await second.user.click(
+      screen.getByRole("button", { name: "Open in Ghostty" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("open_session", {
+      machineId: "buildbox",
+      paneId: "w1:p1",
+    });
+  });
+
   it("open_runs_open_session", async () => {
+    openSessionsIn("external");
     const { user } = setup();
     await user.click(screen.getByRole("button", { name: /^Open in Ghostty/ }));
     expect(invoke).toHaveBeenCalledWith("open_session", {
@@ -257,6 +326,7 @@ describe("Inspector actions", () => {
   });
 
   it("open_marks_a_done_agent_seen_after_it_opened", async () => {
+    openSessionsIn("external");
     const { user } = setup(DONE);
     await user.click(screen.getByRole("button", { name: /^Open in Ghostty/ }));
     await waitFor(() =>

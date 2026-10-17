@@ -35,6 +35,7 @@ const ipc = vi.hoisted(() => ({
   getSettings: vi.fn(),
   onSettings: vi.fn(),
   onFocusRow: vi.fn(),
+  onOpenRow: vi.fn(),
   onNewSession: vi.fn(),
   onMenu: vi.fn(),
   invokeTyped: vi.fn(),
@@ -58,6 +59,7 @@ beforeEach(() => {
   ipc.getSettings.mockReset().mockRejectedValue(new Error("no settings"));
   ipc.onSettings.mockReset().mockResolvedValue(() => {});
   ipc.onFocusRow.mockReset().mockResolvedValue(() => {});
+  ipc.onOpenRow.mockReset().mockResolvedValue(() => {});
   ipc.onNewSession.mockReset().mockResolvedValue(() => {});
   ipc.onMenu.mockReset().mockResolvedValue(() => {});
   ipc.invokeTyped
@@ -257,6 +259,89 @@ it("selects a row and shows Home when a notification is clicked", async () => {
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1"),
   );
   useAppStore.setState({ selectedKey: null });
+});
+
+/** A buildbox with the fixture's agents, for the tests that open a row. */
+function listBuildbox() {
+  ipc.getState.mockResolvedValue({
+    ...state,
+    machines: [
+      {
+        id: "buildbox",
+        label: "buildbox",
+        target: "buildbox",
+        session: "default",
+        is_local: false,
+        health: { kind: "online" },
+        snapshot: raw.result.snapshot as unknown as Snapshot,
+        last_ok_ms: 1,
+        ages: {},
+      },
+    ],
+  });
+  ipc.invokeTyped.mockImplementation(async (name: string) =>
+    name === "get_terminals" ? { installed: [], default: "ghostty" } : "",
+  );
+}
+
+it("focus-row selects and opens", async () => {
+  useAppStore.setState({
+    view: { kind: "home" },
+    selectedKey: null,
+    settings: { open_target: "app" } as unknown as Settings,
+  });
+  listBuildbox();
+  render(<App />);
+  await waitFor(() => expect(ipc.onFocusRow).toHaveBeenCalled());
+  await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+  act(() => handler(ipc.onFocusRow)("buildbox::w1:p1"));
+  expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+  expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+    "buildbox::w1:p1",
+  ]);
+  expect(useTerminalStore.getState().panelOpen).toBe(true);
+
+  // With the external terminal as the target, the click opens that instead.
+  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useAppStore.setState({
+    settings: { open_target: "external" } as unknown as Settings,
+  });
+  act(() => handler(ipc.onFocusRow)("buildbox::w1:p2"));
+  await waitFor(() =>
+    expect(ipc.invokeTyped).toHaveBeenCalledWith("open_session", {
+      machineId: "buildbox",
+      paneId: "w1:p2",
+    }),
+  );
+  expect(useTerminalStore.getState().tabs).toEqual([]);
+  useAppStore.setState({ selectedKey: null, settings: null });
+});
+
+it("open-row event opens the tab", async () => {
+  // The popover asks for "app" explicitly, whatever this window's setting says.
+  useAppStore.setState({
+    view: { kind: "home" },
+    settings: { open_target: "external" } as unknown as Settings,
+  });
+  listBuildbox();
+  render(<App />);
+  await waitFor(() => expect(ipc.onOpenRow).toHaveBeenCalled());
+  await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+  act(() => handler(ipc.onOpenRow)("buildbox::w1:p1"));
+  expect(useTerminalStore.getState().tabs).toMatchObject([
+    {
+      tabKey: "buildbox::w1:p1",
+      target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+    },
+  ]);
+  expect(ipc.invokeTyped).not.toHaveBeenCalledWith(
+    "open_session",
+    expect.anything(),
+  );
+  // A key that is no longer listed does nothing.
+  act(() => handler(ipc.onOpenRow)("buildbox::w9:p9"));
+  expect(useTerminalStore.getState().tabs).toHaveLength(1);
+  useAppStore.setState({ settings: null });
 });
 
 it("opens the New session sheet when the tray or the popover asks", async () => {
@@ -575,7 +660,9 @@ describe("terminal menu ids", () => {
 it("stops listening for the window events on unmount", async () => {
   const stopFocus = vi.fn();
   const stopNew = vi.fn();
+  const stopOpen = vi.fn();
   ipc.onFocusRow.mockResolvedValue(stopFocus);
+  ipc.onOpenRow.mockResolvedValue(stopOpen);
   const stopMenu = vi.fn();
   ipc.onNewSession.mockResolvedValue(stopNew);
   ipc.onMenu.mockResolvedValue(stopMenu);
@@ -584,6 +671,7 @@ it("stops listening for the window events on unmount", async () => {
   await Promise.resolve();
   unmount();
   expect(stopFocus).toHaveBeenCalled();
+  expect(stopOpen).toHaveBeenCalled();
   expect(stopNew).toHaveBeenCalled();
   expect(stopMenu).toHaveBeenCalled();
 });

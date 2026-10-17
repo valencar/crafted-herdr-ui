@@ -9,7 +9,7 @@ The UI renders `AppState` pushed from Rust (`"state"` event) and calls typed Tau
 | `lib/bindings/` | ts-rs generated types. Never edit by hand. |
 | `lib/ipc.ts` | the only place that calls `invoke`/`listen`: `onState`, `onSettings`, `onFocusRow`, `invokeTyped`, and the `CommandName` union |
 | `lib/useSync.ts` | `useStateSync` / `useSettingsSync`: every window (main, popover, Settings) keeps its own store current |
-| `lib/openRow.ts` | `openRow` (Open, and mark a "done" agent seen after it opened), `markSeen`, `useOpenWhenListed` (opens a row once it shows up in the list) |
+| `lib/openRow.ts` | `openRow(row, how?)` and `openFull(machineId, label, how?)` (Open in a terminal tab here, or in the external terminal; `how` defaults to `settings.open_target`; a "done" agent is marked seen after it opened), `markSeen`, `useOpenWhenListed` (opens a row once it shows up in the list, following the same setting) |
 | `lib/useHomeShortcuts.ts` | Home's keyboard shortcuts: ⌘K, ⌘N, ⌘R, ⌘↩, the arrow keys, Delete |
 | `lib/grouping.ts`, `lib/format.ts` | `toRows`, `needsYou`, `groupByProject/Workbox/Status`, `displayName`, `formatAge`, `shortPath` |
 | `store/appStore.ts` | Zustand: state, `selectedKey`, `groupBy`, sheet, view, `activityOpen` |

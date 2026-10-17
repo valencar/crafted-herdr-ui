@@ -1,6 +1,14 @@
 import { useEffect } from "react";
 import { ActivityDrawer } from "./components/ActivityDrawer";
-import { invokeTyped, onFocusRow, onMenu, onNewSession } from "./lib/ipc";
+import { toRows } from "./lib/grouping";
+import {
+  invokeTyped,
+  onFocusRow,
+  onMenu,
+  onNewSession,
+  onOpenRow,
+} from "./lib/ipc";
+import { openRow } from "./lib/openRow";
 import { focusRowElement, focusSearch, isInTerminal } from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
@@ -62,9 +70,24 @@ function App() {
     let alive = true;
     const unlisten: (() => void)[] = [];
     const keep = (un: () => void) => (alive ? unlisten.push(un) : un());
+    // The rows as they are when an event arrives, not when this effect last ran.
+    const rowFor = (key: string) => {
+      const current = useAppStore.getState().state;
+      return (current ? toRows(current) : []).find((r) => r.key === key);
+    };
+    // A notification click selects the row (v1), then opens it the way the setting says.
     onFocusRow((key) => {
       focusRow(key);
       focusRowElement(key);
+      const row = rowFor(key);
+      if (row) void openRow(row);
+    })
+      .then(keep)
+      .catch(() => {});
+    // The popover asked for a row to open here.
+    onOpenRow((key) => {
+      const row = rowFor(key);
+      if (row) void openRow(row, "app");
     })
       .then(keep)
       .catch(() => {});

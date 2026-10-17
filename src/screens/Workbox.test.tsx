@@ -7,7 +7,9 @@ import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Pane } from "../lib/bindings/Pane";
 import type { Snapshot } from "../lib/bindings/Snapshot";
+import type { Settings } from "../lib/bindings/Settings";
 import { useAppStore } from "../store/appStore";
+import { useTerminalStore } from "../terminal/terminalStore";
 import { Workbox } from "./Workbox";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -89,6 +91,10 @@ beforeEach(() => {
   // timers stay real for user-event and `findBy*`.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
+  // Most tests are about the external terminal; the app target has its own tests.
+  useAppStore.setState({
+    settings: { open_target: "external" } as unknown as Settings,
+  });
   answers = {
     get_terminals: () => ({ installed: ["ghostty"], default: "ghostty" }),
     preview_reconnect: (args: { id: string }) =>
@@ -104,6 +110,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  useAppStore.setState({ settings: null });
+  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
 });
 
 describe("Workbox", () => {
@@ -312,6 +320,23 @@ describe("Workbox", () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: "Open full Herdr ↗" }));
     expect(calls("open_full_herdr")).toEqual([{ machineId: "buildbox" }]);
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+  });
+
+  it("Open full herdr follows open_target", async () => {
+    useAppStore.setState({
+      settings: { open_target: "app" } as unknown as Settings,
+    });
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: "Open full Herdr ↗" }));
+    expect(calls("open_full_herdr")).toEqual([]);
+    expect(useTerminalStore.getState().tabs).toMatchObject([
+      {
+        tabKey: "full::buildbox",
+        target: { kind: "full", machineId: "buildbox" },
+        machineLabel: "buildbox",
+      },
+    ]);
   });
 
   it("check_now_stores_the_time_and_counts_up", async () => {

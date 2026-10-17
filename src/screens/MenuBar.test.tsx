@@ -83,6 +83,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  useAppStore.setState({ settings: null });
 });
 
 describe("MenuBar", () => {
@@ -126,7 +127,24 @@ describe("MenuBar", () => {
     );
   });
 
+  it("Open with app target asks main to open the row", async () => {
+    useAppStore.setState({ settings: SETTINGS });
+    const user = setup(appState(machine("buildbox")));
+    const first = within(
+      screen.getByRole("region", { name: /Needs you/ }),
+    ).getAllByRole("listitem")[0];
+    await user.click(within(first).getByRole("button", { name: /^Open/ }));
+    expect(invoke).toHaveBeenCalledWith("show_main_open_row", {
+      machineId: "buildbox",
+      paneId: "w1:p1",
+    });
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
+  });
+
   it("open_runs_the_session_in_the_terminal", async () => {
+    useAppStore.setState({
+      settings: { ...SETTINGS, open_target: "external" },
+    });
     const user = setup(appState(machine("buildbox")));
     const first = within(
       screen.getByRole("region", { name: /Needs you/ }),

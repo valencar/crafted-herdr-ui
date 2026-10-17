@@ -3,7 +3,7 @@ import { StoreToast } from "../components/Toast";
 import { HEALTH_LABEL, STATUS_LABEL, formatAge, plural } from "../lib/format";
 import { needsYou, projectNames, toRows, type Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { openRow } from "../lib/openRow";
+import { defaultOpenHow, openRow } from "../lib/openRow";
 import { useNow } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 
@@ -16,6 +16,18 @@ type RowItemProps = {
 };
 
 function RowItem({ row, project, nowMs, primary }: RowItemProps) {
+  const report = useAppStore((s) => s.reportError);
+  // This window opens no tabs. With "Open sessions" set to the app, it asks the main window.
+  const open = () => {
+    if (defaultOpenHow() === "app") {
+      invokeTyped("show_main_open_row", {
+        machineId: row.machineId,
+        paneId: row.paneId,
+      }).catch(report);
+    } else {
+      void openRow(row, "external");
+    }
+  };
   const age = formatAge(row.sinceMs, nowMs);
   const detail = [project, row.machineLabel, age].filter(Boolean).join(" · ");
   return (
@@ -32,7 +44,7 @@ function RowItem({ row, project, nowMs, primary }: RowItemProps) {
         type="button"
         className={primary ? "btn btn-small btn-primary" : "btn btn-small"}
         aria-label={`Open ${row.name}`}
-        onClick={() => void openRow(row)}
+        onClick={open}
       >
         Open
       </button>

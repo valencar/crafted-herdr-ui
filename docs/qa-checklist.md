@@ -196,3 +196,6 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] ⌘F inside a terminal opens the find bar (Enter next, ⇧Enter previous, Esc closes and returns focus to the terminal); ⌘F elsewhere focuses Home's search box.
 - [ ] ⌘+ / ⌘− / ⌘0 change the terminal font size within 9 to 24 and reset to 13, and the size persists.
 - [ ] With the panel open, the Close dialog, the New session sheet and the Activity drawer sit above it (dimmed scrim over the terminal, no terminal layer on top).
+- [ ] Notification click opens the tab.
+- [ ] Popover Open brings the main window with the tab.
+- [ ] Open in {Terminal} still launches the external app.

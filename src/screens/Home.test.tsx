@@ -125,6 +125,10 @@ beforeEach(() => {
       emitPreview = cb;
       return () => {};
     });
+  // Most tests are about the external terminal; the app target has its own tests.
+  useAppStore.setState({
+    settings: { open_target: "external" } as unknown as Settings,
+  });
   invoke.mockReset();
   invoke.mockImplementation(async (name: string, args?: { id?: string }) =>
     name === "get_terminals"
@@ -162,6 +166,44 @@ describe("Home", () => {
     expect(within(cards[0]).queryByText("Mark seen")).toBeNull();
     expect(within(cards[2]).getByText("Mark seen")).toBeInTheDocument();
     expect(await screen.findAllByText("Open in Ghostty ↗")).toHaveLength(4);
+  });
+
+  it("needs_you_cards_pair_the_default_open_with_the_other_way", async () => {
+    setup();
+    await screen.findAllByText("Open in Ghostty ↗");
+    const card = () => within(screen.getAllByRole("article")[0]);
+    expect(
+      card().getByRole("button", { name: "Open in Ghostty ↗" }),
+    ).toHaveClass("btn-primary");
+    expect(card().getByRole("button", { name: "Open here" })).not.toHaveClass(
+      "btn-primary",
+    );
+    cleanup();
+    useAppStore.setState({
+      settings: { open_target: "app" } as unknown as Settings,
+    });
+    setup();
+    await screen.findAllByText("Open in Ghostty");
+    expect(card().getByRole("button", { name: "Open here" })).toHaveClass(
+      "btn-primary",
+    );
+    expect(
+      card().getByRole("button", { name: "Open in Ghostty" }),
+    ).not.toHaveClass("btn-primary");
+  });
+
+  it("open_here_on_a_card_opens_a_tab_without_open_session", async () => {
+    useAppStore.setState({
+      settings: { open_target: "app" } as unknown as Settings,
+    });
+    const user = setup();
+    await user.click(
+      within(screen.getAllByRole("article")[0]).getByRole("button", {
+        name: "Open here",
+      }),
+    );
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
 
   it("selection_is_machine_scoped", async () => {
@@ -366,6 +408,19 @@ describe("Home", () => {
     expect(second).not.toBe(first);
     await user.keyboard("{ArrowUp}");
     expect(useAppStore.getState().selectedKey).toBe(first);
+  });
+
+  it("cmd_enter_follows_open_target", async () => {
+    useAppStore.setState({
+      settings: { open_target: "app" } as unknown as Settings,
+    });
+    const user = setup();
+    useAppStore.setState({ selectedKey: "buildbox::w1:p1" });
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+      "buildbox::w1:p1",
+    ]);
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
 
   it("cmd_enter_opens_the_selection", async () => {
@@ -713,6 +768,26 @@ describe("Home", () => {
       act(() => useAppStore.getState().setState(withNewPane()));
       expect(useAppStore.getState().selectedKey).toBe(KEY);
       expect(useAppStore.getState().pendingSelectKey).toBeNull();
+    });
+
+    it("is_opened_in_a_tab_when_the_setting_says_app", () => {
+      useAppStore.setState({
+        settings: { open_target: "app" } as unknown as Settings,
+      });
+      setup();
+      act(() =>
+        useAppStore
+          .getState()
+          .setPendingOpen({ key: KEY, machineId: "buildbox", paneId: "w9:p9" }),
+      );
+      act(() => useAppStore.getState().setState(withNewPane()));
+      expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+        KEY,
+      ]);
+      expect(invoke).not.toHaveBeenCalledWith(
+        "open_session",
+        expect.anything(),
+      );
     });
 
     it("is_opened_only_after_its_row_shows_up_and_only_once", () => {

@@ -3,7 +3,7 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import { HEALTH_LABEL, agentNameProblem, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { markSeen, openRow } from "../lib/openRow";
+import { markSeen, openRow, type OpenHow } from "../lib/openRow";
 import { useAppStore } from "../store/appStore";
 import { CommandBox, CopyButton } from "./CommandBox";
 import { CloseConfirm } from "./CloseConfirm";
@@ -130,6 +130,12 @@ export function Inspector({
     }
   };
 
+  // The setting picks the primary Open (and ⌘↩); the other way is the secondary button.
+  const openTarget = useAppStore((s) => s.settings?.open_target ?? "app");
+  const otherTarget = openTarget === "app" ? "external" : "app";
+  const openLabel = (how: OpenHow) =>
+    how === "app" ? "Open here" : `Open in ${terminalName}`;
+
   const [closing, setClosing] = useState(false);
 
   return (
@@ -219,9 +225,16 @@ export function Inspector({
         <button
           type="button"
           className="btn btn-primary btn-wide"
-          onClick={() => void openRow(row)}
+          onClick={() => void openRow(row, openTarget)}
         >
-          Open in {terminalName} <kbd className="mono">⌘↩</kbd>
+          {openLabel(openTarget)} <kbd className="mono">⌘↩</kbd>
+        </button>
+        <button
+          type="button"
+          className="btn btn-wide"
+          onClick={() => void openRow(row, otherTarget)}
+        >
+          {openLabel(otherTarget)}
         </button>
         {row.status === "done" && (
           <button type="button" className="btn" onClick={() => markSeen(row)}>

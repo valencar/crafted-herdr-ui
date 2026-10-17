@@ -131,6 +131,31 @@ describe("Settings", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("no events");
   });
 
+  it("Open sessions saves open_target", async () => {
+    const user = await setup({ open_target: "app" }, "Terminal");
+    const group = await screen.findByRole("group", { name: "Open sessions" });
+    const here = within(group).getByRole("button", {
+      name: "In Crafted Herdr",
+    });
+    // The other choice names the terminal that is selected (the detected default here).
+    const external = within(group).getByRole("button", { name: "In Ghostty" });
+    expect(here).toHaveAttribute("aria-pressed", "true");
+    expect(external).toHaveAttribute("aria-pressed", "false");
+    await user.click(external);
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { open_target: "external" },
+    });
+    await waitFor(() =>
+      expect(
+        within(group).getByRole("button", { name: "In Ghostty" }),
+      ).toHaveAttribute("aria-pressed", "true"),
+    );
+    await user.click(here);
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { open_target: "app" },
+    });
+  });
+
   it("settings_terminal_radio_disables_missing", async () => {
     const user = await setup({}, "Terminal");
     const group = await screen.findByRole("group", {

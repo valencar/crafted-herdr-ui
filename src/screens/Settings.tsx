@@ -303,6 +303,7 @@ function TerminalSection({
   update: Update;
 }) {
   const [list, setList] = useState<TerminalList | null>(null);
+  const targetId = useId();
   const whereId = useId();
   const attachId = useId();
   useEffect(() => {
@@ -333,8 +334,37 @@ function TerminalSection({
   const installed = (id: TerminalId) =>
     id === "custom" || (list?.installed.includes(id) ?? false);
 
+  const terminalLabel = selected ? TERMINAL_LABEL[selected] : "your terminal";
+
   return (
     <div className="settings-stack">
+      <div
+        role="group"
+        aria-labelledby={targetId}
+        className="settings-fieldset"
+      >
+        <div id={targetId} className="settings-label">
+          Open sessions
+        </div>
+        <div className="segmented settings-segmented">
+          {(
+            [
+              ["app", "In Crafted Herdr"],
+              ["external", `In ${terminalLabel}`],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={settings.open_target === value}
+              onClick={() => void update({ open_target: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <fieldset className="settings-fieldset">
         <legend className="settings-label">Open sessions in</legend>
         <div className="opt-grid opt-grid-4">

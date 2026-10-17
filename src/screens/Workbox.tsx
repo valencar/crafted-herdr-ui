@@ -13,7 +13,7 @@ import type { Workspace } from "../lib/bindings/Workspace";
 import { shortPath } from "../lib/format";
 import { groupByProject, isNeedsYou, needsYou, toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
-import { openRow, useOpenWhenListed } from "../lib/openRow";
+import { openFull, openRow, useOpenWhenListed } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
 import {
   isEditable,
@@ -372,7 +372,7 @@ export function Workbox({ machineId }: { machineId: string }) {
             type="button"
             className="btn"
             disabled={machine === null}
-            onClick={() => run(invokeTyped("open_full_herdr", { machineId }))}
+            onClick={() => void openFull(machineId, label)}
           >
             Open full Herdr ↗
           </button>
