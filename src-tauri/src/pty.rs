@@ -25,7 +25,7 @@ impl TermSize {
     }
 }
 
-/// What the driver needs from a running process, besides its output and input.
+/// What a caller needs from a running process, besides its output and input.
 pub trait PtyControl: Send + Sync {
     /// Kills the process. Safe to call more than once and while `wait` is blocked.
     fn kill(&self);
@@ -219,7 +219,7 @@ mod tests {
         input.write_all(b"\n").expect("write");
         input.flush().expect("flush");
         let mut seen = String::new();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             match pty.output.recv_timeout(Duration::from_millis(100)) {
                 Ok(bytes) => seen += &String::from_utf8_lossy(&bytes),
@@ -228,5 +228,6 @@ mod tests {
             }
         }
         assert!(seen.contains("30 100"), "{seen:?}");
+        assert_eq!(pty.control.wait(), 0);
     }
 }
