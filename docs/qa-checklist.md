@@ -185,3 +185,7 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] Menu shortcuts fire while a terminal has focus.
 - [ ] ⌘, opens Settings from the menu; ⌘W with the Settings window focused closes it.
 - [ ] The menu bar shows App, Edit, View, Terminal and Window with the shortcuts of spec §2.4, and no Close Window item.
+- [ ] A terminal tab renders with the bundled Geist Mono at the right cell width on first open (no misaligned columns after the font loads) and honours the terminal font-size setting; the 16 ANSI colors read well on the dark background (`ls --color`, a TUI).
+- [ ] In a terminal tab, ⌘-click on a URL copies it and shows "Link copied"; a plain click does nothing and no browser opens.
+- [ ] An exited or detached tab shows "Detached" with Reattach focused (Enter reattaches); Retry works after a failed open; closing the tab leaves the herdr pane running.
+- [ ] Resizing the window or panel reflows the running program in the active tab; inactive tabs catch up when shown.

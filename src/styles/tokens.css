@@ -45,6 +45,24 @@
   /* focus ring */
   --focus: #8fd3ff;
 
+  /* terminal: the 16 ANSI colors (xterm theme), dark values */
+  --ansi-0: #2a2d33;
+  --ansi-1: #ff8b84;
+  --ansi-2: #7ee0b0;
+  --ansi-3: #e6c07b;
+  --ansi-4: #6e93ff;
+  --ansi-5: #c792ea;
+  --ansi-6: #8fd3ff;
+  --ansi-7: #c9cbd1;
+  --ansi-8: #6b6f79;
+  --ansi-9: #ffb8b2;
+  --ansi-10: #a3ecc9;
+  --ansi-11: #ffd08a;
+  --ansi-12: #9bb4ff;
+  --ansi-13: #dcb3f5;
+  --ansi-14: #b8e4ff;
+  --ansi-15: #ececef;
+
   /* shape */
   --radius-s: 6px;
   --radius-m: 8px;

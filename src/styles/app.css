@@ -1563,3 +1563,42 @@ select.field {
 .activity-error {
   grid-area: err;
 }
+
+/* ---------- terminal tab view ---------- */
+
+.term-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+.term-view[hidden] {
+  display: none;
+}
+.term-host {
+  position: absolute;
+  inset: 0;
+}
+/* The padding sits on xterm's own element so the fit addon subtracts it. */
+.term-host .xterm {
+  padding: 6px 0 0 8px;
+}
+.term-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg);
+  color: var(--text-2);
+}
+.term-overlay-title {
+  margin: 0;
+  font-size: 13px;
+}
+.term-overlay-actions {
+  display: flex;
+  gap: 8px;
+}
