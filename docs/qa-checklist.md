@@ -189,3 +189,9 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] In a terminal tab, ⌘-click on a URL copies it and shows "Link copied"; a plain click does nothing and no browser opens.
 - [ ] An exited or detached tab shows "Detached" with Reattach focused (Enter reattaches); Retry works after a failed open; closing the tab leaves the herdr pane running.
 - [ ] Resizing the window or panel reflows the running program in the active tab; inactive tabs catch up when shown.
+- [ ] Typing in a tab: ⌃C, arrows, Backspace and a full-screen agent TUI work, and none of those keys moves Home's selection or opens its Close dialog.
+- [ ] Panel resize and placement persist: drag the handle (and use the arrow keys on it), quit and relaunch, and the panel comes back at the same size and on the same edge (bottom or right). On the right, Home's Inspector is hidden while the panel is open.
+- [ ] Tabs survive Home ↔ Workbox: scrollback and the running program are intact after switching screens and after ⌃` hides and shows the panel.
+- [ ] A tab for an agent that needs you is highlighted in the tab strip, and the tab shows "Opening…" until its session is up.
+- [ ] ⌘F inside a terminal opens the find bar (Enter next, ⇧Enter previous, Esc closes and returns focus to the terminal); ⌘F elsewhere focuses Home's search box.
+- [ ] ⌘+ / ⌘− / ⌘0 change the terminal font size within 9 to 24 and reset to 13, and the size persists.

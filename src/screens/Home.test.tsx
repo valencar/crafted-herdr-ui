@@ -15,7 +15,9 @@ import type { AppState } from "../lib/bindings/AppState";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
+import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
+import { useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
 import { Home } from "./Home";
 
@@ -138,6 +140,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  useAppStore.setState({ settings: null });
+  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
 });
 
 describe("Home", () => {
@@ -428,6 +432,71 @@ describe("Home", () => {
     await user.click(screen.getByRole("searchbox"));
     await user.keyboard("ab{Backspace}");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("typing Backspace, arrows or ⌘↩ inside the terminal panel never reaches Home's list shortcuts", async () => {
+    const user = setup(defaultState(), (home) => (
+      <>
+        {home}
+        <section className="terminal-panel">
+          {/* xterm's own input is a textarea, and so is the find bar's field a plain input. */}
+          <textarea aria-label="terminal input" />
+          <button type="button">Close tab</button>
+        </section>
+      </>
+    ));
+    useAppStore.setState({ selectedKey: "gpubox::w2:p1" });
+    const terminal = screen.getByLabelText("terminal input");
+    terminal.focus();
+    await user.keyboard("{Backspace}{ArrowDown}{ArrowUp}{Delete}");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await user.keyboard("{Meta>}n{/Meta}{Meta>}r{/Meta}");
+    // A non-editable target inside the panel (a tab button) stays the panel's too.
+    screen.getByRole("button", { name: "Close tab" }).focus();
+    await user.keyboard("{Backspace}{ArrowDown}");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useAppStore.getState().selectedKey).toBe("gpubox::w2:p1");
+    expect(useAppStore.getState().sheet).toBeNull();
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("refresh_now", {});
+  });
+
+  it("hides the Inspector while the terminal panel is open on the right", () => {
+    useAppStore.setState({
+      settings: {
+        terminal_placement: "right",
+      } as unknown as Settings,
+    });
+    useTerminalStore.setState({
+      tabs: [
+        {
+          tabKey: "buildbox::w1:p1",
+          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          title: "api-service",
+          machineLabel: "buildbox",
+          state: "live",
+          error: null,
+          termId: 1,
+        },
+      ],
+      activeKey: "buildbox::w1:p1",
+      panelOpen: true,
+    });
+    setup();
+    expect(screen.queryByLabelText("Selected agent")).toBeNull();
+
+    act(() => useTerminalStore.setState({ panelOpen: false }));
+    expect(screen.getByLabelText("Selected agent")).toBeInTheDocument();
+
+    act(() => {
+      useTerminalStore.setState({ panelOpen: true });
+      useAppStore.setState({
+        settings: { terminal_placement: "bottom" } as unknown as Settings,
+      });
+    });
+    expect(screen.getByLabelText("Selected agent")).toBeInTheDocument();
   });
 
   it("clears_the_selection_when_the_row_disappears", async () => {

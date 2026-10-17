@@ -1,13 +1,35 @@
 import { useEffect } from "react";
 import { ActivityDrawer } from "./components/ActivityDrawer";
-import { onFocusRow, onMenu, onNewSession } from "./lib/ipc";
-import { focusRowElement, focusSearch } from "./lib/uiHelpers";
+import { invokeTyped, onFocusRow, onMenu, onNewSession } from "./lib/ipc";
+import { focusRowElement, focusSearch, isInTerminal } from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
 import { Home } from "./screens/Home";
 import { Onboarding } from "./screens/Onboarding";
 import { Workbox } from "./screens/Workbox";
 import { useAppStore } from "./store/appStore";
+import {
+  DEFAULT_FONT_SIZE,
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
+  requestTerminalFind,
+  TerminalPanel,
+} from "./terminal/TerminalPanel";
+import { useTerminalStore } from "./terminal/terminalStore";
+
+/** Saves the terminal font size one step up or down (within 9 to 24), or back to the default. */
+function saveFontSize(id: "font-bigger" | "font-smaller" | "font-reset") {
+  const { settings, setSettings, reportError } = useAppStore.getState();
+  const current = settings?.terminal_font_size ?? DEFAULT_FONT_SIZE;
+  const step = id === "font-bigger" ? 1 : id === "font-smaller" ? -1 : 0;
+  const next =
+    id === "font-reset"
+      ? DEFAULT_FONT_SIZE
+      : Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, current + step));
+  invokeTyped("set_settings", { patch: { terminal_font_size: next } })
+    .then(setSettings)
+    .catch(reportError);
+}
 
 function App() {
   const view = useAppStore((s) => s.view);
@@ -19,6 +41,10 @@ function App() {
   const machines = useAppStore((s) => s.state?.machines);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
+  const placement = useAppStore(
+    (s) => s.settings?.terminal_placement ?? "bottom",
+  );
+  const hasTabs = useTerminalStore((s) => s.tabs.length > 0);
   // `null` is "herdr was not found"; before the first state there is nothing to say yet.
   const herdrMissing = useAppStore((s) => s.state?.herdr_path === null);
 
@@ -71,6 +97,47 @@ function App() {
           if (current?.herdr_path !== null) setActivityOpen(!open);
           break;
         }
+        case "toggle-terminal":
+          if (useTerminalStore.getState().tabs.length === 0) {
+            useAppStore
+              .getState()
+              .showToast("Open a session to start a terminal.", "info");
+          } else {
+            useTerminalStore.getState().togglePanel();
+          }
+          break;
+        case "close-tab": {
+          const { activeKey, closeTab } = useTerminalStore.getState();
+          if (activeKey) closeTab(activeKey);
+          break;
+        }
+        case "next-tab":
+          useTerminalStore.getState().cycle(1);
+          break;
+        case "prev-tab":
+          useTerminalStore.getState().cycle(-1);
+          break;
+        case "tab1":
+        case "tab2":
+        case "tab3":
+        case "tab4":
+        case "tab5":
+        case "tab6":
+        case "tab7":
+        case "tab8":
+        case "tab9":
+          useTerminalStore.getState().activateIndex(Number(id.slice(3)) - 1);
+          break;
+        case "font-bigger":
+        case "font-smaller":
+        case "font-reset":
+          saveFontSize(id);
+          break;
+        // In a terminal, Find searches its scrollback; anywhere else it is Home's search.
+        case "find":
+          if (isInTerminal(document.activeElement)) requestTerminalFind();
+          else focusSearch();
+          break;
       }
     })
       .then((un) => (alive ? (stop = un) : un()))
@@ -85,11 +152,17 @@ function App() {
 
   return (
     <>
-      {view.kind === "workbox" ? (
-        <Workbox key={view.machineId} machineId={view.machineId} />
-      ) : (
-        <Home />
-      )}
+      {/* The panel is a sibling of the screens, so its tabs survive a change of screen. */}
+      <div className={`shell placement-${placement}`}>
+        <div className="shell-content">
+          {view.kind === "workbox" ? (
+            <Workbox key={view.machineId} machineId={view.machineId} />
+          ) : (
+            <Home />
+          )}
+        </div>
+        {hasTabs && <TerminalPanel />}
+      </div>
       {/* Here rather than in a screen, so it works on Home and on the Workbox screen. */}
       {sheet === "add-workbox" && <AddWorkbox />}
       {activityOpen && (

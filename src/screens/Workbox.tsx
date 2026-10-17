@@ -17,6 +17,7 @@ import { openRow, useOpenWhenListed } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
 import {
   isEditable,
+  isInTerminal,
   scrollToId,
   openSettings,
   terminalName as terminalLabel,
@@ -82,7 +83,12 @@ export function Workbox({ machineId }: { machineId: string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (sheet || useAppStore.getState().dialogOpen > 0) return;
-      if (e.metaKey && e.key === "n" && !isEditable(e.target)) {
+      if (
+        e.metaKey &&
+        e.key === "n" &&
+        !isEditable(e.target) &&
+        !isInTerminal(e.target)
+      ) {
         e.preventDefault();
         openNewSession({ machineId });
       }

@@ -112,6 +112,16 @@ export function isEditable(target: EventTarget | null): boolean {
 }
 
 /**
+ * Whether a key press landed inside the terminal panel. What is typed there belongs to the
+ * program in the terminal, never to a screen's shortcuts.
+ */
+export function isInTerminal(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element && target.closest(".terminal-panel") !== null
+  );
+}
+
+/**
  * The one page the app opens in the browser. Nothing is fetched: the default browser loads it,
  * and the capability allows this URL and no other.
  */

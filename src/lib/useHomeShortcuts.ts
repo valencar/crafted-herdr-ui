@@ -3,7 +3,7 @@ import { useAppStore } from "../store/appStore";
 import type { Row } from "./grouping";
 import { invokeTyped } from "./ipc";
 import { openRow } from "./openRow";
-import { focusRowButton, isEditable } from "./uiHelpers";
+import { focusRowButton, isEditable, isInTerminal } from "./uiHelpers";
 
 type Options = {
   /** The rows in the order the list shows them, for the arrow keys. */
@@ -30,6 +30,8 @@ export function useHomeShortcuts({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (sheet || useAppStore.getState().dialogOpen > 0) return;
+      // Keys typed in a terminal stay there.
+      if (isInTerminal(e.target)) return;
       if (e.metaKey) {
         if (e.key === "n") {
           e.preventDefault();
