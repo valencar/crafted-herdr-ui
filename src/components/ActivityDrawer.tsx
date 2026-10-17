@@ -19,7 +19,11 @@ type Props = {
 
 /** A line that can be pasted into a terminal: `herdr [--machine <id>] <argv>`. */
 function runnable(entry: CommandLogEntry): string {
-  const machine = entry.machine ? ["--machine", entry.machine] : [];
+  // Local runs without the flag (older log entries may still say "local").
+  const machine =
+    entry.machine && entry.machine !== "local"
+      ? ["--machine", entry.machine]
+      : [];
   return shellJoin(["herdr", ...machine, ...entry.argv]);
 }
 
@@ -41,8 +45,10 @@ export function ActivityDrawer({ machines, onClose }: Props) {
   const [showReads, setShowReads] = useState(false);
   const closeButton = useRef<HTMLButtonElement>(null);
 
+  // Each read is scheduled after the previous one ends, so a slow call never overlaps the next.
   useEffect(() => {
     let alive = true;
+    let timer: number | undefined;
     const load = () => {
       invokeTyped("get_command_log")
         .then((log) => {
@@ -51,13 +57,15 @@ export function ActivityDrawer({ machines, onClose }: Props) {
           setUnreadable(false);
         })
         // Keep what is on screen; the next round tries again.
-        .catch(() => alive && setUnreadable(true));
+        .catch(() => alive && setUnreadable(true))
+        .finally(() => {
+          if (alive) timer = window.setTimeout(load, REFRESH_MS);
+        });
     };
     load();
-    const timer = window.setInterval(load, REFRESH_MS);
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, []);
 

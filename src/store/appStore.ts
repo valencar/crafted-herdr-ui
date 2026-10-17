@@ -34,6 +34,11 @@ type AppStore = {
   sheetPrefill: SheetPrefill | null;
   view: View;
   activityOpen: boolean;
+  /**
+   * The herdr version whose "older than supported" banner was dismissed (`""` for an unreadable
+   * one). Kept here so it survives going between Home and a Workbox screen.
+   */
+  dismissedVersion: string | null;
   /** The message shown in the toast, if any: an error unless `toastTone` says otherwise. */
   toast: string | null;
   toastTone: ToastTone;
@@ -61,6 +66,7 @@ type AppStore = {
   openNewSession: (prefill?: SheetPrefill) => void;
   setView: (view: View) => void;
   setActivityOpen: (open: boolean) => void;
+  dismissVersionBanner: (version: string) => void;
   /** Shows an action error. Every report restarts the auto-dismiss timer. */
   reportError: (e: unknown) => void;
   /** Shows a message in the toast; the tone defaults to `"error"`. Restarts the timer. */
@@ -114,6 +120,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   sheetPrefill: null,
   view: { kind: "home" },
   activityOpen: false,
+  dismissedVersion: null,
   toast: null,
   toastTone: "error",
   preview: null,
@@ -130,6 +137,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ sheet: "new-session", sheetPrefill: prefill ?? null }),
   setView: (view) => set({ view }),
   setActivityOpen: (activityOpen) => set({ activityOpen }),
+  dismissVersionBanner: (dismissedVersion) => set({ dismissedVersion }),
   reportError: (e) => {
     get().showToast(actionErrorMessage(toActionError(e)), "error");
   },

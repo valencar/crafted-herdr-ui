@@ -143,7 +143,7 @@ impl HerdrCli {
         };
         lock(&self.log).push(CommandLogEntry {
             at_ms,
-            machine: machine.map(str::to_owned),
+            machine: remote.map(str::to_owned),
             argv: args.to_vec(),
             exit_code,
             duration_ms: started.elapsed().as_millis() as u64,

@@ -79,6 +79,8 @@ export function Home() {
   const preview = useAppStore((s) => s.preview);
   const report = useAppStore((s) => s.reportError);
   const dismissToast = useAppStore((s) => s.clearToast);
+  const dismissedVersion = useAppStore((s) => s.dismissedVersion);
+  const dismissVersionBanner = useAppStore((s) => s.dismissVersionBanner);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
@@ -90,8 +92,6 @@ export function Home() {
   const [query, setQuery] = useState("");
   const { current: terminal, installed } = useTerminals();
   const [closingKey, setClosingKey] = useState<string | null>(null);
-  // The version whose "older than supported" banner the user dismissed.
-  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
@@ -163,13 +163,6 @@ export function Home() {
   const dimmed = (machineId: string) => {
     const kind = machines.get(machineId)?.health.kind;
     return kind === "attention" || kind === "reconnecting";
-  };
-  /** What to run to bring back a machine that needs attention (Local has no profile). */
-  const suggestionFor = (machineId: string): string | null => {
-    const m = machines.get(machineId);
-    return m && !m.is_local && m.health.kind === "attention"
-      ? reconnectCommand(m.label)
-      : null;
   };
   const noteFor = (machineId: string): string | null => {
     const m = machines.get(machineId);
@@ -254,17 +247,6 @@ export function Home() {
     state !== null &&
     !isSupportedVersion(state.herdr_version) &&
     dismissedVersion !== (state.herdr_version ?? "");
-  const noWorkboxes = onlyLocal && (
-    <EmptyState
-      title="Only this computer so far"
-      action={{ label: "Add workbox", onClick: () => setSheet("add-workbox") }}
-    >
-      <p>
-        Add a workbox to see the agents running on a machine you can reach over
-        SSH.
-      </p>
-    </EmptyState>
-  );
 
   return (
     <div className="app">
@@ -286,7 +268,7 @@ export function Home() {
           <button
             type="button"
             className="btn btn-small btn-ghost"
-            onClick={() => setDismissedVersion(state.herdr_version ?? "")}
+            onClick={() => dismissVersionBanner(state.herdr_version ?? "")}
           >
             Dismiss
           </button>
@@ -314,6 +296,20 @@ export function Home() {
         />
 
         <main className="main">
+          {/* Once per machine, rows or not: an unreachable box must never vanish from Home. */}
+          {attentionMachines.map((m) => (
+            <EmptyState key={m.id} title={`${m.label} needs attention`}>
+              <p>
+                {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
+                {formatStaleness(m.last_ok_ms, nowMs)}
+              </p>
+              <CommandBox
+                command={reconnectCommand(m.label)}
+                caption="to reconnect, run this in a terminal"
+                copyable
+              />
+            </EmptyState>
+          ))}
           {state === null ? (
             <p className="empty">Connecting to herdr…</p>
           ) : !hasAnyRows ? (
@@ -321,20 +317,20 @@ export function Home() {
               <EmptyState title="No agents yet">
                 <p>Start one with ⌘N.</p>
               </EmptyState>
-              {attentionMachines.map((m) => (
-                <EmptyState key={m.id} title={`${m.label} needs attention`}>
+              {onlyLocal && (
+                <EmptyState
+                  title="Only this computer so far"
+                  action={{
+                    label: "Add workbox",
+                    onClick: () => setSheet("add-workbox"),
+                  }}
+                >
                   <p>
-                    {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
-                    {formatStaleness(m.last_ok_ms, nowMs)}
+                    Add a workbox to see the agents running on a machine you can
+                    reach over SSH.
                   </p>
-                  <CommandBox
-                    command={reconnectCommand(m.label)}
-                    caption="to reconnect, run this in a terminal"
-                    copyable
-                  />
                 </EmptyState>
-              ))}
-              {noWorkboxes}
+              )}
             </>
           ) : (
             <>
@@ -363,7 +359,6 @@ export function Home() {
                         selected={r.key === selectedKey}
                         dim={dimmed(r.machineId)}
                         note={noteFor(r.machineId)}
-                        suggestion={suggestionFor(r.machineId)}
                         nowMs={nowMs}
                         terminalName={terminalName}
                         previewLines={r.key === selectedKey ? previewLines : []}
@@ -430,7 +425,6 @@ export function Home() {
                         selected={r.key === selectedKey}
                         dim={dimmed(r.machineId)}
                         note={noteFor(r.machineId)}
-                        suggestion={suggestionFor(r.machineId)}
                         showMachine={groupBy === "status"}
                         nowMs={nowMs}
                         terminalName={terminalName}
@@ -441,7 +435,6 @@ export function Home() {
                   </ProjectGroup>
                 ))}
               </section>
-              {noWorkboxes}
             </>
           )}
         </main>

@@ -1,6 +1,5 @@
 import { formatAge } from "../lib/format";
 import type { Row } from "../lib/grouping";
-import { CommandBox } from "./CommandBox";
 import { KindBadge } from "./KindBadge";
 import { StatusPill } from "./StatusPill";
 
@@ -10,8 +9,6 @@ type Props = {
   dim: boolean;
   /** The machine's error and staleness, when it is not online. */
   note: string | null;
-  /** The command that would bring the machine back, when it needs attention. */
-  suggestion: string | null;
   /** Show the workbox chip (when the group header does not already say it). */
   showMachine: boolean;
   nowMs: number;
@@ -25,7 +22,6 @@ export function AgentRow({
   selected,
   dim,
   note,
-  suggestion,
   showMachine,
   nowMs,
   terminalName,
@@ -67,15 +63,6 @@ export function AgentRow({
       >
         Open ↗
       </button>
-      {suggestion && (
-        <div className="row-fix">
-          <CommandBox
-            command={suggestion}
-            caption="to reconnect, run this in a terminal"
-            copyable
-          />
-        </div>
-      )}
     </li>
   );
 }

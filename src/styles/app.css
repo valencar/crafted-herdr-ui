@@ -598,7 +598,6 @@ kbd {
 }
 .agent-row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding-right: 14px;
@@ -1418,10 +1417,6 @@ select.field {
 }
 .empty-body p {
   margin: 0;
-}
-.row-fix {
-  flex: 1 0 100%;
-  padding: 0 14px 10px;
 }
 .nav-item.is-dim .nav-label {
   opacity: 0.55;

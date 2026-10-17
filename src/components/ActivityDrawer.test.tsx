@@ -127,6 +127,55 @@ describe("ActivityDrawer", () => {
     );
   });
 
+  it("copies_a_local_entry_without_a_machine_flag", async () => {
+    log = [
+      entry({ machine: null, argv: ["pane", "close", "w1:p1"] }),
+      entry({
+        atMs: at(9, 0, 1),
+        machine: "local",
+        argv: ["pane", "close", "w1:p2"],
+      }),
+    ];
+    const user = await open();
+    // A null machine reads "Local"; so does the "local" id of an older entry.
+    expect(within(rows()[0]).getByText("Local")).toBeInTheDocument();
+    for (const [i, line] of [
+      "herdr pane close w1:p2",
+      "herdr pane close w1:p1",
+    ].entries()) {
+      await user.click(
+        within(rows()[i]).getByRole("button", { name: /^Copy/ }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(line);
+    }
+  });
+
+  it("waits_for_a_slow_read_instead_of_starting_another", async () => {
+    let finish: (log: CommandLogEntry[]) => void = () => {};
+    invoke.mockReset();
+    invoke.mockImplementation(
+      () => new Promise<CommandLogEntry[]>((resolve) => (finish = resolve)),
+    );
+    render(<ActivityDrawer machines={machines} onClose={onClose} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    // The next read is scheduled 2 s after this one ends.
+    await act(async () => {
+      finish(log);
+      await vi.advanceTimersByTimeAsync(1999);
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
   it("names_an_unknown_machine_by_its_id", async () => {
     log = [entry({ machine: "gone-1", argv: ["machine", "list", "--json"] })];
     await open();

@@ -75,6 +75,7 @@ function setup(state: AppState | null = defaultState()) {
     sheetPrefill: null,
     pendingSelectKey: null,
     pendingOpen: null,
+    dismissedVersion: null,
   });
   const user = userEvent.setup();
   render(<Home />);
@@ -719,6 +720,16 @@ describe("Home states", () => {
     expect(screen.getByRole("status")).toHaveTextContent("herdr 0.8.8");
   });
 
+  it("keeps_the_banner_dismissed_when_home_is_shown_again", async () => {
+    const user = setup({ ...defaultState(), herdr_version: "0.8.9" });
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(useAppStore.getState().dismissedVersion).toBe("0.8.9");
+    // Going to a Workbox screen and back unmounts Home; the store remembers.
+    cleanup();
+    render(<Home />);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("empty_agents_state", () => {
     setup(appState(noAgents(machine("buildbox")), noAgents(machine("gpubox"))));
     const card = screen.getByRole("region", { name: "No agents yet" });
@@ -729,20 +740,22 @@ describe("Home states", () => {
     ).toBeNull();
   });
 
-  it("no_workboxes_card_offers_add_workbox_next_to_the_groups_and_when_empty", async () => {
-    const user = setup(appState(LOCAL()));
+  it("the_only_local_card_offers_add_workbox_in_the_empty_state_only", async () => {
+    const user = setup(appState(noAgents(LOCAL())));
+    expect(screen.getByRole("region", { name: "No agents yet" })).toBeVisible();
     const card = screen.getByRole("region", {
       name: "Only this computer so far",
     });
     await user.click(within(card).getByRole("button", { name: "Add workbox" }));
     expect(useAppStore.getState().sheet).toBe("add-workbox");
 
+    // With agents on screen only the sidebar hint remains.
     cleanup();
-    setup(appState(noAgents(LOCAL())));
-    expect(screen.getByRole("region", { name: "No agents yet" })).toBeVisible();
+    setup(appState(LOCAL()));
     expect(
-      screen.getByRole("region", { name: "Only this computer so far" }),
-    ).toBeVisible();
+      screen.queryByRole("region", { name: "Only this computer so far" }),
+    ).toBeNull();
+    expect(screen.getByText(/Only this computer so far/)).toBeVisible();
   });
 
   it("stale_label_from_last_ok", () => {
@@ -785,47 +798,93 @@ describe("Home states", () => {
     );
   });
 
-  describe("an attention row", () => {
-    beforeEach(() => {
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: vi.fn().mockResolvedValue(undefined) },
-        configurable: true,
-      });
-    });
-
+  describe("an attention machine", () => {
     const attention = () =>
       appState(
         machine("buildbox"),
         machine(
           "gpubox",
           { kind: "attention", error: "ssh: connection refused" },
-          { last_ok_ms: Date.now() - 40_000, label: "gpu box" },
+          {
+            last_ok_ms: Date.now() - 40_000,
+            label: "gpu box",
+            snapshot: null,
+          },
         ),
       );
 
-    it("suggests_the_reconnect_command_with_a_copy_button", async () => {
-      setup(attention());
-      const dim = rowItem("gpubox::w1:p1");
-      expect(dim).toHaveTextContent("ssh: connection refused");
-      expect(dim).toHaveTextContent("herdr machine reconnect 'gpu box'");
+    it("gets_one_card_with_the_error_staleness_and_a_copyable_reconnect_command", async () => {
+      const user = setup(attention());
+      const card = screen.getByRole("region", {
+        name: "gpu box needs attention",
+      });
+      expect(card).toHaveTextContent("ssh: connection refused");
+      expect(card).toHaveTextContent("last updated 40s ago");
+      expect(card).toHaveTextContent("herdr machine reconnect 'gpu box'");
+      // Exactly one reconnect line on the whole screen, and the online rows are still there.
+      expect(screen.getAllByText(/herdr machine reconnect/)).toHaveLength(1);
+      expect(rowItem("buildbox::w1:p1")).toBeInTheDocument();
+      expect(document.querySelector(".agent-row .cmdbox")).toBeNull();
+      expect(document.querySelector(".card .cmdbox")).toBeNull();
+
       // The clipboard stub must be in place after userEvent.setup replaced it.
-      const user = userEvent.setup();
       Object.defineProperty(navigator, "clipboard", {
         value: { writeText: vi.fn().mockResolvedValue(undefined) },
         configurable: true,
       });
       await user.click(
-        within(dim).getByRole("button", { name: /^Copy command/ }),
+        within(card).getByRole("button", { name: /^Copy command/ }),
       );
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
         "herdr machine reconnect 'gpu box'",
       );
       expect(
-        await within(dim).findByRole("button", { name: "Copied" }),
+        await within(card).findByRole("button", { name: "Copied" }),
       ).toBeVisible();
     });
 
-    it("suggests_nothing_for_a_healthy_or_reconnecting_machine_or_for_local", () => {
+    it("keeps_the_card_on_top_when_the_machine_has_cached_rows_that_stay_dim", () => {
+      setup(
+        appState(
+          machine("buildbox"),
+          machine(
+            "gpubox",
+            { kind: "attention", error: "ssh: connection refused" },
+            { last_ok_ms: Date.now() - 40_000 },
+          ),
+        ),
+      );
+      expect(screen.getAllByText(/herdr machine reconnect/)).toHaveLength(1);
+      const dim = rowItem("gpubox::w1:p1");
+      expect(dim).toHaveAttribute("data-dim", "true");
+      expect(dim).toHaveTextContent("ssh: connection refused");
+      expect(dim).not.toHaveTextContent("herdr machine reconnect");
+      const main = screen.getByRole("main");
+      expect(main.firstElementChild).toBe(
+        screen.getByRole("region", { name: "gpubox needs attention" }),
+      );
+    });
+
+    it("shows_the_card_even_when_no_machine_has_rows", () => {
+      setup(
+        appState(
+          machine("buildbox", { kind: "online" }, { snapshot: null }),
+          machine(
+            "gpubox",
+            { kind: "attention", error: "ssh: connection refused" },
+            { snapshot: null },
+          ),
+        ),
+      );
+      expect(
+        screen.getByRole("region", { name: "No agents yet" }),
+      ).toBeVisible();
+      expect(
+        screen.getByRole("region", { name: "gpubox needs attention" }),
+      ).toBeVisible();
+    });
+
+    it("has_no_card_for_a_healthy_or_reconnecting_machine_or_for_local", () => {
       setup(
         appState(
           machine("buildbox"),
@@ -845,37 +904,6 @@ describe("Home states", () => {
         }),
       );
       expect(screen.queryByText(/machine reconnect/)).toBeNull();
-    });
-
-    it("also_shows_on_a_needs_you_card", () => {
-      setup(attention());
-      const cards = within(
-        screen.getByRole("region", { name: "Needs you" }),
-      ).getAllByRole("article");
-      const dim = cards.find((c) => c.className.includes("is-dim"));
-      expect(dim).toHaveTextContent("herdr machine reconnect 'gpu box'");
-    });
-
-    it("explains_an_attention_machine_that_has_no_rows_to_dim", () => {
-      setup(
-        appState(
-          machine("buildbox", { kind: "online" }, { snapshot: null }),
-          machine(
-            "gpubox",
-            { kind: "attention", error: "ssh: connection refused" },
-            { snapshot: null, last_ok_ms: Date.now() - 40_000 },
-          ),
-        ),
-      );
-      const card = screen.getByRole("region", {
-        name: "gpubox needs attention",
-      });
-      expect(card).toHaveTextContent("ssh: connection refused");
-      expect(card).toHaveTextContent("last updated 40s ago");
-      expect(card).toHaveTextContent("herdr machine reconnect gpubox");
-      expect(
-        within(card).getByRole("button", { name: /^Copy command/ }),
-      ).toBeVisible();
     });
   });
 

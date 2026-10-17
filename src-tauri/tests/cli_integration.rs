@@ -258,6 +258,18 @@ async fn log_records_every_call() {
 }
 
 #[tokio::test]
+async fn a_local_run_is_logged_without_a_machine_because_it_spawns_without_the_flag() {
+    let fake = Fake::new();
+    fake.put("agent_list.json", "{}");
+    fake.cli
+        .run(Some("local"), &args(&["agent", "list"]), T)
+        .await
+        .unwrap();
+    assert_eq!(fake.calls(), vec!["agent list"]);
+    assert_eq!(fake.cli.log_snapshot()[0].machine, None);
+}
+
+#[tokio::test]
 async fn log_keeps_only_the_last_200_entries() {
     let fake = Fake::new();
     fake.put("agent_list.json", "{}");
