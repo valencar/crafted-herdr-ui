@@ -10,7 +10,7 @@
     "tauri": "tauri",
     "test": "vitest run",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "format": "prettier --write ."
   },
   "dependencies": {
