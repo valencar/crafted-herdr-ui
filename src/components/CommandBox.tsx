@@ -7,10 +7,17 @@ const COPIED_MS = 2000;
 export function CopyButton({
   text,
   label = "Copy",
+  className = "btn btn-small btn-ghost",
+  idleText = "Copy",
+  disabled = false,
 }: {
   text: string;
   /** The accessible name, when "Copy" alone would not say what is copied. */
   label?: string;
+  className?: string;
+  /** The visible text before it is copied. */
+  idleText?: string;
+  disabled?: boolean;
 }) {
   const reportError = useAppStore((s) => s.reportError);
   const [copied, setCopied] = useState(false);
@@ -30,11 +37,12 @@ export function CopyButton({
   return (
     <button
       type="button"
-      className="btn btn-small btn-ghost"
+      className={className}
+      disabled={disabled}
       aria-label={copied ? "Copied" : label}
       onClick={() => void copy()}
     >
-      {copied ? "Copied" : "Copy"}
+      {copied ? "Copied" : idleText}
     </button>
   );
 }

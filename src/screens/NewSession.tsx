@@ -5,16 +5,13 @@ import { Sheet } from "../components/Sheet";
 import type { ActionError } from "../lib/bindings/ActionError";
 import type { NewSessionRequest } from "../lib/bindings/NewSessionRequest";
 import type { Placement } from "../lib/bindings/Placement";
-import { actionErrorMessage, plural } from "../lib/format";
+import { actionErrorMessage, agentNameProblem, plural } from "../lib/format";
 import { toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
 
 const PREVIEW_DEBOUNCE_MS = 150;
 const MAX_RECENT_FOLDERS = 6;
-const NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
-const AGENT_NAME_HINT =
-  "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.";
 
 type PlacementOption = { value: string; label: string; placement: Placement };
 
@@ -31,7 +28,7 @@ function nameProblem(
   optional: boolean,
 ): string | null {
   if (name === "") return optional ? null : "";
-  if (isAgent) return NAME_PATTERN.test(name) ? null : AGENT_NAME_HINT;
+  if (isAgent) return agentNameProblem(name);
   return name.startsWith("-") ? "A name can’t start with “-”." : null;
 }
 

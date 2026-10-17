@@ -4,6 +4,7 @@ import {
   STATUS_LABEL,
   TERMINAL_LABEL,
   actionErrorMessage,
+  agentNameProblem,
   formatAge,
   formatChecked,
   lastLines,
@@ -264,5 +265,21 @@ describe("plural", () => {
     expect(plural(0, "agent", "agents")).toBe("0 agents");
     expect(plural(1, "agent", "agents")).toBe("1 agent");
     expect(plural(2, "workbox", "workboxes")).toBe("2 workboxes");
+  });
+});
+
+describe("agentNameProblem", () => {
+  it("accepts_a_lowercase_name_of_up_to_32_characters", () => {
+    for (const ok of ["a", "planner", "web-app_2", "a".repeat(32)]) {
+      expect(agentNameProblem(ok)).toBeNull();
+    }
+  });
+
+  it("explains_every_other_name_with_the_sentence_rust_gives", () => {
+    const rust =
+      "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.";
+    for (const bad of ["", "Bad Name", "1abc", "has.dot", "a".repeat(33)]) {
+      expect(agentNameProblem(bad)).toBe(rust);
+    }
   });
 });

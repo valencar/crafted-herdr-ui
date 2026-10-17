@@ -279,7 +279,7 @@ describe("Inspector actions", () => {
       await user.type(input, bad);
       await user.click(screen.getByRole("button", { name: "Save" }));
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "Use lowercase letters, digits, - or _",
+        "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.",
       );
     }
     expect(invoke).not.toHaveBeenCalledWith(

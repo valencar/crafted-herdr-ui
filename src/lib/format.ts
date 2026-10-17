@@ -193,3 +193,12 @@ export const HEALTH_LABEL: Record<Health["kind"], string> = {
 export function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
+
+const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+const AGENT_NAME_HELP =
+  "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.";
+
+/** Why an agent name is refused, or `null` when it is fine. Mirrors Rust `validate_name`. */
+export function agentNameProblem(name: string): string | null {
+  return AGENT_NAME.test(name) ? null : AGENT_NAME_HELP;
+}
