@@ -1,44 +1,60 @@
 import { useEffect } from "react";
-import { getState, onState } from "./lib/ipc";
+import { onFocusRow, onNewSession } from "./lib/ipc";
+import { focusRowElement, openSettings } from "./lib/uiHelpers";
+import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
 import { Home } from "./screens/Home";
 import { Workbox } from "./screens/Workbox";
 import { useAppStore } from "./store/appStore";
 
 function App() {
-  const setState = useAppStore((s) => s.setState);
-  const reportError = useAppStore((s) => s.reportError);
   const view = useAppStore((s) => s.view);
   const sheet = useAppStore((s) => s.sheet);
+  const groupBy = useAppStore((s) => s.settings?.group_by);
+  const setGroupBy = useAppStore((s) => s.setGroupBy);
+  const focusRow = useAppStore((s) => s.focusRow);
+  const openNewSession = useAppStore((s) => s.openNewSession);
 
+  useStateSync();
+  useSettingsSync();
+
+  // The saved grouping is where Home starts, and follows a change made in Settings.
+  useEffect(() => {
+    if (groupBy) setGroupBy(groupBy);
+  }, [groupBy, setGroupBy]);
+
+  // Things the rest of the app asks of this window: a clicked notification selects its row,
+  // the tray and the popover open the New session sheet.
   useEffect(() => {
     let alive = true;
-    let unlisten: (() => void) | undefined;
-    // `getState` covers a window that opens after the first push; a late answer must not
-    // overwrite a newer pushed state.
-    let pushed = false;
-    getState()
-      .then((s) => {
-        if (alive && !pushed) setState(s);
-      })
-      .catch(() => {});
-    onState((s) => {
-      pushed = true;
-      setState(s);
+    const unlisten: (() => void)[] = [];
+    const keep = (un: () => void) => (alive ? unlisten.push(un) : un());
+    onFocusRow((key) => {
+      focusRow(key);
+      focusRowElement(key);
     })
-      .then((un) => {
-        if (alive) unlisten = un;
-        else un();
-      })
-      .catch((e) => {
-        // Without the event the screen would silently go stale.
-        if (alive) reportError(e);
-      });
+      .then(keep)
+      .catch(() => {});
+    onNewSession(() => openNewSession())
+      .then(keep)
+      .catch(() => {});
     return () => {
       alive = false;
-      unlisten?.();
+      unlisten.forEach((un) => un());
     };
-  }, [setState, reportError]);
+  }, [focusRow, openNewSession]);
+
+  // ⌘, opens Settings from every screen.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === ",") {
+        e.preventDefault();
+        openSettings();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <>

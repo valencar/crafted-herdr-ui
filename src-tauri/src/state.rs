@@ -10,8 +10,6 @@ use ts_rs::TS;
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::Snapshot;
 
-const POLL_VISIBLE: Duration = Duration::from_secs(2);
-const POLL_HIDDEN: Duration = Duration::from_secs(10);
 const BACKOFF_BASE_SECS: u64 = 2;
 const BACKOFF_CAP_SECS: u64 = 60;
 
@@ -68,11 +66,41 @@ pub struct AppState {
     pub generated_at_ms: u64,
 }
 
-/// Time to wait before the next poll of a machine: 2 s while the window is visible, 10 s
-/// otherwise; after `consecutive_failures` failures, 2 s·2^(n−1) capped at 60 s.
-pub fn next_delay(visible: bool, consecutive_failures: u32) -> Duration {
+/// How often a healthy machine is polled. Comes from Settings (2 s and 10 s by default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PollIntervals {
+    pub visible: Duration,
+    pub hidden: Duration,
+}
+
+impl Default for PollIntervals {
+    fn default() -> Self {
+        Self {
+            visible: Duration::from_secs(2),
+            hidden: Duration::from_secs(10),
+        }
+    }
+}
+
+impl PollIntervals {
+    pub fn from_ms(visible_ms: u64, hidden_ms: u64) -> Self {
+        Self {
+            visible: Duration::from_millis(visible_ms),
+            hidden: Duration::from_millis(hidden_ms),
+        }
+    }
+}
+
+/// Time to wait before the next poll of a machine: `intervals.visible` while the window is
+/// visible, `intervals.hidden` otherwise; after `consecutive_failures` failures, 2 s·2^(n−1)
+/// capped at 60 s, whatever the intervals are.
+pub fn next_delay(visible: bool, consecutive_failures: u32, intervals: PollIntervals) -> Duration {
     if consecutive_failures == 0 {
-        return if visible { POLL_VISIBLE } else { POLL_HIDDEN };
+        return if visible {
+            intervals.visible
+        } else {
+            intervals.hidden
+        };
     }
     let doublings = (consecutive_failures - 1).min(16);
     Duration::from_secs((BACKOFF_BASE_SECS << doublings).min(BACKOFF_CAP_SECS))
@@ -128,7 +156,7 @@ mod tests {
 
     #[test]
     fn next_delay_table() {
-        let ms = |visible, failures| next_delay(visible, failures);
+        let ms = |visible, failures| next_delay(visible, failures, PollIntervals::default());
         assert_eq!(ms(true, 0), Duration::from_secs(2));
         assert_eq!(ms(false, 0), Duration::from_secs(10));
         assert_eq!(ms(true, 1), Duration::from_secs(2));
@@ -136,6 +164,16 @@ mod tests {
         assert_eq!(ms(false, 10), Duration::from_secs(60));
         assert_eq!(ms(false, 2), Duration::from_secs(4));
         assert_eq!(ms(true, u32::MAX), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn next_delay_takes_the_healthy_intervals_from_settings() {
+        let custom = PollIntervals::from_ms(1000, 30_000);
+        assert_eq!(next_delay(true, 0, custom), Duration::from_secs(1));
+        assert_eq!(next_delay(false, 0, custom), Duration::from_secs(30));
+        // Backoff after failures does not depend on them.
+        assert_eq!(next_delay(true, 3, custom), Duration::from_secs(8));
+        assert_eq!(next_delay(false, 1, custom), Duration::from_secs(2));
     }
 
     fn server(code: &str, message: &str) -> HerdrError {

@@ -37,6 +37,7 @@ type Props = {
   onProject: (group: Group) => void;
   onWorkbox: (machineId: string) => void;
   onAddWorkbox: () => void;
+  onSettings: () => void;
 };
 
 export function Sidebar({
@@ -51,6 +52,7 @@ export function Sidebar({
   onProject,
   onWorkbox,
   onAddWorkbox,
+  onSettings,
 }: Props) {
   const localOnly = machines.length === 1 && machines[0].is_local;
   return (
@@ -133,7 +135,7 @@ export function Sidebar({
           {herdrPath ?? "herdr not found"}
           {herdrVersion ? ` · ${herdrVersion}` : ""}
         </span>
-        <button type="button" className="nav-link" disabled>
+        <button type="button" className="nav-link" onClick={onSettings}>
           Settings ⌘,
         </button>
       </div>

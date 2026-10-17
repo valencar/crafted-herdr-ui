@@ -16,8 +16,9 @@ import { openRow } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
 import {
   scrollToId,
+  openSettings,
   terminalName as terminalLabel,
-  useDefaultTerminal,
+  useTerminals,
   useNow,
 } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
@@ -76,7 +77,7 @@ export function Workbox({ machineId }: { machineId: string }) {
   const setPendingOpen = useAppStore((s) => s.setPendingOpen);
 
   const nowMs = useNow(30_000);
-  const terminal = useDefaultTerminal();
+  const { current: terminal } = useTerminals();
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [checkedAtMs, setCheckedAtMs] = useState<number | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -194,6 +195,7 @@ export function Workbox({ machineId }: { machineId: string }) {
       }}
       onWorkbox={(id) => setView({ kind: "workbox", machineId: id })}
       onAddWorkbox={() => setSheet("add-workbox")}
+      onSettings={openSettings}
     />
   );
 

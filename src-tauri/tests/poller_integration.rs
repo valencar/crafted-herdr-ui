@@ -11,7 +11,7 @@ use crafted_herdr_ui_lib::activity::{ActivityTracker, Transition};
 use crafted_herdr_ui_lib::herdr::cli::HerdrCli;
 use crafted_herdr_ui_lib::herdr::model::AgentStatus;
 use crafted_herdr_ui_lib::poller::{Poller, PollerConfig};
-use crafted_herdr_ui_lib::state::{AppState, Health, MachineView};
+use crafted_herdr_ui_lib::state::{AppState, Health, MachineView, PollIntervals};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::broadcast::{self, error::TryRecvError};
@@ -481,4 +481,61 @@ async fn failed_machine_list_keeps_local_polling() {
         .wait_for("local online", |s| online_with_snapshot(s, "local"))
         .await;
     assert_eq!(state.machines.len(), 1);
+}
+
+fn snapshot_calls(h: &Harness) -> usize {
+    h.calls()
+        .iter()
+        .filter(|c| c.contains("api snapshot"))
+        .count()
+}
+
+#[tokio::test]
+async fn set_intervals_takes_effect_without_a_restart() {
+    let h = Harness::start(|dir| {
+        fs::write(
+            dir.join("api_snapshot.json"),
+            fixture("snapshot_local.json"),
+        )
+        .unwrap();
+    });
+    h.wait_for("local online", |s| online_with_snapshot(s, "local"))
+        .await;
+
+    // Hidden polls are 10 s apart by default, so nothing else would poll in the next 3 s.
+    h.poller.set_visible(false);
+    let before = snapshot_calls(&h);
+    h.poller.set_intervals(PollIntervals::from_ms(2000, 1000));
+    tokio::time::sleep(Duration::from_millis(3300)).await;
+    let polls = snapshot_calls(&h) - before;
+    assert!(
+        polls >= 3,
+        "expected the 1 s interval to apply, got {polls} polls"
+    );
+}
+
+#[tokio::test]
+async fn set_herdr_reports_the_new_path_and_version() {
+    let h = Harness::start(|dir| {
+        fs::write(
+            dir.join("api_snapshot.json"),
+            fixture("snapshot_local.json"),
+        )
+        .unwrap();
+    });
+    h.wait_for("local online", |s| online_with_snapshot(s, "local"))
+        .await;
+    h.poller
+        .set_herdr(Some("/opt/herdr/bin/herdr".into()), Some("0.9.4".into()));
+    let state = h
+        .wait_for("the new path", |s| {
+            s.herdr_path.as_deref() == Some("/opt/herdr/bin/herdr")
+        })
+        .await;
+    assert_eq!(state.herdr_version.as_deref(), Some("0.9.4"));
+    assert_eq!(h.poller.current_state().herdr_path, state.herdr_path);
+
+    // Only the first caller runs the poller.
+    assert!(h.poller.claim_start());
+    assert!(!h.poller.claim_start());
 }

@@ -4,10 +4,12 @@ import type { AppState } from "./bindings/AppState";
 import type { ActionError } from "./bindings/ActionError";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CreatedSession } from "./bindings/CreatedSession";
+import type { HerdrStatus } from "./bindings/HerdrStatus";
 import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
 import type { SetupEvent } from "./bindings/SetupEvent";
+import type { Settings } from "./bindings/Settings";
 import type { TerminalList } from "./bindings/TerminalList";
 
 /** Every Tauri command the UI may call, mapped to its result. A Rust `()` arrives as `null`. */
@@ -46,6 +48,13 @@ export type CommandResults = {
   copy_attach_command: string;
   start_preview: null;
   stop_preview: null;
+  get_settings: Settings;
+  set_settings: Settings;
+  herdr_status: HerdrStatus;
+  preview_launch_template: string;
+  show_main: null;
+  show_main_new_session: null;
+  open_settings: null;
 };
 export type CommandName = keyof CommandResults;
 
@@ -102,6 +111,15 @@ export type CommandArgs = {
   copy_attach_command: { machineId: string; paneId: string };
   start_preview: { machineId: string; paneId: string; isAgent: boolean };
   stop_preview: undefined;
+  get_settings: undefined;
+  /** Merged over the current settings; refused as a whole if any value is invalid. */
+  set_settings: { patch: Partial<Settings> };
+  herdr_status: undefined;
+  /** The script a Custom launch command runs for a sample pane. */
+  preview_launch_template: { template: string };
+  show_main: undefined;
+  show_main_new_session: undefined;
+  open_settings: undefined;
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([
@@ -172,4 +190,26 @@ export function onMachineSetup(
   cb: (event: SetupEvent) => void,
 ): Promise<() => void> {
   return listen<SetupEvent>("machine-setup", (event) => cb(event.payload));
+}
+
+/** The current settings, for a window that opened after the last change. */
+export function getSettings(): Promise<Settings> {
+  return invokeTyped("get_settings");
+}
+
+/** Subscribes to the `"settings"` event, sent after every successful change. */
+export function onSettings(
+  cb: (settings: Settings) => void,
+): Promise<() => void> {
+  return listen<Settings>("settings", (event) => cb(event.payload));
+}
+
+/** Subscribes to `"focus-row"`: a notification was clicked; the payload is the row key. */
+export function onFocusRow(cb: (key: string) => void): Promise<() => void> {
+  return listen<string>("focus-row", (event) => cb(event.payload));
+}
+
+/** Subscribes to `"new-session"`: the tray or the popover asked for the New session sheet. */
+export function onNewSession(cb: () => void): Promise<() => void> {
+  return listen("new-session", () => cb());
 }

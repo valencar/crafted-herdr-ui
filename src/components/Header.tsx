@@ -1,4 +1,6 @@
 import type { Ref } from "react";
+import type { TerminalId } from "../lib/bindings/TerminalId";
+import { TerminalMenu } from "./TerminalMenu";
 
 type Props = {
   herdrVersion: string | null;
@@ -6,7 +8,8 @@ type Props = {
   onQuery: (q: string) => void;
   searchRef: Ref<HTMLInputElement>;
   /** `null` until `list_terminals` answers. */
-  terminalName: string | null;
+  terminal: TerminalId | null;
+  installed: TerminalId[];
   onNewSession: () => void;
 };
 
@@ -16,7 +19,8 @@ export function Header({
   query,
   onQuery,
   searchRef,
-  terminalName,
+  terminal,
+  installed,
   onNewSession,
 }: Props) {
   return (
@@ -49,10 +53,7 @@ export function Header({
         <kbd>⌘K</kbd>
       </label>
       <div className="header-actions">
-        <span className="btn picker" title="Change the terminal in Settings">
-          Opens in {terminalName ?? "your terminal"}
-          <span aria-hidden="true">▾</span>
-        </span>
+        <TerminalMenu terminal={terminal} installed={installed} />
         <button
           type="button"
           className="btn btn-primary"

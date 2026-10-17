@@ -14,7 +14,7 @@ import type { SetupStep } from "../lib/bindings/SetupStep";
 import type { StepState } from "../lib/bindings/StepState";
 import { actionErrorMessage } from "../lib/format";
 import { invokeTyped, onMachineSetup, toActionError } from "../lib/ipc";
-import { terminalName, useDefaultTerminal } from "../lib/uiHelpers";
+import { terminalName, useTerminals } from "../lib/uiHelpers";
 import { useAppStore, useModalOpen } from "../store/appStore";
 
 const POLL_MS = 2000;
@@ -101,7 +101,7 @@ export function AddWorkbox() {
   const setSheet = useAppStore((s) => s.setSheet);
   const setView = useAppStore((s) => s.setView);
   const showToast = useAppStore((s) => s.showToast);
-  const terminal = useDefaultTerminal();
+  const { current: terminal } = useTerminals();
   const terminalLabel = terminalName(terminal);
 
   const hostId = useId();

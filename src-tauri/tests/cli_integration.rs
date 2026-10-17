@@ -158,6 +158,28 @@ async fn missing_binary_maps_not_found() {
 }
 
 #[tokio::test]
+async fn set_bin_redirects_every_clone_and_keeps_the_log() {
+    let fake = Fake::new();
+    fake.put("agent_list.json", r#"{"result":{}}"#);
+    let argv = args(&["agent", "list"]);
+    let cli = HerdrCli::new(
+        PathBuf::from("/nonexistent/dir/herdr"),
+        fake.cli.env().to_vec(),
+    );
+    let clone = cli.clone();
+    assert_eq!(
+        clone.run(None, &argv, T).await.unwrap_err(),
+        HerdrError::NotFound
+    );
+
+    cli.set_bin(fake_bin());
+    assert_eq!(clone.bin(), fake_bin());
+    clone.run(None, &argv, T).await.unwrap();
+    // Both calls are in the one shared log.
+    assert_eq!(cli.log_snapshot().len(), 2);
+}
+
+#[tokio::test]
 async fn timeout_maps_timeout() {
     let fake = Fake::new();
     fake.put("slow_kill-test.json", "{}");

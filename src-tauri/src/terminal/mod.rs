@@ -10,7 +10,7 @@ pub mod quote;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use ts_rs::TS;
 
@@ -20,6 +20,7 @@ pub use attach::{
 };
 pub use quote::{join_quoted, shell_quote};
 
+use crate::state::{Health, MachineView};
 use launchers::{Alacritty, Custom, Ghostty, ITerm2, Kitty, TerminalApp, Warp, WezTerm};
 
 const DETECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -28,7 +29,7 @@ const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const OSASCRIPT_TIMEOUT: Duration = Duration::from_secs(120);
 const AUTOMATION_HINT: &str = "Allow Automation permission in System Settings → Privacy & Security → Automation, then try again.";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum TerminalId {
@@ -62,7 +63,9 @@ impl TerminalId {
 
 /// Where a pane opens: a new tab in the terminal's current window, or a new window. Terminals
 /// that can't open a tab from outside always open a window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum OpenMode {
     Tab,
     #[default]
@@ -83,6 +86,9 @@ pub struct LaunchSpec {
     pub program: String,
     pub args: Vec<String>,
     pub files: Vec<SupportFile>,
+    /// Started and left running: no timeout, and it outlives the app. For a user's own
+    /// template, which may run in the foreground for as long as the terminal is open.
+    pub detached: bool,
 }
 
 pub trait Launcher {
@@ -197,6 +203,30 @@ impl TerminalList {
     }
 }
 
+/// The script a Custom template runs for a sample pane on a remote workbox, for the preview
+/// in Settings. The same substitution `Custom` uses: `{attach}` becomes the quoted command.
+pub fn custom_template_example(template: &str) -> String {
+    let sample = MachineView {
+        id: "buildbox".into(),
+        label: "buildbox".into(),
+        target: Some("buildbox".into()),
+        session: "default".into(),
+        is_local: false,
+        health: Health::Online,
+        snapshot: None,
+        last_ok_ms: None,
+        ages: Default::default(),
+    };
+    let cmd = attach_argv(&sample, "term-1", "");
+    Custom {
+        template: template.to_owned(),
+    }
+    .spec(&cmd, OpenMode::Window, "")
+    .args
+    .pop()
+    .unwrap_or_default()
+}
+
 fn launch_timeout(program: &str) -> Duration {
     if program == "osascript" {
         OSASCRIPT_TIMEOUT
@@ -233,6 +263,9 @@ async fn run_spec(
         write_if_changed(file)
             .map_err(|e| format!("Could not write {}: {e}", file.path.display()))?;
     }
+    if spec.detached {
+        return spawn_detached(spec, env);
+    }
     let run = tokio::process::Command::new(&spec.program)
         .args(&spec.args)
         .env_clear()
@@ -255,6 +288,23 @@ async fn run_spec(
         &format!("failed: {detail}"),
         &stderr,
     ))
+}
+
+/// Starts the process and lets it go: no wait and no kill on drop, so a template that stays
+/// in the foreground (`wezterm start -- …`) is not killed after the launch timeout.
+fn spawn_detached(spec: &LaunchSpec, env: &[(String, String)]) -> Result<(), String> {
+    tokio::process::Command::new(&spec.program)
+        .args(&spec.args)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(false)
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("Could not run {}: {e}", spec.program))
 }
 
 fn write_if_changed(file: &SupportFile) -> std::io::Result<()> {
@@ -324,6 +374,17 @@ mod tests {
     }
 
     #[test]
+    fn the_template_example_substitutes_a_quoted_sample_attach() {
+        let line = custom_template_example("myterm -e {attach}");
+        assert!(
+            line.starts_with("myterm -e ssh -t buildbox 'sh -c "),
+            "{line}"
+        );
+        assert!(line.contains("herdr terminal attach term-1"), "{line}");
+        assert_eq!(custom_template_example("plain"), "plain");
+    }
+
+    #[test]
     fn terminal_ids_serialize_for_the_ui() {
         let json = serde_json::to_string(&[T::ITerm2, T::TerminalApp, T::WezTerm]).unwrap();
         assert_eq!(json, r#"["iTerm2","terminalApp","wezTerm"]"#);
@@ -340,6 +401,7 @@ mod tests {
                 path: path.clone(),
                 contents: "a: 1\n".into(),
             }],
+            detached: false,
         };
         launch(&spec, &[]).await.unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "a: 1\n");
@@ -348,6 +410,7 @@ mod tests {
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "echo nope >&2; exit 3".into()],
             files: vec![],
+            detached: false,
         };
         let err = launch(&failing, &[]).await.unwrap_err();
         assert!(err.contains("nope"), "{err}");
@@ -356,6 +419,41 @@ mod tests {
             program: "/nonexistent/terminal".into(),
             args: vec![],
             files: vec![],
+            detached: false,
+        };
+        assert!(
+            launch(&missing, &[])
+                .await
+                .unwrap_err()
+                .contains("Could not run")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_detached_launch_returns_at_once_and_keeps_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran");
+        let spec = LaunchSpec {
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                format!("sleep 0.4; touch '{}'", marker.display()),
+            ],
+            files: vec![],
+            detached: true,
+        };
+        let started = std::time::Instant::now();
+        launch(&spec, &[]).await.unwrap();
+        assert!(started.elapsed() < Duration::from_millis(300));
+        assert!(!marker.exists());
+        // Dropping nothing: the process was not tied to the future that started it.
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert!(marker.exists());
+
+        let missing = LaunchSpec {
+            program: "/nonexistent/terminal".into(),
+            detached: true,
+            ..spec
         };
         assert!(
             launch(&missing, &[])
@@ -389,6 +487,7 @@ mod tests {
             program: "/bin/sleep".into(),
             args: vec!["5".into()],
             files: vec![],
+            detached: false,
         };
         let err = run_spec(&spec, &[], Duration::from_millis(100))
             .await

@@ -21,6 +21,22 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "visible": true
+      },
+      {
+        "label": "popover",
+        "title": "Crafted Herdr",
+        "url": "popover.html",
+        "width": 380,
+        "height": 560,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "visible": false,
+        "skipTaskbar": true,
+        "visibleOnAllWorkspaces": true,
+        "focus": false,
+        "shadow": true,
+        "backgroundColor": "#121317"
       }
     ],
     "security": {

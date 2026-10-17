@@ -93,3 +93,24 @@ Live QA of the native `machine add` layer was not run by the implementer. Run th
 - [ ] Closing the sheet or "Cancel" while a hidden run is under way leaves no `herdr machine add` process behind.
 - [ ] After a native run finishes, "machine add" shows in the Activity drawer with exit 0 (or 1 for a failure).
 
+
+## Task 15
+
+None of these were run by the implementer (tray, popover, notifications and the global shortcut need a GUI session).
+
+- [ ] Close the main window with the red button or ⌘W: the window hides, the app stays in the menu bar, and polling slows to the hidden interval. ⌘Q quits for real. Clicking the Dock icon (or "Open Crafted Herdr" in the tray menu) brings the window back.
+- [ ] The tray icon is a monochrome `>_` that turns white in a dark menu bar and black in a light one. With agents that are blocked or done, the number of them shows next to it; it disappears at 0.
+- [ ] Left-click the tray icon: the 380x560 popover opens centered under it with no title bar. Click elsewhere and it closes; click the icon while it is open and it closes (it does not flicker open again). Right-click shows Open Crafted Herdr, New session…, Settings…, Quit, and each works.
+- [ ] Popover: "Needs you" lists blocked then done agents, each with its status in words, project, workbox and age. "Open" opens the session in the terminal. "Open app ⌥⌘H" shows the main window; "New session" shows it with the New session sheet open.
+- [ ] Make an agent on the test machine (a `herdr-ui-qa` pane) go blocked: exactly one notification appears, titled "<agent> needs you" with "<project> · <workbox>" as the body. Let one finish: "<agent> finished". Nothing fires for agents that were already blocked or done when the app started, or when a machine reconnects.
+- [ ] Click a notification: the main window comes forward on Home with that row selected. If clicks do nothing on your macOS version (the notification plugin reports clicks only "as far as the server reports it"), note it; the fallback is to emit `focus-row` when the app is next activated.
+- [ ] In `pnpm tauri dev` the notification comes from the Terminal app's identity (the plugin does this in dev); check it again from the built .app, where it should carry the Crafted Herdr name and icon.
+- [ ] ⌥⌘H hides the main window when it is in front, and brings it to the front when it is hidden, minimized or behind another app. Turning it off in Settings › Shortcuts releases the key at once (another app can use it); turning it on registers it again without a restart. macOS's own "Hide Others" is ⌥⌘H in the app menu: check that the global shortcut wins and the menu item does not also fire.
+- [ ] Settings window: ⌘, and the sidebar link open the same 880x640 window (a second click focuses it, not a second window). Each section saves as you change it.
+- [ ] Settings › Terminal: uninstalled terminals are disabled and say "Not installed". Choosing another terminal changes "Opens in …" in the main window header at once, and the next Open uses it. The header menu's "Custom…" opens Settings when no launch command is set.
+- [ ] Custom terminal: set the launch command to a foreground command such as `open -na Ghostty --args -e {attach}` and open a session: the terminal stays open for longer than 10 seconds (the template is no longer killed). The example line under the field shows the resolved command.
+- [ ] Settings › Terminal › Attach as "Full herdr UI on that workbox": Open on any row opens the full herdr UI for that row's workbox. Open mode "New tab" adds a tab in iTerm2 and opens a window elsewhere.
+- [ ] Settings › General: set the window-open refresh to 5 s and the hidden one to 30 s; the Activity drawer shows polls at that pace without a restart. Typing 0.5 shows "Use at least 1 second." and saves nothing. "Open a new session in my terminal when it is ready" sets the New session checkbox's starting state.
+- [ ] Settings › Workboxes: the switches enable and disable a workbox (the sidebar and the Workbox screen follow); Local's switch is locked on.
+- [ ] Settings › herdr CLI: "Choose binary…" with another herdr install switches to it at once (path and version update, polling continues). Save a path, then rename that file: restart the app and the section says "Saved herdr binary not found; using <path>" while the app keeps working through auto-discovery. "Find it automatically" clears the saved path.
+- [ ] With no herdr anywhere, launch the app, then choose a binary in Settings: polling starts without a restart.

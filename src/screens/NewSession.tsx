@@ -85,7 +85,9 @@ export function NewSession({ terminalName }: Props) {
   const [name, setName] = useState("");
   const [placementChoice, setPlacementChoice] = useState<string | null>(null);
   const [agentArgs, setAgentArgs] = useState("");
-  const [openAfter, setOpenAfter] = useState(true);
+  const [openAfter, setOpenAfter] = useState(
+    () => useAppStore.getState().settings?.open_after_create ?? true,
+  );
   const [busy, setBusy] = useState(false);
   // The last create failure. It only shows while the form still matches what was sent.
   const [failure, setFailure] = useState<{

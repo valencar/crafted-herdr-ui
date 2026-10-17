@@ -7,11 +7,12 @@ The UI renders `AppState` pushed from Rust (`"state"` event) and calls typed Tau
 | Path | Owns |
 |---|---|
 | `lib/bindings/` | ts-rs generated types. Never edit by hand. |
-| `lib/ipc.ts` | the only place that calls `invoke`/`listen`: `onState`, `invokeTyped`, and the `CommandName` union |
+| `lib/ipc.ts` | the only place that calls `invoke`/`listen`: `onState`, `onSettings`, `onFocusRow`, `invokeTyped`, and the `CommandName` union |
+| `lib/useSync.ts` | `useStateSync` / `useSettingsSync`: every window (main, popover, Settings) keeps its own store current |
 | `lib/grouping.ts`, `lib/format.ts` | `toRows`, `needsYou`, `groupByProject/Workbox/Status`, `displayName`, `formatAge`, `shortPath` |
 | `store/appStore.ts` | Zustand: state, `selectedKey`, `groupBy`, sheet, view, `activityOpen` |
 | `components/` | presentational pieces (StatusPill, AgentRow, Inspector, ConfirmDialog, …) |
-| `screens/` | Home, Workbox, NewSession, AddWorkbox, Settings, MenuBar, Onboarding |
+| `screens/` | Home, Workbox, NewSession, AddWorkbox, Settings, MenuBar, Onboarding. Settings and MenuBar are their own windows (`settings.html`, `popover.html`, entries `settings.tsx`, `popover.tsx`) |
 | `styles/tokens.css` | design tokens as CSS variables (spec §9) |
 
 ## Rules

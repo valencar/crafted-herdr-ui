@@ -18,13 +18,17 @@ use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::poller::Poller;
+use crate::settings::{
+    self, AttachMode, HerdrLocator, HerdrStatus, Settings, SharedSettings, changes,
+};
 use crate::ssh_config;
-use crate::state::{AppState, MachineView};
+use crate::state::{AppState, MachineView, PollIntervals};
 use crate::terminal::{
-    self, InstalledCache, LaunchSpec, OpenMode, TerminalList, allowed_herdr_argv, attach_argv,
+    self, InstalledCache, LaunchSpec, TerminalId, TerminalList, allowed_herdr_argv, attach_argv,
     check_bin, check_openable, check_terminal_id, checked_machine_add_argv, default_terminal,
     full_ui_argv, join_quoted, launcher_for,
 };
+use crate::tray;
 
 const LOCAL: &str = "local";
 const HELP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -41,7 +45,7 @@ impl AgentKindsCache {
         if let Some(kinds) = cached.as_ref() {
             return kinds.clone();
         }
-        match herdr_agent_kinds(cli.bin(), cli.env(), HELP_TIMEOUT).await {
+        match herdr_agent_kinds(&cli.bin(), cli.env(), HELP_TIMEOUT).await {
             Some(kinds) => {
                 *cached = Some(kinds.clone());
                 kinds
@@ -331,18 +335,39 @@ fn attach_for_pane(
     Ok(attach_argv(machine, terminal_id, &bin))
 }
 
-/// Opens `argv` in the user's terminal. Until Settings exist the choice is the default
-/// terminal, in a new window.
+/// The process that opens `argv` in the terminal the settings ask for: the chosen one, or the
+/// default of the installed terminals.
+fn launch_spec(
+    settings: &Settings,
+    installed: &[TerminalId],
+    home: std::path::PathBuf,
+    argv: &[String],
+    title: &str,
+) -> Result<LaunchSpec, String> {
+    let terminal = settings
+        .terminal
+        .unwrap_or_else(|| default_terminal(installed));
+    let template = settings.terminal_custom_template.trim();
+    if terminal == TerminalId::Custom && template.is_empty() {
+        return Err("Set the launch command for your custom terminal in Settings.".into());
+    }
+    Ok(launcher_for(terminal, home, template).spec(argv, settings.open_mode, title))
+}
+
+/// Opens `argv` in the user's terminal, as the settings say (read now, so a change applies to
+/// the next open).
 async fn launch_in_terminal(
     app: &AppHandle,
     cli: &HerdrCli,
     installed: &InstalledCache,
+    settings: &SharedSettings,
     argv: &[String],
     title: &str,
 ) -> Result<(), ActionError> {
     let home = app.path().home_dir().map_err(|e| invalid(e.to_string()))?;
-    let terminal = default_terminal(&installed.get().await);
-    let spec: LaunchSpec = launcher_for(terminal, home, "").spec(argv, OpenMode::default(), title);
+    let settings = settings.get();
+    let spec =
+        launch_spec(&settings, &installed.get().await, home, argv, title).map_err(invalid)?;
     terminal::launch(&spec, cli.env())
         .await
         .map_err(|message| ActionError::Herdr {
@@ -350,18 +375,40 @@ async fn launch_in_terminal(
         })
 }
 
-/// Opens one pane, attached, in the user's terminal.
+/// The full herdr UI for a machine, in the user's terminal.
+async fn open_full(
+    app: &AppHandle,
+    state: &AppState,
+    cli: &HerdrCli,
+    installed: &InstalledCache,
+    settings: &SharedSettings,
+    machine_id: &str,
+) -> Result<(), ActionError> {
+    let machine = find_machine(state, machine_id)?;
+    check_openable(machine).map_err(invalid)?;
+    // Remote machines too: `herdr --remote` is the local client.
+    let argv = full_ui_argv(machine, &local_bin(cli)?);
+    launch_in_terminal(app, cli, installed, settings, &argv, &machine.label).await
+}
+
+/// Opens one pane, attached, in the user's terminal; or, when Settings say "full herdr UI",
+/// the whole herdr UI of that pane's workbox.
 #[tauri::command]
 pub async fn open_session(
     app: AppHandle,
     poller: State<'_, Poller>,
     cli: State<'_, HerdrCli>,
     installed: State<'_, InstalledCache>,
+    settings: State<'_, SharedSettings>,
     machine_id: String,
     pane_id: String,
 ) -> Result<(), ActionError> {
-    let argv = attach_for_pane(&poller.current_state(), &cli, &machine_id, &pane_id)?;
-    launch_in_terminal(&app, &cli, &installed, &argv, &pane_id).await
+    let state = poller.current_state();
+    if settings.get().attach_mode == AttachMode::FullUi {
+        return open_full(&app, &state, &cli, &installed, &settings, &machine_id).await;
+    }
+    let argv = attach_for_pane(&state, &cli, &machine_id, &pane_id)?;
+    launch_in_terminal(&app, &cli, &installed, &settings, &argv, &pane_id).await
 }
 
 /// Opens the full herdr UI for a machine in the user's terminal.
@@ -371,14 +418,18 @@ pub async fn open_full_herdr(
     poller: State<'_, Poller>,
     cli: State<'_, HerdrCli>,
     installed: State<'_, InstalledCache>,
+    settings: State<'_, SharedSettings>,
     machine_id: String,
 ) -> Result<(), ActionError> {
-    let state = poller.current_state();
-    let machine = find_machine(&state, &machine_id)?;
-    check_openable(machine).map_err(invalid)?;
-    // Remote machines too: `herdr --remote` is the local client.
-    let argv = full_ui_argv(machine, &local_bin(&cli)?);
-    launch_in_terminal(&app, &cli, &installed, &argv, &machine.label).await
+    open_full(
+        &app,
+        &poller.current_state(),
+        &cli,
+        &installed,
+        &settings,
+        &machine_id,
+    )
+    .await
 }
 
 /// Runs one of the few herdr commands that need a terminal (`machine reconnect` asks for SSH
@@ -389,11 +440,12 @@ pub async fn open_in_terminal(
     app: AppHandle,
     cli: State<'_, HerdrCli>,
     installed: State<'_, InstalledCache>,
+    settings: State<'_, SharedSettings>,
     argv: Vec<String>,
 ) -> Result<(), ActionError> {
     let bin = cli.bin().to_string_lossy().into_owned();
     let full = allowed_herdr_argv(&bin, &argv).map_err(invalid)?;
-    launch_in_terminal(&app, &cli, &installed, &full, "herdr").await
+    launch_in_terminal(&app, &cli, &installed, &settings, &full, "herdr").await
 }
 
 /// What follows the herdr binary in `machine add`, for the form's fields. The UI hands this to
@@ -513,6 +565,89 @@ pub fn copy_attach_command(
 ) -> Result<String, ActionError> {
     let argv = attach_for_pane(&poller.current_state(), &cli, &machine_id, &pane_id)?;
     Ok(join_quoted(&argv))
+}
+
+/// The event Settings changes are announced on, so every window shows the same values.
+pub const SETTINGS_EVENT: &str = "settings";
+
+#[tauri::command]
+pub fn get_settings(settings: State<'_, SharedSettings>) -> Settings {
+    settings.get()
+}
+
+/// Applies a partial settings object on top of the current settings, saves it and makes the
+/// change live. A refused patch (an interval under 1000 ms, an unknown key) changes nothing.
+#[tauri::command]
+pub async fn set_settings(
+    app: AppHandle,
+    shared: State<'_, SharedSettings>,
+    locator: State<'_, HerdrLocator>,
+    cli: State<'_, HerdrCli>,
+    poller: State<'_, Poller>,
+    patch: serde_json::Value,
+) -> Result<Settings, ActionError> {
+    let old = shared.get();
+    let new = old.merged(&patch).map_err(invalid)?;
+    if new == old {
+        return Ok(new);
+    }
+    settings::save(&app, &new).map_err(invalid)?;
+    shared.set(new.clone());
+
+    let todo = changes(&old, &new);
+    if todo.intervals {
+        poller.set_intervals(PollIntervals::from_ms(
+            new.poll_interval_visible_ms,
+            new.poll_interval_hidden_ms,
+        ));
+    }
+    if todo.herdr_path {
+        let status = locator.locate(new.herdr_path.as_deref(), &cli).await;
+        poller.set_herdr(status.path.clone(), status.version.clone());
+        if status.path.is_some() && poller.claim_start() {
+            let runner = poller.inner().clone();
+            tauri::async_runtime::spawn(async move { runner.run().await });
+        }
+        poller.refresh_now(None);
+    }
+    if todo.shortcut
+        && let Err(message) = tray::set_global_shortcut(&app, new.global_shortcut_enabled)
+    {
+        // The setting is saved; the shortcut just is not available (another app owns it).
+        eprintln!("{message}");
+    }
+    let _ = app.emit(SETTINGS_EVENT, &new);
+    Ok(new)
+}
+
+/// Which herdr binary is in use, its version, and whether the saved path was found.
+#[tauri::command]
+pub fn herdr_status(locator: State<'_, HerdrLocator>) -> HerdrStatus {
+    locator.status()
+}
+
+/// What a Custom launch command would run for a sample pane, for the Settings preview.
+#[tauri::command]
+pub fn preview_launch_template(template: String) -> String {
+    terminal::custom_template_example(&template)
+}
+
+/// Shows the main window, from the popover.
+#[tauri::command]
+pub fn show_main(app: AppHandle) {
+    tray::show_main(&app);
+    tray::hide_popover(&app);
+}
+
+/// Shows the main window with the New session sheet open, from the popover.
+#[tauri::command]
+pub fn show_main_new_session(app: AppHandle) {
+    tray::show_main_new_session(&app);
+}
+
+#[tauri::command]
+pub fn open_settings(app: AppHandle) -> Result<(), ActionError> {
+    tray::open_settings(&app).map_err(|e| invalid(e.to_string()))
 }
 
 /// The one-line read behind a pane box in the Workbox screen.
@@ -935,6 +1070,47 @@ mod tests {
             "buildbox",
             "w1:p1"
         )));
+    }
+
+    fn home() -> std::path::PathBuf {
+        "/Users/dev".into()
+    }
+
+    #[test]
+    fn a_launch_follows_the_saved_terminal_and_open_mode() {
+        let argv = vec!["ssh".to_owned(), "-t".into(), "buildbox".into()];
+        let installed = [TerminalId::Warp, TerminalId::TerminalApp];
+
+        // Nothing chosen: the default of the installed ones, in a new window.
+        let auto = launch_spec(&Settings::default(), &installed, home(), &argv, "t").unwrap();
+        assert_eq!(auto.program, "open");
+        assert!(auto.args.iter().any(|a| a.starts_with("warp://launch/")));
+
+        // iTerm2 in tab mode adds a tab to the current window.
+        let tab = Settings {
+            terminal: Some(TerminalId::ITerm2),
+            open_mode: terminal::OpenMode::Tab,
+            ..Settings::default()
+        };
+        let spec = launch_spec(&tab, &installed, home(), &argv, "t").unwrap();
+        assert_eq!(spec.program, "osascript");
+        assert!(spec.args.iter().any(|a| a.contains("create tab")));
+    }
+
+    #[test]
+    fn a_custom_terminal_needs_a_template_and_runs_it_detached() {
+        let argv = vec!["ssh".to_owned(), "buildbox".into()];
+        let custom = |template: &str| Settings {
+            terminal: Some(TerminalId::Custom),
+            terminal_custom_template: template.into(),
+            ..Settings::default()
+        };
+        let err = launch_spec(&custom("  "), &[], home(), &argv, "t").unwrap_err();
+        assert!(err.contains("Settings"), "{err}");
+
+        let spec = launch_spec(&custom(" myterm -e {attach} "), &[], home(), &argv, "t").unwrap();
+        assert!(spec.detached);
+        assert_eq!(spec.args, ["-c", "myterm -e ssh buildbox"]);
     }
 
     #[test]

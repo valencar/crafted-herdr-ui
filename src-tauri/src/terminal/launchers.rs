@@ -38,6 +38,7 @@ fn spec(program: &str, args: Vec<String>) -> LaunchSpec {
         program: program.to_owned(),
         args,
         files: Vec::new(),
+        detached: false,
     }
 }
 
@@ -187,7 +188,10 @@ impl Launcher for Custom {
     }
     fn spec(&self, cmd: &[String], _mode: OpenMode, _title: &str) -> LaunchSpec {
         let script = self.template.replace("{attach}", &join_quoted(cmd));
-        spec("/bin/sh", vec!["-c".into(), script])
+        LaunchSpec {
+            detached: true,
+            ..spec("/bin/sh", vec!["-c".into(), script])
+        }
     }
 }
 
@@ -329,6 +333,9 @@ mod tests {
         };
         let spec = launcher.spec(&c, OpenMode::Window, "t");
         assert_eq!(spec.program, "/bin/sh");
+        // A foreground template must not be killed after a launch timeout.
+        assert!(spec.detached);
+        assert!(!Ghostty.spec(&c, OpenMode::Window, "t").detached);
         assert_eq!(spec.args[0], "-c");
         assert_eq!(
             spec.args[1],

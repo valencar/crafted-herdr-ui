@@ -14,6 +14,7 @@ import {
   groupByStatus,
   groupByWorkbox,
   needsYou,
+  projectNames,
   toRows,
   type Group,
   type Row,
@@ -21,10 +22,12 @@ import {
 import { invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
 import {
+  focusRowButton,
+  openSettings,
   scrollToId,
   terminalName as terminalLabel,
-  useDefaultTerminal,
   useNow,
+  useTerminals,
 } from "../lib/uiHelpers";
 import { useAppStore, type GroupBy } from "../store/appStore";
 import { NewSession } from "./NewSession";
@@ -61,15 +64,6 @@ function isEditable(target: EventTarget | null): boolean {
   );
 }
 
-function focusRow(key: string) {
-  const li = [...document.querySelectorAll<HTMLElement>("[data-row-key]")].find(
-    (el) => el.dataset.rowKey === key,
-  );
-  const button = li?.querySelector<HTMLElement>("button.row-main");
-  button?.focus();
-  button?.scrollIntoView?.({ block: "nearest" });
-}
-
 export function Home() {
   const state = useAppStore((s) => s.state);
   const selectedKey = useAppStore((s) => s.selectedKey);
@@ -92,7 +86,7 @@ export function Home() {
 
   const nowMs = useNow(30_000);
   const [query, setQuery] = useState("");
-  const terminal = useDefaultTerminal();
+  const { current: terminal, installed } = useTerminals();
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -144,14 +138,7 @@ export function Home() {
   const groups = useMemo(() => GROUPERS[groupBy](visible), [groupBy, visible]);
   const navRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
-  const projectOf = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const g of projectGroups) {
-      if (g.tier === 3) continue;
-      for (const r of g.rows) map.set(r.key, g.name);
-    }
-    return map;
-  }, [projectGroups]);
+  const projectOf = useMemo(() => projectNames(rows), [rows]);
 
   const selectedRow = rows.find((r) => r.key === selectedKey) ?? null;
   // Keyboard shortcuts only act on a selection the user can see in the list.
@@ -224,7 +211,7 @@ export function Home() {
               : navRows.length - 1
             : Math.min(navRows.length - 1, Math.max(0, at + (down ? 1 : -1)));
         select(navRows[next].key);
-        focusRow(navRows[next].key);
+        focusRowButton(navRows[next].key);
       } else if (e.key === "Backspace" || e.key === "Delete") {
         if (actionRow) {
           e.preventDefault();
@@ -255,7 +242,8 @@ export function Home() {
         query={query}
         onQuery={setQuery}
         searchRef={searchRef}
-        terminalName={terminal ? terminalName : null}
+        terminal={terminal}
+        installed={installed}
         onNewSession={() => openNewSession()}
       />
       <div className="body">
@@ -274,6 +262,7 @@ export function Home() {
           activeWorkbox={null}
           onWorkbox={(id) => setView({ kind: "workbox", machineId: id })}
           onAddWorkbox={() => setSheet("add-workbox")}
+          onSettings={openSettings}
         />
 
         <main className="main">
@@ -338,7 +327,13 @@ export function Home() {
                         key={g}
                         type="button"
                         aria-pressed={groupBy === g}
-                        onClick={() => setGroupBy(g)}
+                        onClick={() => {
+                          setGroupBy(g);
+                          // Remembered for the next launch.
+                          invokeTyped("set_settings", {
+                            patch: { group_by: g },
+                          }).catch(() => {});
+                        }}
                       >
                         {g[0].toUpperCase() + g.slice(1)}
                       </button>

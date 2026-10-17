@@ -4,15 +4,19 @@ pub mod commands;
 pub mod env;
 pub mod herdr;
 pub mod machine_setup;
+pub mod notify;
 pub mod poller;
+pub mod settings;
 pub mod ssh_config;
 pub mod state;
 pub mod terminal;
+pub mod tray;
 
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tokio::sync::watch;
 
 use actions::Actions;
 use activity::ActivityTracker;
@@ -20,16 +24,20 @@ use commands::{AgentKindsCache, PREVIEW_EVENT, PreviewManager};
 use herdr::cli::HerdrCli;
 use machine_setup::{MachineSetup, PortablePty};
 use poller::{Poller, PollerConfig};
+use settings::{HerdrLocator, SharedSettings};
+use state::{AppState, PollIntervals};
 use terminal::InstalledCache;
+use tray::{MAIN_WINDOW, POPOVER_WINDOW, PopoverGuard};
 
 const FALLBACK_SHELL: &str = "/bin/zsh";
-const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
-const MAIN_WINDOW: &str = "main";
 
-/// Startup wiring: find herdr, build the CLI runner and the poller, hand both to Tauri state,
-/// and start polling. Without herdr there is nothing to poll, so the UI just gets a state
-/// with `herdr_path: None`.
+/// Startup wiring: read the settings, find herdr, build the CLI runner and the poller, hand them
+/// to Tauri state, start polling, and set up the tray, notifications and the global shortcut.
+/// Without herdr there is nothing to poll, so the UI just gets a state with `herdr_path: None`.
 fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let handle = app.handle().clone();
+    let settings = settings::load(&handle);
+
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
@@ -42,37 +50,50 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     });
     let forwarded = env::forwarded_env(&login);
 
-    // No saved path yet: Settings arrive later.
+    // An empty path makes every call fail with `NotFound`, which is what we want without herdr.
+    // `locate` points the runner at the binary it finds (the saved path first).
     let home = app.path().home_dir()?;
-    let herdr_bin = env::resolve_herdr(None, login_hit, &home, &|p| p.is_file());
-    let herdr_version = herdr_bin.as_deref().and_then(|bin| {
-        tauri::async_runtime::block_on(env::herdr_version(bin, &forwarded, VERSION_TIMEOUT))
-    });
+    let cli = HerdrCli::new(PathBuf::new(), forwarded);
+    let locator = HerdrLocator::new(login_hit, home);
+    let herdr =
+        tauri::async_runtime::block_on(locator.locate(settings.herdr_path.as_deref(), &cli));
 
     let activity_path = app.path().app_data_dir()?.join("activity.json");
     let config = PollerConfig {
         activity_path: Some(activity_path.clone()),
-        herdr_version,
-        herdr_path: herdr_bin.as_ref().map(|p| p.display().to_string()),
+        herdr_version: herdr.version.clone(),
+        herdr_path: herdr.path.clone(),
     };
-    // An empty path makes every call fail with `NotFound`, which is what we want without herdr.
-    let cli = HerdrCli::new(herdr_bin.clone().unwrap_or_default(), forwarded);
-    let handle = app.handle().clone();
+    // Everything that reacts to the state without calling the poller (the tray badge, the
+    // notifications) reads this channel. The poller calls `emit` while it holds its core lock,
+    // so `emit` only does non-blocking things: send the event, replace the watched value.
+    let (state_tx, state_rx) = watch::channel(AppState {
+        machines: Vec::new(),
+        herdr_version: herdr.version.clone(),
+        herdr_path: herdr.path.clone(),
+        generated_at_ms: 0,
+    });
+    let emit_handle = handle.clone();
     let poller = Poller::new(
         cli.clone(),
         ActivityTracker::load(&activity_path),
         config,
         Arc::new(move |state| {
             // Nobody listening yet is fine; `get_state` covers that.
-            let _ = handle.emit("state", state);
+            let _ = emit_handle.emit("state", &state);
+            state_tx.send_replace(state);
         }),
     );
+    poller.set_intervals(PollIntervals::from_ms(
+        settings.poll_interval_visible_ms,
+        settings.poll_interval_hidden_ms,
+    ));
     let refresh_poller = poller.clone();
     let actions = Actions::new(
         cli.clone(),
         Arc::new(move |machine| refresh_poller.refresh_now(machine)),
     );
-    let preview_handle = app.handle().clone();
+    let preview_handle = handle.clone();
     let visible_poller = poller.clone();
     app.manage(PreviewManager::new(
         cli.clone(),
@@ -87,8 +108,21 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(InstalledCache::default());
     app.manage(MachineSetup::new(Arc::new(PortablePty)));
     app.manage(poller.clone());
+    app.manage(locator);
+    app.manage(PopoverGuard::default());
+    let shared = SharedSettings::new(settings.clone());
+    app.manage(shared.clone());
 
-    if herdr_bin.is_some() {
+    let tray_icon = tray::create_tray(&handle)?;
+    tray::start_badge(tray_icon, state_rx.clone());
+    notify::start(&handle, &poller, state_rx, shared);
+    if settings.global_shortcut_enabled
+        && let Err(message) = tray::set_global_shortcut(&handle, true)
+    {
+        eprintln!("{message}");
+    }
+
+    if herdr.path.is_some() && poller.claim_start() {
         tauri::async_runtime::spawn(async move { poller.run().await });
     } else {
         poller.emit_current();
@@ -98,9 +132,6 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Polls fast only while the main window is on screen.
 fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
-    if window.label() != MAIN_WINDOW {
-        return;
-    }
     let visible = match event {
         WindowEvent::Focused(true) => true,
         // Losing focus does not hide the window; being minimized or hidden does.
@@ -114,11 +145,40 @@ fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
     }
 }
 
+fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
+    match (window.label(), event) {
+        // Closing the main window keeps the app in the menu bar; ⌘Q quits.
+        (MAIN_WINDOW, WindowEvent::CloseRequested { api, .. }) => {
+            api.prevent_close();
+            tray::hide_main(window.app_handle());
+        }
+        (MAIN_WINDOW, _) => track_visibility(window, event),
+        (POPOVER_WINDOW, WindowEvent::Focused(false)) => {
+            tray::popover_lost_focus(window.app_handle());
+        }
+        _ => {}
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if shortcut == &tray::global_shortcut()
+                        && event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed
+                    {
+                        tray::toggle_main(app);
+                    }
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             commands::get_state,
             commands::create_session,
@@ -154,9 +214,30 @@ pub fn run() {
             commands::copy_attach_command,
             commands::start_preview,
             commands::stop_preview,
+            commands::get_settings,
+            commands::set_settings,
+            commands::herdr_status,
+            commands::preview_launch_template,
+            commands::show_main,
+            commands::show_main_new_session,
+            commands::open_settings,
         ])
-        .on_window_event(track_visibility)
+        .on_window_event(on_window_event)
         .setup(|app| start(app))
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app, event| match event {
+        // The windows are hidden, not destroyed, so this only fires if every one was closed.
+        RunEvent::ExitRequested {
+            api, code: None, ..
+        } => api.prevent_exit(),
+        // A click on the Dock icon while the main window is hidden brings it back.
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen {
+            has_visible_windows: false,
+            ..
+        } => tray::show_main(app),
+        _ => {}
+    });
 }

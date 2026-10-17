@@ -5,8 +5,17 @@ const listen = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
 
-const { getState, invokeTyped, onPreview, onState, toActionError } =
-  await import("./ipc");
+const {
+  getSettings,
+  getState,
+  invokeTyped,
+  onFocusRow,
+  onNewSession,
+  onPreview,
+  onSettings,
+  onState,
+  toActionError,
+} = await import("./ipc");
 
 beforeEach(() => {
   invoke.mockReset();
@@ -110,5 +119,35 @@ describe("state", () => {
     expect(listen).toHaveBeenCalledWith("preview", expect.any(Function));
     expect(cb).toHaveBeenCalledWith({ key: "buildbox::w1:p1", text: "hi" });
     expect(off).toBe(unlisten);
+  });
+});
+
+describe("settings and window events", () => {
+  it("getSettings asks for the saved settings", async () => {
+    invoke.mockResolvedValue({ group_by: "status" });
+    await expect(getSettings()).resolves.toEqual({ group_by: "status" });
+    expect(invoke).toHaveBeenCalledWith("get_settings", undefined);
+  });
+
+  it("hands the payload of each event to its callback", async () => {
+    const handlers = new Map<string, (e: { payload: unknown }) => void>();
+    listen.mockImplementation(async (name: string, cb) => {
+      handlers.set(name, cb);
+      return () => {};
+    });
+    const settings = vi.fn();
+    const focus = vi.fn();
+    const newSession = vi.fn();
+    await onSettings(settings);
+    await onFocusRow(focus);
+    await onNewSession(newSession);
+
+    handlers.get("settings")!({ payload: { group_by: "status" } });
+    handlers.get("focus-row")!({ payload: "buildbox::w1:p1" });
+    handlers.get("new-session")!({ payload: null });
+
+    expect(settings).toHaveBeenCalledWith({ group_by: "status" });
+    expect(focus).toHaveBeenCalledWith("buildbox::w1:p1");
+    expect(newSession).toHaveBeenCalledWith();
   });
 });

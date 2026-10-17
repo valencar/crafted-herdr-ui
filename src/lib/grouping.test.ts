@@ -12,6 +12,7 @@ import {
   isHomeLike,
   isNeedsYou,
   needsYou,
+  projectNames,
   toRows,
   type Row,
 } from "./grouping";
@@ -338,6 +339,16 @@ describe("groupByProject", () => {
 
   it("returns nothing for no rows", () => {
     expect(groupByProject([])).toEqual([]);
+  });
+});
+
+describe("projectNames", () => {
+  it("names the project of each row and leaves loose sessions out", () => {
+    const names = projectNames(buildbox());
+    expect(names.get("buildbox::w1:p1")).toBe("api-service");
+    expect(names.get("buildbox::w2:p1")).toBe("web-app");
+    // The idle agent works in ~/projects, a container folder: loose.
+    expect(names.has("buildbox::w2:p2")).toBe(false);
   });
 });
 

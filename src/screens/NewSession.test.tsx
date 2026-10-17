@@ -12,6 +12,7 @@ import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { NewSessionRequest } from "../lib/bindings/NewSessionRequest";
+import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
 
@@ -69,6 +70,21 @@ function fakePreview(req: NewSessionRequest): string[] {
   }
   return lines;
 }
+
+const DEFAULT_SETTINGS: Settings = {
+  herdr_path: null,
+  terminal: null,
+  terminal_custom_template: "",
+  open_mode: "window",
+  attach_mode: "pane",
+  notify_blocked: true,
+  notify_done: true,
+  poll_interval_visible_ms: 2000,
+  poll_interval_hidden_ms: 10_000,
+  group_by: "project",
+  global_shortcut_enabled: true,
+  open_after_create: true,
+};
 
 const KINDS = ["claude", "codex"];
 /** Errors the next `create_session` calls fail with, oldest first. */
@@ -598,6 +614,17 @@ describe("NewSession after create", () => {
       paneId: "w3:p1",
     });
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p1");
+  });
+
+  it("starts unchecked when the settings say not to open after creating", () => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, open_after_create: false },
+    });
+    setup();
+    expect(
+      screen.getByLabelText("Open in Ghostty when ready"),
+    ).not.toBeChecked();
+    useAppStore.setState({ settings: null });
   });
 
   it("queues no open when the box is unchecked", async () => {

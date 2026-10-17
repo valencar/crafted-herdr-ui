@@ -265,6 +265,19 @@ export function groupByProject(rows: Row[]): Group[] {
   return [...projects, ...[...loose.values()].sort(byNameThenMachine)];
 }
 
+/**
+ * Row key → the name of the project group the row sits in. Rows in "Loose sessions" have no
+ * project, so they are left out.
+ */
+export function projectNames(rows: Row[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const g of groupByProject(rows)) {
+    if (g.tier === 3) continue;
+    for (const r of g.rows) names.set(r.key, g.name);
+  }
+  return names;
+}
+
 /** One group per machine, in the order machines first appear. */
 export function groupByWorkbox(rows: Row[]): Group[] {
   const groups = new Map<string, Group>();

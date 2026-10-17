@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -61,7 +61,8 @@ impl CommandLog {
 /// The single door to the `herdr` binary.
 #[derive(Debug, Clone)]
 pub struct HerdrCli {
-    bin: PathBuf,
+    /// Shared by every clone, so a path chosen in Settings reaches all of them.
+    bin: Arc<RwLock<PathBuf>>,
     env: Vec<(String, String)>,
     log: Arc<Mutex<CommandLog>>,
     limits: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
@@ -82,7 +83,7 @@ pub(crate) fn now_ms() -> u64 {
 impl HerdrCli {
     pub fn new(bin: PathBuf, env: Vec<(String, String)>) -> Self {
         Self {
-            bin,
+            bin: Arc::new(RwLock::new(bin)),
             env,
             log: Arc::default(),
             limits: Arc::default(),
@@ -171,8 +172,14 @@ impl HerdrCli {
     }
 
     /// The resolved `herdr` binary, for the few calls that print plain text instead of JSON.
-    pub fn bin(&self) -> &Path {
-        &self.bin
+    pub fn bin(&self) -> PathBuf {
+        self.bin.read().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// Points every clone of this runner (and its log, which stays) at another binary. Calls
+    /// already running finish with the old one.
+    pub fn set_bin(&self, bin: PathBuf) {
+        *self.bin.write().unwrap_or_else(|p| p.into_inner()) = bin;
     }
 
     /// The environment every herdr spawn gets.
@@ -198,7 +205,7 @@ impl HerdrCli {
         args: &[String],
         timeout: Duration,
     ) -> Result<(Option<i32>, String, String), HerdrError> {
-        let mut cmd = Command::new(&self.bin);
+        let mut cmd = Command::new(self.bin());
         if let Some(id) = remote {
             cmd.arg("--machine").arg(id);
         }

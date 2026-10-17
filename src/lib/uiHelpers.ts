@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useAppStore } from "../store/appStore";
 import type { TerminalId } from "./bindings/TerminalId";
+import type { TerminalList } from "./bindings/TerminalList";
 import { TERMINAL_LABEL } from "./format";
 import { invokeTyped } from "./ipc";
 
@@ -13,21 +15,35 @@ export function useNow(everyMs: number): number {
   return now;
 }
 
-/** The default terminal's id, once `list_terminals` has answered. */
-export function useDefaultTerminal(): TerminalId | null {
-  const [terminal, setTerminal] = useState<TerminalId | null>(null);
+/** The terminals `list_terminals` found, and the one sessions open in. */
+export type Terminals = {
+  /** The chosen terminal, or the default one; `null` until `list_terminals` has answered. */
+  current: TerminalId | null;
+  installed: TerminalId[];
+};
+
+/**
+ * The terminal sessions open in: the saved choice, or else the first installed of Ghostty,
+ * iTerm2, Warp, Terminal. Follows a change made in Settings.
+ */
+export function useTerminals(): Terminals {
+  const saved = useAppStore((s) => s.settings?.terminal ?? null);
+  const [list, setList] = useState<TerminalList | null>(null);
   useEffect(() => {
     let cancelled = false;
     invokeTyped("list_terminals")
       .then((t) => {
-        if (!cancelled) setTerminal(t.default);
+        if (!cancelled) setList(t);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
-  return terminal;
+  return {
+    current: saved ?? list?.default ?? null,
+    installed: list?.installed ?? [],
+  };
 }
 
 /** "Ghostty", or a generic name until the terminal is known. */
@@ -42,4 +58,34 @@ export function scrollToId(id: string) {
       .getElementById(id)
       ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }, 0);
+}
+
+/** Opens the Settings window (⌘, and the sidebar link). Errors go to the toast. */
+export function openSettings(): void {
+  invokeTyped("open_settings").catch((e) =>
+    useAppStore.getState().reportError(e),
+  );
+}
+
+/** Focuses a row's button and scrolls it into view. False if no such row is on screen. */
+export function focusRowButton(key: string): boolean {
+  const li = [...document.querySelectorAll<HTMLElement>("[data-row-key]")].find(
+    (el) => el.dataset.rowKey === key,
+  );
+  const button = li?.querySelector<HTMLElement>("button.row-main");
+  button?.focus();
+  button?.scrollIntoView?.({ block: "nearest" });
+  return button !== undefined && button !== null;
+}
+
+/**
+ * Focuses a row after a notification click. The row may be on a screen that has not drawn
+ * yet (coming back from a Workbox), so this tries a few times.
+ */
+export function focusRowElement(key: string, attemptsLeft = 4): void {
+  window.setTimeout(() => {
+    if (!focusRowButton(key) && attemptsLeft > 1) {
+      focusRowElement(key, attemptsLeft - 1);
+    }
+  }, 60);
 }

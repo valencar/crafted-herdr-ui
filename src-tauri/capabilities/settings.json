@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "Capability for the Settings window: events, and the file dialog for Choose binary",
+  "windows": ["settings"],
+  "permissions": ["core:default", "dialog:allow-open"]
+}

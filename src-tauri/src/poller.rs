@@ -18,7 +18,7 @@ use crate::activity::{ActivityTracker, Transition};
 use crate::herdr::cli::{HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{MachineProfile, Snapshot, parse_machine_list, parse_snapshot};
-use crate::state::{AppState, Health, MachineView, classify_error, next_delay};
+use crate::state::{AppState, Health, MachineView, PollIntervals, classify_error, next_delay};
 
 /// Receives each new `AppState`. It is called while the poller holds an internal lock (that is
 /// what keeps states in order), so it must not call back into the `Poller`.
@@ -165,6 +165,10 @@ struct SaveState {
 struct Inner {
     cli: HerdrCli,
     config: PollerConfig,
+    /// The herdr binary's path and version as shown to the UI; Settings can change them.
+    herdr: Mutex<(Option<String>, Option<String>)>,
+    intervals: Mutex<PollIntervals>,
+    started: AtomicBool,
     emit: Emit,
     visible: AtomicBool,
     core: Mutex<Core>,
@@ -189,7 +193,10 @@ impl Poller {
         Self {
             inner: Arc::new(Inner {
                 cli,
+                herdr: Mutex::new((config.herdr_path.clone(), config.herdr_version.clone())),
                 config,
+                intervals: Mutex::new(PollIntervals::default()),
+                started: AtomicBool::new(false),
                 emit,
                 visible: AtomicBool::new(true),
                 core: Mutex::new(Core::new()),
@@ -251,6 +258,27 @@ impl Poller {
         }
     }
 
+    /// Sets how often healthy machines are polled (Settings). Applies to the next wait, and
+    /// wakes every machine so a shorter interval takes effect now.
+    pub fn set_intervals(&self, intervals: PollIntervals) {
+        let changed = std::mem::replace(&mut *lock(&self.inner.intervals), intervals) != intervals;
+        if changed {
+            self.inner.wake_all();
+        }
+    }
+
+    /// Replaces the herdr path and version the state reports, and emits the new state.
+    pub fn set_herdr(&self, path: Option<String>, version: Option<String>) {
+        *lock(&self.inner.herdr) = (path, version);
+        self.emit_current();
+    }
+
+    /// True the first time it is called: whoever gets true runs `run`. Polling starts late when
+    /// herdr was not found at launch and the user then picks a binary in Settings.
+    pub fn claim_start(&self) -> bool {
+        !self.inner.started.swap(true, Ordering::Relaxed)
+    }
+
     /// Whether the main window is on screen, as last reported by `set_visible`.
     pub fn is_visible(&self) -> bool {
         self.inner.visible()
@@ -287,11 +315,16 @@ impl Inner {
         }
     }
 
+    fn delay(&self, failures: u32) -> Duration {
+        next_delay(self.visible(), failures, *lock(&self.intervals))
+    }
+
     fn state_now(&self, core: &Core) -> AppState {
+        let (herdr_path, herdr_version) = lock(&self.herdr).clone();
         AppState {
             machines: core.machines.clone(),
-            herdr_version: self.config.herdr_version.clone(),
-            herdr_path: self.config.herdr_path.clone(),
+            herdr_version,
+            herdr_path,
             generated_at_ms: now_ms(),
         }
     }
@@ -365,11 +398,11 @@ impl Inner {
                 Err(e) => {
                     failures = failures.saturating_add(1);
                     resync = true;
-                    self.record_failure(&id, &e, next_delay(self.visible(), failures));
+                    self.record_failure(&id, &e, self.delay(failures));
                 }
             }
             self.maybe_save();
-            let delay = next_delay(self.visible(), failures);
+            let delay = self.delay(failures);
             tokio::select! {
                 _ = tokio::time::sleep(delay) => {}
                 _ = wake.notified() => {}

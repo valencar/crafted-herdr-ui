@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import type { AppState } from "../lib/bindings/AppState";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
+import type { Settings } from "../lib/bindings/Settings";
 import { actionErrorMessage } from "../lib/format";
 import { toActionError } from "../lib/ipc";
 
@@ -23,6 +24,8 @@ let pendingTimer: ReturnType<typeof setTimeout> | undefined;
 
 type AppStore = {
   state: AppState | null;
+  /** The saved settings; `null` until they have been read (screens then use the defaults). */
+  settings: Settings | null;
   /** A row key, `${machineId}::${paneId}`. */
   selectedKey: string | null;
   groupBy: GroupBy;
@@ -49,6 +52,9 @@ type AppStore = {
   /** The latest live-preview frame for the selected row. */
   preview: PreviewFrame | null;
   setState: (state: AppState) => void;
+  setSettings: (settings: Settings) => void;
+  /** A notification was clicked: show Home with that row selected. */
+  focusRow: (key: string) => void;
   select: (key: string | null) => void;
   setGroupBy: (groupBy: GroupBy) => void;
   setSheet: (sheet: Sheet) => void;
@@ -101,6 +107,7 @@ function settlePending(get: Get) {
 
 export const useAppStore = create<AppStore>((set, get) => ({
   state: null,
+  settings: null,
   selectedKey: null,
   groupBy: "project",
   sheet: null,
@@ -114,6 +121,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   pendingSelectKey: null,
   pendingOpen: null,
   setState: (state) => set({ state }),
+  setSettings: (settings) => set({ settings }),
+  focusRow: (selectedKey) => set({ selectedKey, view: { kind: "home" } }),
   select: (selectedKey) => set({ selectedKey }),
   setGroupBy: (groupBy) => set({ groupBy }),
   setSheet: (sheet) => set({ sheet, sheetPrefill: null }),

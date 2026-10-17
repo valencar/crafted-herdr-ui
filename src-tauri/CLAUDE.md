@@ -15,7 +15,8 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 | `actions.rs`, `commands.rs` | argv builders (pure) plus `#[tauri::command]` wrappers |
 | `terminal/` | `attach_argv`, `shell_quote`, one launcher per terminal app |
 | `ssh_config.rs`, `machine_setup.rs` | Host alias parsing; pty-driven `machine add` |
-| `settings.rs`, `notify.rs`, `tray.rs` | store-backed settings, notifications, tray/popover |
+| `settings.rs` | `Settings` (merge + validation), the `settings.json` store, herdr re-resolution (`HerdrLocator`) |
+| `notify.rs`, `tray.rs` | notifications from `Transition`s; tray, badge, popover and Settings windows, global shortcut |
 
 ## Rules
 
@@ -24,7 +25,9 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 - **Mutations never retry automatically.** A timeout becomes `ActionError::MaybeApplied` and triggers `Poller::refresh_now`.
 - **Quoting:** any user- or herdr-derived string that reaches a shell or AppleScript goes through `shell_quote` / AppleScript escaping. Test it with hostile strings (`' " $ \` ; |`, unicode).
 - **No `unwrap()`/`expect()` outside tests and startup wiring.** Return typed errors.
-- **Spawning:** use `tokio::process::Command` with `kill_on_drop(true)`, an explicit env (from `forwarded_env`), and a timeout from the constants (`T_DEFAULT` 10 s, `T_CREATE` 30 s, `T_AGENT_START` 45 s, `T_PROMPT` 30 s).
+- **Spawning:** use `tokio::process::Command` with `kill_on_drop(true)`, an explicit env (from `forwarded_env`), and a timeout from the constants (`T_DEFAULT` 10 s, `T_CREATE` 30 s, `T_AGENT_START` 45 s, `T_PROMPT` 30 s). The one exception is the Custom terminal template (`LaunchSpec::detached`): it may stay in the foreground, so it is started without a wait or a kill.
+- **The poller's `emit` runs under its core lock.** Anything that reacts to the state (tray badge, notifications) reads the `watch` channel that `emit` fills, on its own task. Never call `Poller` methods or `get_state` from inside `emit`.
+- **Settings** are read at the moment of use (`SharedSettings::get`), so a change applies to the next open without a restart. Only intervals, the herdr path and the global shortcut need work when they change (`settings::changes`).
 - **Types shared with the UI** derive `TS` with `#[ts(export, export_to = "../../src/lib/bindings/")]`. Run `cargo test` to regenerate them, and commit the bindings.
 - **Testability:** keep logic pure (argv builders, classifiers, parsers, `next_delay`) and inject side effects (`emit` callbacks, `exists` predicates), so tests don't need a Tauri runtime.
 
