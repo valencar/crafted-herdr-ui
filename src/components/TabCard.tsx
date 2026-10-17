@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Tab } from "../lib/bindings/Tab";
+import { plural } from "../lib/format";
 
 type Props = {
   tab: Tab;
@@ -24,7 +25,7 @@ export function TabCard({
         <span className="tab-card-name">{tab.label}</span>
         <span className="mono muted tab-card-id">{tab.tab_id}</span>
         <span className="muted tab-card-count">
-          {paneCount} {paneCount === 1 ? "session" : "sessions"}
+          {plural(paneCount, "session", "sessions")}
         </span>
       </div>
       <div className="tab-card-panes">{children}</div>

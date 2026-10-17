@@ -5,7 +5,7 @@ import { Sheet } from "../components/Sheet";
 import type { ActionError } from "../lib/bindings/ActionError";
 import type { NewSessionRequest } from "../lib/bindings/NewSessionRequest";
 import type { Placement } from "../lib/bindings/Placement";
-import { actionErrorMessage } from "../lib/format";
+import { actionErrorMessage, plural } from "../lib/format";
 import { toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
@@ -348,7 +348,7 @@ export function NewSession({ terminalName }: Props) {
               const agents = m.snapshot?.agents.length ?? 0;
               const meta =
                 m.health.kind === "online"
-                  ? `${agents} ${agents === 1 ? "agent" : "agents"}`
+                  ? plural(agents, "agent", "agents")
                   : "not reachable";
               return (
                 <label key={m.id} className="opt" data-on={m.id === machineId}>

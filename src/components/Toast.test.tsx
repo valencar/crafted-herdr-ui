@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
-import { Toast } from "./Toast";
+import { useAppStore } from "../store/appStore";
+import { StoreToast, Toast } from "./Toast";
 
 it("shows_the_message_as_an_alert_and_dismisses_on_click", async () => {
   const onDismiss = vi.fn();
@@ -22,4 +23,14 @@ it("an info toast is a polite status, not an alert", () => {
   render(<Toast message="Added buildbox" tone="info" onDismiss={() => {}} />);
   expect(screen.getByRole("status")).toHaveTextContent("Added buildbox");
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("the store toast shows the app store message and clears it on dismiss", async () => {
+  useAppStore.setState({ toast: null, toastTone: "error" });
+  render(<StoreToast />);
+  expect(screen.queryByRole("alert")).toBeNull();
+  act(() => useAppStore.getState().showToast("Added buildbox", "info"));
+  expect(screen.getByRole("status")).toHaveTextContent("Added buildbox");
+  await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+  expect(useAppStore.getState().toast).toBeNull();
 });

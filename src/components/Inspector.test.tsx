@@ -88,7 +88,7 @@ describe("Inspector details", () => {
     expect(screen.getByRole("heading", { name: "planner" })).toBeVisible();
     expect(screen.getByText("api-service on buildbox")).toBeInTheDocument();
     const grid = screen.getByRole("group", { name: "Details" });
-    expect(grid).toHaveTextContent("Workboxbuildbox · online");
+    expect(grid).toHaveTextContent("Workboxbuildbox · Online");
     expect(grid).toHaveTextContent("Sessiondefault");
     expect(grid).toHaveTextContent("Folder~/projects/api-service");
     expect(grid).toHaveTextContent("Workspace / tabapi-service · main");

@@ -8,13 +8,14 @@ import { NeedsYouCard } from "../components/NeedsYouCard";
 import { ProjectGroup } from "../components/ProjectGroup";
 import { ReconnectBox } from "../components/ReconnectBox";
 import { Sidebar } from "../components/Sidebar";
-import { Toast } from "../components/Toast";
+import { StoreToast } from "../components/Toast";
 import type { MachineView } from "../lib/bindings/MachineView";
 import {
   formatStaleness,
   isPending,
   isSupportedVersion,
   lastLines,
+  plural,
 } from "../lib/format";
 import {
   groupByProject,
@@ -27,7 +28,7 @@ import {
   type Row,
 } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { markSeen, openRow } from "../lib/openRow";
+import { markSeen, openRow, useOpenWhenListed } from "../lib/openRow";
 import {
   focusRowButton,
   isEditable,
@@ -77,22 +78,17 @@ export function Home() {
   const setSheet = useAppStore((s) => s.setSheet);
   const setView = useAppStore((s) => s.setView);
   const openNewSession = useAppStore((s) => s.openNewSession);
-  const toast = useAppStore((s) => s.toast);
-  const toastTone = useAppStore((s) => s.toastTone);
   // Only the selected row's text: another row's frame must not re-render Home.
   const previewText = useAppStore((s) =>
     s.preview && s.preview.key === s.selectedKey ? s.preview.text : null,
   );
   const report = useAppStore((s) => s.reportError);
-  const dismissToast = useAppStore((s) => s.clearToast);
   const dismissedVersion = useAppStore((s) => s.dismissedVersion);
   const dismissVersionBanner = useAppStore((s) => s.dismissVersionBanner);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
-  const pendingOpen = useAppStore((s) => s.pendingOpen);
-  const setPendingOpen = useAppStore((s) => s.setPendingOpen);
 
   const nowMs = useNow(30_000);
   const [query, setQuery] = useState("");
@@ -116,29 +112,15 @@ export function Home() {
     }
   }, [state, rows, selectedKey, select]);
 
-  // A session was just created: select it and open it once the next poll lists its row.
-  // (`open_session` reads the pane from the state, so it can't run before then.)
+  // A session was just created: select it once the next poll lists its row.
   useEffect(() => {
     if (pendingSelectKey && rows.some((r) => r.key === pendingSelectKey)) {
       select(pendingSelectKey);
       setPendingSelectKey(null);
     }
-    if (pendingOpen && rows.some((r) => r.key === pendingOpen.key)) {
-      setPendingOpen(null);
-      invokeTyped("open_session", {
-        machineId: pendingOpen.machineId,
-        paneId: pendingOpen.paneId,
-      }).catch(report);
-    }
-  }, [
-    pendingSelectKey,
-    pendingOpen,
-    rows,
-    select,
-    setPendingSelectKey,
-    setPendingOpen,
-    report,
-  ]);
+  }, [pendingSelectKey, rows, select, setPendingSelectKey]);
+  const rowKeys = useMemo(() => new Set(rows.map((r) => r.key)), [rows]);
+  useOpenWhenListed(rowKeys);
 
   // No search: `visible` is `rows` itself, so the project groups built for the sidebar are
   // the ones to show.
@@ -382,7 +364,7 @@ export function Home() {
                   <span className="muted">
                     {needs.length === 0
                       ? "All clear"
-                      : `${needs.length} ${needs.length === 1 ? "agent" : "agents"} waiting across ${needsMachines} ${needsMachines === 1 ? "workbox" : "workboxes"}`}
+                      : `${plural(needs.length, "agent", "agents")} waiting across ${plural(needsMachines, "workbox", "workboxes")}`}
                   </span>
                 </div>
                 {needs.length > 0 && (
@@ -496,9 +478,7 @@ export function Home() {
         <CloseConfirm row={closingRow} onDone={() => setClosingKey(null)} />
       )}
       {sheet === "new-session" && <NewSession terminalName={terminalName} />}
-      {toast && (
-        <Toast message={toast} tone={toastTone} onDismiss={dismissToast} />
-      )}
+      <StoreToast />
     </div>
   );
 }

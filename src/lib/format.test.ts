@@ -13,6 +13,7 @@ import {
   formatDuration,
   formatStaleness,
   isSupportedVersion,
+  plural,
   parseVersion,
   shellJoin,
   shellQuote,
@@ -255,5 +256,13 @@ describe("isQuietRead", () => {
     expect(
       isQuietRead(entry(["api", "snapshot"], { error: "timed out" })),
     ).toBe(false);
+  });
+});
+
+describe("plural", () => {
+  it("counts_with_the_singular_only_for_exactly_one", () => {
+    expect(plural(0, "agent", "agents")).toBe("0 agents");
+    expect(plural(1, "agent", "agents")).toBe("1 agent");
+    expect(plural(2, "workbox", "workboxes")).toBe("2 workboxes");
   });
 });

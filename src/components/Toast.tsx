@@ -1,4 +1,4 @@
-import type { ToastTone } from "../store/appStore";
+import { useAppStore, type ToastTone } from "../store/appStore";
 
 /**
  * A minimal toast: the message, and a Dismiss button. An error is an alert; an info toast
@@ -25,4 +25,14 @@ export function Toast({
       </button>
     </div>
   );
+}
+
+/** The app store's toast, when there is one. Every screen mounts this once. */
+export function StoreToast() {
+  const toast = useAppStore((s) => s.toast);
+  const tone = useAppStore((s) => s.toastTone);
+  const dismiss = useAppStore((s) => s.clearToast);
+  return toast ? (
+    <Toast message={toast} tone={tone} onDismiss={dismiss} />
+  ) : null;
 }

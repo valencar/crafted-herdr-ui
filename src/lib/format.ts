@@ -180,3 +180,16 @@ export function isQuietRead(entry: CommandLogEntry): boolean {
   const [first, second] = entry.argv;
   return (first === "api" && second === "snapshot") || second === "read";
 }
+
+/** The workbox health words shown next to a machine's dot (never color alone). */
+export const HEALTH_LABEL: Record<Health["kind"], string> = {
+  online: "Online",
+  reconnecting: "Reconnecting",
+  attention: "Attention",
+  disabled: "Disabled",
+};
+
+/** "1 agent", "2 agents". */
+export function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}

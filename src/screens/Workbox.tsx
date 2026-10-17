@@ -4,15 +4,15 @@ import { NameSheet } from "../components/NameSheet";
 import { PaneBox } from "../components/PaneBox";
 import { Sidebar } from "../components/Sidebar";
 import { TabCard } from "../components/TabCard";
-import { Toast } from "../components/Toast";
+import { StoreToast } from "../components/Toast";
 import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
 import type { Pane } from "../lib/bindings/Pane";
 import type { Tab } from "../lib/bindings/Tab";
 import type { Workspace } from "../lib/bindings/Workspace";
-import { shortPath } from "../lib/format";
+import { plural, shortPath } from "../lib/format";
 import { groupByProject, isNeedsYou, needsYou, toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
-import { openRow } from "../lib/openRow";
+import { openRow, useOpenWhenListed } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
 import {
   isEditable,
@@ -58,18 +58,13 @@ function workspaceFolder(panes: Pane[], workspaceId: string): string | null {
 export function Workbox({ machineId }: { machineId: string }) {
   const state = useAppStore((s) => s.state);
   const sheet = useAppStore((s) => s.sheet);
-  const toast = useAppStore((s) => s.toast);
-  const toastTone = useAppStore((s) => s.toastTone);
   const setView = useAppStore((s) => s.setView);
   const setSheet = useAppStore((s) => s.setSheet);
   const setGroupBy = useAppStore((s) => s.setGroupBy);
   const openNewSession = useAppStore((s) => s.openNewSession);
   const report = useAppStore((s) => s.reportError);
-  const dismissToast = useAppStore((s) => s.clearToast);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
-  const pendingOpen = useAppStore((s) => s.pendingOpen);
-  const setPendingOpen = useAppStore((s) => s.setPendingOpen);
 
   const nowMs = useNow(30_000);
   const { current: terminal } = useTerminals();
@@ -100,20 +95,8 @@ export function Workbox({ machineId }: { machineId: string }) {
   );
   const tails = usePaneTails(machineId, targets);
 
-  // A session was just created with "Open when ready": open it once its row is listed.
-  useEffect(() => {
-    if (
-      pendingOpen &&
-      pendingOpen.machineId === machineId &&
-      rowByPane.has(pendingOpen.paneId)
-    ) {
-      setPendingOpen(null);
-      invokeTyped("open_session", {
-        machineId: pendingOpen.machineId,
-        paneId: pendingOpen.paneId,
-      }).catch(report);
-    }
-  }, [pendingOpen, rowByPane, machineId, setPendingOpen, report]);
+  const rowKeys = useMemo(() => new Set(rows.map((r) => r.key)), [rows]);
+  useOpenWhenListed(rowKeys);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -522,7 +505,7 @@ export function Workbox({ machineId }: { machineId: string }) {
       {dialog?.kind === "close-workspace" && (
         <ConfirmDialog
           title={`Close workspace ${dialog.workspace.label}?`}
-          body={`This closes workspace ${dialog.workspace.workspace_id} on ${label}, with its ${dialog.workspace.tab_count} ${dialog.workspace.tab_count === 1 ? "tab" : "tabs"} and ${dialog.workspace.pane_count} ${dialog.workspace.pane_count === 1 ? "session" : "sessions"}, and ends whatever is running in them.`}
+          body={`This closes workspace ${dialog.workspace.workspace_id} on ${label}, with its ${plural(dialog.workspace.tab_count, "tab", "tabs")} and ${plural(dialog.workspace.pane_count, "session", "sessions")}, and ends whatever is running in them.`}
           confirmLabel="Close workspace"
           onConfirm={() => {
             const { workspace } = dialog;
@@ -560,7 +543,7 @@ export function Workbox({ machineId }: { machineId: string }) {
       {dialog?.kind === "close-tab" && (
         <ConfirmDialog
           title={`Close tab ${dialog.tab.label}?`}
-          body={`This closes tab ${dialog.tab.tab_id} on ${label} and ends whatever is running in its ${dialog.tab.pane_count} ${dialog.tab.pane_count === 1 ? "session" : "sessions"}.`}
+          body={`This closes tab ${dialog.tab.tab_id} on ${label} and ends whatever is running in its ${plural(dialog.tab.pane_count, "session", "sessions")}.`}
           confirmLabel="Close tab"
           onConfirm={() => {
             const { tab } = dialog;
@@ -574,9 +557,7 @@ export function Workbox({ machineId }: { machineId: string }) {
       {sheet === "new-session" && (
         <NewSession terminalName={terminalLabel(terminal)} />
       )}
-      {toast && (
-        <Toast message={toast} tone={toastTone} onDismiss={dismissToast} />
-      )}
+      <StoreToast />
     </div>
   );
 }

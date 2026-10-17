@@ -5,6 +5,7 @@ import {
   formatClock,
   formatDuration,
   isQuietRead,
+  plural,
   shellJoin,
 } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
@@ -140,7 +141,7 @@ export function ActivityDrawer({ machines, onClose }: Props) {
       <p className="muted activity-sub">
         Every herdr command the app ran, newest first.
         {hidden > 0 &&
-          ` ${hidden} successful ${hidden === 1 ? "read" : "reads"} hidden.`}
+          ` ${plural(hidden, "successful read", "successful reads")} hidden.`}
       </p>
       {unreadable && (
         <p className="field-error" role="status">

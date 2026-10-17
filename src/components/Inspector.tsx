@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { shortPath } from "../lib/format";
+import { HEALTH_LABEL, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { markSeen, openRow } from "../lib/openRow";
@@ -15,13 +15,6 @@ const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const AGENT_NAME_HELP =
   "Use lowercase letters, digits, - or _, starting with a letter (32 characters at most).";
 const COPIED_MS = 1500;
-
-const HEALTH_LABEL = {
-  online: "online",
-  reconnecting: "reconnecting",
-  attention: "needs attention",
-  disabled: "disabled",
-} as const;
 
 /** Mirrors Rust's `validate_name`; Rust still has the last word. */
 function nameProblem(name: string, isAgent: boolean): string | null {
