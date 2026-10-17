@@ -17,8 +17,13 @@ type Props = {
   onClose: () => void;
 };
 
-/** A line that can be pasted into a terminal: `herdr [--machine <id>] <argv>`. */
-function runnable(entry: CommandLogEntry): string {
+/**
+ * A line that can be pasted into a terminal: `herdr [--machine <id>] <argv>`. A remote launch
+ * has none, because `--machine` doesn't forward attach or `--remote`; the Inspector's command
+ * box offers the real command for those.
+ */
+function runnable(entry: CommandLogEntry): string | null {
+  if (entry.note !== null && entry.machine !== null) return null;
   // Local runs without the flag (older log entries may still say "local").
   const machine =
     entry.machine && entry.machine !== "local"
@@ -147,7 +152,10 @@ export function ActivityDrawer({ machines, onClose }: Props) {
       )}
       <ul className="activity-list">
         {keyed.map(({ entry, key }) => {
-          const failed = entry.exitCode !== 0 || entry.error !== null;
+          const failed =
+            entry.error !== null ||
+            (entry.exitCode !== null && entry.exitCode !== 0);
+          const line = runnable(entry);
           return (
             <li key={key} className="activity-row" data-failed={failed}>
               <span className="mono activity-time">
@@ -158,15 +166,20 @@ export function ActivityDrawer({ machines, onClose }: Props) {
               </span>
               <code className="activity-cmd">{shellJoin(entry.argv)}</code>
               <span className="mono activity-exit">
-                {entry.exitCode === null ? "no exit" : `exit ${entry.exitCode}`}
+                {entry.note ??
+                  (entry.exitCode === null
+                    ? "no exit"
+                    : `exit ${entry.exitCode}`)}
               </span>
               <span className="mono muted activity-duration">
                 {formatDuration(entry.durationMs)}
               </span>
-              <CopyButton
-                text={runnable(entry)}
-                label={`Copy command: ${shellJoin(entry.argv)}`}
-              />
+              {line !== null && (
+                <CopyButton
+                  text={line}
+                  label={`Copy command: ${shellJoin(entry.argv)}`}
+                />
+              )}
               {entry.error && (
                 <p className="field-error activity-error">{entry.error}</p>
               )}

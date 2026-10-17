@@ -25,6 +25,7 @@ function entry(over: Partial<CommandLogEntry>): CommandLogEntry {
     exitCode: 0,
     durationMs: 12,
     error: null,
+    note: null,
     ...over,
   };
 }
@@ -151,6 +152,54 @@ describe("ActivityDrawer", () => {
       });
       expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(line);
     }
+  });
+
+  it("shows_a_terminal_launch_as_a_note_not_a_failure", async () => {
+    log = [
+      entry({
+        machine: "m-1",
+        argv: ["terminal", "attach", "t1"],
+        exitCode: null,
+        note: "opened in Ghostty",
+      }),
+    ];
+    await open();
+    const row = rows()[0];
+    expect(row).toHaveAttribute("data-failed", "false");
+    expect(within(row).getByText("opened in Ghostty")).toBeInTheDocument();
+    expect(within(row).queryByText("no exit")).not.toBeInTheDocument();
+    // `--machine` doesn't forward attach, so a remote launch has no line to copy.
+    expect(within(row).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("keeps_copy_on_a_local_terminal_launch", async () => {
+    log = [
+      entry({
+        machine: null,
+        argv: ["terminal", "attach", "t1"],
+        exitCode: null,
+        note: "opened in Ghostty",
+      }),
+    ];
+    const user = await open();
+    const row = rows()[0];
+    expect(row).toHaveAttribute("data-failed", "false");
+    await user.click(within(row).getByRole("button", { name: /^Copy/ }));
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
+      "herdr terminal attach t1",
+    );
+  });
+
+  it("still_marks_a_call_without_an_exit_code_but_with_an_error_as_failed", async () => {
+    log = [
+      entry({
+        exitCode: null,
+        error: "timed out",
+        argv: ["pane", "close", "x"],
+      }),
+    ];
+    await open();
+    expect(rows()[0]).toHaveAttribute("data-failed", "true");
   });
 
   it("waits_for_a_slow_read_instead_of_starting_another", async () => {

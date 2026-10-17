@@ -210,6 +210,7 @@ describe("isQuietRead", () => {
     exitCode: 0,
     durationMs: 5,
     error: null,
+    note: null,
     ...over,
   });
 

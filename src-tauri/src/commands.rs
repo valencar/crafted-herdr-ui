@@ -403,12 +403,11 @@ async fn launch_in_terminal(
         .map_err(|message| ActionError::Herdr {
             error: HerdrError::Spawn { message },
         })?;
-    cli.record(
+    cli.record_launch(
         log.machine,
         log.args,
         started,
-        None,
-        Some(opened_in(chosen_terminal(&settings, &installed))),
+        opened_in(chosen_terminal(&settings, &installed)),
     );
     Ok(())
 }
