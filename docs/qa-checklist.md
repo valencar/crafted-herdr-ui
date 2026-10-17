@@ -173,11 +173,6 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] Toggle a notification setting within 2 s of launching the app: it saves at once, instead of waiting for herdr to be located. A herdr path saved in that window is picked up too (Settings › herdr CLI shows the saved path as found).
 - [ ] With Settings (or the menu-bar popover) open and the main window hidden or behind it, click the Dock icon: the main window comes to the front.
 
-## Task 3
-
-- [ ] Window size and position persist across quit and relaunch.
-- [ ] Quitting with open terminal tabs leaves every herdr pane running (check `herdr pane list`).
-
 ## v0.2
 
 - [ ] ⌘W with no tab open does nothing; the red button still hides the window.
@@ -205,3 +200,6 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] ⌘J cycles through the agents that need you (blocked first), selects each on Home and opens it in the terminal panel; with nobody waiting it shows "Nobody needs you right now."
 - [ ] ⌘\ moves the terminal panel between the bottom and the right edge (and shows it if hidden), and the choice survives a relaunch.
 - [ ] ⌘B collapses the sidebar to a 56 px rail (workbox initials with health dots, tooltips naming each workbox and its health) and back, on Home and on the Workbox screen; the rail's expand button works.
+- [ ] Window size and position persist across quit and relaunch.
+- [ ] Quitting with open terminal tabs leaves every herdr pane running (check `herdr pane list`).
+- [ ] ⌘C/⌘V copy and paste work inside a terminal tab.

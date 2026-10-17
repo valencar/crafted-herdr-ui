@@ -15,6 +15,7 @@ The UI renders `AppState` pushed from Rust (`"state"` event) and calls typed Tau
 | `lib/nextNeedsYou.ts` | `nextNeedsYou(rows, currentKey)`: the next row in `needsYou` order after the selected one, wrapping round (⌘J) |
 | `lib/fuzzy.ts`, `lib/palette.ts` | `fuzzyScore`, and the ⌘K palette's `buildItems` / `rankItems` (pure); `components/CommandPalette.tsx` is the dialog (on `.scrim`, `useModalOpen`) |
 | `lib/grouping.ts`, `lib/format.ts` | `toRows`, `needsYou`, `groupByProject/Workbox/Status`, `displayName`, `formatAge`, `shortPath` |
+| `terminal/` | the in-app terminal: `terminalStore` (Zustand: tabs, active tab, panel open), `useTermSession` (the Rust session over a `Channel`: write, resize, close, the detached state), `TerminalView` (one xterm instance per tab, kept mounted while hidden), `TerminalPanel` (tab strip, resize handle, find bar), `xtermTheme` (reads the `--ansi-*` and other tokens) |
 | `store/appStore.ts` | Zustand: state, `selectedKey`, `groupBy`, sheet, view, `activityOpen` |
 | `components/` | presentational pieces (StatusPill, AgentRow, Inspector, ConfirmDialog, EmptyState, ActivityDrawer, …). Pieces split out of the big screens: `HomeNotices` (the version banner and the Local-down card on Home), `WorkboxDialogs` (the dialogs on the Workbox screen), `SessionPicker` and `SetupChecklist` (Add workbox), `StoreToast` in `Toast.tsx` (the store's toast, mounted by every screen that reports errors) |
 | `screens/` | Home, Workbox, NewSession, AddWorkbox, Settings, MenuBar, Onboarding. Settings and MenuBar are their own windows (`settings.html`, `popover.html`, entries `settings.tsx`, `popover.tsx`) |
@@ -26,6 +27,8 @@ The UI renders `AppState` pushed from Rust (`"state"` event) and calls typed Tau
 - **Status is never color-only.** Every status shows its text label too: "Needs input", "Done, unseen", "Working", "Idle", "Unknown", "Shell".
 - **Colors and sizes come from `tokens.css` variables.** No hex literals in components.
 - **The one URL:** the app opens `https://herdr.dev` (Onboarding) through `plugin-opener`; the main window's capability allows that URL and no other. No other link, fetch or `<a href>` to the web.
+- **Keys typed in `.terminal-panel` belong to the terminal.** Home's list shortcuts and every other key handler skip an event whose target is inside it (`isInTerminal` in `lib/uiHelpers.ts`); only the native menu's accelerators act there. The terminal never takes focus while a sheet or dialog is open.
+- **Links in a terminal are copy-only.** ⌘-click copies the URL and shows "Link copied"; xterm's web-links addon never opens one. No terminal text becomes a command: `term_write` carries only keystrokes and pastes.
 - **Fonts:** Geist and Geist Mono are bundled under `fonts/`. No network font loading, and no network calls at all.
 - **Accessibility:**
   - real `<button>`, `<a>` and `<input>`/`<label>`, with a visible focus ring;

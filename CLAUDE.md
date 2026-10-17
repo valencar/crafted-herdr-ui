@@ -37,6 +37,7 @@ scripts/check-no-personal-data.sh
 - Errors: stderr JSON `{error:{code,message}}` with exit 1; usage errors exit 2.
 - Attach: `herdr terminal attach <terminal_id>` locally. For remote machines, `ssh -t <target> …`, because `--machine` doesn't forward attach. A non-default session needs `HERDR_SESSION=<name>`.
 - Snapshots carry no timestamps; the app records the times it observes changes itself.
+- The in-app terminal is just another attach client: a tab runs exactly the argv `open_argv` builds (the same command "Open in {Terminal}" runs) on a pty, and closing a tab ends only that client, never the herdr pane.
 
 ## Build orchestration (how this repo is being built)
 

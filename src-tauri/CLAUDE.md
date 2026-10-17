@@ -13,10 +13,11 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 | `activity.rs` | `ActivityTracker`: observed status-change times persisted to `activity.json` |
 | `state.rs`, `poller.rs` | `AppState`/`MachineView`/`Health`, per-machine polling, `"state"` event, `Transition` broadcast |
 | `actions.rs`, `commands.rs` | argv builders (pure) plus `#[tauri::command]` wrappers (`commands.rs` holds only the wrappers and their small helpers) |
-| `terminal/` | `attach_argv`, `shell_quote`, one launcher per terminal app; `open.rs` is what "Open" runs (attach or full UI, the launch spec, the command-log entry) and takes the home dir, so it knows nothing of Tauri |
+| `terminal/` | `attach_argv`, `shell_quote`, one launcher per terminal app; `open.rs` is what "Open" runs (attach or full UI, the launch spec, the command-log entry) and takes the home dir, so it knows nothing of Tauri; `session.rs` is `TermSessions`: the in-app terminal's open sessions (writer, `PtyControl`, a reader thread that decodes UTF-8 incrementally and pushes `TermEvent::Data`/`Exit` to a sink) |
 | `preview.rs` | `PreviewManager` (the live preview, emitting only changed frames), `PreviewFrame`, the one-line pane read |
 | `ssh_config.rs`, `machine_setup/` | Host alias parsing; pty-driven `machine add` (`transcript.rs` is the pure prompt/step parser and `SetupRun`; `mod.rs` the thread driver over `pty.rs`) |
 | `pty.rs` | the shared pseudo-terminal spawner: `TermSize`, `PtySpawner`/`PortablePty` (spawns at a size), `PtyControl` (kill, wait, try_wait, resize), `SpawnedPty`; used by `machine_setup/` and the in-app terminal |
+| `menu.rs` | the native app menu: `MenuId`, the `items()` table (id, label, accelerator), the `build` of the App, Edit, View, Terminal and Window menus, and `on_event`, which forwards a chosen item to the main window as a `"menu"` event |
 | `settings.rs` | `Settings` (merge + validation), the `settings.json` store, herdr re-resolution (`HerdrLocator`) |
 | `notify.rs`, `tray.rs` | notifications from `Transition`s; tray, badge, popover and Settings windows, global shortcut |
 
@@ -27,6 +28,7 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 - **Mutations never retry automatically.** A timeout becomes `ActionError::MaybeApplied` and triggers `Poller::refresh_now`.
 - **Quoting:** any user- or herdr-derived string that reaches a shell or AppleScript goes through `shell_quote` / AppleScript escaping. Test it with hostile strings (`' " $ \` ; |`, unicode).
 - **No `unwrap()`/`expect()` outside tests and startup wiring.** Return typed errors.
+- **Terminal sessions run only `open_argv` output.** `term_open` takes a target (a pane or a full-UI machine), never a command line; Rust builds the argv with `open_argv` and spawns it on a pty with the captured env plus `TERM=xterm-256color` and `COLORTERM=truecolor`. `term_write` carries only keystrokes and pastes. `term_close` kills only the attach client, never a herdr pane; all sessions are killed when the app exits. `TermSessions` allows at most 16 sessions (`MAX_SESSIONS`) and answers the 17th with "Close a terminal tab first (16 open)."
 - **Spawning:** use `tokio::process::Command` with `kill_on_drop(true)`, an explicit env (from `forwarded_env`), and a timeout from the constants (`T_DEFAULT` 10 s, `T_CREATE` 30 s, `T_AGENT_START` 45 s, `T_PROMPT` 30 s). The one exception is the Custom terminal template (`LaunchSpec::detached`): it may stay in the foreground, so it is started without a wait or a kill.
 - **The poller's `emit` runs under its core lock.** Anything that reacts to the state (tray badge, notifications) reads the `watch` channel that `emit` fills, on its own task. Never call `Poller` methods or `get_state` from inside `emit`.
 - **Settings** are read at the moment of use (`SharedSettings::get`), so a change applies to the next open without a restart. Only intervals, the herdr path and the global shortcut need work when they change (`settings::changes`).
