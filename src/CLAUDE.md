@@ -9,9 +9,11 @@ The UI renders `AppState` pushed from Rust (`"state"` event) and calls typed Tau
 | `lib/bindings/` | ts-rs generated types. Never edit by hand. |
 | `lib/ipc.ts` | the only place that calls `invoke`/`listen`: `onState`, `onSettings`, `onFocusRow`, `invokeTyped`, and the `CommandName` union |
 | `lib/useSync.ts` | `useStateSync` / `useSettingsSync`: every window (main, popover, Settings) keeps its own store current |
+| `lib/openRow.ts` | `openRow` (Open, and mark a "done" agent seen after it opened), `markSeen`, `useOpenWhenListed` (opens a row once it shows up in the list) |
+| `lib/useHomeShortcuts.ts` | Home's keyboard shortcuts: ⌘K, ⌘N, ⌘R, ⌘↩, the arrow keys, Delete |
 | `lib/grouping.ts`, `lib/format.ts` | `toRows`, `needsYou`, `groupByProject/Workbox/Status`, `displayName`, `formatAge`, `shortPath` |
 | `store/appStore.ts` | Zustand: state, `selectedKey`, `groupBy`, sheet, view, `activityOpen` |
-| `components/` | presentational pieces (StatusPill, AgentRow, Inspector, ConfirmDialog, EmptyState, ActivityDrawer, …) |
+| `components/` | presentational pieces (StatusPill, AgentRow, Inspector, ConfirmDialog, EmptyState, ActivityDrawer, …). Pieces split out of the big screens: `HomeNotices` (the version banner and the Local-down card on Home), `WorkboxDialogs` (the dialogs on the Workbox screen), `SessionPicker` and `SetupChecklist` (Add workbox), `StoreToast` in `Toast.tsx` (the store's toast, mounted by every screen that reports errors) |
 | `screens/` | Home, Workbox, NewSession, AddWorkbox, Settings, MenuBar, Onboarding. Settings and MenuBar are their own windows (`settings.html`, `popover.html`, entries `settings.tsx`, `popover.tsx`) |
 | `styles/tokens.css` | design tokens as CSS variables (spec §9) |
 

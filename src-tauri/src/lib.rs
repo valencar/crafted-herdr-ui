@@ -34,6 +34,9 @@ use tray::{MAIN_WINDOW, POPOVER_WINDOW, PopoverGuard};
 
 const FALLBACK_SHELL: &str = "/bin/zsh";
 
+/// Machine id that means "this computer": no `--machine` flag.
+pub(crate) const LOCAL: &str = "local";
+
 /// Locks, recovering the data if another thread panicked while holding the lock.
 pub(crate) fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -183,6 +186,7 @@ async fn log_startup_status(cli: &HerdrCli, bin: PathBuf) {
         answered
             .is_none()
             .then(|| "herdr status did not answer".to_owned()),
+        None,
     );
 }
 

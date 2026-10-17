@@ -27,7 +27,10 @@ export function Toast({
   );
 }
 
-/** The app store's toast, when there is one. Each window mounts this once. */
+/**
+ * The app store's toast, when there is one. Every screen that reports errors as a toast mounts
+ * it: Home, Workbox, Settings and the menu-bar popover. Onboarding shows its errors inline.
+ */
 export function StoreToast() {
   const toast = useAppStore((s) => s.toast);
   const tone = useAppStore((s) => s.toastTone);

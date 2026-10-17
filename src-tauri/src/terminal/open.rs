@@ -169,10 +169,9 @@ pub(crate) async fn open_full(
     settings: &SharedSettings,
     machine_id: &str,
 ) -> Result<(), ActionError> {
-    let machine = find_machine(state, machine_id)?;
-    check_openable(machine).map_err(ActionError::invalid)?;
     // Remote machines too: `herdr --remote` is the local client.
-    let argv = full_ui_argv(machine, &local_bin(cli)?);
+    let argv = open_argv(state, cli, AttachMode::FullUi, machine_id, "")?;
+    let machine = find_machine(state, machine_id)?;
     let log = LaunchLog {
         machine: Some(machine_id),
         args: argv[1..].to_vec(),

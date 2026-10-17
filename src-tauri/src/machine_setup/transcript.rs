@@ -1,6 +1,20 @@
 //! The pure side of the setup run: the prompts and steps recognized in `herdr machine add`'s
 //! output, the escape-sequence cleanup, and `SetupRun`, the state of one run. Nothing here starts
 //! a process or touches a thread, so the patterns are tested against recorded transcripts.
+//!
+//! Where the patterns come from (herdr v0.9.4, github.com/herdrdev/herdr, read-only checkout
+//! at that tag):
+//! - `src/cli/machine.rs`: `add` (the "Saved SSH machine <id>. Remote server is ready." line,
+//!   the "machine was not saved" errors) and `select_remote_session` / `render_remote_session_picker`
+//!   (the "Running sessions on <target>:" picker; Up/Down + Enter in raw mode, only when no
+//!   `--remote-session` is given and 2 or more sessions run).
+//! - `src/remote/attach.rs`: `confirm_remote_install` ("... Install <source> to <path>? [Y/n] "),
+//!   `confirm_remote_install_with_running_server` ("Install <v> and stop the remote server now?
+//!   [y/N] ", "continue installing the remote herdr binary? [y/N] "), `confirm_remote_server_stop`
+//!   ("stop and update the remote server, then continue attaching? [y/N] ", "restart the remote
+//!   server now? [y/N] "), `read_remote_confirmation` (a line: `y`/`yes`/`n`/`no`).
+//! - `tests/machine_setup.rs`: drives the same prompts over a pty with `y\n` / `n\n` and `\x1b[B\r`,
+//!   which are the keystrokes sent here.
 
 use serde::Serialize;
 use ts_rs::TS;

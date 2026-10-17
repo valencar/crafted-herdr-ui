@@ -9,6 +9,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
+use crate::LOCAL;
 use crate::actions::{self, ActionError, Actions, CreatedSession, NewSessionRequest};
 use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
 use crate::herdr::cli::{CommandLogEntry, HerdrCli, T_DEFAULT};
@@ -30,7 +31,6 @@ use crate::terminal::{
 };
 use crate::tray;
 
-const LOCAL: &str = "local";
 const HELP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The agent kinds read from `herdr agent start --help`, kept after the first successful read.
@@ -387,7 +387,14 @@ pub fn start_machine_add(
         } else {
             None
         };
-        log_cli.record(None, logged.clone(), started_ms, Some(exit.code), error);
+        log_cli.record(
+            None,
+            logged.clone(),
+            started_ms,
+            Some(exit.code),
+            error,
+            None,
+        );
     });
     let emit: Emit = Arc::new(move |event| {
         if matches!(event, SetupEvent::Finished { ok: true }) {

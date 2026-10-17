@@ -9,7 +9,11 @@ import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
 import type { TerminalId } from "../lib/bindings/TerminalId";
 import type { TerminalList } from "../lib/bindings/TerminalList";
-import { TERMINAL_LABEL, actionErrorMessage } from "../lib/format";
+import {
+  HEALTH_LABEL,
+  TERMINAL_LABEL,
+  actionErrorMessage,
+} from "../lib/format";
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
 
@@ -441,7 +445,7 @@ function Workboxes() {
               </span>
               <span className="health" data-health={m.health.kind}>
                 <span className="dot" aria-hidden="true" />
-                {m.health.kind[0].toUpperCase() + m.health.kind.slice(1)}
+                {HEALTH_LABEL[m.health.kind]}
               </span>
               <input
                 type="checkbox"

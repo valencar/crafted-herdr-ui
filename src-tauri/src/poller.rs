@@ -19,13 +19,12 @@ use crate::herdr::cli::{HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{MachineProfile, Snapshot, parse_machine_list, parse_snapshot};
 use crate::state::{AppState, Health, MachineView, PollIntervals, classify_error, next_delay};
-use crate::{lock, now_ms};
+use crate::{LOCAL, lock, now_ms};
 
 /// Receives each new `AppState`. It is called while the poller holds an internal lock (that is
 /// what keeps states in order), so it must not call back into the `Poller`.
 pub type Emit = Arc<dyn Fn(AppState) + Send + Sync>;
 
-const LOCAL: &str = "local";
 const RELOAD_EVERY: Duration = Duration::from_secs(30);
 const SAVE_EVERY: Duration = Duration::from_secs(5);
 const TRANSITION_BUFFER: usize = 64;

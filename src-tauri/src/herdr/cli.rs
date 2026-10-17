@@ -11,15 +11,13 @@ use tokio::sync::Semaphore;
 use ts_rs::TS;
 
 use super::errors::HerdrError;
-use crate::{lock, now_ms};
+use crate::{LOCAL, lock, now_ms};
 
 pub const T_DEFAULT: Duration = Duration::from_secs(10);
 pub const T_CREATE: Duration = Duration::from_secs(30);
 pub const T_AGENT_START: Duration = Duration::from_secs(45);
 pub const T_PROMPT: Duration = Duration::from_secs(30);
 
-/// Machine id that means "this computer": no `--machine` flag.
-const LOCAL: &str = "local";
 const MAX_CONCURRENT_PER_MACHINE: usize = 4;
 const LOG_CAPACITY: usize = 200;
 
@@ -165,21 +163,6 @@ impl HerdrCli {
         result
     }
 
-    /// Adds a call that ran outside `run` (the pty-driven `machine add`) to the command log.
-    /// `machine` is the profile id for a remote machine (`None` for Local or when no single
-    /// machine is meant), `argv` is what follows the herdr binary, and `started_ms` is a Unix
-    /// time in milliseconds.
-    pub fn record(
-        &self,
-        machine: Option<&str>,
-        argv: Vec<String>,
-        started_ms: u64,
-        exit_code: Option<i32>,
-        error: Option<String>,
-    ) {
-        self.push_entry(machine, argv, started_ms, exit_code, error, None);
-    }
-
     /// Adds a command that was handed to the user's terminal. Its outcome is unknown, so the
     /// entry carries `note` (where it went) instead of an exit code or an error. The arguments
     /// are as in `record`.
@@ -190,11 +173,14 @@ impl HerdrCli {
         started_ms: u64,
         note: String,
     ) {
-        self.push_entry(machine, argv, started_ms, None, None, Some(note));
+        self.record(machine, argv, started_ms, None, None, Some(note));
     }
 
-    /// One entry for a call that ran outside `run`: it ended just now, `started_ms` ago.
-    fn push_entry(
+    /// Adds a call that ran outside `run` (the pty-driven `machine add`) to the command log. It
+    /// ended just now, `started_ms` ago. `machine` is the profile id for a remote machine (`None`
+    /// for Local or when no single machine is meant), `argv` is what follows the herdr binary,
+    /// and `started_ms` is a Unix time in milliseconds.
+    pub fn record(
         &self,
         machine: Option<&str>,
         argv: Vec<String>,
@@ -449,6 +435,7 @@ mod tests {
             now_ms(),
             Some(1),
             Some("failed".into()),
+            None,
         );
         let log = cli.log_snapshot();
         assert_eq!(log[0].note, None);

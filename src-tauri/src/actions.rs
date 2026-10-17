@@ -346,19 +346,6 @@ impl Actions {
         }
     }
 
-    /// The create step: the reply, and the new pane's id read from it.
-    async fn create_first_step(
-        &self,
-        machine: &str,
-        step: Vec<String>,
-    ) -> Result<(Value, String), ActionError> {
-        let created = self
-            .mutate(machine, step.clone(), self.timeouts.create)
-            .await?;
-        let pane_id = created_pane(&created, step)?;
-        Ok((created, pane_id))
-    }
-
     /// Creates the pane and, for an agent, starts it there. If the agent fails to start, the
     /// new pane stays open and the error says so.
     pub async fn create_session(
@@ -370,16 +357,19 @@ impl Actions {
         let Some(first) = steps.next() else {
             return Err(ActionError::invalid("Nothing to create."));
         };
-        let (created, pane_id) = self
-            .create_first_step(&req.machine_id, first)
+        // An agent's later step never runs after an unknown create, and the error says so.
+        let not_started = |e: ActionError| {
+            if req.kind.is_some() {
+                agent_not_started(e)
+            } else {
+                e
+            }
+        };
+        let created = self
+            .mutate(&req.machine_id, first.clone(), self.timeouts.create)
             .await
-            .map_err(|e| {
-                if req.kind.is_some() {
-                    agent_not_started(e)
-                } else {
-                    e
-                }
-            })?;
+            .map_err(not_started)?;
+        let pane_id = created_pane(&created, first).map_err(not_started)?;
         let session = CreatedSession {
             terminal_id: created_terminal_id(&created),
             pane_id,
