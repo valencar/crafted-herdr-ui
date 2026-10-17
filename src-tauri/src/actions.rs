@@ -283,6 +283,18 @@ fn created_terminal_id(v: &Value) -> Option<String> {
     .map(str::to_owned)
 }
 
+/// A create step whose outcome is unknown: the agent step never runs after it, and the message
+/// says so.
+fn agent_not_started(error: ActionError) -> ActionError {
+    match error {
+        ActionError::MaybeApplied { message, argv } => ActionError::MaybeApplied {
+            message: format!("{message} The agent was not started."),
+            argv,
+        },
+        other => other,
+    }
+}
+
 /// The new pane's id from a create reply. `mutate` already refreshed; if the reply has no pane
 /// the action was still applied, so say so rather than report a failure.
 fn created_pane(reply: &Value, argv: Vec<String>) -> Result<String, ActionError> {
@@ -340,10 +352,21 @@ impl Actions {
         let Some(first) = steps.next() else {
             return Err(invalid("Nothing to create."));
         };
-        let created = self
-            .mutate(&req.machine_id, first.clone(), self.timeouts.create)
-            .await?;
-        let pane_id = created_pane(&created, first)?;
+        let (created, pane_id) = async {
+            let created = self
+                .mutate(&req.machine_id, first.clone(), self.timeouts.create)
+                .await?;
+            let pane_id = created_pane(&created, first)?;
+            Ok((created, pane_id))
+        }
+        .await
+        .map_err(|e| {
+            if req.kind.is_some() {
+                agent_not_started(e)
+            } else {
+                e
+            }
+        })?;
         let session = CreatedSession {
             terminal_id: created_terminal_id(&created),
             pane_id,

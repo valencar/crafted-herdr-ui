@@ -464,6 +464,71 @@ async fn create_without_a_readable_pane_is_maybe_applied_and_never_continues() {
 }
 
 #[tokio::test]
+async fn an_unreadable_create_reply_says_the_agent_was_not_started() {
+    let h = Harness::new();
+    h.put(&format!("{SPLIT}.json"), "not json");
+
+    let err = h
+        .actions
+        .create_session(&split_agent_request())
+        .await
+        .unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(message.contains("could not be read"), "{message}");
+            assert!(
+                message.ends_with(" The agent was not started."),
+                "{message}"
+            );
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+    assert!(h.calls().iter().all(|c| !c.starts_with("agent start")));
+}
+
+#[tokio::test]
+async fn a_create_reply_without_a_pane_says_the_agent_was_not_started() {
+    let h = Harness::new();
+    h.put(&format!("{SPLIT}.json"), r#"{"result":{}}"#);
+
+    let err = h
+        .actions
+        .create_session(&split_agent_request())
+        .await
+        .unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(
+                message.ends_with(" The agent was not started."),
+                "{message}"
+            );
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_unreadable_create_reply_without_an_agent_keeps_the_plain_message() {
+    let h = Harness::new();
+    h.put(&format!("{SPLIT}.json"), "not json");
+    let req = NewSessionRequest {
+        kind: None,
+        ..split_agent_request()
+    };
+
+    let err = h.actions.create_session(&req).await.unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(!message.contains("agent"), "{message}");
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn agent_start_timeout_says_the_agent_may_have_started() {
     let h = Harness::new();
     h.put(&format!("{SPLIT}.json"), &fixture("pane_split.json"));
