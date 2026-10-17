@@ -10,7 +10,12 @@ import { ReconnectBox } from "../components/ReconnectBox";
 import { Sidebar } from "../components/Sidebar";
 import { Toast } from "../components/Toast";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { formatStaleness, isSupportedVersion, lastLines } from "../lib/format";
+import {
+  formatStaleness,
+  isPending,
+  isSupportedVersion,
+  lastLines,
+} from "../lib/format";
 import {
   groupByProject,
   groupByStatus,
@@ -238,7 +243,11 @@ export function Home() {
   // Local never gets the reconnect card below, so a herdr that isn't answering would be
   // invisible. Say so, with the one thing to do.
   const localDown = allMachines.find(
-    (m) => m.is_local && m.health.kind !== "online" && m.snapshot === null,
+    (m) =>
+      m.is_local &&
+      m.health.kind !== "online" &&
+      m.snapshot === null &&
+      !isPending(m.health),
   );
   const localError =
     localDown &&

@@ -1,6 +1,7 @@
 import type { ActionError } from "./bindings/ActionError";
 import type { AgentStatus } from "./bindings/AgentStatus";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
+import type { Health } from "./bindings/Health";
 import type { TerminalId } from "./bindings/TerminalId";
 
 /** A row's status: a herdr agent status, or `shell` for a pane with no agent. */
@@ -159,6 +160,14 @@ export function formatClock(ms: number): string {
 /** "412 ms" below a second, "1.2 s" from there. */
 export function formatDuration(ms: number): string {
   return ms < SECOND ? `${ms} ms` : `${(ms / SECOND).toFixed(1)} s`;
+}
+
+/**
+ * A machine that has not been polled yet: it starts as reconnecting with no error text, and
+ * a real failure never has empty text.
+ */
+export function isPending(health: Health): boolean {
+  return health.kind === "reconnecting" && health.error === "";
 }
 
 /**

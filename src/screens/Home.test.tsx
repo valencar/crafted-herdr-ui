@@ -840,6 +840,11 @@ describe("Home states", () => {
       ).toHaveTextContent("herdr isn’t answering yet");
     });
 
+    it("is_absent_before_the_first_poll_has_answered", () => {
+      setup(down({ kind: "reconnecting", retry_in_ms: 0, error: "" }));
+      expect(screen.queryByText("Local isn’t answering")).toBeNull();
+    });
+
     it("is_absent_when_local_is_online_or_still_has_a_snapshot", () => {
       setup(down({ kind: "online" }));
       expect(screen.queryByText("Local isn’t answering")).toBeNull();

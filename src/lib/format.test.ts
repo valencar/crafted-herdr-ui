@@ -8,6 +8,7 @@ import {
   formatChecked,
   lastLines,
   formatClock,
+  isPending,
   isQuietRead,
   formatDuration,
   formatStaleness,
@@ -196,6 +197,19 @@ describe("activity formats", () => {
     expect(formatDuration(999)).toBe("999 ms");
     expect(formatDuration(1000)).toBe("1.0 s");
     expect(formatDuration(12_340)).toBe("12.3 s");
+  });
+});
+
+describe("isPending", () => {
+  it("is_true_only_for_a_machine_that_has_not_been_polled_yet", () => {
+    expect(isPending({ kind: "reconnecting", retry_in_ms: 0, error: "" })).toBe(
+      true,
+    );
+    expect(
+      isPending({ kind: "reconnecting", retry_in_ms: 4000, error: "boom" }),
+    ).toBe(false);
+    expect(isPending({ kind: "attention", error: "" })).toBe(false);
+    expect(isPending({ kind: "online" })).toBe(false);
   });
 });
 
