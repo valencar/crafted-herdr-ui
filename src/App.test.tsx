@@ -315,7 +315,7 @@ describe("menu events", () => {
     expect(useAppStore.getState().activityOpen).toBe(false);
   });
 
-  it("ignores the palette and activity ids it does not know about yet", async () => {
+  it("tab ids do nothing while no tab is open", async () => {
     render(<App />);
     await screen.findByRole("searchbox");
     await menu("tab3");
@@ -410,6 +410,32 @@ describe("terminal menu ids", () => {
     expect(screen.getByTestId("view-buildbox::w1:p1")).toBeInTheDocument();
     await menu("toggle-terminal");
     expect(panel).toBeVisible();
+  });
+
+  it("tab shortcuts bring back a hidden panel", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    openTabs("w1:p1", "w2:p1");
+    const panel = await screen.findByRole("region", { name: "Terminal" });
+    const hide = () =>
+      act(() => useTerminalStore.getState().setPanelOpen(false));
+
+    for (const [id, key] of [
+      ["tab1", "buildbox::w1:p1"],
+      ["next-tab", "buildbox::w2:p1"],
+      ["prev-tab", "buildbox::w1:p1"],
+    ] as const) {
+      hide();
+      expect(panel).not.toBeVisible();
+      await menu(id);
+      expect(panel).toBeVisible();
+      expect(activeKey()).toBe(key);
+    }
+
+    // A tab that doesn't exist shows nothing, so the panel stays hidden.
+    hide();
+    await menu("tab9");
+    expect(panel).not.toBeVisible();
   });
 
   it("the panel survives moving between Home and the Workbox screen", async () => {

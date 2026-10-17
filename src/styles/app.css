@@ -738,6 +738,8 @@ kbd {
 
 .scrim {
   position: fixed;
+  /* Above the terminal panel, below the Activity drawer (30) and the toast (40). */
+  z-index: 25;
   inset: 0;
   display: flex;
   align-items: center;
@@ -1631,6 +1633,8 @@ select.field {
 }
 .terminal-panel {
   position: relative;
+  /* Keeps xterm's own z-indexes inside the panel, under dialogs and sheets. */
+  isolation: isolate;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;

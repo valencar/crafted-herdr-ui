@@ -195,3 +195,4 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] A tab for an agent that needs you is highlighted in the tab strip, and the tab shows "Opening…" until its session is up.
 - [ ] ⌘F inside a terminal opens the find bar (Enter next, ⇧Enter previous, Esc closes and returns focus to the terminal); ⌘F elsewhere focuses Home's search box.
 - [ ] ⌘+ / ⌘− / ⌘0 change the terminal font size within 9 to 24 and reset to 13, and the size persists.
+- [ ] With the panel open, the Close dialog, the New session sheet and the Activity drawer sit above it (dimmed scrim over the terminal, no terminal layer on top).

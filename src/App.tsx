@@ -111,12 +111,15 @@ function App() {
           if (activeKey) closeTab(activeKey);
           break;
         }
+        // A tab shortcut shows the tab: it also brings back a hidden panel.
         case "next-tab":
-          useTerminalStore.getState().cycle(1);
+        case "prev-tab": {
+          const terminals = useTerminalStore.getState();
+          if (terminals.tabs.length === 0) break;
+          terminals.cycle(id === "next-tab" ? 1 : -1);
+          terminals.setPanelOpen(true);
           break;
-        case "prev-tab":
-          useTerminalStore.getState().cycle(-1);
-          break;
+        }
         case "tab1":
         case "tab2":
         case "tab3":
@@ -125,9 +128,15 @@ function App() {
         case "tab6":
         case "tab7":
         case "tab8":
-        case "tab9":
-          useTerminalStore.getState().activateIndex(Number(id.slice(3)) - 1);
+        case "tab9": {
+          const terminals = useTerminalStore.getState();
+          const at = Number(id.slice(3)) - 1;
+          if (at < terminals.tabs.length) {
+            terminals.activateIndex(at);
+            terminals.setPanelOpen(true);
+          }
           break;
+        }
         case "font-bigger":
         case "font-smaller":
         case "font-reset":

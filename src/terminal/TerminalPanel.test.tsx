@@ -186,6 +186,28 @@ describe("TerminalPanel", () => {
     expect(screen.getByRole("tab")).toHaveTextContent("Needs input");
   });
 
+  it("a tab that needs you says so in words in every state", () => {
+    open("w1:p1", "api-service");
+    open("w1:p2", "infra");
+    render(<TerminalPanel />);
+    const [needs, calm] = screen.getAllByRole("tab");
+    // w1:p1 is blocked; w1:p2 is working.
+    expect(needs.parentElement).toHaveAttribute("data-needs", "true");
+    expect(needs).toHaveTextContent("Opening… · Needs input");
+    expect(calm.parentElement).not.toHaveAttribute("data-needs");
+    expect(calm).not.toHaveTextContent("Needs input");
+
+    for (const [state, text] of [
+      ["detached", "Detached · Needs input"],
+      ["error", "Error · Needs input"],
+    ] as const) {
+      act(() =>
+        useTerminalStore.getState().updateTab("buildbox::w1:p1", { state }),
+      );
+      expect(screen.getAllByRole("tab")[0]).toHaveTextContent(text);
+    }
+  });
+
   it("clicking a tab activates it", async () => {
     const user = userEvent.setup();
     open("w1:p1", "api-service");

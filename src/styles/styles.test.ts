@@ -30,4 +30,16 @@ describe("app.css", () => {
       expect(rule(selector)).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     }
   });
+
+  it("keeps_the_terminal_panel_under_dialogs_sheets_and_the_drawer", () => {
+    // The panel and xterm's z-indexed layers stay inside the panel's own stacking context.
+    expect(rule(".terminal-panel")).toMatch(/isolation:\s*isolate/);
+    const z = (selector: string) =>
+      Number(/z-index:\s*(\d+)/.exec(rule(selector))?.[1] ?? 0);
+    // Dialogs and sheets sit on `.scrim`, which is later than the panel only by tree order
+    // if it has no z-index of its own.
+    expect(z(".scrim")).toBeGreaterThan(z(".terminal-panel"));
+    expect(z(".activity")).toBeGreaterThan(z(".scrim"));
+    expect(z(".toast")).toBeGreaterThan(z(".scrim"));
+  });
 });

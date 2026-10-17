@@ -8,7 +8,7 @@ import {
   type PointerEvent,
 } from "react";
 import { STATUS_LABEL } from "../lib/format";
-import { isNeedsYou, toRows } from "../lib/grouping";
+import { isNeedsYou, toRows, type Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
@@ -34,18 +34,22 @@ export function requestTerminalFind(): void {
 const clampSize = (n: number) =>
   Math.min(MAX_PANEL_SIZE, Math.max(MIN_PANEL_SIZE, Math.round(n)));
 
-/** The text a tab shows for its session: the state while there is no live session, else the row's status. */
-function tabStatus(tab: TermTab, rowStatus: string | null): string | null {
-  switch (tab.state) {
-    case "opening":
-      return "Opening…";
-    case "detached":
-      return "Detached";
-    case "error":
-      return "Error";
-    case "live":
-      return rowStatus;
-  }
+/**
+ * The text a tab shows for its session: the state while there is no live session, else the
+ * row's status. A tab that needs you always says so in words, whatever its state.
+ */
+function tabStatus(tab: TermTab, row: Row | undefined): string | null {
+  const rowLabel = row ? STATUS_LABEL[row.status] : null;
+  const state =
+    tab.state === "opening"
+      ? "Opening…"
+      : tab.state === "detached"
+        ? "Detached"
+        : tab.state === "error"
+          ? "Error"
+          : null;
+  if (state === null) return rowLabel;
+  return row && isNeedsYou(row) ? `${state} · ${rowLabel}` : state;
 }
 
 /**
@@ -70,7 +74,7 @@ export function TerminalPanel() {
   const bottom = placement === "bottom";
 
   const rows = useMemo(() => {
-    const byKey = new Map<string, ReturnType<typeof toRows>[number]>();
+    const byKey = new Map<string, Row>();
     if (state) for (const r of toRows(state)) byKey.set(r.key, r);
     return byKey;
   }, [state]);
@@ -126,6 +130,7 @@ export function TerminalPanel() {
     const d = drag.current;
     drag.current = null;
     if (d && d.size !== d.startSize) saveSize(d.size);
+    else setPending(null);
   };
 
   // ---- find ----
@@ -210,7 +215,7 @@ export function TerminalPanel() {
       <div className="term-tabs" role="tablist" aria-label="Terminal tabs">
         {tabs.map((tab) => {
           const row = rows.get(tab.tabKey);
-          const status = tabStatus(tab, row ? STATUS_LABEL[row.status] : null);
+          const status = tabStatus(tab, row);
           const needs = row !== undefined && isNeedsYou(row);
           return (
             <div
