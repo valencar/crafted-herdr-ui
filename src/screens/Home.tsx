@@ -21,7 +21,7 @@ import {
   groupByStatus,
   groupByWorkbox,
   needsYou,
-  projectNames,
+  projectNamesOf,
   toRows,
   type Group,
   type Row,
@@ -140,15 +140,26 @@ export function Home() {
     report,
   ]);
 
+  // No search: `visible` is `rows` itself, so the project groups built for the sidebar are
+  // the ones to show.
   const visible = useMemo(
-    () => rows.filter((r) => matches(r, query)),
+    () => (query.trim() ? rows.filter((r) => matches(r, query)) : rows),
     [rows, query],
   );
   const needs = useMemo(() => needsYou(visible), [visible]);
-  const groups = useMemo(() => GROUPERS[groupBy](visible), [groupBy, visible]);
-  const navRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
-  const projectOf = useMemo(() => projectNames(rows), [rows]);
+  const projectOf = useMemo(
+    () => projectNamesOf(projectGroups),
+    [projectGroups],
+  );
+  const groups = useMemo(
+    () =>
+      groupBy === "project" && visible === rows
+        ? projectGroups
+        : GROUPERS[groupBy](visible),
+    [groupBy, visible, rows, projectGroups],
+  );
+  const navRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
 
   const selectedRow = rows.find((r) => r.key === selectedKey) ?? null;
   // Keyboard shortcuts only act on a selection the user can see in the list.
