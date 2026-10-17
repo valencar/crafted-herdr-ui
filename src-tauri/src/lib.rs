@@ -112,16 +112,18 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     app.manage(shortcut);
 
-    // The settings can't change herdr's path while startup is still resolving it.
-    let update = tauri::async_runtime::block_on(shared.begin_update());
-    tauri::async_runtime::spawn(locate_and_poll(handle, update));
+    tauri::async_runtime::spawn(locate_and_poll(handle));
     Ok(())
 }
 
 /// The slow part of startup, off the setup path: capture the login environment, find herdr and
 /// read its version, tell the UI, then start polling. Also asks `herdr status` once and logs it
 /// (the spec's startup check); nothing depends on the answer.
-async fn locate_and_poll(handle: tauri::AppHandle, update: tokio::sync::OwnedMutexGuard<()>) {
+///
+/// The settings lock is taken only once the environment is captured, so a settings save during
+/// the capture is not held up. A herdr path saved before that is read by `locate` below; one
+/// saved after waits on the lock, and `set_settings` re-resolves it because herdr is located.
+async fn locate_and_poll(handle: tauri::AppHandle) {
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
@@ -138,6 +140,8 @@ async fn locate_and_poll(handle: tauri::AppHandle, update: tokio::sync::OwnedMut
     );
     cli.set_env(env::forwarded_env(&login));
     locator.set_login_hit(login_hit);
+    // The settings can't change herdr's path while startup is still resolving it.
+    let update = shared.begin_update().await;
     let herdr = locator
         .locate(shared.get().herdr_path.as_deref(), &cli)
         .await;

@@ -699,7 +699,9 @@ pub async fn set_settings(
             new.poll_interval_hidden_ms,
         ));
     }
-    if todo.herdr_path {
+    // Before startup has located herdr, its own `locate` reads the saved path, so there is
+    // nothing to resolve here (and the login environment may not be captured yet).
+    if todo.herdr_path && poller.is_located() {
         let status = locator.locate(new.herdr_path.as_deref(), &cli).await;
         poller.set_herdr(status.path.clone(), status.version.clone());
         if status.path.is_some() && poller.claim_start() {
