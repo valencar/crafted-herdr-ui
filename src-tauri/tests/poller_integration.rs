@@ -382,32 +382,79 @@ async fn status_change_broadcasts_a_transition_and_sets_an_age() {
     );
 }
 
-#[tokio::test]
-async fn machine_recovering_from_failure_emits_no_transition() {
-    let mut h = Harness::start(|dir| {
+/// Makes `local` fail until it has failed `n` polls in a row. Each poll is woken by hand and
+/// waited for through its backoff (2 s, 4 s, 8 s), so the count is exact.
+async fn fail_polls(h: &Harness, n: u32) {
+    h.put("api_snapshot.stderr", "ssh: connect: Connection refused");
+    h.put("api_snapshot.exit", "1");
+    h.remove("api_snapshot.json");
+    for failure in 1..=n {
+        h.poller.refresh_now(Some("local"));
+        let expected = 2000u64 << (failure - 1);
+        h.wait_for("failure shown", |s| {
+            matches!(
+                machine(s, "local").health,
+                Health::Reconnecting { retry_in_ms, .. } if retry_in_ms == expected
+            )
+        })
+        .await;
+    }
+}
+
+fn start_idle() -> Harness {
+    Harness::start(|dir| {
         fs::write(
             dir.join("api_snapshot.json"),
             buildbox_with_first_agent("idle"),
         )
         .unwrap();
-    });
+    })
+}
+
+fn recover_with(h: &Harness, status: &str) {
+    h.remove("api_snapshot.stderr");
+    h.remove("api_snapshot.exit");
+    h.put("api_snapshot.json", &buildbox_with_first_agent(status));
+    h.poller.refresh_now(Some("local"));
+}
+
+#[tokio::test]
+async fn a_short_blip_still_reports_what_changed_meanwhile() {
+    let mut h = start_idle();
     h.wait_for("local online", |s| online_with_snapshot(s, "local"))
         .await;
 
-    h.put("api_snapshot.stderr", "ssh: connect: Connection refused");
-    h.put("api_snapshot.exit", "1");
-    h.remove("api_snapshot.json");
-    h.poller.refresh_now(Some("local"));
-    h.wait_for("failure shown", |s| {
-        matches!(machine(s, "local").health, Health::Reconnecting { .. })
-    })
-    .await;
+    // Two failed polls in a row is a blip, not an outage.
+    fail_polls(&h, 2).await;
 
     // While it was away, the first agent became blocked.
-    h.remove("api_snapshot.stderr");
-    h.remove("api_snapshot.exit");
-    h.put("api_snapshot.json", &buildbox_with_first_agent("blocked"));
-    h.poller.refresh_now(Some("local"));
+    recover_with(&h, "blocked");
+    let state = h
+        .wait_for("recovered", |s| {
+            first_agent_status(s, "local") == Some(AgentStatus::Blocked)
+                && machine(s, "local").health == Health::Online
+        })
+        .await;
+
+    let transition = h.transitions.try_recv().expect("the change was reported");
+    assert_eq!(transition.from, AgentStatus::Idle);
+    assert_eq!(transition.to, AgentStatus::Blocked);
+    assert!(
+        machine(&state, "local")
+            .ages
+            .contains_key(&transition.terminal_id)
+    );
+}
+
+#[tokio::test]
+async fn recovering_from_an_outage_of_three_failures_emits_no_transition() {
+    let mut h = start_idle();
+    h.wait_for("local online", |s| online_with_snapshot(s, "local"))
+        .await;
+
+    fail_polls(&h, 3).await;
+
+    recover_with(&h, "blocked");
     let state = h
         .wait_for("recovered", |s| {
             first_agent_status(s, "local") == Some(AgentStatus::Blocked)
@@ -417,7 +464,7 @@ async fn machine_recovering_from_failure_emits_no_transition() {
 
     assert!(
         matches!(h.transitions.try_recv(), Err(TryRecvError::Empty)),
-        "recovery must not notify"
+        "recovery after an outage must not notify"
     );
     // The age of something that changed while unobserved is unknown, not guessed.
     let local = machine(&state, "local");

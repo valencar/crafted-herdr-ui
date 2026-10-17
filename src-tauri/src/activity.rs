@@ -92,7 +92,7 @@ impl ActivityTracker {
         transitions
     }
 
-    /// Like `observe`, for the first good snapshot after app start or after a failure: what
+    /// Like `observe`, for the first good snapshot after app start or after an outage: what
     /// changed while the app could not see is not a fresh event. Any new or changed key gets
     /// `since_ms = None` (unknown age, never a guess), nothing is returned, and this machine's
     /// absent keys are pruned.

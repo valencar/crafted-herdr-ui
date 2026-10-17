@@ -57,6 +57,17 @@ fn pending_health() -> Health {
     }
 }
 
+/// Failures in a row that make an outage: after that long a machine has been away, what changed
+/// meanwhile is unknown, so the next good snapshot is a new baseline (no notifications, no
+/// guessed ages). A shorter blip is just a missed poll, and the change is reported.
+const OUTAGE_FAILURES: u32 = 3;
+
+/// Whether a good snapshot only sets the baseline: the first one after app start, or the first
+/// one after an outage.
+fn needs_resync(first_poll: bool, failures_before: u32) -> bool {
+    first_poll || failures_before >= OUTAGE_FAILURES
+}
+
 fn blank_view(id: &str, label: &str, target: Option<String>, session: &str) -> MachineView {
     MachineView {
         id: id.to_owned(),
@@ -169,6 +180,7 @@ struct Inner {
     herdr: Mutex<(Option<String>, Option<String>)>,
     intervals: Mutex<PollIntervals>,
     started: AtomicBool,
+    located: AtomicBool,
     emit: Emit,
     visible: AtomicBool,
     core: Mutex<Core>,
@@ -197,6 +209,7 @@ impl Poller {
                 config,
                 intervals: Mutex::new(PollIntervals::default()),
                 started: AtomicBool::new(false),
+                located: AtomicBool::new(false),
                 emit,
                 visible: AtomicBool::new(true),
                 core: Mutex::new(Core::new()),
@@ -267,10 +280,18 @@ impl Poller {
         }
     }
 
-    /// Replaces the herdr path and version the state reports, and emits the new state.
+    /// Replaces the herdr path and version the state reports, and emits the new state. The
+    /// first call also means herdr has been looked for, so `is_located` turns true.
     pub fn set_herdr(&self, path: Option<String>, version: Option<String>) {
         *lock(&self.inner.herdr) = (path, version);
+        self.inner.located.store(true, Ordering::Relaxed);
         self.emit_current();
+    }
+
+    /// False until startup has looked for herdr. Before that the state would say "no herdr"
+    /// when the answer is only not known yet.
+    pub fn is_located(&self) -> bool {
+        self.inner.located.load(Ordering::Relaxed)
     }
 
     /// True the first time it is called: whoever gets true runs `run`. Polling starts late when
@@ -285,7 +306,7 @@ impl Poller {
     }
 
     /// Status changes seen by polling, for notifications. Not sent for the first good poll after
-    /// start or after a failure.
+    /// start or after an outage of `OUTAGE_FAILURES` failures in a row.
     pub fn subscribe(&self) -> broadcast::Receiver<Transition> {
         self.inner.transitions.subscribe()
     }
@@ -386,18 +407,16 @@ impl Inner {
 
     async fn poll_machine(self: Arc<Self>, id: String, wake: Arc<Notify>) {
         let mut failures: u32 = 0;
-        // The first good snapshot after start or after a failure only sets the baseline.
-        let mut resync = true;
+        let mut first_poll = true;
         loop {
             match self.fetch_snapshot(&id).await {
                 Ok(snapshot) => {
+                    self.record_snapshot(&id, snapshot, needs_resync(first_poll, failures));
+                    first_poll = false;
                     failures = 0;
-                    self.record_snapshot(&id, snapshot, resync);
-                    resync = false;
                 }
                 Err(e) => {
                     failures = failures.saturating_add(1);
-                    resync = true;
                     self.record_failure(&id, &e, self.delay(failures));
                 }
             }
@@ -481,6 +500,16 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_first_poll_and_a_real_outage_resync() {
+        assert!(needs_resync(true, 0));
+        assert!(!needs_resync(false, 0));
+        assert!(!needs_resync(false, 1));
+        assert!(!needs_resync(false, 2));
+        assert!(needs_resync(false, 3));
+        assert!(needs_resync(false, 40));
+    }
+
     use super::*;
 
     fn profile(id: &str, enabled: bool) -> MachineProfile {
