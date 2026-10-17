@@ -35,6 +35,8 @@ tauri-plugin-window-state = "=2.5.0"
 
 [dev-dependencies]
 tempfile = "3"
+# Already in the tree through tauri; the tests parse accelerators with its own parser.
+muda = { version = "0.20", default-features = false }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 

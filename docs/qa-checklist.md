@@ -177,3 +177,11 @@ None of these were run by the implementer (they need a GUI session or a real her
 
 - [ ] Window size and position persist across quit and relaunch.
 - [ ] Quitting with open terminal tabs leaves every herdr pane running (check `herdr pane list`).
+
+## v0.2
+
+- [ ] ⌘W with no tab open does nothing; the red button still hides the window.
+- [ ] ⌘C/⌘V work in text inputs (Edit menu).
+- [ ] Menu shortcuts fire while a terminal has focus.
+- [ ] ⌘, opens Settings from the menu; ⌘W with the Settings window focused closes it.
+- [ ] The menu bar shows App, Edit, View, Terminal and Window with the shortcuts of spec §2.4, and no Close Window item.

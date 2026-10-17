@@ -68,6 +68,17 @@ export function openSettings(): void {
   );
 }
 
+/** Focuses and selects Home's search box. False if the current screen has none. */
+export function focusSearch(): boolean {
+  const input = document.querySelector<HTMLInputElement>(
+    'input[type="search"]',
+  );
+  if (!input) return false;
+  input.focus();
+  input.select();
+  return true;
+}
+
 /** Focuses a row's button and scrolls it into view. False if no such row is on screen. */
 export function focusRowButton(key: string): boolean {
   const li = [...document.querySelectorAll<HTMLElement>("[data-row-key]")].find(

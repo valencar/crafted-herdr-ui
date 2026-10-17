@@ -1,4 +1,3 @@
-import type { Ref } from "react";
 import type { TerminalId } from "../lib/bindings/TerminalId";
 import { TerminalMenu } from "./TerminalMenu";
 
@@ -6,7 +5,6 @@ type Props = {
   herdrVersion: string | null;
   query: string;
   onQuery: (q: string) => void;
-  searchRef: Ref<HTMLInputElement>;
   /** `null` until `get_terminals` answers. */
   terminal: TerminalId | null;
   installed: TerminalId[];
@@ -18,7 +16,6 @@ export function Header({
   herdrVersion,
   query,
   onQuery,
-  searchRef,
   terminal,
   installed,
   onNewSession,
@@ -38,7 +35,6 @@ export function Header({
       <label className="search">
         <span className="sr-only">Search</span>
         <input
-          ref={searchRef}
           type="search"
           value={query}
           placeholder="Jump to an agent, project, or workbox…"

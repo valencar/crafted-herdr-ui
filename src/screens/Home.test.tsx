@@ -339,10 +339,10 @@ describe("Home", () => {
     expect(useAppStore.getState().sheet).toBe("new-session");
   });
 
-  it("cmd_k_focuses_search", async () => {
+  it("cmd_k_is_left_to_the_native_menu", async () => {
     const user = setup();
     await user.keyboard("{Meta>}k{/Meta}");
-    expect(screen.getByRole("searchbox")).toHaveFocus();
+    expect(screen.getByRole("searchbox")).not.toHaveFocus();
   });
 
   it("cmd_r_refreshes", async () => {

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { ActivityDrawer } from "./components/ActivityDrawer";
-import { onFocusRow, onNewSession } from "./lib/ipc";
-import { focusRowElement, openSettings } from "./lib/uiHelpers";
+import { onFocusRow, onMenu, onNewSession } from "./lib/ipc";
+import { focusRowElement, focusSearch } from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
 import { Home } from "./screens/Home";
@@ -51,27 +51,35 @@ function App() {
     };
   }, [focusRow, openNewSession]);
 
-  // ⌘, opens Settings from every screen; ⌘⇧A toggles the Activity drawer.
+  // The native menu owns the app's shortcuts (so they work while a terminal has focus) and
+  // sends each chosen item here. They stand down while a sheet or a dialog is open. Settings…
+  // is handled in Rust.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === ",") {
-        e.preventDefault();
-        openSettings();
-      } else if (e.shiftKey && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        const {
-          state: current,
-          activityOpen: open,
-          setActivityOpen: set,
-        } = useAppStore.getState();
-        // Without herdr there is no command log to show.
-        if (current?.herdr_path !== null) set(!open);
+    let alive = true;
+    let stop: (() => void) | undefined;
+    onMenu((id) => {
+      const { sheet: openSheet, dialogOpen } = useAppStore.getState();
+      if (openSheet !== null || dialogOpen > 0) return;
+      switch (id) {
+        // Until the command palette exists, it does what ⌘K did: focus Home's search.
+        case "palette":
+          focusSearch();
+          break;
+        case "activity": {
+          const { state: current, activityOpen: open } = useAppStore.getState();
+          // Without herdr there is no command log to show.
+          if (current?.herdr_path !== null) setActivityOpen(!open);
+          break;
+        }
       }
+    })
+      .then((un) => (alive ? (stop = un) : un()))
+      .catch(() => {});
+    return () => {
+      alive = false;
+      stop?.();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [setActivityOpen]);
 
   if (herdrMissing) return <Onboarding />;
 

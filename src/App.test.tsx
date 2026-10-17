@@ -9,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "./lib/bindings/AppState";
+import type { MenuId } from "./lib/bindings/MenuId";
 import type { Snapshot } from "./lib/bindings/Snapshot";
 import { useAppStore } from "./store/appStore";
 import App from "./App";
@@ -22,6 +23,7 @@ const ipc = vi.hoisted(() => ({
   onSettings: vi.fn(),
   onFocusRow: vi.fn(),
   onNewSession: vi.fn(),
+  onMenu: vi.fn(),
   invokeTyped: vi.fn(),
   toActionError: (e: unknown) => e,
 }));
@@ -44,6 +46,7 @@ beforeEach(() => {
   ipc.onSettings.mockReset().mockResolvedValue(() => {});
   ipc.onFocusRow.mockReset().mockResolvedValue(() => {});
   ipc.onNewSession.mockReset().mockResolvedValue(() => {});
+  ipc.onMenu.mockReset().mockResolvedValue(() => {});
   ipc.invokeTyped
     .mockReset()
     .mockResolvedValue({ installed: [], default: "ghostty" });
@@ -51,7 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   // A test that opened a sheet or the drawer must not leave it open for the next one.
-  useAppStore.setState({ sheet: null, activityOpen: false });
+  useAppStore.setState({ sheet: null, activityOpen: false, dialogOpen: 0 });
 });
 
 it("loads the state on mount, then subscribes to pushes", async () => {
@@ -186,6 +189,12 @@ function handler(mock: typeof ipc.onFocusRow): (...args: unknown[]) => void {
   return mock.mock.calls[0][0] as (...args: unknown[]) => void;
 }
 
+/** Sends the app a menu event, as the native menu does. */
+async function menu(id: MenuId) {
+  await waitFor(() => expect(ipc.onMenu).toHaveBeenCalled());
+  act(() => handler(ipc.onMenu)(id));
+}
+
 it("loads the settings and starts Home on the saved grouping", async () => {
   useAppStore.setState({ settings: null, groupBy: "project" });
   ipc.getSettings.mockResolvedValue(SETTINGS);
@@ -241,29 +250,77 @@ it("opens the New session sheet when the tray or the popover asks", async () => 
   expect(useAppStore.getState().sheet).toBe("new-session");
 });
 
-it("opens Settings on ⌘, and from the sidebar link", async () => {
+it("opens Settings from the sidebar link, and leaves ⌘, to the native menu", async () => {
   useAppStore.setState({ view: { kind: "home" } });
   render(<App />);
   await screen.findByRole("searchbox");
+  // ⌘, is the menu's "Settings…" item, handled in Rust (menu.rs); the page ignores the keys.
   fireEvent.keyDown(window, { key: ",", metaKey: true });
-  expect(ipc.invokeTyped).toHaveBeenCalledWith("open_settings");
+  expect(ipc.invokeTyped).not.toHaveBeenCalledWith("open_settings");
 
-  ipc.invokeTyped.mockClear();
   fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
   expect(ipc.invokeTyped).toHaveBeenCalledWith("open_settings");
+});
+
+describe("menu events", () => {
+  beforeEach(() => {
+    useAppStore.setState({ view: { kind: "home" } });
+  });
+
+  it("palette focuses the Home search box until the palette exists", async () => {
+    render(<App />);
+    const search = await screen.findByRole("searchbox");
+    await menu("palette");
+    expect(search).toHaveFocus();
+  });
+
+  it("menu events are ignored while a sheet or dialog is open", async () => {
+    render(<App />);
+    const search = await screen.findByRole("searchbox");
+    ipc.invokeTyped.mockImplementation(async (name: string) => {
+      if (name === "list_ssh_hosts" || name === "get_command_log") return [];
+      return { installed: [], default: "ghostty" };
+    });
+
+    act(() => useAppStore.setState({ sheet: "add-workbox" }));
+    await menu("palette");
+    await menu("activity");
+    expect(search).not.toHaveFocus();
+    expect(useAppStore.getState().activityOpen).toBe(false);
+
+    act(() => useAppStore.setState({ sheet: null }));
+    // Closing the sheet released its own claim on `dialogOpen`; this one is a dialog's.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    act(() => useAppStore.setState({ dialogOpen: 1 }));
+    await menu("palette");
+    await menu("activity");
+    expect(search).not.toHaveFocus();
+    expect(useAppStore.getState().activityOpen).toBe(false);
+  });
+
+  it("ignores the ids that later tasks handle", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    await menu("toggle-terminal");
+    await menu("tab3");
+    expect(useAppStore.getState().activityOpen).toBe(false);
+  });
 });
 
 it("stops listening for the window events on unmount", async () => {
   const stopFocus = vi.fn();
   const stopNew = vi.fn();
   ipc.onFocusRow.mockResolvedValue(stopFocus);
+  const stopMenu = vi.fn();
   ipc.onNewSession.mockResolvedValue(stopNew);
+  ipc.onMenu.mockResolvedValue(stopMenu);
   const { unmount } = render(<App />);
   await waitFor(() => expect(ipc.onNewSession).toHaveBeenCalled());
   await Promise.resolve();
   unmount();
   expect(stopFocus).toHaveBeenCalled();
   expect(stopNew).toHaveBeenCalled();
+  expect(stopMenu).toHaveBeenCalled();
 });
 
 it("onboarding_when_no_herdr", async () => {
@@ -282,7 +339,7 @@ it("onboarding_when_no_herdr", async () => {
   ).toBeInTheDocument();
   expect(screen.queryByRole("searchbox")).toBeNull();
   // The drawer and the sheets have nothing to show without herdr.
-  fireEvent.keyDown(window, { key: "A", metaKey: true, shiftKey: true });
+  await menu("activity");
   expect(screen.queryByRole("complementary", { name: "Activity" })).toBeNull();
   expect(useAppStore.getState().activityOpen).toBe(false);
 
@@ -306,7 +363,7 @@ describe("the Activity drawer", () => {
     );
   });
 
-  it("toggles_with_cmd_shift_a_on_every_screen", async () => {
+  it("toggles_with_the_activity_menu_event_on_every_screen", async () => {
     useAppStore.setState({ view: { kind: "home" } });
     render(<App />);
     await screen.findByRole("searchbox");
@@ -314,13 +371,13 @@ describe("the Activity drawer", () => {
       screen.queryByRole("complementary", { name: "Activity" }),
     ).toBeNull();
 
-    fireEvent.keyDown(window, { key: "A", metaKey: true, shiftKey: true });
+    await menu("activity");
     expect(
       await screen.findByRole("complementary", { name: "Activity" }),
     ).toBeInTheDocument();
     expect(ipc.invokeTyped).toHaveBeenCalledWith("get_command_log");
 
-    // The same keys close it, and it stays open across a change of screen.
+    // The same menu item closes it, and it stays open across a change of screen.
     act(() =>
       useAppStore.setState({
         view: { kind: "workbox", machineId: "buildbox" },
@@ -329,18 +386,17 @@ describe("the Activity drawer", () => {
     expect(
       screen.getByRole("complementary", { name: "Activity" }),
     ).toBeInTheDocument();
-    fireEvent.keyDown(window, { key: "a", metaKey: true, shiftKey: true });
+    await menu("activity");
     expect(
       screen.queryByRole("complementary", { name: "Activity" }),
     ).toBeNull();
   });
 
-  it("ignores_a_plain_cmd_a_and_cmd_shift_other_keys", async () => {
+  it("no_longer_handles_cmd_shift_a_as_a_keydown", async () => {
     render(<App />);
     await screen.findByRole("searchbox");
-    fireEvent.keyDown(window, { key: "a", metaKey: true });
-    fireEvent.keyDown(window, { key: "b", metaKey: true, shiftKey: true });
-    fireEvent.keyDown(window, { key: "A", shiftKey: true });
+    // The native menu owns the shortcut, so a page that handled it too would toggle twice.
+    fireEvent.keyDown(window, { key: "A", metaKey: true, shiftKey: true });
     expect(useAppStore.getState().activityOpen).toBe(false);
   });
 

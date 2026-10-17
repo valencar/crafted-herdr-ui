@@ -4,6 +4,7 @@ pub mod commands;
 pub mod env;
 pub mod herdr;
 pub mod machine_setup;
+pub mod menu;
 pub mod notify;
 pub mod poller;
 pub mod preview;
@@ -303,6 +304,8 @@ pub fn run() {
             commands::term_close,
             commands::show_main_open_row,
         ])
+        .menu(menu::build)
+        .on_menu_event(menu::on_event)
         .on_window_event(on_window_event)
         .setup(|app| start(app))
         .build(tauri::generate_context!())

@@ -560,6 +560,7 @@ dependencies = [
 name = "crafted-herdr-ui"
 version = "0.1.0"
 dependencies = [
+ "muda",
  "portable-pty",
  "serde",
  "serde_json",

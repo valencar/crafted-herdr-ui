@@ -16,6 +16,7 @@ const {
   getState,
   invokeTyped,
   onFocusRow,
+  onMenu,
   onNewSession,
   onOpenRow,
   openTerm,
@@ -214,5 +215,19 @@ describe("onOpenRow", () => {
     expect(listen.mock.calls[0][0]).toBe("open-row");
     listen.mock.calls[0][1]({ payload: "buildbox::w1:p1" });
     expect(cb).toHaveBeenCalledWith("buildbox::w1:p1");
+  });
+});
+
+describe("onMenu", () => {
+  it("listens to menu and hands over the item id", async () => {
+    const unlisten = vi.fn();
+    listen.mockResolvedValue(unlisten);
+    const cb = vi.fn();
+
+    await expect(onMenu(cb)).resolves.toBe(unlisten);
+
+    expect(listen.mock.calls[0][0]).toBe("menu");
+    listen.mock.calls[0][1]({ payload: "toggle-terminal" });
+    expect(cb).toHaveBeenCalledWith("toggle-terminal");
   });
 });

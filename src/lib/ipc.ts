@@ -5,6 +5,7 @@ import type { ActionError } from "./bindings/ActionError";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CreatedSession } from "./bindings/CreatedSession";
 import type { HerdrStatus } from "./bindings/HerdrStatus";
+import type { MenuId } from "./bindings/MenuId";
 import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
@@ -237,6 +238,11 @@ export function onFocusRow(cb: (key: string) => void): Promise<() => void> {
 /** Subscribes to `"new-session"`: the tray or the popover asked for the New session sheet. */
 export function onNewSession(cb: () => void): Promise<() => void> {
   return listen("new-session", () => cb());
+}
+
+/** Subscribes to `"menu"`: a native menu item was chosen; the payload is its id. */
+export function onMenu(cb: (id: MenuId) => void): Promise<() => void> {
+  return listen<MenuId>("menu", (event) => cb(event.payload));
 }
 
 /** Subscribes to `"open-row"`: the popover asked the main window to open a row (its key). */

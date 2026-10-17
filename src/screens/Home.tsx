@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { EmptyState } from "../components/EmptyState";
@@ -86,7 +86,6 @@ export function Home() {
   const [query, setQuery] = useState("");
   const { current: terminal, installed } = useTerminals();
   const [closingKey, setClosingKey] = useState<string | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const machines = useMemo(
@@ -162,7 +161,7 @@ export function Home() {
     return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
   };
 
-  useHomeShortcuts({ navRows, actionRow, searchRef, onClose: setClosingKey });
+  useHomeShortcuts({ navRows, actionRow, onClose: setClosingKey });
 
   const needsMachines = new Set(needs.map((r) => r.machineId)).size;
   const hasAnyRows = rows.length > 0;
@@ -192,7 +191,6 @@ export function Home() {
         herdrVersion={state?.herdr_version ?? null}
         query={query}
         onQuery={setQuery}
-        searchRef={searchRef}
         terminal={terminal}
         installed={installed}
         onNewSession={() => openNewSession()}
