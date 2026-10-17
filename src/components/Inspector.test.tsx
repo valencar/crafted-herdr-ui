@@ -134,6 +134,27 @@ describe("Inspector command box and the attach mode", () => {
   });
 });
 
+describe("Inspector when Rust refuses the attach command", () => {
+  it("copy_command_stays_clickable_and_shows_rusts_reason", async () => {
+    invoke.mockImplementation(async (name: string) => {
+      if (name === "copy_attach_command") {
+        throw { kind: "invalid", message: "Pane w1:p1 has no terminal." };
+      }
+      return null;
+    });
+    const { user, writeText } = setup();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Copy command" }),
+      ).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "Copy command" }));
+    expect(useAppStore.getState().toast).toBe("Pane w1:p1 has no terminal.");
+    expect(writeText).not.toHaveBeenCalled();
+    expect(screen.queryByText(/^\$/)).toBeNull();
+  });
+});
+
 describe("Inspector reply", () => {
   it("reply_disabled_for_blocked_with_hint", () => {
     setup(BLOCKED);

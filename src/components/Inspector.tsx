@@ -51,12 +51,26 @@ export function Inspector({
 
   // What "Open" runs; the text comes from Rust, and follows the attach mode in Settings.
   const attachMode = useAppStore((s) => s.settings?.attach_mode);
-  const [command, setCommand] = useState<string | null>(null);
+  // Rust's refusal is kept too, so "Copy command" can say why there is nothing to copy.
+  const [attach, setAttach] = useState<{
+    command: string | null;
+    refusal: { error: unknown } | null;
+  }>({ command: null, refusal: null });
+  const { command, refusal } = attach;
   useEffect(() => {
     let alive = true;
     invokeTyped("copy_attach_command", { machineId, paneId })
-      .then((c) => alive && setCommand(typeof c === "string" ? c : null))
-      .catch(() => alive && setCommand(null));
+      .then(
+        (c) =>
+          alive &&
+          setAttach({
+            command: typeof c === "string" ? c : null,
+            refusal: null,
+          }),
+      )
+      .catch(
+        (error) => alive && setAttach({ command: null, refusal: { error } }),
+      );
     return () => {
       alive = false;
     };
@@ -264,13 +278,23 @@ export function Inspector({
             >
               Rename
             </button>
-            <CopyButton
-              text={command ?? ""}
-              disabled={command === null}
-              className="btn"
-              idleText="Copy command"
-              label="Copy command"
-            />
+            {refusal ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => reportError(refusal.error)}
+              >
+                Copy command
+              </button>
+            ) : (
+              <CopyButton
+                text={command ?? ""}
+                disabled={command === null}
+                className="btn"
+                idleText="Copy command"
+                label="Copy command"
+              />
+            )}
             <button
               type="button"
               className="btn btn-danger"
