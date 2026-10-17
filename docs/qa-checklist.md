@@ -172,3 +172,8 @@ None of these were run by the implementer (they need a GUI session or a real her
 
 - [ ] Toggle a notification setting within 2 s of launching the app: it saves at once, instead of waiting for herdr to be located. A herdr path saved in that window is picked up too (Settings › herdr CLI shows the saved path as found).
 - [ ] With Settings (or the menu-bar popover) open and the main window hidden or behind it, click the Dock icon: the main window comes to the front.
+
+## Task 3
+
+- [ ] Window size and position persist across quit and relaunch.
+- [ ] Quitting with open terminal tabs leaves every herdr pane running (check `herdr pane list`).

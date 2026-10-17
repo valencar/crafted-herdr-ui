@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { TermEvent } from "./bindings/TermEvent";
+import type { TermTarget } from "./bindings/TermTarget";
+
 const invoke = vi.fn();
 const listen = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+class MockChannel<T> {
+  onmessage: (message: T) => void = () => {};
+}
+vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: MockChannel }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
 
 const {
@@ -11,6 +17,8 @@ const {
   invokeTyped,
   onFocusRow,
   onNewSession,
+  onOpenRow,
+  openTerm,
   onPreview,
   onSettings,
   onState,
@@ -149,5 +157,62 @@ describe("settings and window events", () => {
     expect(settings).toHaveBeenCalledWith({ group_by: "status" });
     expect(focus).toHaveBeenCalledWith("buildbox::w1:p1");
     expect(newSession).toHaveBeenCalledWith();
+  });
+});
+
+describe("openTerm", () => {
+  it("openTerm passes a channel and forwards its messages", async () => {
+    invoke.mockResolvedValue(7);
+    const events: TermEvent[] = [];
+    const target: TermTarget = {
+      kind: "pane",
+      machineId: "buildbox",
+      paneId: "w1:p1",
+    };
+
+    await expect(
+      openTerm(target, 80, 24, (e) => events.push(e)),
+    ).resolves.toBe(7);
+
+    expect(invoke).toHaveBeenCalledWith("term_open", {
+      target,
+      cols: 80,
+      rows: 24,
+      onEvent: expect.any(MockChannel),
+    });
+    const channel = invoke.mock.calls[0][1].onEvent as MockChannel<TermEvent>;
+    channel.onmessage({ kind: "data", data: "x" });
+    channel.onmessage({ kind: "exit", code: 0 });
+    expect(events).toEqual([
+      { kind: "data", data: "x" },
+      { kind: "exit", code: 0 },
+    ]);
+  });
+
+  it("rethrows a failed open as an ActionError", async () => {
+    invoke.mockRejectedValue({
+      kind: "invalid",
+      message: "herdr is still starting. Try again in a moment.",
+    });
+    await expect(
+      openTerm({ kind: "full", machineId: "local" }, 80, 24, () => {}),
+    ).rejects.toEqual({
+      kind: "invalid",
+      message: "herdr is still starting. Try again in a moment.",
+    });
+  });
+});
+
+describe("onOpenRow", () => {
+  it("listens to open-row and hands over the row key", async () => {
+    const unlisten = vi.fn();
+    listen.mockResolvedValue(unlisten);
+    const cb = vi.fn();
+
+    await expect(onOpenRow(cb)).resolves.toBe(unlisten);
+
+    expect(listen.mock.calls[0][0]).toBe("open-row");
+    listen.mock.calls[0][1]({ payload: "buildbox::w1:p1" });
+    expect(cb).toHaveBeenCalledWith("buildbox::w1:p1");
   });
 });

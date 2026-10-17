@@ -13,6 +13,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 use tauri_plugin_positioner::{Position, WindowExt};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
 use crate::herdr::model::AgentStatus;
@@ -132,6 +133,8 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
 
 /// Hides the main window (the app keeps running in the menu bar) and slows polling down.
 pub fn hide_main<R: Runtime>(app: &AppHandle<R>) {
+    // Hiding is how the window "closes", so this is when its size and position are saved.
+    let _ = app.save_window_state(StateFlags::all());
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.hide();
     }

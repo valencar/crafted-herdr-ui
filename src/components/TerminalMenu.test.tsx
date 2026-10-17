@@ -26,6 +26,12 @@ const SETTINGS: Settings = {
   group_by: "project",
   global_shortcut_enabled: true,
   open_after_create: true,
+  open_target: "app",
+  terminal_placement: "bottom",
+  terminal_panel_size: 320,
+  terminal_font_size: 13,
+  sidebar_collapsed: false,
+  row_density: "comfortable",
 };
 
 function setup(template = "") {

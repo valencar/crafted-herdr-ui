@@ -6,8 +6,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::Deserialize;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
+use ts_rs::TS;
 
 use crate::LOCAL;
 use crate::actions::{self, ActionError, Actions, CreatedSession, NewSessionRequest};
@@ -17,6 +20,7 @@ use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::poller::Poller;
 use crate::preview::{PreviewManager, last_nonempty_line, pane_tail_argv};
+use crate::pty::TermSize;
 use crate::settings::{
     self, AttachMode, HerdrLocator, HerdrStatus, Settings, SharedSettings, ShortcutState,
     ShortcutStatus, changes,
@@ -26,11 +30,13 @@ use crate::state::{AppState, PollIntervals};
 use crate::terminal::open::{
     LaunchLog, attach_for_pane, attach_log_args, launch_in_terminal, open_argv, open_full,
 };
+use crate::terminal::session::{TermEvent, TermId, TermSessions, TermSink};
 use crate::terminal::{
     self, InstalledCache, TerminalList, allowed_herdr_argv, checked_machine_add_argv, join_quoted,
 };
 use crate::tray;
 
+const STILL_STARTING: &str = "herdr is still starting. Try again in a moment.";
 const HELP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The agent kinds read from `herdr agent start --help`, kept after the first successful read.
@@ -326,6 +332,138 @@ pub async fn open_full_herdr(
     .await
 }
 
+/// What a terminal tab runs: one pane's attach command, or the machine's full herdr UI.
+#[derive(Debug, Clone, PartialEq, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum TermTarget {
+    Pane { machine_id: String, pane_id: String },
+    Full { machine_id: String },
+}
+
+/// The command a terminal tab runs, built here and nowhere else (the UI never sends one), and
+/// the herdr arguments the Activity log shows for it. Refuses what `open_argv` refuses (an
+/// unknown machine or pane) before anything is spawned.
+fn term_argv(
+    state: &AppState,
+    cli: &HerdrCli,
+    settings: &Settings,
+    target: &TermTarget,
+) -> Result<(Vec<String>, Vec<String>), ActionError> {
+    match target {
+        TermTarget::Pane {
+            machine_id,
+            pane_id,
+        } => {
+            let argv = open_argv(state, cli, settings.attach_mode, machine_id, pane_id)?;
+            let log = match settings.attach_mode {
+                AttachMode::Pane => attach_log_args(state, machine_id, pane_id),
+                AttachMode::FullUi => argv[1..].to_vec(),
+            };
+            Ok((argv, log))
+        }
+        TermTarget::Full { machine_id } => {
+            let argv = open_argv(state, cli, AttachMode::FullUi, machine_id, "")?;
+            let log = argv[1..].to_vec();
+            Ok((argv, log))
+        }
+    }
+}
+
+impl TermTarget {
+    fn machine_id(&self) -> &str {
+        match self {
+            TermTarget::Pane { machine_id, .. } | TermTarget::Full { machine_id } => machine_id,
+        }
+    }
+}
+
+/// Runs the target's command in the app's terminal panel and streams its output to `on_event`.
+/// Returns the id the other `term_*` commands take.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn term_open(
+    poller: State<'_, Poller>,
+    cli: State<'_, HerdrCli>,
+    settings: State<'_, SharedSettings>,
+    sessions: State<'_, Arc<TermSessions>>,
+    target: TermTarget,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<TermEvent>,
+) -> Result<TermId, ActionError> {
+    let (argv, log_args) = term_argv(&poller.current_state(), &cli, &settings.get(), &target)?;
+    let env = cli.env().to_vec();
+    if env.is_empty() {
+        return Err(ActionError::invalid(STILL_STARTING));
+    }
+    let started = crate::now_ms();
+    let sink: TermSink = Arc::new(move |event| on_event.send(event).is_ok());
+    let sessions = Arc::clone(&sessions);
+    let id = tauri::async_runtime::spawn_blocking(move || {
+        sessions.open(&argv, &env, TermSize { cols, rows }, sink)
+    })
+    .await
+    .map_err(|e| ActionError::invalid(e.to_string()))?
+    .map_err(ActionError::invalid)?;
+    let machine = target.machine_id();
+    cli.record_launch(
+        (machine != LOCAL).then_some(machine),
+        log_args,
+        started,
+        "opened in Crafted Herdr".into(),
+    );
+    Ok(id)
+}
+
+/// Runs a blocking call on a session (a write waits on the pty) off the main thread.
+async fn on_sessions<T: Send + 'static>(
+    sessions: &Arc<TermSessions>,
+    work: impl FnOnce(&TermSessions) -> T + Send + 'static,
+) -> Result<T, ActionError> {
+    let sessions = Arc::clone(sessions);
+    tauri::async_runtime::spawn_blocking(move || work(&sessions))
+        .await
+        .map_err(|e| ActionError::invalid(e.to_string()))
+}
+
+/// Types keystrokes or a paste into a terminal tab. Nothing but input goes through here.
+#[tauri::command]
+pub async fn term_write(
+    sessions: State<'_, Arc<TermSessions>>,
+    id: TermId,
+    data: String,
+) -> Result<(), ActionError> {
+    on_sessions(&sessions, move |s| s.write(id, &data))
+        .await?
+        .map_err(ActionError::invalid)
+}
+
+#[tauri::command]
+pub async fn term_resize(
+    sessions: State<'_, Arc<TermSessions>>,
+    id: TermId,
+    cols: u16,
+    rows: u16,
+) -> Result<(), ActionError> {
+    on_sessions(&sessions, move |s| s.resize(id, TermSize { cols, rows }))
+        .await?
+        .map_err(ActionError::invalid)
+}
+
+/// Closes a terminal tab: kills the attach client only; the herdr pane keeps running.
+#[tauri::command]
+pub async fn term_close(
+    sessions: State<'_, Arc<TermSessions>>,
+    id: TermId,
+) -> Result<(), ActionError> {
+    on_sessions(&sessions, move |s| s.close(id)).await
+}
+
 /// Runs one of the few herdr commands that need a terminal (`machine reconnect` asks for SSH
 /// authentication) in the user's terminal. `args` is what follows the herdr binary, which is
 /// always the resolved local one; anything outside the allowlist is refused.
@@ -500,6 +638,9 @@ pub fn preview_reconnect(id: String) -> Result<String, ActionError> {
     Ok(join_quoted(&full))
 }
 
+/// The event that asks the main window to open a row.
+pub const OPEN_ROW_EVENT: &str = "open-row";
+
 /// The event Settings changes are announced on, so every window shows the same values.
 pub const SETTINGS_EVENT: &str = "settings";
 
@@ -591,6 +732,19 @@ pub fn show_main_new_session(app: AppHandle) {
     tray::show_main_new_session(&app);
 }
 
+/// Shows the main window and asks it to select a row (`"<machineId>::<paneId>"`), from the
+/// popover or a notification.
+#[tauri::command]
+pub fn show_main_open_row(app: AppHandle, machine_id: String, pane_id: String) {
+    tray::show_main(&app);
+    tray::hide_popover(&app);
+    let _ = app.emit_to(
+        tray::MAIN_WINDOW,
+        OPEN_ROW_EVENT,
+        format!("{machine_id}::{pane_id}"),
+    );
+}
+
 #[tauri::command]
 pub fn open_settings(app: AppHandle) -> Result<(), ActionError> {
     tray::open_settings(&app).map_err(|e| ActionError::invalid(e.to_string()))
@@ -648,6 +802,103 @@ mod tests {
         assert!(preview_reconnect("a b".into()).is_err());
         assert!(preview_reconnect("-oProxyCommand=x".into()).is_err());
         assert!(preview_reconnect(String::new()).is_err());
+    }
+
+    fn remote_state() -> AppState {
+        let mut s = state();
+        s.machines[1].target = Some("buildbox".into());
+        s
+    }
+
+    fn herdr() -> HerdrCli {
+        HerdrCli::new("/opt/herdr/bin/herdr".into(), vec![])
+    }
+
+    #[test]
+    fn a_pane_target_runs_the_attach_argv_and_logs_terminal_attach() {
+        let target = TermTarget::Pane {
+            machine_id: "buildbox".into(),
+            pane_id: "w1:p1".into(),
+        };
+        let (argv, log) =
+            term_argv(&remote_state(), &herdr(), &Settings::default(), &target).unwrap();
+        assert_eq!(argv[..3], ["ssh", "-t", "buildbox"]);
+        assert!(argv[3].contains("herdr terminal attach term-1"));
+        assert_eq!(log, ["terminal", "attach", "term-1"]);
+    }
+
+    #[test]
+    fn a_full_target_runs_the_full_ui_argv() {
+        let target = TermTarget::Full {
+            machine_id: "buildbox".into(),
+        };
+        // The target decides, whatever the attach mode says.
+        for attach_mode in [AttachMode::Pane, AttachMode::FullUi] {
+            let settings = Settings {
+                attach_mode,
+                ..Settings::default()
+            };
+            let (argv, log) = term_argv(&remote_state(), &herdr(), &settings, &target).unwrap();
+            assert_eq!(argv, ["/opt/herdr/bin/herdr", "--remote", "buildbox"]);
+            assert_eq!(log, ["--remote", "buildbox"]);
+        }
+    }
+
+    #[test]
+    fn a_pane_target_follows_the_full_ui_attach_mode() {
+        let target = TermTarget::Pane {
+            machine_id: "buildbox".into(),
+            pane_id: "w1:p1".into(),
+        };
+        let settings = Settings {
+            attach_mode: AttachMode::FullUi,
+            ..Settings::default()
+        };
+        let (argv, log) = term_argv(&remote_state(), &herdr(), &settings, &target).unwrap();
+        assert_eq!(argv, ["/opt/herdr/bin/herdr", "--remote", "buildbox"]);
+        assert_eq!(log, ["--remote", "buildbox"]);
+    }
+
+    #[test]
+    fn an_unknown_pane_is_refused_before_spawning() {
+        let refused = |machine: &str, pane: &str| {
+            let target = TermTarget::Pane {
+                machine_id: machine.into(),
+                pane_id: pane.into(),
+            };
+            term_argv(&remote_state(), &herdr(), &Settings::default(), &target)
+        };
+        assert!(matches!(
+            refused("buildbox", "w9:p9"),
+            Err(ActionError::Invalid { .. })
+        ));
+        assert!(matches!(
+            refused("gone", "w1:p1"),
+            Err(ActionError::Invalid { .. })
+        ));
+        let full = TermTarget::Full {
+            machine_id: "gone".into(),
+        };
+        assert!(term_argv(&remote_state(), &herdr(), &Settings::default(), &full).is_err());
+    }
+
+    #[test]
+    fn a_target_is_read_from_the_ui_in_camel_case() {
+        let pane: TermTarget = serde_json::from_value(serde_json::json!(
+            {"kind": "pane", "machineId": "buildbox", "paneId": "w1:p1"}
+        ))
+        .unwrap();
+        assert_eq!(pane.machine_id(), "buildbox");
+        assert!(matches!(pane, TermTarget::Pane { .. }));
+        let full: TermTarget =
+            serde_json::from_value(serde_json::json!({"kind": "full", "machineId": "local"}))
+                .unwrap();
+        assert_eq!(
+            full,
+            TermTarget::Full {
+                machine_id: "local".into()
+            }
+        );
     }
 
     #[test]

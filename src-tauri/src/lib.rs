@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
 use actions::Actions;
@@ -32,6 +33,7 @@ use pty::PortablePty;
 use settings::{HerdrLocator, SharedSettings, ShortcutState, ShortcutStatus};
 use state::{AppState, PollIntervals};
 use terminal::InstalledCache;
+use terminal::session::TermSessions;
 use tray::{MAIN_WINDOW, POPOVER_WINDOW, PopoverGuard};
 
 const FALLBACK_SHELL: &str = "/bin/zsh";
@@ -115,6 +117,8 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(AgentKindsCache::default());
     app.manage(InstalledCache::default());
     app.manage(MachineSetup::new(Arc::new(PortablePty)));
+    // An `Arc`, so the blocking `term_*` work can move a handle into `spawn_blocking`.
+    app.manage(Arc::new(TermSessions::new(Arc::new(PortablePty))));
     app.manage(poller.clone());
     app.manage(locator);
     app.manage(PopoverGuard::default());
@@ -229,6 +233,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_positioner::init())
+        // Only the main window is remembered: the popover is placed by the tray, and restoring
+        // would show it (and the Settings window) at launch.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&[POPOVER_WINDOW, tray::SETTINGS_WINDOW])
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -286,6 +297,11 @@ pub fn run() {
             commands::show_main,
             commands::show_main_new_session,
             commands::open_settings,
+            commands::term_open,
+            commands::term_write,
+            commands::term_resize,
+            commands::term_close,
+            commands::show_main_open_row,
         ])
         .on_window_event(on_window_event)
         .setup(|app| start(app))
@@ -301,6 +317,13 @@ pub fn run() {
         // the popover is on screen (macOS then reports a visible window).
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => tray::show_main(app),
+        // Quitting ends the attach clients only; the herdr panes they showed keep running.
+        RunEvent::Exit => {
+            if let Some(sessions) = app.try_state::<Arc<TermSessions>>() {
+                sessions.close_all();
+            }
+            let _ = app.save_window_state(StateFlags::all());
+        }
         _ => {}
     });
 }
