@@ -58,5 +58,7 @@ export function useStateSync(): void {
 /** Keeps the store's `settings` current. */
 export function useSettingsSync(): void {
   const setSettings = useAppStore((s) => s.setSettings);
-  useSynced<Settings>(getSettings, onSettings, setSettings);
+  // Without the event the Settings window would silently show stale values.
+  const reportError = useAppStore((s) => s.reportError);
+  useSynced<Settings>(getSettings, onSettings, setSettings, reportError);
 }

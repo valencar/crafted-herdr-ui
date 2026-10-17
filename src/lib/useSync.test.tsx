@@ -113,4 +113,12 @@ describe("useSettingsSync", () => {
     act(() => push(settings("changed")));
     expect(useAppStore.getState().settings).toEqual(settings("changed"));
   });
+
+  it("reports_a_listener_that_cannot_be_registered", async () => {
+    vi.mocked(getSettings).mockResolvedValue(settings("saved"));
+    vi.mocked(onSettings).mockRejectedValue(new Error("no settings events"));
+    renderHook(() => useSettingsSync());
+    await act(async () => {});
+    expect(useAppStore.getState().toast).toContain("no settings events");
+  });
 });
