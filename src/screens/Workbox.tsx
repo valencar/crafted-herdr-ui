@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { ConfirmDialog } from "../components/ConfirmDialog";
-import { NameSheet } from "../components/NameSheet";
 import { PaneBox } from "../components/PaneBox";
 import { Sidebar } from "../components/Sidebar";
 import { TabCard } from "../components/TabCard";
 import { StoreToast } from "../components/Toast";
+import {
+  WorkboxDialogs,
+  type WorkboxDialog,
+} from "../components/WorkboxDialogs";
 import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
 import type { Pane } from "../lib/bindings/Pane";
-import type { Tab } from "../lib/bindings/Tab";
 import type { Workspace } from "../lib/bindings/Workspace";
-import { plural, shortPath } from "../lib/format";
+import { shortPath } from "../lib/format";
 import { groupByProject, isNeedsYou, needsYou, toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { openRow, useOpenWhenListed } from "../lib/openRow";
@@ -27,25 +28,6 @@ import { NewSession } from "./NewSession";
 
 /** herdr's answer when a workspace has linked worktree workspaces (spec section 7). */
 const GROUP_CLOSE_CODE = "workspace_group_close_required";
-const GROUP_CLOSE_NOTE =
-  "Close its linked worktree workspaces first, then try again.";
-
-type Dialog =
-  | { kind: "rename-box" }
-  | { kind: "remove" }
-  | { kind: "disable" }
-  | { kind: "new-workspace" }
-  | { kind: "new-tab"; workspace: Workspace }
-  | { kind: "rename-workspace"; workspace: Workspace }
-  | { kind: "close-workspace"; workspace: Workspace }
-  | { kind: "group-close"; workspace: Workspace; message: string }
-  | { kind: "rename-tab"; tab: Tab }
-  | { kind: "close-tab"; tab: Tab };
-
-function sentence(text: string): string {
-  const t = text.trim();
-  return /[.!?]$/.test(t) ? t : `${t}.`;
-}
 
 /** Where a workspace was started: the folder of its first pane. */
 function workspaceFolder(panes: Pane[], workspaceId: string): string | null {
@@ -68,7 +50,7 @@ export function Workbox({ machineId }: { machineId: string }) {
 
   const nowMs = useNow(30_000);
   const { current: terminal } = useTerminals();
-  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [dialog, setDialog] = useState<WorkboxDialog | null>(null);
   const [checkedAtMs, setCheckedAtMs] = useState<number | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -403,156 +385,15 @@ export function Workbox({ machineId }: { machineId: string }) {
         <main className="main">{content}</main>
       </div>
 
-      {machine && dialog?.kind === "rename-box" && (
-        <NameSheet
-          title="Rename workbox"
-          fields={[{ key: "name", label: "Name", initial: machine.label }]}
-          submitLabel="Rename"
-          onSubmit={(v) =>
-            invokeTyped("machine_rename", { id: machine.id, label: v.name })
-          }
-          onClose={close}
-        />
-      )}
-      {machine && dialog?.kind === "remove" && (
-        <ConfirmDialog
-          title={`Remove ${machine.label}?`}
-          body="Removing forgets this workbox here. Its sessions and agents keep running on the machine."
-          confirmLabel="Remove workbox"
-          danger
-          onConfirm={() => {
-            close();
-            invokeTyped("machine_remove", { id: machine.id })
-              .then(goHome)
-              .catch(report);
-          }}
-          onCancel={close}
-        />
-      )}
-      {machine && dialog?.kind === "disable" && (
-        <ConfirmDialog
-          title={`Disable ${machine.label}?`}
-          body={`Crafted Herdr stops checking ${machine.label}. Its sessions and agents keep running on the machine, and you can enable it again here.`}
-          confirmLabel="Disable workbox"
-          danger={false}
-          onConfirm={() => {
-            close();
-            run(
-              invokeTyped("machine_set_enabled", {
-                id: machine.id,
-                enabled: false,
-              }),
-            );
-          }}
-          onCancel={close}
-        />
-      )}
-      {dialog?.kind === "new-workspace" && (
-        <NameSheet
-          title="New workspace"
-          fields={[
-            {
-              key: "cwd",
-              label: "Folder",
-              placeholder: "/home/dev/projects/api-service",
-              mono: true,
-            },
-            { key: "name", label: "Name" },
-          ]}
-          submitLabel="Create workspace"
-          onSubmit={(v) =>
-            invokeTyped("create_workspace", {
-              machineId,
-              cwd: v.cwd,
-              label: v.name,
-            })
-          }
-          onClose={close}
-        />
-      )}
-      {dialog?.kind === "new-tab" && (
-        <NameSheet
-          title={`New tab in ${dialog.workspace.label}`}
-          fields={[{ key: "name", label: "Name" }]}
-          submitLabel="Create tab"
-          onSubmit={(v) =>
-            invokeTyped("create_tab", {
-              machineId,
-              workspaceId: dialog.workspace.workspace_id,
-              label: v.name,
-            })
-          }
-          onClose={close}
-        />
-      )}
-      {dialog?.kind === "rename-workspace" && (
-        <NameSheet
-          title="Rename workspace"
-          fields={[
-            { key: "name", label: "Name", initial: dialog.workspace.label },
-          ]}
-          submitLabel="Rename"
-          onSubmit={(v) =>
-            invokeTyped("rename_workspace", {
-              machineId,
-              workspaceId: dialog.workspace.workspace_id,
-              label: v.name,
-            })
-          }
-          onClose={close}
-        />
-      )}
-      {dialog?.kind === "close-workspace" && (
-        <ConfirmDialog
-          title={`Close workspace ${dialog.workspace.label}?`}
-          body={`This closes workspace ${dialog.workspace.workspace_id} on ${label}, with its ${plural(dialog.workspace.tab_count, "tab", "tabs")} and ${plural(dialog.workspace.pane_count, "session", "sessions")}, and ends whatever is running in them.`}
-          confirmLabel="Close workspace"
-          onConfirm={() => {
-            const { workspace } = dialog;
-            close();
-            void closeWorkspace(workspace);
-          }}
-          onCancel={close}
-        />
-      )}
-      {dialog?.kind === "group-close" && (
-        <ConfirmDialog
-          title={`${dialog.workspace.label} can’t be closed yet`}
-          body={`${sentence(dialog.message)} ${GROUP_CLOSE_NOTE}`}
-          confirmLabel="OK"
-          danger={false}
-          onConfirm={close}
-          onCancel={close}
-        />
-      )}
-      {dialog?.kind === "rename-tab" && (
-        <NameSheet
-          title="Rename tab"
-          fields={[{ key: "name", label: "Name", initial: dialog.tab.label }]}
-          submitLabel="Rename"
-          onSubmit={(v) =>
-            invokeTyped("rename_tab", {
-              machineId,
-              tabId: dialog.tab.tab_id,
-              label: v.name,
-            })
-          }
-          onClose={close}
-        />
-      )}
-      {dialog?.kind === "close-tab" && (
-        <ConfirmDialog
-          title={`Close tab ${dialog.tab.label}?`}
-          body={`This closes tab ${dialog.tab.tab_id} on ${label} and ends whatever is running in its ${plural(dialog.tab.pane_count, "session", "sessions")}.`}
-          confirmLabel="Close tab"
-          onConfirm={() => {
-            const { tab } = dialog;
-            close();
-            run(invokeTyped("close_tab", { machineId, tabId: tab.tab_id }));
-          }}
-          onCancel={close}
-        />
-      )}
+      <WorkboxDialogs
+        dialog={dialog}
+        machine={machine}
+        machineId={machineId}
+        label={label}
+        onClose={close}
+        onRemoved={goHome}
+        onCloseWorkspace={closeWorkspace}
+      />
 
       {sheet === "new-session" && (
         <NewSession terminalName={terminalLabel(terminal)} />
