@@ -59,7 +59,7 @@ describe("openRow", () => {
 });
 
 describe("markSeen", () => {
-  it("marks the row seen", async () => {
+  it("marks the row seen", () => {
     markSeen(row("done"));
     expect(invoke.mock.calls).toEqual([["mark_seen", target]]);
   });

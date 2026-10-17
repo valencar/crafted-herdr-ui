@@ -27,7 +27,7 @@ export function Toast({
   );
 }
 
-/** The app store's toast, when there is one. Every screen mounts this once. */
+/** The app store's toast, when there is one. Each window mounts this once. */
 export function StoreToast() {
   const toast = useAppStore((s) => s.toast);
   const tone = useAppStore((s) => s.toastTone);

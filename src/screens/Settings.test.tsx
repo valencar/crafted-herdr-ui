@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/bindings/AppState";
@@ -74,6 +74,7 @@ function setup(settings: Partial<SettingsData> = {}, section?: string) {
   useAppStore.setState({
     settings: { ...DEFAULTS, ...settings },
     state: STATE,
+    toast: null,
   });
   const user = userEvent.setup();
   render(<Settings />);
@@ -118,6 +119,12 @@ beforeEach(() => {
 });
 
 describe("Settings", () => {
+  it("shows_the_app_toast_so_a_failed_listener_is_visible_in_this_window", () => {
+    setup();
+    act(() => useAppStore.getState().reportError(new Error("no events")));
+    expect(screen.getByRole("alert")).toHaveTextContent("no events");
+  });
+
   it("settings_terminal_radio_disables_missing", async () => {
     const user = await setup({}, "Terminal");
     const group = await screen.findByRole("group", {

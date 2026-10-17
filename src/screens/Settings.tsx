@@ -1,5 +1,6 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { StoreToast } from "../components/Toast";
 import type { GroupBy } from "../lib/bindings/GroupBy";
 import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
 import type { OpenMode } from "../lib/bindings/OpenMode";
@@ -674,6 +675,7 @@ export function Settings() {
           <Shortcuts settings={settings} update={update} />
         )}
       </main>
+      <StoreToast />
     </div>
   );
 }

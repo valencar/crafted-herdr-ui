@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Profiler, type ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { ActionError } from "../lib/bindings/ActionError";
@@ -62,7 +63,10 @@ function appState(...machines: MachineView[]): AppState {
 
 const defaultState = () => appState(machine("buildbox"), machine("gpubox"));
 
-function setup(state: AppState | null = defaultState()) {
+function setup(
+  state: AppState | null = defaultState(),
+  wrap: (home: ReactElement) => ReactElement = (home) => home,
+) {
   useAppStore.setState({
     state,
     selectedKey: null,
@@ -78,7 +82,7 @@ function setup(state: AppState | null = defaultState()) {
     dismissedVersion: null,
   });
   const user = userEvent.setup();
-  render(<Home />);
+  render(wrap(<Home />));
   return user;
 }
 
@@ -451,6 +455,21 @@ describe("Home", () => {
     expect(
       invoke.mock.calls.filter(([name]) => name === "start_preview"),
     ).toHaveLength(1);
+  });
+
+  it("a_preview_frame_for_another_row_does_not_re_render_home", () => {
+    const commits = vi.fn();
+    setup(defaultState(), (home) => (
+      <Profiler id="home" onRender={commits}>
+        {home}
+      </Profiler>
+    ));
+    // Nothing is selected, so no Inspector preview listens: only Home's own subscription counts.
+    commits.mockClear();
+    act(() =>
+      useAppStore.getState().setPreview({ key: "x::w1:p1", text: "hi" }),
+    );
+    expect(commits).not.toHaveBeenCalled();
   });
 
   it("the_inspector_follows_the_selection_and_starts_one_preview", async () => {
