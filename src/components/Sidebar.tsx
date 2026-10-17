@@ -1,4 +1,4 @@
-import { STATUS_LABEL, type RowStatus } from "../lib/format";
+import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Group } from "../lib/grouping";
 
@@ -16,13 +16,6 @@ function worstStatus(group: Group): RowStatus {
     WORST_FIRST.find((s) => group.rows.some((r) => r.status === s)) ?? "shell"
   );
 }
-
-const HEALTH_LABEL = {
-  online: "Online",
-  reconnecting: "Reconnecting",
-  attention: "Attention",
-  disabled: "Disabled",
-} as const;
 
 type Props = {
   needsCount: number;

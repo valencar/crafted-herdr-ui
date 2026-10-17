@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -11,14 +11,13 @@ use tokio::sync::Semaphore;
 use ts_rs::TS;
 
 use super::errors::HerdrError;
+use crate::{LOCAL, lock, now_ms};
 
 pub const T_DEFAULT: Duration = Duration::from_secs(10);
 pub const T_CREATE: Duration = Duration::from_secs(30);
 pub const T_AGENT_START: Duration = Duration::from_secs(45);
 pub const T_PROMPT: Duration = Duration::from_secs(30);
 
-/// Machine id that means "this computer": no `--machine` flag.
-const LOCAL: &str = "local";
 const MAX_CONCURRENT_PER_MACHINE: usize = 4;
 const LOG_CAPACITY: usize = 200;
 
@@ -37,6 +36,9 @@ pub struct CommandLogEntry {
     #[ts(type = "number")]
     pub duration_ms: u64,
     pub error: Option<String>,
+    /// For a command handed to the user's terminal, where it went ("opened in Ghostty"). The
+    /// app can't see how that command ends, so such an entry has no exit code and no error.
+    pub note: Option<String>,
 }
 
 /// Ring buffer of the most recent calls.
@@ -68,18 +70,6 @@ pub struct HerdrCli {
     env: Arc<OnceLock<Vec<(String, String)>>>,
     log: Arc<Mutex<CommandLog>>,
     limits: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
-}
-
-/// Locks, recovering the data if another thread panicked while holding the lock.
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-pub(crate) fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 impl HerdrCli {
@@ -168,14 +158,28 @@ impl HerdrCli {
             exit_code,
             duration_ms: started.elapsed().as_millis() as u64,
             error: result.as_ref().err().map(ToString::to_string),
+            note: None,
         });
         result
     }
 
-    /// Adds a call that ran outside `run` (the pty-driven `machine add`) to the command log.
-    /// `machine` is the profile id for a remote machine (`None` for Local or when no single
-    /// machine is meant), `argv` is what follows the herdr binary, and `started_ms` is a Unix
-    /// time in milliseconds.
+    /// Adds a command that was handed to the user's terminal. Its outcome is unknown, so the
+    /// entry carries `note` (where it went) instead of an exit code or an error. The arguments
+    /// are as in `record`.
+    pub fn record_launch(
+        &self,
+        machine: Option<&str>,
+        argv: Vec<String>,
+        started_ms: u64,
+        note: String,
+    ) {
+        self.record(machine, argv, started_ms, None, None, Some(note));
+    }
+
+    /// Adds a call that ran outside `run` (the pty-driven `machine add`) to the command log. It
+    /// ended just now, `started_ms` ago. `machine` is the profile id for a remote machine (`None`
+    /// for Local or when no single machine is meant), `argv` is what follows the herdr binary,
+    /// and `started_ms` is a Unix time in milliseconds.
     pub fn record(
         &self,
         machine: Option<&str>,
@@ -183,6 +187,7 @@ impl HerdrCli {
         started_ms: u64,
         exit_code: Option<i32>,
         error: Option<String>,
+        note: Option<String>,
     ) {
         lock(&self.log).push(CommandLogEntry {
             at_ms: started_ms,
@@ -191,6 +196,7 @@ impl HerdrCli {
             exit_code,
             duration_ms: now_ms().saturating_sub(started_ms),
             error,
+            note,
         });
     }
 
@@ -400,19 +406,40 @@ mod tests {
     fn recorded_calls_carry_the_remote_machine_and_never_local() {
         let cli = HerdrCli::new(PathBuf::from("herdr"), vec![]);
         let at = now_ms();
-        cli.record(
+        cli.record_launch(
             Some("buildbox"),
             vec!["terminal".into(), "attach".into(), "t1".into()],
             at,
-            None,
-            Some("opened in Ghostty".into()),
+            "opened in Ghostty".into(),
         );
-        cli.record(Some(LOCAL), vec!["--remote".into()], at, None, None);
+        cli.record_launch(
+            Some(LOCAL),
+            vec!["--remote".into()],
+            at,
+            "opened in Ghostty".into(),
+        );
         let log = cli.log_snapshot();
         assert_eq!(log[0].machine.as_deref(), Some("buildbox"));
-        assert_eq!(log[0].error.as_deref(), Some("opened in Ghostty"));
+        assert_eq!(log[0].note.as_deref(), Some("opened in Ghostty"));
+        assert_eq!(log[0].error, None);
         assert_eq!(log[0].exit_code, None);
         assert_eq!(log[1].machine, None);
+    }
+
+    #[test]
+    fn recorded_calls_have_no_note() {
+        let cli = HerdrCli::new(PathBuf::from("herdr"), vec![]);
+        cli.record(
+            None,
+            vec!["status".into()],
+            now_ms(),
+            Some(1),
+            Some("failed".into()),
+            None,
+        );
+        let log = cli.log_snapshot();
+        assert_eq!(log[0].note, None);
+        assert_eq!(log[0].error.as_deref(), Some("failed"));
     }
 
     #[test]
@@ -426,6 +453,7 @@ mod tests {
                 exit_code: Some(0),
                 duration_ms: 0,
                 error: None,
+                note: None,
             });
         }
         let snap = log.snapshot();

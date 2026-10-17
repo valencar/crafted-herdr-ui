@@ -5,6 +5,7 @@
 
 pub mod attach;
 pub mod launchers;
+pub mod open;
 pub mod quote;
 
 use std::path::PathBuf;
@@ -345,11 +346,15 @@ async fn run_spec(
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
     let detail: String = stderr.trim().chars().take(300).collect();
-    Err(failure_message(
-        &spec.program,
-        &format!("failed: {detail}"),
-        &stderr,
-    ))
+    let what = if !detail.is_empty() {
+        format!("failed: {detail}")
+    } else {
+        match out.status.code() {
+            Some(code) => format!("failed (exit {code})"),
+            None => "was stopped by a signal".to_owned(),
+        }
+    };
+    Err(failure_message(&spec.program, &what, &stderr))
 }
 
 /// Starts the process and lets it go: no wait and no kill on drop, so a template that stays
@@ -568,6 +573,25 @@ mod tests {
         );
         assert!(denied.contains("Automation"), "{denied}");
         assert!(!failure_message("open", "did not finish in time", "").contains("Automation"));
+    }
+
+    #[tokio::test]
+    async fn a_failure_without_stderr_says_how_it_ended() {
+        let sh = |script: &str| LaunchSpec {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            files: vec![],
+            detached: false,
+        };
+        let timeout = Duration::from_secs(5);
+        let exit = run_spec(&sh("exit 3"), &[], timeout).await.unwrap_err();
+        assert_eq!(exit, "/bin/sh failed (exit 3).");
+        let signal = run_spec(&sh("kill -9 $$"), &[], timeout).await.unwrap_err();
+        assert_eq!(signal, "/bin/sh was stopped by a signal.");
+        let said = run_spec(&sh("echo nope >&2; exit 1"), &[], timeout)
+            .await
+            .unwrap_err();
+        assert_eq!(said, "/bin/sh failed: nope.");
     }
 
     #[tokio::test]

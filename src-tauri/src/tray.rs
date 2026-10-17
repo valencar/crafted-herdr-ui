@@ -6,7 +6,6 @@
 //! (which runs under the poller's core lock).
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -17,6 +16,7 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use tokio::sync::watch;
 
 use crate::herdr::model::AgentStatus;
+use crate::now_ms;
 use crate::poller::Poller;
 use crate::state::{AppState, Health};
 
@@ -116,13 +116,6 @@ pub fn template_icon_rgba(size: u32) -> Vec<u8> {
 }
 
 // ---------- windows ----------
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
 
 /// Brings the main window to the front and tells the poller it is on screen (2 s polls).
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {

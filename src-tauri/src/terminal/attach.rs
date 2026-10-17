@@ -11,7 +11,10 @@ use super::quote::{is_plain, shell_quote};
 /// single quotes. So the strings herdr hands us (SSH target, session name) must be made only of
 /// characters that are safe unquoted everywhere.
 pub fn check_openable(machine: &MachineView) -> Result<(), String> {
-    if machine.session != DEFAULT_SESSION && !is_plain(&machine.session) {
+    // A leading '-' would make `--session <s>` read the name as another flag.
+    if machine.session != DEFAULT_SESSION
+        && (!is_plain(&machine.session) || machine.session.starts_with('-'))
+    {
         return Err(format!(
             "The session name of {} has characters the app won't pass to a shell. \
              Open it from a terminal instead.",
@@ -544,6 +547,16 @@ mod tests {
         let mut no_target = machine("b", Some("x"), "default");
         no_target.target = None;
         assert!(check_openable(&no_target).is_err());
+    }
+
+    #[test]
+    fn a_session_that_herdr_would_read_as_a_flag_is_refused() {
+        // `--session -x` would be taken as an option, so it is refused like an unsafe name.
+        for target in [None, Some("buildbox")] {
+            let err = check_openable(&machine("b", target, "-x")).unwrap_err();
+            assert!(err.contains("session name"), "{err}");
+        }
+        assert!(check_openable(&machine("b", Some("buildbox"), "work-2")).is_ok());
     }
 
     /// Runs the local attach command with the real `/bin/sh` against a fake herdr that refuses

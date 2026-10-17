@@ -1,6 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -68,7 +68,15 @@ function setup(state: AppState | null) {
 }
 
 beforeEach(() => {
+  // Ages are formatted against `Date.now()` at render, so pin it to `NOW`. Only `Date` is faked;
+  // timers stay real for user-event and `findBy*`.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   invoke.mockReset().mockResolvedValue(null);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("MenuBar", () => {

@@ -7,7 +7,8 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Profiler, type ReactElement } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { ActionError } from "../lib/bindings/ActionError";
 import type { AppState } from "../lib/bindings/AppState";
@@ -24,6 +25,22 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   onPreview: vi.fn(),
 }));
 import { invokeTyped, onPreview } from "../lib/ipc";
+
+// AgentRow and NeedsYouCard each call formatAge once per render and Home never does, so its
+// call count says how many rows rendered.
+vi.mock("../lib/format", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/format")>();
+  return { ...actual, formatAge: vi.fn(actual.formatAge) };
+});
+import { formatAge } from "../lib/format";
+
+const rowRenders = vi.mocked(formatAge);
+
+/** Waits out the terminal lookup, which re-renders every row once, then zeroes the counter. */
+async function settleRows() {
+  await screen.findByText("Opens in Ghostty");
+  rowRenders.mockClear();
+}
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 let emitPreview: (frame: PreviewFrame) => void;
@@ -62,7 +79,10 @@ function appState(...machines: MachineView[]): AppState {
 
 const defaultState = () => appState(machine("buildbox"), machine("gpubox"));
 
-function setup(state: AppState | null = defaultState()) {
+function setup(
+  state: AppState | null = defaultState(),
+  wrap: (home: ReactElement) => ReactElement = (home) => home,
+) {
   useAppStore.setState({
     state,
     selectedKey: null,
@@ -78,7 +98,7 @@ function setup(state: AppState | null = defaultState()) {
     dismissedVersion: null,
   });
   const user = userEvent.setup();
-  render(<Home />);
+  render(wrap(<Home />));
   return user;
 }
 
@@ -93,6 +113,10 @@ function rowItem(key: string): HTMLElement {
 }
 
 beforeEach(() => {
+  // Ages are formatted against `Date.now()` at render, so pin it: a slow runner can't tip 40s into 41s.
+  // Only `Date` is faked; timers stay real for user-event and `findBy*`.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   vi.mocked(onPreview)
     .mockReset()
     .mockImplementation(async (cb) => {
@@ -110,6 +134,10 @@ beforeEach(() => {
           ? `herdr machine reconnect ${args?.id}`
           : null,
   );
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("Home", () => {
@@ -453,6 +481,59 @@ describe("Home", () => {
     ).toHaveLength(1);
   });
 
+  it("a_preview_frame_for_another_row_does_not_re_render_home", () => {
+    const commits = vi.fn();
+    setup(defaultState(), (home) => (
+      <Profiler id="home" onRender={commits}>
+        {home}
+      </Profiler>
+    ));
+    // Nothing is selected, so no Inspector preview listens: only Home's own subscription counts.
+    commits.mockClear();
+    act(() =>
+      useAppStore.getState().setPreview({ key: "x::w1:p1", text: "hi" }),
+    );
+    expect(commits).not.toHaveBeenCalled();
+  });
+
+  // Memoization guard: it counts row renders, not timing. The `user.type` below re-renders Home
+  // (its search state changes) without changing any row's props, so a row that loses `memo`, or
+  // gets an unstable prop such as a new callback each render, renders again and fails these.
+  it("home_re_rendering_for_an_unrelated_reason_re_renders_no_row", async () => {
+    const commits = vi.fn();
+    const user = setup(defaultState(), (home) => (
+      <Profiler id="home" onRender={commits}>
+        {home}
+      </Profiler>
+    ));
+    await settleRows();
+    commits.mockClear();
+    // A blank query keeps every row visible, so only Home's own state changes.
+    await user.type(screen.getByRole("searchbox"), " ");
+    expect(commits).toHaveBeenCalled();
+    expect(rowRenders).not.toHaveBeenCalled();
+  });
+
+  it("a_row_re_renders_when_its_own_props_change", async () => {
+    const user = setup();
+    await settleRows();
+    await user.click(selectButton("gpubox::w1:p1"));
+    // The spy sees renders (so the guard above can fail): the newly selected row rendered.
+    expect(rowRenders).toHaveBeenCalled();
+  });
+
+  it("a_preview_frame_for_the_selected_row_re_renders_only_that_card", async () => {
+    const user = setup();
+    const section = screen.getByRole("region", { name: "Needs you" });
+    await user.click(within(section).getAllByRole("article")[0]);
+    const key = useAppStore.getState().selectedKey!;
+    await waitFor(() => expect(onPreview).toHaveBeenCalled());
+    await settleRows();
+    act(() => emitPreview({ key, text: "one\ntwo" }));
+    // Home re-rendered for the selected row's text; every other row and card kept its props.
+    expect(rowRenders).toHaveBeenCalledTimes(1);
+  });
+
   it("the_inspector_follows_the_selection_and_starts_one_preview", async () => {
     const user = setup();
     await user.click(
@@ -607,7 +688,7 @@ describe("Home", () => {
     });
 
     it("reports_an_open_whose_row_never_shows_up", () => {
-      vi.useFakeTimers();
+      vi.useFakeTimers({ now: NOW });
       try {
         setup();
         act(() =>
@@ -633,7 +714,7 @@ describe("Home", () => {
     });
 
     it("is_dropped_after_10_seconds_if_it_never_shows_up", () => {
-      vi.useFakeTimers();
+      vi.useFakeTimers({ now: NOW });
       try {
         setup();
         act(() => useAppStore.getState().setPendingSelectKey(KEY));
@@ -650,7 +731,7 @@ describe("Home", () => {
   });
 
   it("shows_a_reported_error_and_dismisses_it_after_8_seconds", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ now: NOW });
     try {
       setup();
       act(() =>
@@ -768,13 +849,9 @@ describe("Home states", () => {
         machine(
           "gpubox",
           { kind: "reconnecting", retry_in_ms: 5000, error: "timed out" },
-          { last_ok_ms: Date.now() - 40_000 },
+          { last_ok_ms: NOW - 40_000 },
         ),
-        machine(
-          "stagingbox",
-          { kind: "online" },
-          { last_ok_ms: Date.now() - 90_000 },
-        ),
+        machine("stagingbox", { kind: "online" }, { last_ok_ms: NOW - 90_000 }),
       ),
     );
     expect(rowItem("gpubox::w1:p1")).toHaveTextContent(
@@ -840,6 +917,11 @@ describe("Home states", () => {
       ).toHaveTextContent("herdr isn’t answering yet");
     });
 
+    it("is_absent_before_the_first_poll_has_answered", () => {
+      setup(down({ kind: "reconnecting", retry_in_ms: 0, error: "" }));
+      expect(screen.queryByText("Local isn’t answering")).toBeNull();
+    });
+
     it("is_absent_when_local_is_online_or_still_has_a_snapshot", () => {
       setup(down({ kind: "online" }));
       expect(screen.queryByText("Local isn’t answering")).toBeNull();
@@ -862,7 +944,7 @@ describe("Home states", () => {
           "gpubox",
           { kind: "attention", error: "ssh: connection refused" },
           {
-            last_ok_ms: Date.now() - 40_000,
+            last_ok_ms: NOW - 40_000,
             label: "gpu box",
             snapshot: null,
           },
@@ -912,7 +994,7 @@ describe("Home states", () => {
           machine(
             "gpubox",
             { kind: "attention", error: "ssh: connection refused" },
-            { last_ok_ms: Date.now() - 40_000 },
+            { last_ok_ms: NOW - 40_000 },
           ),
         ),
       );

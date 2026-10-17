@@ -7,7 +7,7 @@ vi.mock("./ipc", async (importOriginal) => ({
   invokeTyped: vi.fn(),
 }));
 import { invokeTyped } from "./ipc";
-import { openRow } from "./openRow";
+import { markSeen, openRow } from "./openRow";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
@@ -55,5 +55,18 @@ describe("openRow", () => {
     await openRow(row("done"));
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(useAppStore.getState().toast).toBe("no terminal");
+  });
+});
+
+describe("markSeen", () => {
+  it("marks the row seen", () => {
+    markSeen(row("done"));
+    expect(invoke.mock.calls).toEqual([["mark_seen", target]]);
+  });
+
+  it("reports a failure to the toast", async () => {
+    invoke.mockRejectedValueOnce({ kind: "invalid", message: "gone" });
+    markSeen(row("done"));
+    await vi.waitFor(() => expect(useAppStore.getState().toast).toBe("gone"));
   });
 });

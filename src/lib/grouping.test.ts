@@ -13,6 +13,7 @@ import {
   isNeedsYou,
   needsYou,
   projectNames,
+  projectNamesOf,
   toRows,
   type Row,
 } from "./grouping";
@@ -349,6 +350,11 @@ describe("projectNames", () => {
     expect(names.get("buildbox::w2:p1")).toBe("web-app");
     // The idle agent works in ~/projects, a container folder: loose.
     expect(names.has("buildbox::w2:p2")).toBe(false);
+  });
+
+  it("projectNamesOf_reads_groups_that_are_already_built", () => {
+    const rows = buildbox();
+    expect(projectNamesOf(groupByProject(rows))).toEqual(projectNames(rows));
   });
 });
 

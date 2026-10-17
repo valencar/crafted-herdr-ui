@@ -25,6 +25,7 @@ function entry(over: Partial<CommandLogEntry>): CommandLogEntry {
     exitCode: 0,
     durationMs: 12,
     error: null,
+    note: null,
     ...over,
   };
 }
@@ -153,6 +154,54 @@ describe("ActivityDrawer", () => {
     }
   });
 
+  it("shows_a_terminal_launch_as_a_note_not_a_failure", async () => {
+    log = [
+      entry({
+        machine: "m-1",
+        argv: ["terminal", "attach", "t1"],
+        exitCode: null,
+        note: "opened in Ghostty",
+      }),
+    ];
+    await open();
+    const row = rows()[0];
+    expect(row).toHaveAttribute("data-failed", "false");
+    expect(within(row).getByText("opened in Ghostty")).toBeInTheDocument();
+    expect(within(row).queryByText("no exit")).not.toBeInTheDocument();
+    // `--machine` doesn't forward attach, so a remote launch has no line to copy.
+    expect(within(row).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("keeps_copy_on_a_local_terminal_launch", async () => {
+    log = [
+      entry({
+        machine: null,
+        argv: ["terminal", "attach", "t1"],
+        exitCode: null,
+        note: "opened in Ghostty",
+      }),
+    ];
+    const user = await open();
+    const row = rows()[0];
+    expect(row).toHaveAttribute("data-failed", "false");
+    await user.click(within(row).getByRole("button", { name: /^Copy/ }));
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
+      "herdr terminal attach t1",
+    );
+  });
+
+  it("still_marks_a_call_without_an_exit_code_but_with_an_error_as_failed", async () => {
+    log = [
+      entry({
+        exitCode: null,
+        error: "timed out",
+        argv: ["pane", "close", "x"],
+      }),
+    ];
+    await open();
+    expect(rows()[0]).toHaveAttribute("data-failed", "true");
+  });
+
   it("waits_for_a_slow_read_instead_of_starting_another", async () => {
     let finish: (log: CommandLogEntry[]) => void = () => {};
     invoke.mockReset();
@@ -208,6 +257,32 @@ describe("ActivityDrawer", () => {
       await vi.advanceTimersByTimeAsync(6000);
     });
     expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  describe("while the window is hidden", () => {
+    const hide = (hidden: boolean) =>
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => hidden,
+      });
+    afterEach(() => hide(false));
+
+    it("does_not_read_the_log_until_the_window_shows_again", async () => {
+      await open();
+      expect(invoke).toHaveBeenCalledTimes(1);
+
+      hide(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6000);
+      });
+      expect(invoke).toHaveBeenCalledTimes(1);
+
+      hide(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(invoke).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("hides_successful_reads_until_show_reads_is_on", async () => {

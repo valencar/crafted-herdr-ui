@@ -1,31 +1,19 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { shortPath } from "../lib/format";
+import { HEALTH_LABEL, agentNameProblem, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { openRow } from "../lib/openRow";
+import { markSeen, openRow } from "../lib/openRow";
 import { useAppStore } from "../store/appStore";
-import { CommandBox } from "./CommandBox";
+import { CommandBox, CopyButton } from "./CommandBox";
 import { CloseConfirm } from "./CloseConfirm";
 import { KindBadge } from "./KindBadge";
 import { Preview } from "./Preview";
 import { StatusPill } from "./StatusPill";
 
-const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
-const AGENT_NAME_HELP =
-  "Use lowercase letters, digits, - or _, starting with a letter (32 characters at most).";
-const COPIED_MS = 1500;
-
-const HEALTH_LABEL = {
-  online: "online",
-  reconnecting: "reconnecting",
-  attention: "needs attention",
-  disabled: "disabled",
-} as const;
-
 /** Mirrors Rust's `validate_name`; Rust still has the last word. */
 function nameProblem(name: string, isAgent: boolean): string | null {
-  if (isAgent) return AGENT_NAME.test(name) ? null : AGENT_NAME_HELP;
+  if (isAgent) return agentNameProblem(name);
   return name.trim() === "" ? "Name can’t be empty." : null;
 }
 
@@ -63,12 +51,26 @@ export function Inspector({
 
   // What "Open" runs; the text comes from Rust, and follows the attach mode in Settings.
   const attachMode = useAppStore((s) => s.settings?.attach_mode);
-  const [command, setCommand] = useState<string | null>(null);
+  // Rust's refusal is kept too, so "Copy command" can say why there is nothing to copy.
+  const [attach, setAttach] = useState<{
+    command: string | null;
+    refusal: { error: unknown } | null;
+  }>({ command: null, refusal: null });
+  const { command, refusal } = attach;
   useEffect(() => {
     let alive = true;
     invokeTyped("copy_attach_command", { machineId, paneId })
-      .then((c) => alive && setCommand(typeof c === "string" ? c : null))
-      .catch(() => alive && setCommand(null));
+      .then(
+        (c) =>
+          alive &&
+          setAttach({
+            command: typeof c === "string" ? c : null,
+            refusal: null,
+          }),
+      )
+      .catch(
+        (error) => alive && setAttach({ command: null, refusal: { error } }),
+      );
     return () => {
       alive = false;
     };
@@ -123,26 +125,6 @@ export function Inspector({
     try {
       await invokeTyped("rename_session", { ...target, isAgent, name });
       stopRename();
-    } catch (e) {
-      reportError(e);
-    }
-  };
-
-  // Copy
-  const [copied, setCopied] = useState(false);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => () => clearTimeout(copiedTimer.current), []);
-  const copy = async () => {
-    try {
-      const line = await invokeTyped("copy_attach_command", target);
-      try {
-        await navigator.clipboard.writeText(line);
-      } catch {
-        throw new Error("Couldn’t copy to the clipboard.");
-      }
-      setCopied(true);
-      clearTimeout(copiedTimer.current);
-      copiedTimer.current = setTimeout(() => setCopied(false), COPIED_MS);
     } catch (e) {
       reportError(e);
     }
@@ -242,11 +224,7 @@ export function Inspector({
           Open in {terminalName} <kbd className="mono">⌘↩</kbd>
         </button>
         {row.status === "done" && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => invokeTyped("mark_seen", target).catch(reportError)}
-          >
+          <button type="button" className="btn" onClick={() => markSeen(row)}>
             Mark seen
           </button>
         )}
@@ -300,9 +278,23 @@ export function Inspector({
             >
               Rename
             </button>
-            <button type="button" className="btn" onClick={() => void copy()}>
-              {copied ? "Copied" : "Copy command"}
-            </button>
+            {refusal ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => reportError(refusal.error)}
+              >
+                Copy command
+              </button>
+            ) : (
+              <CopyButton
+                text={command ?? ""}
+                disabled={command === null}
+                className="btn"
+                idleText="Copy command"
+                label="Copy command"
+              />
+            )}
             <button
               type="button"
               className="btn btn-danger"

@@ -1,6 +1,7 @@
 import type { ActionError } from "./bindings/ActionError";
 import type { AgentStatus } from "./bindings/AgentStatus";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
+import type { Health } from "./bindings/Health";
 import type { TerminalId } from "./bindings/TerminalId";
 
 /** A row's status: a herdr agent status, or `shell` for a pane with no agent. */
@@ -110,7 +111,7 @@ export function lastLines(text: string | null, count: number): string[] {
     .slice(-count);
 }
 
-/** The first herdr version the app is built against (`env.rs` `MIN_VERSION`). */
+/** The first herdr version the app is built against. The only place the floor lives. */
 const MIN_VERSION: [number, number, number] = [0, 9, 0];
 
 /**
@@ -162,6 +163,14 @@ export function formatDuration(ms: number): string {
 }
 
 /**
+ * A machine that has not been polled yet: it starts as reconnecting with no error text, and
+ * a real failure never has empty text.
+ */
+export function isPending(health: Health): boolean {
+  return health.kind === "reconnecting" && health.error === "";
+}
+
+/**
  * A successful read-only call: `api snapshot`, or `<noun> read …` (`pane read`, `agent read`).
  * The poller and the previews make these every couple of seconds, so the Activity drawer hides
  * them unless asked. A read that failed is never quiet.
@@ -170,4 +179,26 @@ export function isQuietRead(entry: CommandLogEntry): boolean {
   if (entry.exitCode !== 0 || entry.error !== null) return false;
   const [first, second] = entry.argv;
   return (first === "api" && second === "snapshot") || second === "read";
+}
+
+/** The workbox health words shown next to a machine's dot (never color alone). */
+export const HEALTH_LABEL: Record<Health["kind"], string> = {
+  online: "Online",
+  reconnecting: "Reconnecting",
+  attention: "Attention",
+  disabled: "Disabled",
+};
+
+/** "1 agent", "2 agents". */
+export function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+const AGENT_NAME_HELP =
+  "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.";
+
+/** Why an agent name is refused, or `null` when it is fine. Mirrors Rust `validate_name`. */
+export function agentNameProblem(name: string): string | null {
+  return AGENT_NAME.test(name) ? null : AGENT_NAME_HELP;
 }

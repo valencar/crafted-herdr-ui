@@ -5,6 +5,7 @@ import {
   formatClock,
   formatDuration,
   isQuietRead,
+  plural,
   shellJoin,
 } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
@@ -17,8 +18,13 @@ type Props = {
   onClose: () => void;
 };
 
-/** A line that can be pasted into a terminal: `herdr [--machine <id>] <argv>`. */
-function runnable(entry: CommandLogEntry): string {
+/**
+ * A line that can be pasted into a terminal: `herdr [--machine <id>] <argv>`. A remote launch
+ * has none, because `--machine` doesn't forward attach or `--remote`; the Inspector's command
+ * box offers the real command for those.
+ */
+function runnable(entry: CommandLogEntry): string | null {
+  if (entry.note !== null && entry.machine !== null) return null;
   // Local runs without the flag (older log entries may still say "local").
   const machine =
     entry.machine && entry.machine !== "local"
@@ -34,8 +40,9 @@ function newestFirst(entries: CommandLogEntry[]): CommandLogEntry[] {
 
 /**
  * Every herdr call the app has made, as the command it ran (spec section 8.2). Refreshes every
- * 2 s while it is open. Successful reads (the poller's snapshots, the previews' pane reads)
- * are hidden unless "Show reads" is on, because they would bury everything else.
+ * 2 s while it is open and the window is visible. Successful reads (the poller's snapshots, the
+ * previews' pane reads) are hidden unless "Show reads" is on, because they would bury everything
+ * else.
  */
 export function ActivityDrawer({ machines, onClose }: Props) {
   const headingId = useId();
@@ -50,6 +57,11 @@ export function ActivityDrawer({ machines, onClose }: Props) {
     let alive = true;
     let timer: number | undefined;
     const load = () => {
+      // Nobody is looking: skip the read (and the re-render of up to 200 rows), keep the beat.
+      if (document.hidden) {
+        timer = window.setTimeout(load, REFRESH_MS);
+        return;
+      }
       invokeTyped("get_command_log")
         .then((log) => {
           if (!alive) return;
@@ -135,7 +147,7 @@ export function ActivityDrawer({ machines, onClose }: Props) {
       <p className="muted activity-sub">
         Every herdr command the app ran, newest first.
         {hidden > 0 &&
-          ` ${hidden} successful ${hidden === 1 ? "read" : "reads"} hidden.`}
+          ` ${plural(hidden, "successful read", "successful reads")} hidden.`}
       </p>
       {unreadable && (
         <p className="field-error" role="status">
@@ -147,7 +159,10 @@ export function ActivityDrawer({ machines, onClose }: Props) {
       )}
       <ul className="activity-list">
         {keyed.map(({ entry, key }) => {
-          const failed = entry.exitCode !== 0 || entry.error !== null;
+          const failed =
+            entry.error !== null ||
+            (entry.exitCode !== null && entry.exitCode !== 0);
+          const line = runnable(entry);
           return (
             <li key={key} className="activity-row" data-failed={failed}>
               <span className="mono activity-time">
@@ -158,15 +173,20 @@ export function ActivityDrawer({ machines, onClose }: Props) {
               </span>
               <code className="activity-cmd">{shellJoin(entry.argv)}</code>
               <span className="mono activity-exit">
-                {entry.exitCode === null ? "no exit" : `exit ${entry.exitCode}`}
+                {entry.note ??
+                  (entry.exitCode === null
+                    ? "no exit"
+                    : `exit ${entry.exitCode}`)}
               </span>
               <span className="mono muted activity-duration">
                 {formatDuration(entry.durationMs)}
               </span>
-              <CopyButton
-                text={runnable(entry)}
-                label={`Copy command: ${shellJoin(entry.argv)}`}
-              />
+              {line !== null && (
+                <CopyButton
+                  text={line}
+                  label={`Copy command: ${shellJoin(entry.argv)}`}
+                />
+              )}
               {entry.error && (
                 <p className="field-error activity-error">{entry.error}</p>
               )}

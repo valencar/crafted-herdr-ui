@@ -11,4 +11,9 @@ atMs: number, machine: string | null,
 /**
  * The arguments after `--machine <id>`.
  */
-argv: Array<string>, exitCode: number | null, durationMs: number, error: string | null, };
+argv: Array<string>, exitCode: number | null, durationMs: number, error: string | null, 
+/**
+ * For a command handed to the user's terminal, where it went ("opened in Ghostty"). The
+ * app can't see how that command ends, so such an entry has no exit code and no error.
+ */
+note: string | null, };

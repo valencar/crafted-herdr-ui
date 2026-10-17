@@ -2,36 +2,35 @@
 //! state and hands off to `Actions` (or the poller). Names are snake_case in Rust and in
 //! `invoke()`; argument keys are camelCase, which is Tauri's default.
 
-use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
-use ts_rs::TS;
 
+use crate::LOCAL;
 use crate::actions::{self, ActionError, Actions, CreatedSession, NewSessionRequest};
 use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
 use crate::herdr::cli::{CommandLogEntry, HerdrCli, T_DEFAULT};
-use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::poller::Poller;
+use crate::preview::{PreviewManager, last_nonempty_line, pane_tail_argv};
 use crate::settings::{
     self, AttachMode, HerdrLocator, HerdrStatus, Settings, SharedSettings, ShortcutState,
     ShortcutStatus, changes,
 };
 use crate::ssh_config;
-use crate::state::{AppState, MachineView, PollIntervals};
+use crate::state::{AppState, PollIntervals};
+use crate::terminal::open::{
+    LaunchLog, attach_for_pane, attach_log_args, launch_in_terminal, open_argv, open_full,
+};
 use crate::terminal::{
-    self, InstalledCache, LaunchSpec, TerminalId, TerminalList, allowed_herdr_argv, attach_argv,
-    check_bin, check_openable, check_terminal_id, checked_machine_add_argv, default_terminal,
-    full_ui_argv, join_quoted, launcher_for,
+    self, InstalledCache, TerminalList, allowed_herdr_argv, checked_machine_add_argv, join_quoted,
 };
 use crate::tray;
 
-const LOCAL: &str = "local";
 const HELP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The agent kinds read from `herdr agent start --help`, kept after the first successful read.
@@ -188,8 +187,8 @@ pub async fn close_workspace(
     actions.close_workspace(&machine_id, &workspace_id).await
 }
 
-/// Sends a reply to an agent. Refused here, without calling herdr, if the poller last saw it
-/// blocked.
+/// Sends a reply to an agent. `Actions::reply_to_agent` refuses it, without calling herdr, unless
+/// the poller last saw the agent idle or done (or has not seen it at all).
 #[tauri::command]
 pub async fn reply_to_agent(
     actions: State<'_, Actions>,
@@ -265,172 +264,11 @@ pub async fn list_agent_kinds(
     Ok(cache.get(&cli).await)
 }
 
-fn invalid(message: impl Into<String>) -> ActionError {
-    ActionError::Invalid {
-        message: message.into(),
-    }
-}
-
-fn find_machine<'a>(state: &'a AppState, machine_id: &str) -> Result<&'a MachineView, ActionError> {
-    state
-        .machines
-        .iter()
-        .find(|m| m.id == machine_id)
-        .ok_or_else(|| invalid(format!("Unknown machine {machine_id}.")))
-}
-
-/// The terminal id of a pane, from the last snapshot. A pane with none can't be attached.
-fn pane_terminal_id<'a>(machine: &'a MachineView, pane_id: &str) -> Result<&'a str, ActionError> {
-    let snapshot = machine
-        .snapshot
-        .as_ref()
-        .ok_or_else(|| invalid(format!("{} has not reported its panes yet.", machine.label)))?;
-    let from_panes = snapshot
-        .panes
-        .iter()
-        .find(|p| p.pane_id == pane_id)
-        .map(|p| p.terminal_id.as_str());
-    let from_agents = || {
-        snapshot
-            .agents
-            .iter()
-            .find(|a| a.pane_id == pane_id)
-            .map(|a| a.terminal_id.as_str())
-    };
-    match from_panes.or_else(from_agents) {
-        Some(id) if !id.is_empty() => check_terminal_id(id).map(|()| id).map_err(invalid),
-        Some(_) => Err(invalid(format!(
-            "Pane {pane_id} has no terminal to attach to."
-        ))),
-        None => Err(invalid(format!(
-            "Pane {pane_id} is not on {}.",
-            machine.label
-        ))),
-    }
-}
-
-/// The herdr binary a Local command runs. Remote machines use their own `herdr`.
-fn local_bin(cli: &HerdrCli) -> Result<String, ActionError> {
-    let bin = cli.bin().to_string_lossy().into_owned();
-    if bin.is_empty() {
-        return Err(invalid("herdr was not found on this computer."));
-    }
-    check_bin(&bin).map_err(invalid)?;
-    Ok(bin)
-}
-
-/// The herdr arguments the command log shows for an attach: the plain `terminal attach`, not
-/// the wrapper script around it.
-fn attach_log_args(state: &AppState, machine_id: &str, pane_id: &str) -> Vec<String> {
-    let id = find_machine(state, machine_id)
-        .and_then(|m| pane_terminal_id(m, pane_id))
-        .unwrap_or(pane_id);
-    ["terminal", "attach", id].map(str::to_owned).to_vec()
-}
-
-/// The attach command for a pane: what the terminal runs, as argv.
-fn attach_for_pane(
-    state: &AppState,
-    cli: &HerdrCli,
-    machine_id: &str,
-    pane_id: &str,
-) -> Result<Vec<String>, ActionError> {
-    let machine = find_machine(state, machine_id)?;
-    check_openable(machine).map_err(invalid)?;
-    let terminal_id = pane_terminal_id(machine, pane_id)?;
-    let bin = if machine.is_local {
-        local_bin(cli)?
-    } else {
-        String::new()
-    };
-    Ok(attach_argv(machine, terminal_id, &bin))
-}
-
-/// The terminal the settings ask for: the chosen one, or the default of the installed ones.
-fn chosen_terminal(settings: &Settings, installed: &[TerminalId]) -> TerminalId {
-    settings
-        .terminal
-        .unwrap_or_else(|| default_terminal(installed))
-}
-
-/// The process that opens `argv` in the terminal the settings ask for.
-fn launch_spec(
-    settings: &Settings,
-    installed: &[TerminalId],
-    home: std::path::PathBuf,
-    argv: &[String],
-    title: &str,
-) -> Result<LaunchSpec, String> {
-    let terminal = chosen_terminal(settings, installed);
-    let template = settings.terminal_custom_template.trim();
-    if terminal == TerminalId::Custom && template.is_empty() {
-        return Err("Set the launch command for your custom terminal in Settings.".into());
-    }
-    Ok(launcher_for(terminal, home, template).spec(argv, settings.open_mode, title))
-}
-
-/// What the Activity drawer shows for a command that was handed to a terminal: the herdr
-/// arguments (without the binary) and the machine they were for.
-struct LaunchLog<'a> {
-    machine: Option<&'a str>,
-    args: Vec<String>,
-}
-
-/// The note on a command-log entry for a launch: the app can't see how the command ends, so
-/// the entry says where it went instead of an exit code.
-fn opened_in(terminal: TerminalId) -> String {
-    format!("opened in {}", terminal.display_name())
-}
-
-/// Opens `argv` in the user's terminal, as the settings say (read now, so a change applies to
-/// the next open), and adds the launch to the command log.
-async fn launch_in_terminal(
-    app: &AppHandle,
-    cli: &HerdrCli,
-    installed: &InstalledCache,
-    settings: &SharedSettings,
-    argv: &[String],
-    title: &str,
-    log: LaunchLog<'_>,
-) -> Result<(), ActionError> {
-    let home = app.path().home_dir().map_err(|e| invalid(e.to_string()))?;
-    let settings = settings.get();
-    let installed = installed.get().await;
-    let spec = launch_spec(&settings, &installed, home, argv, title).map_err(invalid)?;
-    let started = crate::herdr::cli::now_ms();
-    terminal::launch(&spec, cli.env())
-        .await
-        .map_err(|message| ActionError::Herdr {
-            error: HerdrError::Spawn { message },
-        })?;
-    cli.record(
-        log.machine,
-        log.args,
-        started,
-        None,
-        Some(opened_in(chosen_terminal(&settings, &installed))),
-    );
-    Ok(())
-}
-
-/// The full herdr UI for a machine, in the user's terminal.
-async fn open_full(
-    app: &AppHandle,
-    state: &AppState,
-    cli: &HerdrCli,
-    installed: &InstalledCache,
-    settings: &SharedSettings,
-    machine_id: &str,
-) -> Result<(), ActionError> {
-    let machine = find_machine(state, machine_id)?;
-    check_openable(machine).map_err(invalid)?;
-    // Remote machines too: `herdr --remote` is the local client.
-    let argv = full_ui_argv(machine, &local_bin(cli)?);
-    let log = LaunchLog {
-        machine: Some(machine_id),
-        args: argv[1..].to_vec(),
-    };
-    launch_in_terminal(app, cli, installed, settings, &argv, &machine.label, log).await
+/// The user's home directory, which the terminal launchers need.
+fn home_dir(app: &AppHandle) -> Result<PathBuf, ActionError> {
+    app.path()
+        .home_dir()
+        .map_err(|e| ActionError::invalid(e.to_string()))
 }
 
 /// Opens one pane, attached, in the user's terminal; or, when Settings say "full herdr UI",
@@ -447,14 +285,24 @@ pub async fn open_session(
 ) -> Result<(), ActionError> {
     let state = poller.current_state();
     if settings.get().attach_mode == AttachMode::FullUi {
-        return open_full(&app, &state, &cli, &installed, &settings, &machine_id).await;
+        let home = home_dir(&app)?;
+        return open_full(home, &state, &cli, &installed, &settings, &machine_id).await;
     }
     let argv = attach_for_pane(&state, &cli, &machine_id, &pane_id)?;
     let log = LaunchLog {
         machine: Some(&machine_id),
         args: attach_log_args(&state, &machine_id, &pane_id),
     };
-    launch_in_terminal(&app, &cli, &installed, &settings, &argv, &pane_id, log).await
+    launch_in_terminal(
+        home_dir(&app)?,
+        &cli,
+        &installed,
+        &settings,
+        &argv,
+        &pane_id,
+        log,
+    )
+    .await
 }
 
 /// Opens the full herdr UI for a machine in the user's terminal.
@@ -468,7 +316,7 @@ pub async fn open_full_herdr(
     machine_id: String,
 ) -> Result<(), ActionError> {
     open_full(
-        &app,
+        home_dir(&app)?,
         &poller.current_state(),
         &cli,
         &installed,
@@ -490,12 +338,13 @@ pub async fn open_in_terminal(
     argv: Vec<String>,
 ) -> Result<(), ActionError> {
     let bin = cli.bin().to_string_lossy().into_owned();
-    let full = allowed_herdr_argv(&bin, &argv).map_err(invalid)?;
+    let full = allowed_herdr_argv(&bin, &argv).map_err(ActionError::invalid)?;
     let log = LaunchLog {
         machine: None,
         args: argv,
     };
-    launch_in_terminal(&app, &cli, &installed, &settings, &full, "herdr", log).await
+    let home = home_dir(&app)?;
+    launch_in_terminal(home, &cli, &installed, &settings, &full, "herdr", log).await
 }
 
 /// What follows the herdr binary in `machine add`, for the form's fields. The UI hands this to
@@ -506,8 +355,8 @@ pub fn machine_add_argv(
     label: Option<String>,
     session: Option<String>,
 ) -> Result<Vec<String>, ActionError> {
-    let full =
-        checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
+    let full = checked_machine_add_argv(&target, label.as_deref(), session.as_deref())
+        .map_err(ActionError::invalid)?;
     Ok(full[1..].to_vec())
 }
 
@@ -524,11 +373,11 @@ pub fn start_machine_add(
     label: Option<String>,
     session: Option<String>,
 ) -> Result<(), ActionError> {
-    let mut argv =
-        checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
+    let mut argv = checked_machine_add_argv(&target, label.as_deref(), session.as_deref())
+        .map_err(ActionError::invalid)?;
     let logged = argv[1..].to_vec();
     argv[0] = cli.bin().to_string_lossy().into_owned();
-    let started_ms = crate::herdr::cli::now_ms();
+    let started_ms = crate::now_ms();
     let (log_cli, poller) = (cli.inner().clone(), poller.inner().clone());
     let on_exit: ExitHook = Arc::new(move |exit| {
         let error = if exit.cancelled {
@@ -538,7 +387,14 @@ pub fn start_machine_add(
         } else {
             None
         };
-        log_cli.record(None, logged.clone(), started_ms, Some(exit.code), error);
+        log_cli.record(
+            None,
+            logged.clone(),
+            started_ms,
+            Some(exit.code),
+            error,
+            None,
+        );
     });
     let emit: Emit = Arc::new(move |event| {
         if matches!(event, SetupEvent::Finished { ok: true }) {
@@ -550,7 +406,7 @@ pub fn start_machine_add(
     });
     setup
         .start(&argv, cli.env(), emit, on_exit)
-        .map_err(invalid)
+        .map_err(ActionError::invalid)
 }
 
 /// Types the user's answer to the prompt the setup is showing: `"yes"` or `"no"` for a
@@ -560,7 +416,7 @@ pub fn answer_machine_setup(
     setup: State<'_, MachineSetup>,
     choice: String,
 ) -> Result<(), ActionError> {
-    setup.answer(&choice).map_err(invalid)
+    setup.answer(&choice).map_err(ActionError::invalid)
 }
 
 /// Stops the running setup (the user chose the terminal instead, or closed the sheet).
@@ -576,8 +432,8 @@ pub fn preview_machine_add(
     label: Option<String>,
     session: Option<String>,
 ) -> Result<String, ActionError> {
-    let full =
-        checked_machine_add_argv(&target, label.as_deref(), session.as_deref()).map_err(invalid)?;
+    let full = checked_machine_add_argv(&target, label.as_deref(), session.as_deref())
+        .map_err(ActionError::invalid)?;
     Ok(join_quoted(&full))
 }
 
@@ -615,25 +471,6 @@ pub async fn list_terminals(
     Ok(TerminalList::new(installed.refresh().await))
 }
 
-/// What "Open" runs for a pane, as argv: the pane's attach command, or the machine's full herdr
-/// UI when Settings say so.
-fn open_argv(
-    state: &AppState,
-    cli: &HerdrCli,
-    mode: AttachMode,
-    machine_id: &str,
-    pane_id: &str,
-) -> Result<Vec<String>, ActionError> {
-    match mode {
-        AttachMode::FullUi => {
-            let machine = find_machine(state, machine_id)?;
-            check_openable(machine).map_err(invalid)?;
-            Ok(full_ui_argv(machine, &local_bin(cli)?))
-        }
-        AttachMode::Pane => attach_for_pane(state, cli, machine_id, pane_id),
-    }
-}
-
 /// The one-line command "Open" runs for a pane (so the attach command, or the full herdr UI in
 /// that attach mode), for the user to paste into any terminal.
 #[tauri::command]
@@ -659,7 +496,7 @@ pub fn copy_attach_command(
 #[tauri::command]
 pub fn preview_reconnect(id: String) -> Result<String, ActionError> {
     let args = ["machine", "reconnect", id.as_str()].map(str::to_owned);
-    let full = allowed_herdr_argv("herdr", &args).map_err(invalid)?;
+    let full = allowed_herdr_argv("herdr", &args).map_err(ActionError::invalid)?;
     Ok(join_quoted(&full))
 }
 
@@ -686,11 +523,11 @@ pub async fn set_settings(
     // One change at a time, from reading the old values to applying the new ones.
     let _update = shared.begin_update().await;
     let old = shared.get();
-    let new = old.merged(&patch).map_err(invalid)?;
+    let new = old.merged(&patch).map_err(ActionError::invalid)?;
     if new == old {
         return Ok(new);
     }
-    settings::save(&app, &new).map_err(invalid)?;
+    settings::save(&app, &new).map_err(ActionError::invalid)?;
     shared.set(new.clone());
 
     let todo = changes(&old, &new);
@@ -700,7 +537,9 @@ pub async fn set_settings(
             new.poll_interval_hidden_ms,
         ));
     }
-    if todo.herdr_path {
+    // Before startup has located herdr, its own `locate` reads the saved path, so there is
+    // nothing to resolve here (and the login environment may not be captured yet).
+    if todo.herdr_path && poller.is_located() {
         let status = locator.locate(new.herdr_path.as_deref(), &cli).await;
         poller.set_herdr(status.path.clone(), status.version.clone());
         if status.path.is_some() && poller.claim_start() {
@@ -754,33 +593,7 @@ pub fn show_main_new_session(app: AppHandle) {
 
 #[tauri::command]
 pub fn open_settings(app: AppHandle) -> Result<(), ActionError> {
-    tray::open_settings(&app).map_err(|e| invalid(e.to_string()))
-}
-
-/// The one-line read behind a pane box in the Workbox screen.
-pub fn pane_tail_argv(pane_id: &str) -> Vec<String> {
-    [
-        "pane",
-        "read",
-        pane_id,
-        "--source",
-        "recent-unwrapped",
-        "--lines",
-        "1",
-        "--format",
-        "text",
-    ]
-    .map(str::to_owned)
-    .to_vec()
-}
-
-/// The last line with something on it, trimmed; empty when the pane has printed nothing.
-pub fn last_nonempty_line(text: &str) -> String {
-    text.lines()
-        .map(str::trim)
-        .rfind(|l| !l.is_empty())
-        .unwrap_or_default()
-        .to_owned()
+    tray::open_settings(&app).map_err(|e| ActionError::invalid(e.to_string()))
 }
 
 /// The last line a pane printed, for its box in the Workbox screen.
@@ -791,174 +604,13 @@ pub async fn read_pane_tail(
     pane_id: String,
 ) -> Result<String, ActionError> {
     if machine_id.trim().is_empty() || pane_id.trim().is_empty() || pane_id.starts_with('-') {
-        return Err(invalid("Pick a pane to read."));
+        return Err(ActionError::invalid("Pick a pane to read."));
     }
     let text = cli
         .run_text(Some(&machine_id), &pane_tail_argv(&pane_id), T_DEFAULT)
         .await
         .map_err(|error| ActionError::Herdr { error })?;
     Ok(last_nonempty_line(&text))
-}
-
-const PREVIEW_EVERY: Duration = Duration::from_secs(2);
-/// The event `PreviewFrame`s are emitted on.
-pub const PREVIEW_EVENT: &str = "preview";
-
-/// One frame of the live preview, sent to the UI as the `"preview"` event. `key` is
-/// `<machineId>::<paneId>`, the same key the UI uses for a row.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
-pub struct PreviewFrame {
-    pub key: String,
-    /// The terminal text, or `None` when the read failed.
-    pub text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub error: Option<String>,
-}
-
-pub type PreviewEmit = Arc<dyn Fn(PreviewFrame) + Send + Sync>;
-pub type IsVisible = Arc<dyn Fn() -> bool + Send + Sync>;
-
-/// The row key the UI uses for a pane.
-pub fn preview_key(machine_id: &str, pane_id: &str) -> String {
-    format!("{machine_id}::{pane_id}")
-}
-
-/// The read command for a pane: `agent read` for an agent, `pane read` for a shell.
-pub fn preview_argv(pane_id: &str, is_agent: bool) -> Vec<String> {
-    let group = if is_agent { "agent" } else { "pane" };
-    [
-        group,
-        "read",
-        pane_id,
-        "--source",
-        "recent-unwrapped",
-        "--lines",
-        "60",
-        "--format",
-        "text",
-    ]
-    .map(str::to_owned)
-    .to_vec()
-}
-
-fn preview_error(e: &HerdrError) -> String {
-    match e {
-        HerdrError::Server { message, .. } | HerdrError::Usage { message } => message.clone(),
-        HerdrError::NotFound => "herdr was not found.".to_owned(),
-        HerdrError::Timeout { .. } => "herdr did not answer in time.".to_owned(),
-        other => other.to_string(),
-    }
-}
-
-struct Active {
-    /// Bumped by every start and stop; a task only emits while its number is the current one.
-    generation: u64,
-    task: Option<JoinHandle<()>>,
-}
-
-/// The live preview: at most one pane is read every 2 s, and only while the window is visible.
-/// Starting another pane, or stopping, cancels the old read, and a frame for the old pane is
-/// never emitted after `start` or `stop` has returned.
-#[derive(Clone)]
-pub struct PreviewManager {
-    cli: HerdrCli,
-    visible: IsVisible,
-    emit: PreviewEmit,
-    every: Duration,
-    active: Arc<StdMutex<Active>>,
-}
-
-fn lock_active(m: &StdMutex<Active>) -> MutexGuard<'_, Active> {
-    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-impl PreviewManager {
-    pub fn new(cli: HerdrCli, visible: IsVisible, emit: PreviewEmit) -> Self {
-        Self {
-            cli,
-            visible,
-            emit,
-            every: PREVIEW_EVERY,
-            active: Arc::new(StdMutex::new(Active {
-                generation: 0,
-                task: None,
-            })),
-        }
-    }
-
-    /// A shorter period, for tests.
-    pub fn with_every(mut self, every: Duration) -> Self {
-        self.every = every;
-        self
-    }
-
-    /// Previews one pane, replacing any other. Must be called inside a tokio runtime.
-    pub fn start(
-        &self,
-        machine_id: &str,
-        pane_id: &str,
-        is_agent: bool,
-    ) -> Result<(), ActionError> {
-        if machine_id.trim().is_empty() || pane_id.trim().is_empty() || pane_id.starts_with('-') {
-            return Err(invalid("Pick a pane to preview."));
-        }
-        let mut active = lock_active(&self.active);
-        if let Some(old) = active.task.take() {
-            old.abort();
-        }
-        active.generation += 1;
-        let generation = active.generation;
-        let this = self.clone();
-        let machine = machine_id.to_owned();
-        let pane = pane_id.to_owned();
-        active.task = Some(tokio::spawn(async move {
-            this.run(generation, machine, pane, is_agent).await;
-        }));
-        Ok(())
-    }
-
-    /// Stops the preview, if one is running.
-    pub fn stop(&self) {
-        let mut active = lock_active(&self.active);
-        active.generation += 1;
-        if let Some(old) = active.task.take() {
-            old.abort();
-        }
-    }
-
-    /// Emits only while `generation` is still the current one. The check and the emit happen
-    /// under one lock, so `start`/`stop` returning means no stale frame follows.
-    fn emit_current(&self, generation: u64, frame: PreviewFrame) {
-        let active = lock_active(&self.active);
-        if active.generation == generation {
-            (self.emit)(frame);
-        }
-    }
-
-    async fn run(&self, generation: u64, machine: String, pane: String, is_agent: bool) {
-        let key = preview_key(&machine, &pane);
-        let args = preview_argv(&pane, is_agent);
-        loop {
-            if (self.visible)() {
-                let frame = match self.cli.run_text(Some(&machine), &args, T_DEFAULT).await {
-                    Ok(text) => PreviewFrame {
-                        key: key.clone(),
-                        text: Some(text),
-                        error: None,
-                    },
-                    Err(e) => PreviewFrame {
-                        key: key.clone(),
-                        text: None,
-                        error: Some(preview_error(&e)),
-                    },
-                };
-                self.emit_current(generation, frame);
-            }
-            tokio::time::sleep(self.every).await;
-        }
-    }
 }
 
 /// Starts the live preview for one pane (replacing the previous one).
@@ -983,60 +635,9 @@ pub async fn stop_preview(preview: State<'_, PreviewManager>) -> Result<(), Acti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use std::os::unix::fs::PermissionsExt;
 
-    use crate::herdr::model::parse_snapshot;
-    use crate::state::{Health, MachineView};
-
-    fn view(id: &str, label: &str, is_local: bool, with_snapshot: bool) -> MachineView {
-        let snapshot = with_snapshot.then(|| {
-            let path = format!(
-                "{}/tests/fixtures/snapshot_buildbox.json",
-                env!("CARGO_MANIFEST_DIR")
-            );
-            let text = std::fs::read_to_string(path).unwrap();
-            parse_snapshot(&serde_json::from_str(&text).unwrap()).unwrap()
-        });
-        MachineView {
-            id: id.into(),
-            label: label.into(),
-            target: None,
-            session: "default".into(),
-            is_local,
-            health: Health::Online,
-            snapshot,
-            last_ok_ms: None,
-            ages: HashMap::new(),
-        }
-    }
-
-    fn state() -> AppState {
-        AppState {
-            machines: vec![
-                view("local", "Local", true, false),
-                view("buildbox", "Build box", false, true),
-            ],
-            herdr_version: None,
-            herdr_path: None,
-            generated_at_ms: 0,
-        }
-    }
-
-    #[test]
-    fn open_shows_the_full_ui_command_in_that_attach_mode() {
-        let mut state = state();
-        state.machines[1].target = Some("buildbox".into());
-        let cli = HerdrCli::new(std::path::PathBuf::from("/opt/herdr/bin/herdr"), vec![]);
-        let pane = state.machines[1].snapshot.as_ref().unwrap().panes[0].clone();
-        let attach = open_argv(&state, &cli, AttachMode::Pane, "buildbox", &pane.pane_id).unwrap();
-        assert_eq!(attach[0], "ssh");
-        assert!(attach[3].contains("terminal attach"));
-        let full = open_argv(&state, &cli, AttachMode::FullUi, "buildbox", &pane.pane_id).unwrap();
-        assert_eq!(full, ["/opt/herdr/bin/herdr", "--remote", "buildbox"]);
-        let local = open_argv(&state, &cli, AttachMode::FullUi, "local", "w1:p1").unwrap();
-        assert_eq!(local, ["/opt/herdr/bin/herdr"]);
-    }
+    use crate::state::fixtures::state;
 
     #[test]
     fn the_reconnect_preview_uses_the_profile_id_and_refuses_odd_ids() {
@@ -1047,60 +648,6 @@ mod tests {
         assert!(preview_reconnect("a b".into()).is_err());
         assert!(preview_reconnect("-oProxyCommand=x".into()).is_err());
         assert!(preview_reconnect(String::new()).is_err());
-    }
-
-    #[test]
-    fn launches_are_logged_as_plain_herdr_arguments() {
-        let state = state();
-        let pane = state.machines[1].snapshot.as_ref().unwrap().panes[0].clone();
-        assert_eq!(
-            attach_log_args(&state, "buildbox", &pane.pane_id),
-            ["terminal", "attach", pane.terminal_id.as_str()]
-        );
-        assert_eq!(opened_in(TerminalId::Ghostty), "opened in Ghostty");
-        assert_eq!(opened_in(TerminalId::TerminalApp), "opened in Terminal");
-        assert_eq!(
-            chosen_terminal(&Settings::default(), &[TerminalId::Warp]),
-            TerminalId::Warp
-        );
-    }
-
-    #[test]
-    fn preview_reads_agents_and_shells_with_the_agreed_flags() {
-        assert_eq!(
-            preview_argv("w1:p1", true).join(" "),
-            "agent read w1:p1 --source recent-unwrapped --lines 60 --format text"
-        );
-        assert_eq!(
-            preview_argv("w1:p2", false).join(" "),
-            "pane read w1:p2 --source recent-unwrapped --lines 60 --format text"
-        );
-        assert_eq!(preview_key("buildbox", "w1:p1"), "buildbox::w1:p1");
-    }
-
-    #[test]
-    fn pane_tail_reads_one_unwrapped_line() {
-        assert_eq!(
-            pane_tail_argv("w1:p2").join(" "),
-            "pane read w1:p2 --source recent-unwrapped --lines 1 --format text"
-        );
-        assert_eq!(
-            last_nonempty_line("  ready on :3000  \n\n  \n"),
-            "ready on :3000"
-        );
-        assert_eq!(last_nonempty_line("one\ntwo\n"), "two");
-        assert_eq!(last_nonempty_line("\n \n"), "");
-        assert_eq!(last_nonempty_line(""), "");
-    }
-
-    #[test]
-    fn preview_errors_read_as_sentences() {
-        let server = HerdrError::Server {
-            code: "pane_not_found".into(),
-            message: "pane w1:p9 not found".into(),
-        };
-        assert_eq!(preview_error(&server), "pane w1:p9 not found");
-        assert_eq!(preview_error(&HerdrError::NotFound), "herdr was not found.");
     }
 
     #[test]
@@ -1160,131 +707,5 @@ mod tests {
             cache.get(&cli).await,
             ["claude", "codex", "copilot", "opencode", "cursor"]
         );
-    }
-
-    fn remote_state() -> AppState {
-        let mut s = state();
-        s.machines[1].target = Some("buildbox".into());
-        s
-    }
-
-    fn cli() -> HerdrCli {
-        HerdrCli::new("/opt/herdr/bin/herdr".into(), vec![])
-    }
-
-    #[test]
-    fn attach_command_for_a_remote_pane_uses_ssh_and_plain_herdr() {
-        let argv = attach_for_pane(&remote_state(), &cli(), "buildbox", "w1:p1").unwrap();
-        assert_eq!(argv[..3], ["ssh", "-t", "buildbox"]);
-        assert!(argv[3].contains("herdr terminal attach term-1 ||"));
-        assert!(!argv[3].contains("/opt/herdr"));
-    }
-
-    #[test]
-    fn attach_command_for_a_local_pane_uses_the_resolved_binary() {
-        let mut s = remote_state();
-        s.machines[0].snapshot = s.machines[1].snapshot.clone();
-        let argv = attach_for_pane(&s, &cli(), "local", "w1:p1").unwrap();
-        assert_eq!(argv[..2], ["/bin/sh", "-c"]);
-        assert!(argv[2].starts_with("/opt/herdr/bin/herdr terminal attach term-1 ||"));
-        let line = join_quoted(&argv);
-        assert!(line.starts_with("/bin/sh -c '/opt/herdr/bin/herdr terminal attach term-1 || "));
-    }
-
-    #[test]
-    fn panes_that_cannot_be_attached_are_refused_before_launching() {
-        let mut s = remote_state();
-        let invalid =
-            |r: Result<Vec<String>, ActionError>| matches!(r, Err(ActionError::Invalid { .. }));
-        assert!(invalid(attach_for_pane(&s, &cli(), "gone", "w1:p1")));
-        assert!(invalid(attach_for_pane(&s, &cli(), "buildbox", "w9:p9")));
-        // Local has no snapshot yet.
-        assert!(invalid(attach_for_pane(&s, &cli(), "local", "w1:p1")));
-
-        let snapshot = s.machines[1].snapshot.as_mut().unwrap();
-        for pane in &mut snapshot.panes {
-            pane.terminal_id.clear();
-        }
-        for agent in &mut snapshot.agents {
-            agent.terminal_id.clear();
-        }
-        assert!(invalid(attach_for_pane(&s, &cli(), "buildbox", "w1:p1")));
-
-        // A remote machine without an SSH target can't be reached.
-        let mut no_target = state();
-        no_target.machines[1].target = None;
-        assert!(invalid(attach_for_pane(
-            &no_target,
-            &cli(),
-            "buildbox",
-            "w1:p1"
-        )));
-    }
-
-    fn home() -> std::path::PathBuf {
-        "/Users/dev".into()
-    }
-
-    #[test]
-    fn a_launch_follows_the_saved_terminal_and_open_mode() {
-        let argv = vec!["ssh".to_owned(), "-t".into(), "buildbox".into()];
-        let installed = [TerminalId::Warp, TerminalId::TerminalApp];
-
-        // Nothing chosen: the default of the installed ones, in a new window.
-        let auto = launch_spec(&Settings::default(), &installed, home(), &argv, "t").unwrap();
-        assert_eq!(auto.program, "open");
-        assert!(auto.args.iter().any(|a| a.starts_with("warp://launch/")));
-
-        // iTerm2 in tab mode adds a tab to the current window.
-        let tab = Settings {
-            terminal: Some(TerminalId::ITerm2),
-            open_mode: terminal::OpenMode::Tab,
-            ..Settings::default()
-        };
-        let spec = launch_spec(&tab, &installed, home(), &argv, "t").unwrap();
-        assert_eq!(spec.program, "osascript");
-        assert!(spec.args.iter().any(|a| a.contains("create tab")));
-    }
-
-    #[test]
-    fn a_custom_terminal_needs_a_template_and_runs_it_detached() {
-        let argv = vec!["ssh".to_owned(), "buildbox".into()];
-        let custom = |template: &str| Settings {
-            terminal: Some(TerminalId::Custom),
-            terminal_custom_template: template.into(),
-            ..Settings::default()
-        };
-        let err = launch_spec(&custom("  "), &[], home(), &argv, "t").unwrap_err();
-        assert!(err.contains("Settings"), "{err}");
-
-        let spec = launch_spec(&custom(" myterm -e {attach} "), &[], home(), &argv, "t").unwrap();
-        assert!(spec.detached);
-        assert_eq!(spec.args, ["-c", "myterm -e ssh buildbox"]);
-    }
-
-    #[test]
-    fn local_commands_need_a_herdr_binary() {
-        let mut s = remote_state();
-        s.machines[0].snapshot = s.machines[1].snapshot.clone();
-        let missing = HerdrCli::new(std::path::PathBuf::new(), vec![]);
-        assert!(matches!(
-            attach_for_pane(&s, &missing, "local", "w1:p1"),
-            Err(ActionError::Invalid { .. })
-        ));
-        // Remote machines don't use the local binary.
-        assert!(attach_for_pane(&s, &missing, "buildbox", "w1:p1").is_ok());
-    }
-
-    #[test]
-    fn terminal_ids_a_login_shell_could_misread_are_refused() {
-        let mut s = remote_state();
-        let snapshot = s.machines[1].snapshot.as_mut().unwrap();
-        for pane in &mut snapshot.panes {
-            pane.terminal_id = "term 1';x".into();
-        }
-        assert!(matches!(
-            attach_for_pane(&s, &cli(), "buildbox", "w1:p1"),
-            Err(ActionError::Invalid { .. })
-        ));
     }
 }

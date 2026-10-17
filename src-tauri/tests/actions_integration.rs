@@ -26,6 +26,7 @@ fn fixture(name: &str) -> String {
 struct Harness {
     dir: TempDir,
     actions: Actions,
+    cli: HerdrCli,
     refreshed: Arc<Mutex<Vec<Option<String>>>>,
 }
 
@@ -42,8 +43,9 @@ impl Harness {
         let bin = Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/fake-herdr");
         let refreshed: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
         let sink = refreshed.clone();
+        let cli = HerdrCli::new(bin, env);
         let actions = Actions::new(
-            HerdrCli::new(bin, env),
+            cli.clone(),
             Arc::new(move |m| sink.lock().unwrap().push(m.map(str::to_owned))),
         )
         .with_timeouts(Timeouts {
@@ -54,6 +56,7 @@ impl Harness {
         Self {
             dir,
             actions,
+            cli,
             refreshed,
         }
     }
@@ -381,6 +384,31 @@ async fn machine_commands_are_local_and_tolerate_plain_text_output() {
 }
 
 #[tokio::test]
+async fn successful_machine_config_commands_are_logged_as_successes() {
+    let h = Harness::new();
+    h.put("machine_rename_buildbox_--label_Build box.json", "Renamed.");
+    h.put("machine_disable_buildbox.json", "");
+    h.put("machine_remove_buildbox.exit", "0");
+
+    h.actions
+        .machine_rename("buildbox", "Build box")
+        .await
+        .unwrap();
+    h.actions
+        .machine_set_enabled("buildbox", false)
+        .await
+        .unwrap();
+    h.actions.machine_remove("buildbox").await.unwrap();
+
+    let log = h.cli.log_snapshot();
+    assert_eq!(log.len(), 3);
+    for entry in &log {
+        assert_eq!(entry.error, None, "{:?}", entry.argv);
+        assert_eq!(entry.exit_code, Some(0), "{:?}", entry.argv);
+    }
+}
+
+#[tokio::test]
 async fn machine_command_errors_are_not_swallowed() {
     let h = Harness::new();
     h.put(
@@ -433,6 +461,96 @@ async fn create_without_a_readable_pane_is_maybe_applied_and_never_continues() {
     assert!(matches!(err, ActionError::MaybeApplied { .. }), "{err:?}");
     assert_eq!(h.calls().len(), 1, "agent start must not run");
     assert_eq!(h.refreshed(), [Some("buildbox".to_string())]);
+}
+
+#[tokio::test]
+async fn an_unreadable_create_reply_says_the_agent_was_not_started() {
+    let h = Harness::new();
+    h.put(&format!("{SPLIT}.json"), "not json");
+
+    let err = h
+        .actions
+        .create_session(&split_agent_request())
+        .await
+        .unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(message.contains("could not be read"), "{message}");
+            assert!(
+                message.ends_with(" The agent was not started."),
+                "{message}"
+            );
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+    assert!(h.calls().iter().all(|c| !c.starts_with("agent start")));
+}
+
+#[tokio::test]
+async fn a_create_reply_without_a_pane_says_the_agent_was_not_started() {
+    let h = Harness::new();
+    h.put(&format!("{SPLIT}.json"), r#"{"result":{}}"#);
+
+    let err = h
+        .actions
+        .create_session(&split_agent_request())
+        .await
+        .unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(
+                message.ends_with(" The agent was not started."),
+                "{message}"
+            );
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_create_timeout_says_the_agent_was_not_started() {
+    let h = Harness::new();
+    h.put(&format!("{SPLIT}.json"), &fixture("pane_split.json"));
+    h.put(&format!("{SPLIT}.sleep"), "3");
+
+    let err = h
+        .actions
+        .create_session(&split_agent_request())
+        .await
+        .unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(message.contains("did not answer in time"), "{message}");
+            assert!(
+                message.ends_with(" The agent was not started."),
+                "{message}"
+            );
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+    assert!(h.calls().iter().all(|c| !c.starts_with("agent start")));
+}
+
+#[tokio::test]
+async fn an_unreadable_create_reply_without_an_agent_keeps_the_plain_message() {
+    let h = Harness::new();
+    h.put(&format!("{SPLIT}.json"), "not json");
+    let req = NewSessionRequest {
+        kind: None,
+        ..split_agent_request()
+    };
+
+    let err = h.actions.create_session(&req).await.unwrap_err();
+
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(!message.contains("agent"), "{message}");
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
 }
 
 #[tokio::test]

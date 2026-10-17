@@ -72,6 +72,15 @@ pub enum ActionError {
     Invalid { message: String },
 }
 
+impl ActionError {
+    /// A request refused before herdr was called.
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::Invalid {
+            message: message.into(),
+        }
+    }
+}
+
 /// Stands in for the new pane's id in the `agent start` step until the first step has run.
 pub const PANE_PLACEHOLDER: &str = "{PANE}";
 
@@ -184,19 +193,15 @@ pub fn preview_new_session(req: &NewSessionRequest, machine_label: Option<&str>)
         .collect()
 }
 
-fn invalid(message: impl Into<String>) -> ActionError {
-    ActionError::Invalid {
-        message: message.into(),
-    }
-}
-
 /// Values that herdr would read as a flag, or that are empty, never reach the CLI.
 fn check_arg(what: &str, value: &str) -> Result<(), ActionError> {
     if value.trim().is_empty() {
-        return Err(invalid(format!("{what} can't be empty.")));
+        return Err(ActionError::invalid(format!("{what} can't be empty.")));
     }
     if value.starts_with('-') {
-        return Err(invalid(format!("{what} can't start with '-'.")));
+        return Err(ActionError::invalid(format!(
+            "{what} can't start with '-'."
+        )));
     }
     Ok(())
 }
@@ -211,7 +216,7 @@ fn validate_request(req: &NewSessionRequest) -> Result<(), ActionError> {
     }
     if let Some(kind) = &req.kind {
         check_arg("Agent kind", kind)?;
-        validate_name(&req.name).map_err(invalid)?;
+        validate_name(&req.name).map_err(ActionError::invalid)?;
     } else if !matches!(req.placement, Placement::SplitBeside { .. }) {
         check_arg("Name", &req.name)?;
     }
@@ -283,6 +288,18 @@ fn created_terminal_id(v: &Value) -> Option<String> {
     .map(str::to_owned)
 }
 
+/// A create step whose outcome is unknown: the agent step never runs after it, and the message
+/// says so.
+fn agent_not_started(error: ActionError) -> ActionError {
+    match error {
+        ActionError::MaybeApplied { message, argv } => ActionError::MaybeApplied {
+            message: format!("{message} The agent was not started."),
+            argv,
+        },
+        other => other,
+    }
+}
+
 /// The new pane's id from a create reply. `mutate` already refreshed; if the reply has no pane
 /// the action was still applied, so say so rather than report a failure.
 fn created_pane(reply: &Value, argv: Vec<String>) -> Result<String, ActionError> {
@@ -338,12 +355,21 @@ impl Actions {
         validate_request(req)?;
         let mut steps = plan_new_session(req).into_iter();
         let Some(first) = steps.next() else {
-            return Err(invalid("Nothing to create."));
+            return Err(ActionError::invalid("Nothing to create."));
+        };
+        // An agent's later step never runs after an unknown create, and the error says so.
+        let not_started = |e: ActionError| {
+            if req.kind.is_some() {
+                agent_not_started(e)
+            } else {
+                e
+            }
         };
         let created = self
             .mutate(&req.machine_id, first.clone(), self.timeouts.create)
-            .await?;
-        let pane_id = created_pane(&created, first)?;
+            .await
+            .map_err(not_started)?;
+        let pane_id = created_pane(&created, first).map_err(not_started)?;
         let session = CreatedSession {
             terminal_id: created_terminal_id(&created),
             pane_id,
@@ -392,7 +418,7 @@ impl Actions {
     ) -> Result<(), ActionError> {
         check_arg("Pane", pane_id)?;
         if is_agent {
-            validate_name(name).map_err(invalid)?;
+            validate_name(name).map_err(ActionError::invalid)?;
         } else {
             check_arg("Name", name)?;
         }
@@ -546,17 +572,17 @@ impl Actions {
     ) -> Result<(), ActionError> {
         check_arg("Pane", pane_id)?;
         if text.trim().is_empty() {
-            return Err(invalid("Reply can't be empty."));
+            return Err(ActionError::invalid("Reply can't be empty."));
         }
         match cached_status {
             None | Some(AgentStatus::Idle | AgentStatus::Done) => {}
             Some(AgentStatus::Blocked) => {
-                return Err(invalid(
+                return Err(ActionError::invalid(
                     "This agent is waiting for approval. Open it to answer there.",
                 ));
             }
             Some(AgentStatus::Working | AgentStatus::Unknown) => {
-                return Err(invalid("Reply when the agent is idle."));
+                return Err(ActionError::invalid("Reply when the agent is idle."));
             }
         }
         let mut args = argv(&["agent", "prompt", pane_id]);
@@ -583,11 +609,11 @@ impl Actions {
     }
 
     /// Saved-machine changes are local configuration, so they never carry `--machine`. These
-    /// commands print plain text rather than JSON, so output that is not JSON is not an error.
+    /// commands print plain text rather than JSON, so they go through `run_text`.
     async fn machine_config(&self, args: Vec<String>) -> Result<(), ActionError> {
-        let result = self.cli.run(None, &args, self.timeouts.default).await;
+        let result = self.cli.run_text(None, &args, self.timeouts.default).await;
         match result {
-            Ok(_) | Err(HerdrError::Parse { .. }) => {
+            Ok(_) => {
                 (self.refresh)(None);
                 Ok(())
             }

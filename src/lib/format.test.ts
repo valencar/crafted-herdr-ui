@@ -4,14 +4,17 @@ import {
   STATUS_LABEL,
   TERMINAL_LABEL,
   actionErrorMessage,
+  agentNameProblem,
   formatAge,
   formatChecked,
   lastLines,
   formatClock,
+  isPending,
   isQuietRead,
   formatDuration,
   formatStaleness,
   isSupportedVersion,
+  plural,
   parseVersion,
   shellJoin,
   shellQuote,
@@ -199,6 +202,19 @@ describe("activity formats", () => {
   });
 });
 
+describe("isPending", () => {
+  it("is_true_only_for_a_machine_that_has_not_been_polled_yet", () => {
+    expect(isPending({ kind: "reconnecting", retry_in_ms: 0, error: "" })).toBe(
+      true,
+    );
+    expect(
+      isPending({ kind: "reconnecting", retry_in_ms: 4000, error: "boom" }),
+    ).toBe(false);
+    expect(isPending({ kind: "attention", error: "" })).toBe(false);
+    expect(isPending({ kind: "online" })).toBe(false);
+  });
+});
+
 describe("isQuietRead", () => {
   const entry = (
     argv: string[],
@@ -210,6 +226,7 @@ describe("isQuietRead", () => {
     exitCode: 0,
     durationMs: 5,
     error: null,
+    note: null,
     ...over,
   });
 
@@ -240,5 +257,29 @@ describe("isQuietRead", () => {
     expect(
       isQuietRead(entry(["api", "snapshot"], { error: "timed out" })),
     ).toBe(false);
+  });
+});
+
+describe("plural", () => {
+  it("counts_with_the_singular_only_for_exactly_one", () => {
+    expect(plural(0, "agent", "agents")).toBe("0 agents");
+    expect(plural(1, "agent", "agents")).toBe("1 agent");
+    expect(plural(2, "workbox", "workboxes")).toBe("2 workboxes");
+  });
+});
+
+describe("agentNameProblem", () => {
+  it("accepts_a_lowercase_name_of_up_to_32_characters", () => {
+    for (const ok of ["a", "planner", "web-app_2", "a".repeat(32)]) {
+      expect(agentNameProblem(ok)).toBeNull();
+    }
+  });
+
+  it("explains_every_other_name_with_the_sentence_rust_gives", () => {
+    const rust =
+      "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.";
+    for (const bad of ["", "Bad Name", "1abc", "has.dot", "a".repeat(33)]) {
+      expect(agentNameProblem(bad)).toBe(rust);
+    }
   });
 });

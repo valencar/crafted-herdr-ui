@@ -3,29 +3,29 @@ import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { EmptyState } from "../components/EmptyState";
 import { Header } from "../components/Header";
+import { LocalDownCard, VersionBanner } from "../components/HomeNotices";
 import { Inspector } from "../components/Inspector";
 import { NeedsYouCard } from "../components/NeedsYouCard";
 import { ProjectGroup } from "../components/ProjectGroup";
 import { ReconnectBox } from "../components/ReconnectBox";
 import { Sidebar } from "../components/Sidebar";
-import { Toast } from "../components/Toast";
+import { StoreToast } from "../components/Toast";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { formatStaleness, isSupportedVersion, lastLines } from "../lib/format";
+import { formatStaleness, isPending, lastLines, plural } from "../lib/format";
 import {
   groupByProject,
   groupByStatus,
   groupByWorkbox,
   needsYou,
-  projectNames,
+  projectNamesOf,
   toRows,
   type Group,
   type Row,
 } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { openRow } from "../lib/openRow";
+import { markSeen, openRow, useOpenWhenListed } from "../lib/openRow";
+import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import {
-  focusRowButton,
-  isEditable,
   openSettings,
   scrollToId,
   terminalName as terminalLabel,
@@ -51,6 +51,9 @@ const GROUPERS: Record<GroupBy, (rows: Row[]) => Group[]> = {
   status: groupByStatus,
 };
 
+/** Shared by every card but the selected one, so a memoized card sees the same prop. */
+const NO_LINES: readonly string[] = [];
+
 function matches(row: Row, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -69,19 +72,15 @@ export function Home() {
   const setSheet = useAppStore((s) => s.setSheet);
   const setView = useAppStore((s) => s.setView);
   const openNewSession = useAppStore((s) => s.openNewSession);
-  const toast = useAppStore((s) => s.toast);
-  const toastTone = useAppStore((s) => s.toastTone);
-  const preview = useAppStore((s) => s.preview);
+  // Only the selected row's text: another row's frame must not re-render Home.
+  const previewText = useAppStore((s) =>
+    s.preview && s.preview.key === s.selectedKey ? s.preview.text : null,
+  );
   const report = useAppStore((s) => s.reportError);
-  const dismissToast = useAppStore((s) => s.clearToast);
-  const dismissedVersion = useAppStore((s) => s.dismissedVersion);
-  const dismissVersionBanner = useAppStore((s) => s.dismissVersionBanner);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
-  const pendingOpen = useAppStore((s) => s.pendingOpen);
-  const setPendingOpen = useAppStore((s) => s.setPendingOpen);
 
   const nowMs = useNow(30_000);
   const [query, setQuery] = useState("");
@@ -105,39 +104,35 @@ export function Home() {
     }
   }, [state, rows, selectedKey, select]);
 
-  // A session was just created: select it and open it once the next poll lists its row.
-  // (`open_session` reads the pane from the state, so it can't run before then.)
+  // A session was just created: select it once the next poll lists its row.
   useEffect(() => {
     if (pendingSelectKey && rows.some((r) => r.key === pendingSelectKey)) {
       select(pendingSelectKey);
       setPendingSelectKey(null);
     }
-    if (pendingOpen && rows.some((r) => r.key === pendingOpen.key)) {
-      setPendingOpen(null);
-      invokeTyped("open_session", {
-        machineId: pendingOpen.machineId,
-        paneId: pendingOpen.paneId,
-      }).catch(report);
-    }
-  }, [
-    pendingSelectKey,
-    pendingOpen,
-    rows,
-    select,
-    setPendingSelectKey,
-    setPendingOpen,
-    report,
-  ]);
+  }, [pendingSelectKey, rows, select, setPendingSelectKey]);
+  useOpenWhenListed(rows);
 
+  // No search: `visible` is `rows` itself, so the project groups built for the sidebar are
+  // the ones to show.
   const visible = useMemo(
-    () => rows.filter((r) => matches(r, query)),
+    () => (query.trim() ? rows.filter((r) => matches(r, query)) : rows),
     [rows, query],
   );
   const needs = useMemo(() => needsYou(visible), [visible]);
-  const groups = useMemo(() => GROUPERS[groupBy](visible), [groupBy, visible]);
-  const navRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
-  const projectOf = useMemo(() => projectNames(rows), [rows]);
+  const projectOf = useMemo(
+    () => projectNamesOf(projectGroups),
+    [projectGroups],
+  );
+  const groups = useMemo(
+    () =>
+      groupBy === "project" && visible === rows
+        ? projectGroups
+        : GROUPERS[groupBy](visible),
+    [groupBy, visible, rows, projectGroups],
+  );
+  const navRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
 
   const selectedRow = rows.find((r) => r.key === selectedKey) ?? null;
   // Keyboard shortcuts only act on a selection the user can see in the list.
@@ -148,10 +143,7 @@ export function Home() {
   const selectedMachine = selectedRow
     ? (machines.get(selectedRow.machineId) ?? null)
     : null;
-  const previewLines =
-    selectedKey && preview?.key === selectedKey
-      ? lastLines(preview.text, 3)
-      : [];
+  const previewLines = useMemo(() => lastLines(previewText, 3), [previewText]);
   const closingRow = rows.find((r) => r.key === closingKey) ?? null;
   const terminalName = terminalLabel(terminal);
 
@@ -170,66 +162,7 @@ export function Home() {
     return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
   };
 
-  const open = openRow;
-  const markSeen = (row: Row) => {
-    invokeTyped("mark_seen", {
-      machineId: row.machineId,
-      paneId: row.paneId,
-    }).catch(report);
-  };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (sheet || useAppStore.getState().dialogOpen > 0) return;
-      if (e.metaKey) {
-        if (e.key === "k") {
-          e.preventDefault();
-          searchRef.current?.focus();
-          searchRef.current?.select();
-        } else if (e.key === "n") {
-          e.preventDefault();
-          openNewSession();
-        } else if (e.key === "r") {
-          e.preventDefault();
-          invokeTyped("refresh_now", {}).catch(report);
-        } else if (e.key === "Enter" && actionRow) {
-          e.preventDefault();
-          open(actionRow);
-        }
-        return;
-      }
-      if (e.ctrlKey || e.altKey || isEditable(e.target)) return;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        if (navRows.length === 0) return;
-        e.preventDefault();
-        const at = navRows.findIndex((r) => r.key === selectedKey);
-        const down = e.key === "ArrowDown";
-        const next =
-          at < 0
-            ? down
-              ? 0
-              : navRows.length - 1
-            : Math.min(navRows.length - 1, Math.max(0, at + (down ? 1 : -1)));
-        select(navRows[next].key);
-        focusRowButton(navRows[next].key);
-      } else if (e.key === "Backspace" || e.key === "Delete") {
-        if (actionRow) {
-          e.preventDefault();
-          setClosingKey(actionRow.key);
-        }
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [
-    sheet,
-    actionRow,
-    selectedKey,
-    navRows,
-    select,
-    openNewSession,
-    open,
-    report,
-  ]);
+  useHomeShortcuts({ navRows, actionRow, searchRef, onClose: setClosingKey });
 
   const needsMachines = new Set(needs.map((r) => r.machineId)).size;
   const hasAnyRows = rows.length > 0;
@@ -238,7 +171,11 @@ export function Home() {
   // Local never gets the reconnect card below, so a herdr that isn't answering would be
   // invisible. Say so, with the one thing to do.
   const localDown = allMachines.find(
-    (m) => m.is_local && m.health.kind !== "online" && m.snapshot === null,
+    (m) =>
+      m.is_local &&
+      m.health.kind !== "online" &&
+      m.snapshot === null &&
+      !isPending(m.health),
   );
   const localError =
     localDown &&
@@ -249,11 +186,6 @@ export function Home() {
   const attentionMachines = allMachines.filter(
     (m) => !m.is_local && m.health.kind === "attention",
   );
-  const unsupported =
-    state !== null &&
-    !isSupportedVersion(state.herdr_version) &&
-    dismissedVersion !== (state.herdr_version ?? "");
-
   return (
     <div className="app">
       <Header
@@ -265,21 +197,7 @@ export function Home() {
         installed={installed}
         onNewSession={() => openNewSession()}
       />
-      {unsupported && (
-        <div className="banner" role="status">
-          <span>
-            herdr {state.herdr_version ?? "(unknown version)"} is older than
-            this app supports (0.9.0+). Some actions may fail.
-          </span>
-          <button
-            type="button"
-            className="btn btn-small btn-ghost"
-            onClick={() => dismissVersionBanner(state.herdr_version ?? "")}
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+      <VersionBanner />
       <div className="body">
         <Sidebar
           needsCount={needsYou(rows).length}
@@ -302,23 +220,7 @@ export function Home() {
         />
 
         <main className="main">
-          {localDown && (
-            <EmptyState
-              title="Local isn’t answering"
-              action={{
-                label: "Retry now",
-                onClick: () =>
-                  invokeTyped("refresh_now", { machineId: "local" }).catch(
-                    report,
-                  ),
-              }}
-            >
-              <p>{localError || "herdr isn’t answering yet"}</p>
-              <p>
-                Start herdr with <code>herdr</code> in a terminal, then retry.
-              </p>
-            </EmptyState>
-          )}
+          {localDown && <LocalDownCard error={localError} />}
           {/* Once per machine, rows or not: an unreachable box must never vanish from Home. */}
           {attentionMachines.map((m) => (
             <EmptyState key={m.id} title={`${m.label} needs attention`}>
@@ -365,7 +267,7 @@ export function Home() {
                   <span className="muted">
                     {needs.length === 0
                       ? "All clear"
-                      : `${needs.length} ${needs.length === 1 ? "agent" : "agents"} waiting across ${needsMachines} ${needsMachines === 1 ? "workbox" : "workboxes"}`}
+                      : `${plural(needs.length, "agent", "agents")} waiting across ${plural(needsMachines, "workbox", "workboxes")}`}
                   </span>
                 </div>
                 {needs.length > 0 && (
@@ -380,9 +282,11 @@ export function Home() {
                         note={noteFor(r.machineId)}
                         nowMs={nowMs}
                         terminalName={terminalName}
-                        previewLines={r.key === selectedKey ? previewLines : []}
+                        previewLines={
+                          r.key === selectedKey ? previewLines : NO_LINES
+                        }
                         onSelect={select}
-                        onOpen={open}
+                        onOpen={openRow}
                         onMarkSeen={markSeen}
                       />
                     ))}
@@ -448,7 +352,7 @@ export function Home() {
                         nowMs={nowMs}
                         terminalName={terminalName}
                         onSelect={select}
-                        onOpen={open}
+                        onOpen={openRow}
                       />
                     ))}
                   </ProjectGroup>
@@ -477,9 +381,7 @@ export function Home() {
         <CloseConfirm row={closingRow} onDone={() => setClosingKey(null)} />
       )}
       {sheet === "new-session" && <NewSession terminalName={terminalName} />}
-      {toast && (
-        <Toast message={toast} tone={toastTone} onDismiss={dismissToast} />
-      )}
+      <StoreToast />
     </div>
   );
 }

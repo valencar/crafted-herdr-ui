@@ -33,6 +33,15 @@ pub struct Transition {
     pub to: AgentStatus,
 }
 
+/// What one `observe` found.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Observed {
+    pub transitions: Vec<Transition>,
+    /// An agent appeared or disappeared. Neither is a transition, but the tracker's keys (and so
+    /// what `activity.json` should hold) changed.
+    pub keys_changed: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActivityTracker {
     map: HashMap<ActivityKey, ActivityRecord>,
@@ -54,8 +63,9 @@ struct FileFormat {
 
 impl ActivityTracker {
     /// Records the statuses in `snap` for `machine_id` and returns the changes seen.
-    pub fn observe(&mut self, machine_id: &str, snap: &Snapshot, now_ms: u64) -> Vec<Transition> {
+    pub fn observe(&mut self, machine_id: &str, snap: &Snapshot, now_ms: u64) -> Observed {
         let mut transitions = Vec::new();
+        let mut keys_changed = false;
         let mut seen = HashSet::new();
         for agent in snap.agents.iter().filter(|a| !a.terminal_id.is_empty()) {
             let key = ActivityKey {
@@ -65,6 +75,7 @@ impl ActivityTracker {
             seen.insert(key.clone());
             match self.map.get_mut(&key) {
                 None => {
+                    keys_changed = true;
                     self.map.insert(
                         key,
                         ActivityRecord {
@@ -87,9 +98,14 @@ impl ActivityTracker {
                 Some(_) => {}
             }
         }
+        let before = self.map.len();
         self.map
             .retain(|key, _| key.machine_id != machine_id || seen.contains(key));
-        transitions
+        keys_changed |= self.map.len() != before;
+        Observed {
+            transitions,
+            keys_changed,
+        }
     }
 
     /// Like `observe`, for the first good snapshot after app start or after an outage: what
@@ -231,11 +247,13 @@ mod tests {
     #[test]
     fn first_sight_has_no_age_and_no_transition() {
         let mut t = ActivityTracker::default();
-        let out = t.observe(
-            "local",
-            &snap(vec![agent("w1:p1", "t1", AgentStatus::Idle)]),
-            500,
-        );
+        let out = t
+            .observe(
+                "local",
+                &snap(vec![agent("w1:p1", "t1", AgentStatus::Idle)]),
+                500,
+            )
+            .transitions;
         assert!(out.is_empty());
         assert_eq!(t.since("local", "t1"), None);
         assert!(t.map.contains_key(&ActivityKey {
@@ -252,11 +270,13 @@ mod tests {
             &snap(vec![agent("w1:p1", "t1", AgentStatus::Idle)]),
             500,
         );
-        let out = t.observe(
-            "local",
-            &snap(vec![agent("w1:p1", "t1", AgentStatus::Blocked)]),
-            1000,
-        );
+        let out = t
+            .observe(
+                "local",
+                &snap(vec![agent("w1:p1", "t1", AgentStatus::Blocked)]),
+                1000,
+            )
+            .transitions;
         assert_eq!(t.since("local", "t1"), Some(1000));
         assert_eq!(
             out,
@@ -283,13 +303,33 @@ mod tests {
             &snap(vec![agent("w1:p1", "t1", AgentStatus::Working)]),
             1000,
         );
-        let out = t.observe(
-            "local",
-            &snap(vec![agent("w1:p1", "t1", AgentStatus::Working)]),
-            2000,
-        );
+        let out = t
+            .observe(
+                "local",
+                &snap(vec![agent("w1:p1", "t1", AgentStatus::Working)]),
+                2000,
+            )
+            .transitions;
         assert!(out.is_empty());
         assert_eq!(t.since("local", "t1"), Some(1000));
+    }
+
+    #[test]
+    fn observe_reports_keys_that_appear_or_go_away_without_a_transition() {
+        let mut t = ActivityTracker::default();
+        let idle = || snap(vec![agent("w1:p1", "t1", AgentStatus::Idle)]);
+        // First sight: a new key, no transition.
+        let first = t.observe("local", &idle(), 1);
+        assert!(first.transitions.is_empty() && first.keys_changed);
+        // The same agent again: nothing changed.
+        let same = t.observe("local", &idle(), 2);
+        assert!(same.transitions.is_empty() && !same.keys_changed);
+        // Gone for one poll, then back with the same status: pruned, then re-added unknown.
+        let gone = t.observe("local", &snap(vec![]), 3);
+        assert!(gone.transitions.is_empty() && gone.keys_changed);
+        let back = t.observe("local", &idle(), 4);
+        assert!(back.transitions.is_empty() && back.keys_changed);
+        assert_eq!(t.since("local", "t1"), None);
     }
 
     #[test]
@@ -321,11 +361,13 @@ mod tests {
             &snap(vec![agent("w1:p1", "", AgentStatus::Idle)]),
             1,
         );
-        let out = t.observe(
-            "local",
-            &snap(vec![agent("w1:p1", "", AgentStatus::Blocked)]),
-            2,
-        );
+        let out = t
+            .observe(
+                "local",
+                &snap(vec![agent("w1:p1", "", AgentStatus::Blocked)]),
+                2,
+            )
+            .transitions;
         assert!(out.is_empty());
         assert!(t.map.is_empty());
     }
@@ -372,15 +414,17 @@ mod tests {
         assert_eq!(t.map.len(), 4, "t3 pruned, other machine untouched");
 
         // The new baseline is in place, so the same snapshot is not a transition.
-        let out = t.observe(
-            "local",
-            &snap(vec![
-                agent("w1:p1", "t1", AgentStatus::Idle),
-                agent("w1:p2", "t2", AgentStatus::Blocked),
-                agent("w1:p4", "t4", AgentStatus::Working),
-            ]),
-            300,
-        );
+        let out = t
+            .observe(
+                "local",
+                &snap(vec![
+                    agent("w1:p1", "t1", AgentStatus::Idle),
+                    agent("w1:p2", "t2", AgentStatus::Blocked),
+                    agent("w1:p4", "t4", AgentStatus::Working),
+                ]),
+                300,
+            )
+            .transitions;
         assert!(out.is_empty());
     }
 

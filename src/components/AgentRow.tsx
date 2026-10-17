@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { formatAge } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { KindBadge } from "./KindBadge";
@@ -17,7 +18,7 @@ type Props = {
   onOpen: (row: Row) => void;
 };
 
-export function AgentRow({
+export const AgentRow = memo(function AgentRow({
   row,
   selected,
   dim,
@@ -65,4 +66,4 @@ export function AgentRow({
       </button>
     </li>
   );
-}
+});

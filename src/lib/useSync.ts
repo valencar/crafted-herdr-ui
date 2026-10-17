@@ -1,70 +1,60 @@
 import { useEffect } from "react";
+import type { AppState } from "./bindings/AppState";
+import type { Settings } from "./bindings/Settings";
 import { useAppStore } from "../store/appStore";
 import { getSettings, getState, onSettings, onState } from "./ipc";
 
 /**
- * Keeps the store's `state` current: the state as it is now, then every push. Every window
- * (main, popover, Settings) runs its own copy, since each has its own JS context.
+ * Keeps one store value current: its value as it is now, then every push. `get` is asked
+ * once at once, which covers a window that opens after the first push, and once more when the
+ * listener is live, which covers a push that landed in between. An answer never overwrites a
+ * pushed value. Every window (main, popover, Settings) runs its own copy, since each has its
+ * own JS context.
  */
-export function useStateSync(): void {
-  const setState = useAppStore((s) => s.setState);
-  const reportError = useAppStore((s) => s.reportError);
-
+function useSynced<T>(
+  get: () => Promise<T | null>,
+  on: (cb: (value: T) => void) => Promise<() => void>,
+  set: (value: T) => void,
+): void {
   useEffect(() => {
     let alive = true;
     let unlisten: (() => void) | undefined;
-    // `getState` covers a window that opens after the first push; a late answer must not
-    // overwrite a newer pushed state.
     let pushed = false;
-    getState()
-      .then((s) => {
-        if (alive && !pushed && s) setState(s);
-      })
-      .catch(() => {});
-    onState((s) => {
+    const fetchCurrent = () =>
+      get()
+        .then((value) => {
+          if (alive && !pushed && value) set(value);
+        })
+        .catch(() => {});
+    fetchCurrent();
+    on((value) => {
       pushed = true;
-      setState(s);
+      set(value);
     })
       .then((un) => {
-        if (alive) unlisten = un;
-        else un();
+        if (!alive) return un();
+        unlisten = un;
+        if (!pushed) fetchCurrent();
       })
       .catch((e) => {
-        // Without the event the screen would silently go stale.
-        if (alive) reportError(e);
+        // Without the event the window would silently go stale.
+        if (alive) useAppStore.getState().reportError(e);
       });
     return () => {
       alive = false;
       unlisten?.();
     };
-  }, [setState, reportError]);
+  }, [get, on, set]);
 }
 
-/** Keeps the store's `settings` current, with the same rules as `useStateSync`. */
+/** Keeps the store's `state` current. */
+export function useStateSync(): void {
+  const setState = useAppStore((s) => s.setState);
+  useSynced<AppState>(getState, onState, setState);
+}
+
+/** Keeps the store's `settings` current. */
 export function useSettingsSync(): void {
   const setSettings = useAppStore((s) => s.setSettings);
-
-  useEffect(() => {
-    let alive = true;
-    let unlisten: (() => void) | undefined;
-    let pushed = false;
-    getSettings()
-      .then((s) => {
-        if (alive && !pushed) setSettings(s);
-      })
-      .catch(() => {});
-    onSettings((s) => {
-      pushed = true;
-      setSettings(s);
-    })
-      .then((un) => {
-        if (alive) unlisten = un;
-        else un();
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-      unlisten?.();
-    };
-  }, [setSettings]);
+  useSynced<Settings>(getSettings, onSettings, setSettings);
 }

@@ -270,8 +270,13 @@ export function groupByProject(rows: Row[]): Group[] {
  * project, so they are left out.
  */
 export function projectNames(rows: Row[]): Map<string, string> {
+  return projectNamesOf(groupByProject(rows));
+}
+
+/** `projectNames` for groups that are already built, so a caller that has them skips a pass. */
+export function projectNamesOf(groups: Group[]): Map<string, string> {
   const names = new Map<string, string>();
-  for (const g of groupByProject(rows)) {
+  for (const g of groups) {
     if (g.tier === 3) continue;
     for (const r of g.rows) names.set(r.key, g.name);
   }

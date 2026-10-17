@@ -1,22 +1,11 @@
 import { useMemo } from "react";
-import { Toast } from "../components/Toast";
-import { STATUS_LABEL, formatAge } from "../lib/format";
+import { StoreToast } from "../components/Toast";
+import { HEALTH_LABEL, STATUS_LABEL, formatAge, plural } from "../lib/format";
 import { needsYou, projectNames, toRows, type Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
 import { useNow } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
-
-const HEALTH_LABEL = {
-  online: "Online",
-  reconnecting: "Reconnecting",
-  attention: "Attention",
-  disabled: "Disabled",
-} as const;
-
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
 
 type RowItemProps = {
   row: Row;
@@ -57,9 +46,6 @@ function RowItem({ row, project, nowMs, primary }: RowItemProps) {
  */
 export function MenuBar() {
   const state = useAppStore((s) => s.state);
-  const toast = useAppStore((s) => s.toast);
-  const toastTone = useAppStore((s) => s.toastTone);
-  const dismissToast = useAppStore((s) => s.clearToast);
   const report = useAppStore((s) => s.reportError);
   const shortcutOn = useAppStore((s) => s.settings?.global_shortcut_enabled);
   const nowMs = useNow(30_000);
@@ -181,9 +167,7 @@ export function MenuBar() {
           New session
         </button>
       </div>
-      {toast && (
-        <Toast message={toast} tone={toastTone} onDismiss={dismissToast} />
-      )}
+      <StoreToast />
     </div>
   );
 }

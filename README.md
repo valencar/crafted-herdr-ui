@@ -74,7 +74,7 @@ The commands are visible in the **Activity drawer** (⌘⇧A): the calls the app
 | Ghostty | `open -na Ghostty --args -e …`; always a new window |
 | iTerm2 | AppleScript; a new window, or a new tab in the current window (Settings) |
 | Terminal | AppleScript (`do script`) |
-| Warp | A temporary launch configuration opened through `warp://launch/…` |
+| Warp | A launch configuration in `~/.warp/launch_configurations/` (kept on disk, see Privacy), opened through `warp://launch/…` |
 | WezTerm | `open -na WezTerm --args start -- …` |
 | Kitty | `open -na kitty --args …` |
 | Alacritty | `open -na Alacritty --args -e …` |

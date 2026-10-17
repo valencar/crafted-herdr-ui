@@ -9,18 +9,19 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 | `herdr/model.rs` | serde + ts-rs types for herdr JSON (`Snapshot`, `Agent`, `Pane`, `MachineProfile`, …) and the parsers |
 | `herdr/errors.rs` | `HerdrError` (serialized to the UI as `{kind, …}`) |
 | `herdr/cli.rs` | `HerdrCli::run(machine, args, timeout)`, the per-machine semaphore (4), and the 200-entry `CommandLog` |
-| `env.rs` | login-shell env capture, herdr binary resolution, version floor 0.9.0 (captured and resolved after the window is up; `get_state` answers `null` until then) |
+| `env.rs` | login-shell env capture, herdr binary resolution, the plain-text herdr reads (captured and resolved after the window is up; `get_state` answers `null` until then). The 0.9.0 version floor lives in the UI (`lib/format.ts`) |
 | `activity.rs` | `ActivityTracker`: observed status-change times persisted to `activity.json` |
 | `state.rs`, `poller.rs` | `AppState`/`MachineView`/`Health`, per-machine polling, `"state"` event, `Transition` broadcast |
-| `actions.rs`, `commands.rs` | argv builders (pure) plus `#[tauri::command]` wrappers |
-| `terminal/` | `attach_argv`, `shell_quote`, one launcher per terminal app |
-| `ssh_config.rs`, `machine_setup.rs` | Host alias parsing; pty-driven `machine add` |
+| `actions.rs`, `commands.rs` | argv builders (pure) plus `#[tauri::command]` wrappers (`commands.rs` holds only the wrappers and their small helpers) |
+| `terminal/` | `attach_argv`, `shell_quote`, one launcher per terminal app; `open.rs` is what "Open" runs (attach or full UI, the launch spec, the command-log entry) and takes the home dir, so it knows nothing of Tauri |
+| `preview.rs` | `PreviewManager` (the live preview, emitting only changed frames), `PreviewFrame`, the one-line pane read |
+| `ssh_config.rs`, `machine_setup/` | Host alias parsing; pty-driven `machine add` (`transcript.rs` is the pure prompt/step parser and `SetupRun`; `mod.rs` the pty and thread driver) |
 | `settings.rs` | `Settings` (merge + validation), the `settings.json` store, herdr re-resolution (`HerdrLocator`) |
 | `notify.rs`, `tray.rs` | notifications from `Transition`s; tray, badge, popover and Settings windows, global shortcut |
 
 ## Rules
 
-- **Every herdr call goes through `HerdrCli::run`.** No other `Command::new("herdr")`, except the plain-text reads `env::herdr_version` (`--version`), `env::herdr_agent_kinds` (`agent start --help`) and `env::herdr_status` (`status`, once at startup, logged by `lib.rs`), all via `env::run_plain_text`; none prints JSON. `machine_setup.rs` also starts `herdr machine add` on a pty (its prompts need a tty), with the argv from `checked_machine_add_argv` and a command-log entry when it ends. The only other processes spawned are terminal launchers (`open`, `osascript`, `/bin/sh -c` for custom templates), the login shell for env capture, `mdfind`, and `ssh` inside attach commands.
+- **Every herdr call goes through `HerdrCli::run`.** No other `Command::new("herdr")`, except the plain-text reads `env::herdr_version` (`--version`), `env::herdr_agent_kinds` (`agent start --help`) and `env::herdr_status` (`status`, once at startup, logged by `lib.rs`), all via `env::run_plain_text`; none prints JSON. `machine_setup/mod.rs` also starts `herdr machine add` on a pty (its prompts need a tty), with the argv from `checked_machine_add_argv` and a command-log entry when it ends. The only other processes spawned are terminal launchers (`open`, `osascript`, `/bin/sh -c` for custom templates), the login shell for env capture, `mdfind`, and `ssh` inside attach commands.
 - **Pass `--machine <profile id>` first**, before the subcommand. Local is the machine id `"local"`, which maps to no `--machine` flag.
 - **Mutations never retry automatically.** A timeout becomes `ActionError::MaybeApplied` and triggers `Poller::refresh_now`.
 - **Quoting:** any user- or herdr-derived string that reaches a shell or AppleScript goes through `shell_quote` / AppleScript escaping. Test it with hostile strings (`' " $ \` ; |`, unicode).

@@ -6,6 +6,7 @@ pub mod herdr;
 pub mod machine_setup;
 pub mod notify;
 pub mod poller;
+pub mod preview;
 pub mod settings;
 pub mod ssh_config;
 pub mod state;
@@ -13,23 +14,41 @@ pub mod terminal;
 pub mod tray;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tokio::sync::watch;
 
 use actions::Actions;
 use activity::ActivityTracker;
-use commands::{AgentKindsCache, PREVIEW_EVENT, PreviewManager};
+use commands::AgentKindsCache;
 use herdr::cli::HerdrCli;
 use machine_setup::{MachineSetup, PortablePty};
 use poller::{Poller, PollerConfig};
+use preview::{PREVIEW_EVENT, PreviewManager};
 use settings::{HerdrLocator, SharedSettings, ShortcutState, ShortcutStatus};
 use state::{AppState, PollIntervals};
 use terminal::InstalledCache;
 use tray::{MAIN_WINDOW, POPOVER_WINDOW, PopoverGuard};
 
 const FALLBACK_SHELL: &str = "/bin/zsh";
+
+/// Machine id that means "this computer": no `--machine` flag.
+pub(crate) const LOCAL: &str = "local";
+
+/// Locks, recovering the data if another thread panicked while holding the lock.
+pub(crate) fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Milliseconds since the Unix epoch (0 if the clock is before it).
+pub(crate) fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// Startup wiring: read the settings, find herdr, build the CLI runner and the poller, hand them
 /// to Tauri state, start polling, and set up the tray, notifications and the global shortcut.
@@ -112,16 +131,18 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     app.manage(shortcut);
 
-    // The settings can't change herdr's path while startup is still resolving it.
-    let update = tauri::async_runtime::block_on(shared.begin_update());
-    tauri::async_runtime::spawn(locate_and_poll(handle, update));
+    tauri::async_runtime::spawn(locate_and_poll(handle));
     Ok(())
 }
 
 /// The slow part of startup, off the setup path: capture the login environment, find herdr and
 /// read its version, tell the UI, then start polling. Also asks `herdr status` once and logs it
 /// (the spec's startup check); nothing depends on the answer.
-async fn locate_and_poll(handle: tauri::AppHandle, update: tokio::sync::OwnedMutexGuard<()>) {
+///
+/// The settings lock is taken only once the environment is captured, so a settings save during
+/// the capture is not held up. A herdr path saved before that is read by `locate` below; one
+/// saved after waits on the lock, and `set_settings` re-resolves it because herdr is located.
+async fn locate_and_poll(handle: tauri::AppHandle) {
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
@@ -138,6 +159,8 @@ async fn locate_and_poll(handle: tauri::AppHandle, update: tokio::sync::OwnedMut
     );
     cli.set_env(env::forwarded_env(&login));
     locator.set_login_hit(login_hit);
+    // The settings can't change herdr's path while startup is still resolving it.
+    let update = shared.begin_update().await;
     let herdr = locator
         .locate(shared.get().herdr_path.as_deref(), &cli)
         .await;
@@ -153,7 +176,7 @@ async fn locate_and_poll(handle: tauri::AppHandle, update: tokio::sync::OwnedMut
 
 /// Runs `herdr status` once and adds it to the command log.
 async fn log_startup_status(cli: &HerdrCli, bin: PathBuf) {
-    let started = herdr::cli::now_ms();
+    let started = now_ms();
     let answered = env::herdr_status(&bin, cli.env(), settings::VERSION_TIMEOUT).await;
     cli.record(
         None,
@@ -163,6 +186,7 @@ async fn log_startup_status(cli: &HerdrCli, bin: PathBuf) {
         answered
             .is_none()
             .then(|| "herdr status did not answer".to_owned()),
+        None,
     );
 }
 
@@ -271,12 +295,10 @@ pub fn run() {
         RunEvent::ExitRequested {
             api, code: None, ..
         } => api.prevent_exit(),
-        // A click on the Dock icon while the main window is hidden brings it back.
+        // A click on the Dock icon always brings the main window back, even while Settings or
+        // the popover is on screen (macOS then reports a visible window).
         #[cfg(target_os = "macos")]
-        RunEvent::Reopen {
-            has_visible_windows: false,
-            ..
-        } => tray::show_main(app),
+        RunEvent::Reopen { .. } => tray::show_main(app),
         _ => {}
     });
 }

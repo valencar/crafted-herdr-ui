@@ -1,5 +1,5 @@
-import { formatAge } from "../lib/format";
-import { shortPath } from "../lib/format";
+import { memo } from "react";
+import { formatAge, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { StatusPill } from "./StatusPill";
 
@@ -13,13 +13,13 @@ type Props = {
   nowMs: number;
   terminalName: string;
   /** The last few lines of the live preview; only the selected card has any. */
-  previewLines: string[];
+  previewLines: readonly string[];
   onSelect: (key: string) => void;
   onOpen: (row: Row) => void;
   onMarkSeen: (row: Row) => void;
 };
 
-export function NeedsYouCard({
+export const NeedsYouCard = memo(function NeedsYouCard({
   row,
   project,
   selected,
@@ -86,4 +86,4 @@ export function NeedsYouCard({
       </div>
     </article>
   );
-}
+});

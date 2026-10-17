@@ -31,26 +31,31 @@ export function Preview({ row }: { row: Row }) {
     setPreview(null);
     onPreview((f) => {
       if (alive && f.key === key) setPreview(f);
-    })
-      .then((un) => {
-        if (alive) unlisten = un;
-        else un();
-      })
-      .catch((e) => {
+    }).then(
+      (un) => {
+        if (!alive) {
+          un();
+          return;
+        }
+        unlisten = un;
+        // Rust only emits changed frames, so the first one must find the listener in place.
+        inOrder(() =>
+          invokeTyped("start_preview", { machineId, paneId, isAgent }),
+        ).catch((e) => {
+          if (alive) {
+            setPreview({
+              key,
+              text: null,
+              error: actionErrorMessage(toActionError(e)),
+            });
+          }
+        });
+      },
+      (e) => {
         // Without the event the preview would stay on "Waiting for output…" forever.
         if (alive) reportError(e);
-      });
-    inOrder(() =>
-      invokeTyped("start_preview", { machineId, paneId, isAgent }),
-    ).catch((e) => {
-      if (alive) {
-        setPreview({
-          key,
-          text: null,
-          error: actionErrorMessage(toActionError(e)),
-        });
-      }
-    });
+      },
+    );
     return () => {
       alive = false;
       unlisten?.();

@@ -88,7 +88,7 @@ describe("Inspector details", () => {
     expect(screen.getByRole("heading", { name: "planner" })).toBeVisible();
     expect(screen.getByText("api-service on buildbox")).toBeInTheDocument();
     const grid = screen.getByRole("group", { name: "Details" });
-    expect(grid).toHaveTextContent("Workboxbuildbox · online");
+    expect(grid).toHaveTextContent("Workboxbuildbox · Online");
     expect(grid).toHaveTextContent("Sessiondefault");
     expect(grid).toHaveTextContent("Folder~/projects/api-service");
     expect(grid).toHaveTextContent("Workspace / tabapi-service · main");
@@ -131,6 +131,27 @@ describe("Inspector command box and the attach mode", () => {
     );
     expect(screen.queryByText(/terminal attach term-1/)).toBeNull();
     useAppStore.setState({ settings: null });
+  });
+});
+
+describe("Inspector when Rust refuses the attach command", () => {
+  it("copy_command_stays_clickable_and_shows_rusts_reason", async () => {
+    invoke.mockImplementation(async (name: string) => {
+      if (name === "copy_attach_command") {
+        throw { kind: "invalid", message: "Pane w1:p1 has no terminal." };
+      }
+      return null;
+    });
+    const { user, writeText } = setup();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Copy command" }),
+      ).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "Copy command" }));
+    expect(useAppStore.getState().toast).toBe("Pane w1:p1 has no terminal.");
+    expect(writeText).not.toHaveBeenCalled();
+    expect(screen.queryByText(/^\$/)).toBeNull();
   });
 });
 
@@ -279,7 +300,7 @@ describe("Inspector actions", () => {
       await user.type(input, bad);
       await user.click(screen.getByRole("button", { name: "Save" }));
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "Use lowercase letters, digits, - or _",
+        "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.",
       );
     }
     expect(invoke).not.toHaveBeenCalledWith(
@@ -414,6 +435,45 @@ describe("Inspector live preview", () => {
     await waitFor(() =>
       expect(useAppStore.getState().toast).toBe("event system unavailable"),
     );
+    // No listener means nobody could show a frame, so the preview is not started.
+    expect(invoke).not.toHaveBeenCalledWith("start_preview", expect.anything());
+  });
+
+  it("starts_the_preview_only_once_its_listener_is_live", async () => {
+    let registered!: (un: () => void) => void;
+    listen.mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          registered = resolve;
+        }),
+    );
+    setup();
+    await waitFor(() => expect(listen).toHaveBeenCalled());
+    // The listener is still registering: a frame emitted now would have nobody to hear it.
+    expect(invoke).not.toHaveBeenCalledWith("start_preview", expect.anything());
+    await act(async () => registered(unlisten as unknown as () => void));
+    await waitFor(() =>
+      expect(
+        invoke.mock.calls.filter(([name]) => name === "start_preview"),
+      ).toHaveLength(1),
+    );
+  });
+
+  it("never_starts_the_preview_when_unmounted_before_its_listener_is_live", async () => {
+    let registered!: (un: () => void) => void;
+    listen.mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          registered = resolve;
+        }),
+    );
+    const { unmount } = setup();
+    await waitFor(() => expect(listen).toHaveBeenCalled());
+    unmount();
+    await act(async () => registered(unlisten as unknown as () => void));
+    // The late listener is released at once, and the preview never started.
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(invoke).not.toHaveBeenCalledWith("start_preview", expect.anything());
   });
 
   it("previews_a_shell_as_a_pane", async () => {

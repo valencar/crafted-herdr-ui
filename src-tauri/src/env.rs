@@ -18,9 +18,6 @@ const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 const FORWARDED: [&str; 6] = ["PATH", "HOME", "USER", "SSH_AUTH_SOCK", "LANG", "TERM"];
 const DEFAULT_TERM: &str = "xterm-256color";
 
-/// First herdr version the app is built against.
-const MIN_VERSION: (u32, u32, u32) = (0, 9, 0);
-
 /// The environment of the user's login shell.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoginEnv {
@@ -56,11 +53,10 @@ fn process_env() -> LoginEnv {
     }
 }
 
-/// Runs `<shell> -lc <script>` and returns its stdout when it exits 0 in time.
-async fn run_login_shell(shell: &str, script: &str, limit: Duration) -> Option<String> {
-    let child = Command::new(shell)
-        .arg("-lc")
-        .arg(script)
+/// Spawns `cmd` with no stdin and no stderr, and returns its stdout when it exits 0 within
+/// `limit`. The child is killed if it overruns.
+async fn stdout_if_ok(mut cmd: Command, limit: Duration) -> Option<String> {
+    let child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -72,6 +68,13 @@ async fn run_login_shell(shell: &str, script: &str, limit: Duration) -> Option<S
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Runs `<shell> -lc <script>` and returns its stdout when it exits 0 in time.
+async fn run_login_shell(shell: &str, script: &str, limit: Duration) -> Option<String> {
+    let mut cmd = Command::new(shell);
+    cmd.arg("-lc").arg(script);
+    stdout_if_ok(cmd, limit).await
 }
 
 /// Captures the login shell's environment (`<shell> -lc 'env -0'`, 5 s limit).
@@ -166,21 +169,11 @@ async fn run_plain_text(
     args: &[&str],
     limit: Duration,
 ) -> Option<String> {
-    let child = Command::new(bin)
-        .args(args)
+    let mut cmd = Command::new(bin);
+    cmd.args(args)
         .env_clear()
-        .envs(env.iter().map(|(k, v)| (k, v)))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .ok()?;
-    let output = timeout(limit, child.wait_with_output()).await.ok()?.ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+        .envs(env.iter().map(|(k, v)| (k, v)));
+    stdout_if_ok(cmd, limit).await
 }
 
 /// Runs `<bin> --version` with exactly `env` and returns the version it reports (`0.9.4`).
@@ -235,11 +228,6 @@ pub async fn herdr_agent_kinds(
     let text = run_plain_text(bin, env, &["agent", "start", "--help"], limit).await?;
     let kinds = parse_agent_kinds(&text);
     (!kinds.is_empty()).then_some(kinds)
-}
-
-/// True when the version meets the 0.9.0 floor.
-pub fn is_supported(version: (u32, u32, u32)) -> bool {
-    version >= MIN_VERSION
 }
 
 #[cfg(test)]
@@ -361,14 +349,6 @@ mod tests {
         assert_eq!(parse_version(""), None);
         assert_eq!(parse_version("herdr 0.9"), None);
         assert_eq!(parse_version("herdr 0.x.1"), None);
-    }
-
-    #[test]
-    fn support_floor() {
-        assert!(!is_supported((0, 8, 9)));
-        assert!(is_supported((0, 9, 0)));
-        assert!(is_supported((0, 10, 0)));
-        assert!(is_supported((1, 0, 0)));
     }
 
     /// Writes an executable script that ignores its arguments.
