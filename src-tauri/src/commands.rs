@@ -941,6 +941,8 @@ impl PreviewManager {
     async fn run(&self, generation: u64, machine: String, pane: String, is_agent: bool) {
         let key = preview_key(&machine, &pane);
         let args = preview_argv(&pane, is_agent);
+        // An unchanged frame is not sent again: the UI would re-render for nothing.
+        let mut last: Option<PreviewFrame> = None;
         loop {
             if (self.visible)() {
                 let frame = match self.cli.run_text(Some(&machine), &args, T_DEFAULT).await {
@@ -955,7 +957,10 @@ impl PreviewManager {
                         error: Some(preview_error(&e)),
                     },
                 };
-                self.emit_current(generation, frame);
+                if last.as_ref() != Some(&frame) {
+                    self.emit_current(generation, frame.clone());
+                    last = Some(frame);
+                }
             }
             tokio::time::sleep(self.every).await;
         }

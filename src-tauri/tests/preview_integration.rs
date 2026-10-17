@@ -103,7 +103,7 @@ async fn an_agent_is_read_with_agent_read_and_its_text_is_emitted_under_its_key(
     h.put(&format!("{AGENT_P1}.json"), &fixture("pane_read_text.txt"));
 
     h.preview.start("local", "w1:p1", true).unwrap();
-    h.wait_for("two frames", |f| f.len() >= 2).await;
+    h.wait_for("a frame", |f| !f.is_empty()).await;
 
     let first = &h.frames()[0];
     assert_eq!(first.key, "local::w1:p1");
@@ -187,7 +187,7 @@ async fn nothing_is_emitted_for_a_stale_key_after_a_switch() {
     tokio::time::sleep(Duration::from_millis(1300)).await;
 
     let frames = h.frames();
-    assert!(frames.len() >= 2);
+    assert!(!frames.is_empty());
     assert!(
         frames.iter().all(|f| f.key == "local::w1:p2"),
         "stale frame: {frames:#?}"
@@ -234,4 +234,38 @@ async fn a_pane_id_that_looks_like_a_flag_is_refused_without_calling_herdr() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     assert!(h.calls().is_empty());
+}
+
+#[tokio::test]
+async fn an_unchanged_read_is_emitted_once() {
+    let h = Harness::new();
+    h.put(&format!("{AGENT_P1}.json"), &fixture("pane_read_text.txt"));
+    // Faster than the other tests, so several reads fit in the wait.
+    let preview = h.preview.clone().with_every(Duration::from_millis(50));
+
+    preview.start("local", "w1:p1", true).unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    assert!(h.calls().len() >= 3, "calls: {:#?}", h.calls());
+    let frames = h.frames();
+    assert_eq!(frames.len(), 1, "frames: {frames:#?}");
+    assert_eq!(frames[0].key, "local::w1:p1");
+
+    // A new start is a new run, so its first frame goes out again.
+    preview.start("local", "w1:p1", true).unwrap();
+    h.wait_for("the frame of the second start", |f| f.len() == 2)
+        .await;
+}
+
+#[tokio::test]
+async fn a_changed_read_is_emitted_again() {
+    let h = Harness::new();
+    h.put(&format!("{AGENT_P1}.json"), &fixture("pane_read_text.txt"));
+
+    h.preview.start("local", "w1:p1", true).unwrap();
+    h.wait_for("a frame", |f| !f.is_empty()).await;
+    h.put(&format!("{AGENT_P1}.json"), "something new");
+    h.wait_for("the changed frame", |f| f.len() == 2).await;
+
+    assert_eq!(h.frames()[1].text.as_deref(), Some("something new\n"));
 }
