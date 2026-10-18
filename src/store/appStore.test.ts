@@ -234,6 +234,13 @@ describe("appStore", () => {
     expect(s.view).toEqual({ kind: "all" });
   });
 
+  it("focusRow clears the saved search, so the row it selects is not filtered out", () => {
+    useAppStore.getState().setQuery("zzz");
+    useAppStore.getState().focusRow("buildbox::w1:p1");
+    expect(useAppStore.getState().query).toBe("");
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+  });
+
   it("starts without settings and keeps them once they are read", () => {
     expect(useAppStore.getState().settings).toBeNull();
     const settings = {

@@ -94,6 +94,7 @@ function setup(
     sheet: null,
     toast: null,
     dialogOpen: 0,
+    query: "",
   });
   const user = userEvent.setup();
   render(<Dashboard {...props} />);
@@ -210,6 +211,15 @@ describe("Dashboard", () => {
     await user.click(within(card).getByRole("button", { name: "Reply…" }));
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
     expect(useAppStore.getState().view).toEqual({ kind: "all" });
+  });
+
+  it("a_card_reply_clears_a_saved_search_that_filters_the_row_out", async () => {
+    const user = setup();
+    useAppStore.setState({ query: "no such agent" });
+    const card = within(section("Needs you")).getAllByRole("article")[0];
+    await user.click(within(card).getByRole("button", { name: "Reply…" }));
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(useAppStore.getState().query).toBe("");
   });
 
   it("in_the_narrow_column_a_card_click_and_the_all_agents_link_bring_home_back", async () => {

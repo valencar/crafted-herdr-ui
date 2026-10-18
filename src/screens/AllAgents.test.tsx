@@ -537,6 +537,20 @@ describe("AllAgents", () => {
     expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
   });
 
+  it("focusing_a_row_shows_it_even_when_the_saved_search_filtered_it_out", async () => {
+    // Reply, a card click and a notification all go through `focusRow`.
+    setup();
+    act(() => useAppStore.getState().setQuery("no such agent"));
+    expect(
+      document.querySelector('[data-row-key="buildbox::w1:p3"]'),
+    ).toBeNull();
+
+    act(() => useAppStore.getState().focusRow("buildbox::w1:p3"));
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+    expect(selectButton("buildbox::w1:p3")).toBeVisible();
+    expect(rowItem("buildbox::w1:p3")).toHaveClass("is-selected");
+  });
+
   it("backspace_in_the_search_field_does_not_close_anything", async () => {
     const user = setup();
     useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
