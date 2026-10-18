@@ -495,10 +495,25 @@ describe("Dashboard", () => {
     expect(
       gpubox.getByText("1 need input · 1 done · 1 working · 1 idle"),
     ).toBeInTheDocument();
-    expect(gpubox.getByText("Last updated 0s ago")).toBeInTheDocument();
+    expect(gpubox.getByText("Up to date")).toBeInTheDocument();
     expect(gpubox.getByText("1 tab open")).toBeInTheDocument();
     expect(within(cards[0]).getByText("0 tabs open")).toBeInTheDocument();
     expect(cards[1]).not.toHaveClass("is-stale");
+  });
+
+  it("an_online_card_says_up_to_date_and_never_a_cached_age", () => {
+    // `last_ok_ms` is not pushed while polls succeed with an unchanged snapshot, so an old value
+    // on an online workbox says nothing about how fresh the data is.
+    setup(
+      appState(
+        machine("buildbox", { kind: "online" }, { last_ok_ms: NOW - 10 * MIN }),
+      ),
+    );
+    const card = within(section("Workboxes")).getByRole("article", {
+      name: "buildbox",
+    });
+    expect(within(card).getByText("Up to date")).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(/last updated|as of/i);
   });
 
   it("stale_workbox_is_marked_as_of", () => {

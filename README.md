@@ -84,7 +84,7 @@ The **Dashboard** reads top to bottom:
 
 - **Needs you.** Cards for agents waiting on you, blocked first, then oldest, each with its status and age and an Open button. A list of finished, not looked at yet agents follows. With nobody waiting it says "Nobody needs you right now." Cards show no terminal preview; click one (or Reply…) to open All agents on that row, where the preview and reply live.
 - **Right now.** Five tiles: Agents (a bar by status, with its text legend), Blocked the longest, Workboxes online, herdr response (the median time of herdr calls over the last 5 minutes, and how many failed) and Terminal tabs ("{n} of 16", by workbox).
-- **Workboxes.** A card per workbox with its health in words, a status bar, "Last updated 2s ago", its open tabs, and **Open herdr** (online) or **Retry now** (reconnecting or needing attention). A workbox that isn't online shows its last data dimmed, marked "as of {age} ago".
+- **Workboxes.** A card per workbox with its health in words, a status bar, "Up to date" (or, when it isn't online, "Last updated 2m ago"), its open tabs, and **Open herdr** (online) or **Retry now** (reconnecting or needing attention). A workbox that isn't online shows its last data dimmed, marked "as of {age} ago".
 - **Working now.** Working agents, longest-running first, each with an Open button, and a link to All agents.
 
 The Dashboard makes no herdr calls of its own. It reads the app's state and, only while it is visible, the in-memory command log once every 5 seconds for the response tile.
