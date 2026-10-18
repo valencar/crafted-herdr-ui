@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { openFull, openRow } from "../lib/openRow";
+import { isKeyForMenu } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 import { tabShortcut } from "../terminal/tabOrder";
 import { useTerminalStore } from "../terminal/terminalStore";
@@ -74,6 +75,9 @@ export function OpenButton({
       if (!rootRef.current?.contains(e.target as Node)) close();
     };
     const onKey = (e: KeyboardEvent) => {
+      // Not this menu's key: something else already handled it, or it was typed in another
+      // control (the palette's input).
+      if (!isKeyForMenu(rootRef.current, e)) return;
       if (e.key === "Escape") {
         close();
         chevronRef.current?.focus();
@@ -90,14 +94,20 @@ export function OpenButton({
       e.preventDefault();
       all[next]?.focus();
     };
+    // Focus moving to another control (the palette opening) leaves the menu behind: close it.
+    const onFocusIn = (e: FocusEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) close();
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn);
     // The menu is fixed, so it would stay behind if the page moved under it.
     window.addEventListener("resize", close);
     window.addEventListener("scroll", close, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocusIn);
       window.removeEventListener("resize", close);
       window.removeEventListener("scroll", close, true);
     };
@@ -177,7 +187,12 @@ export function OpenButton({
 
   return (
     // The cards select themselves on click; the menu must not hand that click to them.
-    <div className={classes} ref={rootRef} onClick={(e) => e.stopPropagation()}>
+    <div
+      className={classes}
+      data-menu-root
+      ref={rootRef}
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
         type="button"
         className="btn open-main"

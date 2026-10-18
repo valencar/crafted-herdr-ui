@@ -41,8 +41,9 @@ export function agoText(age: string): string {
 }
 
 /**
- * "last updated 40s ago". Only for a machine that is not online: `last_ok_ms` is fresh
- * whenever it is.
+ * "last updated 40s ago". Only for a machine that is not online: its `last_ok_ms` is the
+ * last success. An online machine's only moves when its snapshot changes, so it says nothing
+ * about freshness there.
  */
 export function formatStaleness(
   lastOkMs: number | null,

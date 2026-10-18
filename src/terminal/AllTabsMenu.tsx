@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { Row } from "../lib/grouping";
+import { isKeyForMenu } from "../lib/uiHelpers";
 import { HomeIcon } from "./HomeIcon";
 import { tabDotStatus, tabName, tabStatus } from "./tabInfo";
 import type { TabGroup } from "./tabOrder";
@@ -47,6 +48,9 @@ export function AllTabsMenu({
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
+      // Not this menu's key: something else already handled it, or it was typed in another
+      // control (the palette's input).
+      if (!isKeyForMenu(rootRef.current, e)) return;
       if (e.key === "Escape") {
         setOpen(false);
         buttonRef.current?.focus();
@@ -58,11 +62,17 @@ export function AllTabsMenu({
         all[(at + step + all.length) % all.length]?.focus();
       }
     };
+    // Focus moving to another control (the palette opening) leaves the menu behind: close it.
+    const onFocusIn = (e: FocusEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocusIn);
     };
   }, [open]);
 
@@ -73,7 +83,7 @@ export function AllTabsMenu({
   };
 
   return (
-    <div className="menu-wrap tab-menu-wrap" ref={rootRef}>
+    <div className="menu-wrap tab-menu-wrap" data-menu-root ref={rootRef}>
       <button
         ref={buttonRef}
         type="button"

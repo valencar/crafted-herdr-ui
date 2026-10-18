@@ -154,6 +154,37 @@ describe("ContextBar", () => {
     expect(useTerminalStore.getState().tabs).toHaveLength(2);
   });
 
+  it("a_close_confirmation_does_not_follow_the_active_pane", async () => {
+    // A notification can switch the active tab while A's confirmation is open: confirming must
+    // never close B.
+    const user = userEvent.setup();
+    const rowB: Row = {
+      ...row,
+      key: "buildbox::w1:p2",
+      paneId: "w1:p2",
+      name: "reviewer",
+    };
+    const tabB: TermTab = {
+      ...paneTab,
+      tabKey: rowB.key,
+      target: { kind: "pane", machineId: "buildbox", paneId: "w1:p2" },
+      title: "reviewer",
+    };
+    const { rerender } = render(
+      <ContextBar tab={paneTab} row={row} onFind={() => {}} />,
+    );
+    await terminalButton();
+    await user.click(screen.getByRole("button", { name: "Close pane…" }));
+    expect(
+      screen.getByRole("dialog", { name: "Close planner?" }),
+    ).toBeInTheDocument();
+
+    rerender(<ContextBar tab={tabB} row={rowB} onFind={() => {}} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useAppStore.getState().dialogOpen).toBe(0);
+    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+  });
+
   it("the_close_pane_dialog_is_outside_the_terminal_panel", async () => {
     // `.terminal-panel` is its own stacking context, so a dialog inside it would sit under the
     // Dashboard column beside it. The dialog goes to the body, with the app's other dialogs.

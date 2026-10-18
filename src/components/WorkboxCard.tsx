@@ -29,7 +29,12 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
   const kind = machine.health.kind;
   const stale = kind !== "online";
   const counts = statusCounts(rows);
-  const updated = formatStaleness(machine.last_ok_ms, nowMs);
+  // An online workbox answers every poll, but `last_ok_ms` only moves when the snapshot
+  // changes, so its age would grow while everything is fine: say "Up to date" instead. A
+  // workbox that is not online keeps its last success, which is what its age claims.
+  const updated = stale
+    ? formatStaleness(machine.last_ok_ms, nowMs)
+    : "up to date";
   const age = formatAge(machine.last_ok_ms, nowMs);
   return (
     <article

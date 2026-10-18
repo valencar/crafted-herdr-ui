@@ -36,24 +36,46 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const [previousFocus] = useState(
     () => document.activeElement as HTMLElement | null,
   );
+  // When that was an item of an open menu, the menu closes as the palette takes focus and the
+  // item goes with it: its menu's own button (same `data-menu-root`) is where focus returns.
+  const [menuTrigger] = useState(
+    () =>
+      previousFocus
+        ?.closest('[role="menu"]')
+        ?.closest("[data-menu-root]")
+        ?.querySelector<HTMLElement>('[aria-haspopup="menu"]') ?? null,
+  );
 
   useEffect(() => {
     inputRef.current?.focus();
     return () => {
-      // Once the palette is gone: an item that moved focus (a new tab, a sheet, a search box)
-      // keeps it; otherwise focus goes back to where it was, never to the page body.
-      window.setTimeout(() => {
+      // Focus goes back to where it was, never to the page body, unless an item moved it. Where
+      // it was is the control it was opened from, or that control's menu button when it was a
+      // menu item. It is done now, ahead of the re-render that the dropped modal claim causes,
+      // so a terminal that refocuses on that finds focus already on a visible control and
+      // leaves it there.
+      const bodyHasFocus = () => {
         const now = document.activeElement;
-        if (now && now !== document.body) return;
-        const previous = previousFocus;
-        if (previous?.isConnected && previous !== document.body) {
-          previous.focus();
-        } else {
-          focusSearch();
-        }
+        return !now || now === document.body;
+      };
+      const target = [previousFocus, menuTrigger].find(
+        (el) =>
+          el?.isConnected &&
+          el !== document.body &&
+          el.closest("[hidden]") === null,
+      );
+      if (target && bodyHasFocus()) target.focus();
+      // And once more after the item's own effects and the browser's default action for the
+      // event that closed the palette: an item that moved focus (a new tab, a sheet, a search
+      // box) keeps it; if focus ended on the body, it goes back to the target, or to Home's
+      // search box when there is none.
+      window.setTimeout(() => {
+        if (!bodyHasFocus()) return;
+        if (target?.isConnected) target.focus();
+        else focusSearch();
       }, 0);
     };
-  }, [previousFocus]);
+  }, [previousFocus, menuTrigger]);
 
   const items = useMemo(() => {
     const store = useAppStore.getState();
@@ -112,7 +134,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       ],
       open: (row, how) => void openRow(row, how),
       goToProject: (key) => {
-        // The group is only on the page when All agents is grouped by project (as the sidebar does).
+        // The group is only on the page when All agents is grouped by project (as the sidebar does),
+        // and not filtered out by a saved search.
+        store.setQuery("");
         showHomeView({ kind: "all" });
         store.setGroupBy("project");
         scrollToId(`group-${key}`);
@@ -163,7 +187,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     <div
       className="scrim palette-scrim"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target !== e.currentTarget) return;
+        // The press must not clear focus (to the body, over a scrim that cannot take it) after
+        // the palette has handed it back.
+        e.preventDefault();
+        onClose();
       }}
     >
       <div

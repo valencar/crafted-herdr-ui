@@ -141,7 +141,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   pendingOpen: null,
   setState: (state) => set({ state }),
   setSettings: (settings) => set({ settings }),
-  focusRow: (selectedKey) => set({ selectedKey, view: { kind: "all" } }),
+  // The saved search goes too: a row it filters out would be selected but not on the page.
+  focusRow: (selectedKey) =>
+    set({ selectedKey, view: { kind: "all" }, query: "" }),
   select: (selectedKey) => set({ selectedKey }),
   setGroupBy: (groupBy) => set({ groupBy }),
   setQuery: (query) => set({ query }),

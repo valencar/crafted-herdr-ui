@@ -1,8 +1,10 @@
-import { createRef } from "react";
+import { createRef, useEffect, useState } from "react";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TermEvent } from "../lib/bindings/TermEvent";
+import { CommandPalette } from "../components/CommandPalette";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAppStore } from "../store/appStore";
 
 type FakeTerm = {
@@ -495,6 +497,141 @@ describe("TerminalView", () => {
       useAppStore.setState({ sheet: null, dialogOpen: 0 });
     },
   );
+
+  describe("after a dialog closes over the terminal", () => {
+    // Where the dialog was opened from, and what it does when it closes.
+    const probe: {
+      set: ((s: { open: boolean; opener: boolean }) => void) | null;
+    } = { set: null };
+    function Probe({ hidden }: { hidden: boolean }) {
+      const [s, setS] = useState({ open: false, opener: true });
+      useEffect(() => {
+        probe.set = setS;
+      }, []);
+      const done = () => setS((p) => ({ ...p, open: false }));
+      return (
+        <div hidden={hidden}>
+          {s.opener && <button type="button">Close pane…</button>}
+          {s.open && (
+            <ConfirmDialog
+              title="Close?"
+              body="Closes it."
+              confirmLabel="Close"
+              onConfirm={done}
+              onCancel={done}
+            />
+          )}
+        </div>
+      );
+    }
+    const mount = (hidden: boolean) => (
+      <>
+        <Probe hidden={hidden} />
+        <input aria-label="Folder" />
+        <Harness />
+      </>
+    );
+    const opener = () => screen.getByRole("button", { name: "Close pane…" });
+
+    it("a Home-slot dialog's hidden opener does not keep the terminal from focus", async () => {
+      useAppStore.setState({ sheet: null, dialogOpen: 0 });
+      const user = userEvent.setup();
+      const { rerender } = render(mount(false));
+      await flush();
+      opener().focus();
+      act(() => probe.set?.({ open: true, opener: true }));
+      // A notification activates the terminal tab: the Home slot is hidden under the dialog.
+      rerender(mount(true));
+      term().focus.mockClear();
+      expect(term().focus).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      expect(useAppStore.getState().dialogOpen).toBe(0);
+      expect(term().focus).toHaveBeenCalled();
+    });
+
+    it("a dialog whose opener was unmounted leaves focus on the terminal", async () => {
+      useAppStore.setState({ sheet: null, dialogOpen: 0 });
+      render(mount(false));
+      await flush();
+      opener().focus();
+      act(() => probe.set?.({ open: true, opener: true }));
+      term().focus.mockClear();
+      // The pane changes under the dialog (Close pane… is keyed by pane): opener and dialog go.
+      act(() => probe.set?.({ open: false, opener: false }));
+      expect(document.activeElement).toBe(document.body);
+      expect(term().focus).toHaveBeenCalled();
+    });
+
+    it("does not take focus from a control the user is in", async () => {
+      useAppStore.setState({ sheet: null, dialogOpen: 0 });
+      render(mount(false));
+      await flush();
+      screen.getByLabelText("Folder").focus();
+      act(() => useAppStore.getState().openDialog());
+      term().focus.mockClear();
+      act(() => useAppStore.getState().closeDialog());
+      expect(term().focus).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("Folder")).toHaveFocus();
+    });
+  });
+
+  describe("after the command palette closes over a terminal tab", () => {
+    // The palette gives focus back as it goes, before the modal claim drops, so the terminal's
+    // refocus (body, detached or hidden only) leaves a visible control alone.
+    function WithPalette({
+      shown,
+      onClose,
+    }: {
+      shown: boolean;
+      onClose: () => void;
+    }) {
+      return (
+        <>
+          <button type="button" aria-label="strip tab" />
+          <div className="terminal-panel">
+            <textarea aria-label="terminal input" />
+            <Harness />
+          </div>
+          {shown && <CommandPalette onClose={onClose} />}
+        </>
+      );
+    }
+    const openFrom = async (label: string) => {
+      useAppStore.setState({ sheet: null, dialogOpen: 0 });
+      const user = userEvent.setup();
+      const view = render(<WithPalette shown={false} onClose={() => {}} />);
+      await flush();
+      const from = screen.getByLabelText(label);
+      from.focus();
+      view.rerender(
+        <WithPalette
+          shown
+          onClose={() =>
+            view.rerender(<WithPalette shown={false} onClose={() => {}} />)
+          }
+        />,
+      );
+      expect(screen.getByRole("combobox")).toHaveFocus();
+      term().focus.mockClear();
+      return { user, from };
+    };
+
+    it("returns focus to a visible control outside the terminal", async () => {
+      const { user, from } = await openFrom("strip tab");
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("combobox")).toBeNull();
+      expect(from).toHaveFocus();
+      expect(term().focus).not.toHaveBeenCalled();
+    });
+
+    it("returns focus to the terminal when it was opened from inside it", async () => {
+      const { user, from } = await openFrom("terminal input");
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("combobox")).toBeNull();
+      expect(from).toHaveFocus();
+    });
+  });
 
   it("exposes_search_and_focus_through_the_ref", async () => {
     const handle = createRef<TerminalHandle>();

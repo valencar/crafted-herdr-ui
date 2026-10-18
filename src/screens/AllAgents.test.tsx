@@ -511,6 +511,46 @@ describe("AllAgents", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("a_close_confirmation_stays_visible_when_the_home_slot_is_hidden_behind_a_terminal", async () => {
+    // A notification can activate a terminal tab while the dialog is up; the Home slot is then
+    // `hidden`. The dialog is on the body, so it stays visible and Cancel still releases the
+    // modal claim.
+    const user = setup(defaultState(), (home) => (
+      <div className="home-slot" data-testid="slot">
+        {home}
+      </div>
+    ));
+    useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
+    await user.keyboard("{Backspace}");
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(useAppStore.getState().dialogOpen).toBe(1);
+
+    act(() => screen.getByTestId("slot").setAttribute("hidden", ""));
+    const dialog = screen.getByRole("dialog");
+    expect(screen.getByTestId("slot")).not.toBeVisible();
+    expect(dialog).toBeVisible();
+    expect(screen.getByTestId("slot").contains(dialog)).toBe(false);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useAppStore.getState().dialogOpen).toBe(0);
+    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+  });
+
+  it("focusing_a_row_shows_it_even_when_the_saved_search_filtered_it_out", async () => {
+    // Reply, a card click and a notification all go through `focusRow`.
+    setup();
+    act(() => useAppStore.getState().setQuery("no such agent"));
+    expect(
+      document.querySelector('[data-row-key="buildbox::w1:p3"]'),
+    ).toBeNull();
+
+    act(() => useAppStore.getState().focusRow("buildbox::w1:p3"));
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+    expect(selectButton("buildbox::w1:p3")).toBeVisible();
+    expect(rowItem("buildbox::w1:p3")).toHaveClass("is-selected");
+  });
+
   it("backspace_in_the_search_field_does_not_close_anything", async () => {
     const user = setup();
     useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
