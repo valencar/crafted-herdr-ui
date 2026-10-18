@@ -54,16 +54,6 @@ pub enum OpenTarget {
     External,
 }
 
-/// Which edge of the main window the terminal panel docks to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../src/lib/bindings/")]
-pub enum TerminalPlacement {
-    #[default]
-    Bottom,
-    Right,
-}
-
 /// How tightly the session rows are packed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -74,8 +64,8 @@ pub enum RowDensity {
     Compact,
 }
 
-/// The terminal panel's size in points: its height when docked at the bottom, its width on the right.
-pub const PANEL_SIZE_RANGE: std::ops::RangeInclusive<u32> = 120..=2000;
+/// The Dashboard column's width in points when it sits beside a terminal.
+pub const SPLIT_WIDTH_RANGE: std::ops::RangeInclusive<u32> = 360..=1200;
 pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=24;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -102,8 +92,10 @@ pub struct Settings {
     pub open_after_create: bool,
     /// Whether "Open" shows the pane in the in-app terminal panel or in the user's terminal.
     pub open_target: OpenTarget,
-    pub terminal_placement: TerminalPlacement,
-    pub terminal_panel_size: u32,
+    /// Whether a terminal tab shows the Dashboard in a column beside it.
+    pub dashboard_split: bool,
+    /// The width of that column, in points.
+    pub dashboard_split_width: u32,
     pub terminal_font_size: u8,
     pub sidebar_collapsed: bool,
     pub row_density: RowDensity,
@@ -125,8 +117,8 @@ impl Default for Settings {
             global_shortcut_enabled: true,
             open_after_create: true,
             open_target: OpenTarget::default(),
-            terminal_placement: TerminalPlacement::default(),
-            terminal_panel_size: 320,
+            dashboard_split: false,
+            dashboard_split_width: 420,
             terminal_font_size: 13,
             sidebar_collapsed: false,
             row_density: RowDensity::default(),
@@ -172,11 +164,11 @@ impl Settings {
                 ));
             }
         }
-        if !PANEL_SIZE_RANGE.contains(&self.terminal_panel_size) {
+        if !SPLIT_WIDTH_RANGE.contains(&self.dashboard_split_width) {
             return Err(format!(
-                "terminal_panel_size must be between {} and {}.",
-                PANEL_SIZE_RANGE.start(),
-                PANEL_SIZE_RANGE.end()
+                "dashboard_split_width must be between {} and {}.",
+                SPLIT_WIDTH_RANGE.start(),
+                SPLIT_WIDTH_RANGE.end()
             ));
         }
         if !FONT_SIZE_RANGE.contains(&self.terminal_font_size) {
@@ -429,8 +421,8 @@ mod tests {
         assert!(s.global_shortcut_enabled);
         assert!(s.open_after_create);
         assert_eq!(s.open_target, OpenTarget::App);
-        assert_eq!(s.terminal_placement, TerminalPlacement::Bottom);
-        assert_eq!(s.terminal_panel_size, 320);
+        assert!(!s.dashboard_split);
+        assert_eq!(s.dashboard_split_width, 420);
         assert_eq!(s.terminal_font_size, 13);
         assert!(!s.sidebar_collapsed);
         assert_eq!(s.row_density, RowDensity::Comfortable);
@@ -457,8 +449,8 @@ mod tests {
             "global_shortcut_enabled",
             "open_after_create",
             "open_target",
-            "terminal_placement",
-            "terminal_panel_size",
+            "dashboard_split",
+            "dashboard_split_width",
             "terminal_font_size",
             "sidebar_collapsed",
             "row_density",
@@ -484,18 +476,34 @@ mod tests {
     }
 
     #[test]
-    fn panel_size_out_of_range_is_rejected() {
+    fn split_width_out_of_range_is_refused() {
         let base = Settings::default();
-        for ok in [120, 2000] {
-            let s = base.merged(&json!({"terminal_panel_size": ok})).unwrap();
-            assert_eq!(s.terminal_panel_size, ok);
+        for ok in [360, 1200] {
+            let s = base.merged(&json!({"dashboard_split_width": ok})).unwrap();
+            assert_eq!(s.dashboard_split_width, ok);
         }
-        for bad in [119, 2001] {
+        for bad in [359, 1201] {
             assert!(
-                base.merged(&json!({"terminal_panel_size": bad})).is_err(),
+                base.merged(&json!({"dashboard_split_width": bad})).is_err(),
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn stored_settings_with_removed_keys_still_load() {
+        let read = Settings::from_entries([
+            ("terminal_placement".to_owned(), json!("right")),
+            ("terminal_panel_size".to_owned(), json!(500)),
+            ("notify_done".to_owned(), json!(false)),
+            ("dashboard_split".to_owned(), json!(true)),
+        ]);
+        let expected = Settings {
+            notify_done: false,
+            dashboard_split: true,
+            ..Settings::default()
+        };
+        assert_eq!(read, expected);
     }
 
     #[test]
@@ -556,12 +564,12 @@ mod tests {
         let v2 = Settings::default()
             .merged(&json!({
                 "open_target": "external",
-                "terminal_placement": "right",
+                "dashboard_split": true,
                 "row_density": "compact"
             }))
             .unwrap();
         assert_eq!(v2.open_target, OpenTarget::External);
-        assert_eq!(v2.terminal_placement, TerminalPlacement::Right);
+        assert!(v2.dashboard_split);
         assert_eq!(v2.row_density, RowDensity::Compact);
     }
 

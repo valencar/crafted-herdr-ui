@@ -1792,6 +1792,44 @@ select.field {
 .terminal-panel[hidden] {
   display: none;
 }
+/* With the Dashboard beside a terminal the body is a row: the terminal panel takes what the
+   column leaves. The Home slot is hidden then, so only the panel and the column are laid out. */
+.workspace-body.has-split {
+  display: flex;
+  flex-direction: row;
+}
+.has-split > .terminal-panel {
+  position: relative;
+  inset: auto;
+  flex: 1 1 0;
+}
+.split-column {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+}
+.split-resize {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  background: transparent;
+  cursor: col-resize;
+}
+.split-resize:hover {
+  background: var(--border-strong);
+}
+.split-resize:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
 /* A screen's main content, plus the Inspector on Home. */
 .screen {
   flex: 1;

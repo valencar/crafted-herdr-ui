@@ -6,6 +6,7 @@ import { openRow } from "../lib/openRow";
 import { buildItems, rankItems, type PaletteItem } from "../lib/palette";
 import { focusSearch, openSettings, scrollToId } from "../lib/uiHelpers";
 import { useAppStore, useModalOpen } from "../store/appStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 
 /** Scrolls the active option into view as the arrow keys move. */
 function keepInView(id: string) {
@@ -73,8 +74,21 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         },
         {
           id: "toggle-split",
-          label: "Toggle split",
+          label: "Dashboard beside terminal",
           run: () => runMenuAction("toggle-split"),
+        },
+        {
+          id: "go-to-dashboard",
+          label: "Go to Dashboard",
+          run: () => runMenuAction("dashboard"),
+        },
+        {
+          id: "all-agents",
+          label: "All agents",
+          run: () => {
+            store.setView({ kind: "all" });
+            useTerminalStore.getState().activate(HOME);
+          },
         },
         {
           id: "next-needs-you",

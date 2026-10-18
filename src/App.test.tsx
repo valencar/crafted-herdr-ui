@@ -230,8 +230,8 @@ const SETTINGS = {
   group_by: "status",
   global_shortcut_enabled: true,
   open_after_create: true,
-  terminal_placement: "bottom",
-  terminal_panel_size: 320,
+  dashboard_split: false,
+  dashboard_split_width: 420,
   terminal_font_size: 13,
 };
 
@@ -1065,16 +1065,29 @@ describe("next-needs-you, split and sidebar menu ids", () => {
     });
   });
 
-  it("toggle-split still flips terminal_placement while Task 7 replaces it", async () => {
+  it("toggle_split_on_home_does_nothing", async () => {
     render(<App />);
     await screen.findByRole("searchbox");
+    expect(activeKey()).toBe(HOME);
     await menu("toggle-split");
-    expect(saved()).toEqual([{ terminal_placement: "right" }]);
+    expect(saved()).toEqual([]);
+  });
+
+  it("toggle_split_on_a_terminal_saves_dashboard_split", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    openTabs("w1:p1");
+    await menu("toggle-split");
+    expect(saved()).toEqual([{ dashboard_split: true }]);
     await waitFor(() =>
-      expect(useAppStore.getState().settings?.terminal_placement).toBe("right"),
+      expect(useAppStore.getState().settings?.dashboard_split).toBe(true),
     );
+    // The Dashboard column is now beside the terminal.
+    expect(
+      screen.getByRole("complementary", { name: "Dashboard" }),
+    ).toBeVisible();
     await menu("toggle-split");
-    expect(saved()[1]).toEqual({ terminal_placement: "bottom" });
+    expect(saved()[1]).toEqual({ dashboard_split: false });
   });
 
   it("toggle-sidebar saves sidebar_collapsed", async () => {

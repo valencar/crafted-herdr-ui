@@ -115,16 +115,16 @@ export function runMenuAction(id: MenuId): void {
       }
       break;
     }
-    // Nothing draws the placement any more; the setting is still flipped until the Dashboard
-    // column replaces this item.
-    case "toggle-split": {
-      const placement =
-        useAppStore.getState().settings?.terminal_placement ?? "bottom";
-      saveSettings({
-        terminal_placement: placement === "bottom" ? "right" : "bottom",
-      });
+    // The Dashboard in a column beside the active terminal; Home has no terminal to sit beside.
+    case "toggle-split":
+      if (useTerminalStore.getState().activeKey !== HOME) {
+        saveSettings({
+          dashboard_split: !(
+            useAppStore.getState().settings?.dashboard_split ?? false
+          ),
+        });
+      }
       break;
-    }
     case "toggle-sidebar":
       toggleSidebar();
       break;

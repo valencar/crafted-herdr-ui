@@ -1,5 +1,12 @@
 import { useImperativeHandle, type Ref } from "react";
-import { act, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   afterEach,
@@ -80,9 +87,39 @@ function handleFor(tabKey: string): FakeHandle & TerminalHandle {
   return handle;
 }
 
+// The Dashboard has its own tests; here it is a box that says how it was asked to show.
+vi.mock("../screens/Dashboard", () => ({
+  Dashboard: ({ narrow, visible }: { narrow?: boolean; visible?: boolean }) => (
+    <div
+      data-testid="dashboard"
+      data-narrow={String(narrow)}
+      data-visible={String(visible)}
+    />
+  ),
+}));
+
+const ipc = vi.hoisted(() => ({ invokeTyped: vi.fn() }));
+vi.mock("../lib/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/ipc")>()),
+  invokeTyped: ipc.invokeTyped,
+}));
+
 const fixture = raw.result.snapshot as unknown as Snapshot;
 
-const SETTINGS = { terminal_font_size: 13 } as Settings;
+const SETTINGS = {
+  terminal_font_size: 13,
+  dashboard_split: false,
+  dashboard_split_width: 420,
+} as Settings;
+
+const splitOn = (width = 420) =>
+  useAppStore.setState({
+    settings: {
+      ...SETTINGS,
+      dashboard_split: true,
+      dashboard_split_width: width,
+    },
+  });
 
 function appState(): AppState {
   return {
@@ -123,6 +160,7 @@ const reset = () =>
   });
 
 beforeEach(() => {
+  ipc.invokeTyped.mockReset();
   h.handles.clear();
   h.views.length = 0;
   useAppStore.setState({
@@ -149,7 +187,7 @@ describe("Workspace", () => {
     expect(region.querySelector(".workspace-body")).toBe(
       container.querySelector(".workspace-body"),
     );
-    // No resize handle any more.
+    // No split column unless asked for.
     expect(screen.queryByRole("separator")).toBeNull();
   });
 
@@ -269,6 +307,162 @@ describe("Workspace", () => {
     open("w1:p1", "api-service");
     render(<Workspace>{home}</Workspace>);
     expect(h.views[h.views.length - 1]).toMatchObject({ fontSize: 17 });
+  });
+
+  describe("split column", () => {
+    const column = () =>
+      screen.getByRole("complementary", { name: "Dashboard" });
+    const handle = () =>
+      screen.getByRole("separator", { name: "Resize Dashboard column" });
+
+    it("split_column_shows_the_dashboard_beside_the_active_terminal", () => {
+      splitOn(500);
+      open("w1:p1", "api-service");
+      const { container } = render(<Workspace>{home}</Workspace>);
+      const aside = column();
+      expect(aside).toBeVisible();
+      expect(aside).toHaveStyle({ width: "500px" });
+      expect(aside.tagName).toBe("ASIDE");
+      expect(aside).toHaveClass("split-column");
+      expect(aside.parentElement).toBe(
+        container.querySelector(".workspace-body"),
+      );
+      expect(within(aside).getByTestId("dashboard")).toHaveAttribute(
+        "data-narrow",
+        "true",
+      );
+      // Only this Dashboard is live: the Home slot's one is hidden behind the terminal.
+      expect(within(aside).getByTestId("dashboard")).toHaveAttribute(
+        "data-visible",
+        "true",
+      );
+      expect(
+        within(
+          container.querySelector<HTMLElement>(".workspace-body")!,
+        ).getByTestId("view-buildbox::w1:p1"),
+      ).toBeVisible();
+      expect(handle()).toHaveAttribute("aria-orientation", "vertical");
+      expect(handle()).toHaveAttribute("aria-valuenow", "500");
+      expect(handle()).toHaveAttribute("aria-valuemin", "360");
+      expect(handle()).toHaveAttribute("aria-valuemax", "1200");
+      expect(handle()).toHaveAttribute("tabindex", "0");
+    });
+
+    it("no_split_column_on_home", () => {
+      splitOn();
+      render(<Workspace>{home}</Workspace>);
+      expect(
+        screen.queryByRole("complementary", { name: "Dashboard" }),
+      ).toBeNull();
+      expect(screen.queryByRole("separator")).toBeNull();
+
+      // On a terminal it appears; back on Home it goes away again.
+      act(() => open("w1:p1", "api-service"));
+      expect(column()).toBeVisible();
+      act(() => useTerminalStore.getState().activate(HOME));
+      expect(
+        screen.queryByRole("complementary", { name: "Dashboard" }),
+      ).toBeNull();
+
+      // And with the setting off, a terminal has none.
+      useAppStore.setState({ settings: SETTINGS });
+      act(() => useTerminalStore.getState().activate("buildbox::w1:p1"));
+      expect(
+        screen.queryByRole("complementary", { name: "Dashboard" }),
+      ).toBeNull();
+    });
+
+    it("split_resize_keys_save_a_clamped_width", async () => {
+      const user = userEvent.setup();
+      splitOn(1190);
+      open("w1:p1", "api-service");
+      ipc.invokeTyped.mockImplementation(
+        async (_name: string, args: { patch: object }) => ({
+          ...useAppStore.getState().settings,
+          ...args.patch,
+        }),
+      );
+      render(<Workspace>{home}</Workspace>);
+
+      handle().focus();
+      // Left grows by 16, up to the top of the range.
+      await user.keyboard("{ArrowLeft}");
+      expect(ipc.invokeTyped).toHaveBeenLastCalledWith("set_settings", {
+        patch: { dashboard_split_width: 1200 },
+      });
+      await waitFor(() =>
+        expect(useAppStore.getState().settings?.dashboard_split_width).toBe(
+          1200,
+        ),
+      );
+      expect(handle()).toHaveAttribute("aria-valuenow", "1200");
+      // Already at the top: nothing more to save.
+      ipc.invokeTyped.mockClear();
+      await user.keyboard("{ArrowLeft}");
+      expect(ipc.invokeTyped).not.toHaveBeenCalled();
+
+      // Right shrinks by 16.
+      await user.keyboard("{ArrowRight}");
+      expect(ipc.invokeTyped).toHaveBeenLastCalledWith("set_settings", {
+        patch: { dashboard_split_width: 1184 },
+      });
+      await waitFor(() =>
+        expect(handle()).toHaveAttribute("aria-valuenow", "1184"),
+      );
+      expect(column()).toHaveStyle({ width: "1184px" });
+
+      // And down to the floor.
+      act(() => splitOn(365));
+      await user.keyboard("{ArrowRight}");
+      expect(ipc.invokeTyped).toHaveBeenLastCalledWith("set_settings", {
+        patch: { dashboard_split_width: 360 },
+      });
+    });
+
+    it("dragging_the_handle_left_grows_the_column_and_saves_on_release", async () => {
+      splitOn(420);
+      open("w1:p1", "api-service");
+      ipc.invokeTyped.mockResolvedValue({ ...SETTINGS });
+      render(<Workspace>{home}</Workspace>);
+      const sep = handle();
+      fireEvent.pointerDown(sep, { pointerId: 1, clientX: 800 });
+      fireEvent.pointerMove(sep, { pointerId: 1, clientX: 700 });
+      expect(sep).toHaveAttribute("aria-valuenow", "520");
+      expect(column()).toHaveStyle({ width: "520px" });
+      expect(ipc.invokeTyped).not.toHaveBeenCalled();
+      fireEvent.pointerMove(sep, { pointerId: 1, clientX: 100 });
+      expect(sep).toHaveAttribute("aria-valuenow", "1120");
+      fireEvent.pointerMove(sep, { pointerId: 1, clientX: -900 });
+      expect(sep).toHaveAttribute("aria-valuenow", "1200");
+      fireEvent.pointerMove(sep, { pointerId: 1, clientX: 2000 });
+      expect(sep).toHaveAttribute("aria-valuenow", "360");
+      fireEvent.pointerMove(sep, { pointerId: 1, clientX: 760 });
+      fireEvent.pointerUp(sep, { pointerId: 1 });
+      expect(ipc.invokeTyped).toHaveBeenCalledTimes(1);
+      expect(ipc.invokeTyped).toHaveBeenCalledWith("set_settings", {
+        patch: { dashboard_split_width: 460 },
+      });
+    });
+
+    it("split_column_is_outside_terminal_panel", () => {
+      splitOn();
+      open("w1:p1", "api-service");
+      const { container } = render(<Workspace>{home}</Workspace>);
+      const aside = column();
+      expect(aside.closest(".terminal-panel")).toBeNull();
+      expect(panel(container).contains(aside)).toBe(false);
+      for (const el of [
+        aside,
+        handle(),
+        within(aside).getByTestId("dashboard"),
+      ]) {
+        expect(isInTerminal(el)).toBe(false);
+      }
+      // The terminal itself still is.
+      expect(isInTerminal(screen.getByTestId("view-buildbox::w1:p1"))).toBe(
+        true,
+      );
+    });
   });
 
   describe("find bar", () => {

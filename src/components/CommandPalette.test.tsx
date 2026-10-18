@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -107,8 +107,7 @@ describe("CommandPalette", () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "toggle");
     const first = screen.getAllByRole("option")[0];
-    // The shorter label wins the tie.
-    expect(first).toHaveTextContent("Toggle split");
+    expect(first).toHaveTextContent("Dashboard beside terminal");
     expect(screen.getAllByRole("option")[1]).toHaveTextContent(
       "Toggle terminal",
     );
@@ -128,6 +127,42 @@ describe("CommandPalette", () => {
     expect(useAppStore.getState().toast).toBe(
       "Open a session to start a terminal.",
     );
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("has_go_to_dashboard_and_all_agents_commands", async () => {
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "go to dash");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent(
+      "Go to Dashboard",
+    );
+    useAppStore.setState({ view: { kind: "all" } });
+    await user.keyboard("{Enter}");
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    onClose.mockReset();
+    useTerminalStore.setState({ activeKey: "buildbox::w1:p1" });
+    const again = open();
+    await again.type(screen.getByRole("combobox"), "all agents");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("All agents");
+    await again.keyboard("{Enter}");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+  });
+
+  it("dashboard_beside_terminal_command_label", async () => {
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "dashboard beside");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent(
+      "Dashboard beside terminal",
+    );
+    expect(screen.queryByText("Toggle split")).toBeNull();
+    // Same action as ⌘\: with Home active it does nothing.
+    await user.keyboard("{Enter}");
+    expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

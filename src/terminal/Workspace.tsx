@@ -4,8 +4,11 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type PointerEvent,
   type ReactNode,
 } from "react";
+import { invokeTyped } from "../lib/ipc";
+import { Dashboard } from "../screens/Dashboard";
 import { useAppStore } from "../store/appStore";
 import { ContextBar } from "./ContextBar";
 import { useRowsByKey } from "./tabInfo";
@@ -16,6 +19,15 @@ import { HOME, useTerminalStore } from "./terminalStore";
 export const DEFAULT_FONT_SIZE = 13;
 export const MIN_FONT_SIZE = 9;
 export const MAX_FONT_SIZE = 24;
+
+const DEFAULT_SPLIT_WIDTH = 420;
+const MIN_SPLIT_WIDTH = 360;
+const MAX_SPLIT_WIDTH = 1200;
+/** What an arrow key moves the resize handle by. */
+const KEY_STEP = 16;
+
+const clampWidth = (n: number) =>
+  Math.min(MAX_SPLIT_WIDTH, Math.max(MIN_SPLIT_WIDTH, Math.round(n)));
 
 const FIND_EVENT = "crafted-herdr:terminal-find";
 
@@ -39,6 +51,12 @@ export function Workspace({ children }: { children: ReactNode }) {
     (s) => s.settings?.terminal_font_size ?? DEFAULT_FONT_SIZE,
   );
   const rows = useRowsByKey();
+  const split = useAppStore((s) => s.settings?.dashboard_split ?? false);
+  const savedWidth = useAppStore(
+    (s) => s.settings?.dashboard_split_width ?? DEFAULT_SPLIT_WIDTH,
+  );
+  const setSettings = useAppStore((s) => s.setSettings);
+  const report = useAppStore((s) => s.reportError);
 
   // The Home tab is named after what it shows.
   const homeLabel =
@@ -48,6 +66,63 @@ export function Workspace({ children }: { children: ReactNode }) {
       : view.kind === "all"
         ? "All agents"
         : "Dashboard";
+
+  // ---- the Dashboard column beside a terminal ----
+  // It is there only next to a terminal tab; on Home the Dashboard is the Home screen itself.
+  const showSplit = split && activeKey !== HOME;
+  // The width being dragged or just chosen with the keys, until its save is back.
+  const [pending, setPending] = useState<number | null>(null);
+  const width = pending ?? savedWidth;
+  const drag = useRef<{
+    from: number;
+    startWidth: number;
+    width: number;
+  } | null>(null);
+
+  const saveWidth = useCallback(
+    (n: number) => {
+      // The saved value takes over once it is back, unless a later change is already pending.
+      const settle = () => setPending((p) => (p === n ? null : p));
+      invokeTyped("set_settings", { patch: { dashboard_split_width: n } })
+        .then((saved) => {
+          setSettings(saved);
+          settle();
+        })
+        .catch((e: unknown) => {
+          settle();
+          report(e);
+        });
+    },
+    [setSettings, report],
+  );
+
+  const onHandleKey = (e: KeyboardEvent) => {
+    // The handle is on the column's left edge: toward the terminal grows the column.
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const next = clampWidth(
+      width + (e.key === "ArrowLeft" ? KEY_STEP : -KEY_STEP),
+    );
+    if (next === width) return;
+    setPending(next);
+    saveWidth(next);
+  };
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    drag.current = { from: e.clientX, startWidth: width, width };
+  };
+  const onPointerMove = (e: PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    d.width = clampWidth(d.startWidth + d.from - e.clientX);
+    setPending(d.width);
+  };
+  const onPointerUp = () => {
+    const d = drag.current;
+    drag.current = null;
+    if (d && d.width !== d.startWidth) saveWidth(d.width);
+    else setPending(null);
+  };
 
   // ---- find ----
   const handles = useRef(new Map<string, TerminalHandle>());
@@ -108,7 +183,7 @@ export function Workspace({ children }: { children: ReactNode }) {
   return (
     <section className="workspace" aria-label="Workspace">
       <TabStrip homeLabel={homeLabel} />
-      <div className="workspace-body">
+      <div className={"workspace-body" + (showSplit ? " has-split" : "")}>
         <div className="home-slot" hidden={activeKey !== HOME}>
           {children}
         </div>
@@ -172,6 +247,33 @@ export function Workspace({ children }: { children: ReactNode }) {
             ))}
           </div>
         </div>
+        {/* Outside `.terminal-panel`: keys typed here are the Dashboard's, not the terminal's.
+            Only this Dashboard polls the command log; the Home slot's is hidden behind the
+            terminal. */}
+        {showSplit && (
+          <aside
+            className="split-column"
+            aria-label="Dashboard"
+            style={{ width }}
+          >
+            <div
+              className="split-resize"
+              role="separator"
+              aria-label="Resize Dashboard column"
+              aria-orientation="vertical"
+              aria-valuenow={width}
+              aria-valuemin={MIN_SPLIT_WIDTH}
+              aria-valuemax={MAX_SPLIT_WIDTH}
+              tabIndex={0}
+              onKeyDown={onHandleKey}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+            />
+            <Dashboard narrow visible />
+          </aside>
+        )}
       </div>
     </section>
   );
