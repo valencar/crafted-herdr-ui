@@ -11,7 +11,12 @@ import type { MenuId } from "./bindings/MenuId";
 import { toRows } from "./grouping";
 import { nextNeedsYou } from "./nextNeedsYou";
 import { defaultOpenHow, openRow } from "./openRow";
-import { focusSearch, saveSettings, toggleSidebar } from "./uiHelpers";
+import {
+  focusSearch,
+  saveSettings,
+  showHomeView,
+  toggleSidebar,
+} from "./uiHelpers";
 
 /** Saves the terminal font size one step up or down (within 9 to 24), or back to the default. */
 function saveFontSize(id: "font-bigger" | "font-smaller" | "font-reset") {
@@ -45,8 +50,7 @@ export function runMenuAction(id: MenuId): void {
     }
     // The Dashboard is the Home tab showing its default view.
     case "dashboard":
-      useAppStore.getState().setView({ kind: "dashboard" });
-      useTerminalStore.getState().activate(HOME);
+      showHomeView({ kind: "dashboard" });
       break;
     // Switches between the Home tab and the terminal tab that was active last.
     case "toggle-terminal":

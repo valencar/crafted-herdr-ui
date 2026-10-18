@@ -268,6 +268,33 @@ describe("CommandPalette", () => {
     useAppStore.setState({ groupBy: "project", view: { kind: "all" } });
   });
 
+  it("shows_a_workbox_and_a_project_on_home_when_a_terminal_tab_is_active", async () => {
+    const project = groupByProject(toRows(state)).find((g) => g.folder);
+    expect(project).toBeDefined();
+    const pick = async (query: string, tag: string) => {
+      useTerminalStore.setState({ activeKey: "buildbox::w1:p1" });
+      useAppStore.setState({ view: { kind: "dashboard" } });
+      const user = open();
+      await user.type(screen.getByRole("combobox"), query);
+      const option = screen
+        .getAllByRole("option")
+        .find((o) => o.querySelector(".palette-tag")?.textContent === tag);
+      expect(option).toBeDefined();
+      await user.click(option as HTMLElement);
+      cleanup();
+    };
+    await pick("buildbox", "Workboxes");
+    expect(useAppStore.getState().view).toEqual({
+      kind: "workbox",
+      machineId: "buildbox",
+    });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+
+    await pick(project?.name ?? "", "Projects");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+  });
+
   it("says_so_when_nothing_matches", async () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "qqqqzz");

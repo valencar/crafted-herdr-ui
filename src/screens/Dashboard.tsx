@@ -26,6 +26,8 @@ import {
 import { runMenuAction } from "../lib/menuActions";
 import { markSeen } from "../lib/openRow";
 import {
+  showHome,
+  showHomeView,
   terminalName as terminalLabel,
   useNow,
   useTerminals,
@@ -84,7 +86,6 @@ export function Dashboard({ narrow = false, visible }: Props) {
   const view = useAppStore((s) => s.view);
   const selectedKey = useAppStore((s) => s.selectedKey);
   const focusRow = useAppStore((s) => s.focusRow);
-  const setView = useAppStore((s) => s.setView);
   const tabs = useTerminalStore((s) => s.tabs);
   const homeVisible = useHomeVisible();
   const shown = visible ?? (homeVisible && view.kind === "dashboard");
@@ -174,7 +175,11 @@ export function Dashboard({ narrow = false, visible }: Props) {
                     nowMs={nowMs}
                     terminalName={terminalName}
                     previewLines={NO_LINES}
-                    onSelect={(key) => focusRow(key)}
+                    onSelect={(key) => {
+                      // From the column beside a terminal the list is behind the terminal.
+                      showHome();
+                      focusRow(key);
+                    }}
                     onMarkSeen={markSeen}
                   />
                 ))}
@@ -308,7 +313,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
             <button
               type="button"
               className="link-btn"
-              onClick={() => setView({ kind: "all" })}
+              onClick={() => showHomeView({ kind: "all" })}
             >
               All agents ({counts.total})
             </button>

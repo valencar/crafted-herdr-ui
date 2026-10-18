@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { groupByProject, needsYou, toRows } from "../lib/grouping";
-import { openSettings, scrollToId } from "../lib/uiHelpers";
+import { openSettings, scrollToId, showHomeView } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { Sidebar } from "./Sidebar";
@@ -9,14 +9,10 @@ import { Sidebar } from "./Sidebar";
 export function AppSidebar() {
   const state = useAppStore((s) => s.state);
   const view = useAppStore((s) => s.view);
-  const setView = useAppStore((s) => s.setView);
   const setGroupBy = useAppStore((s) => s.setGroupBy);
   const setSheet = useAppStore((s) => s.setSheet);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
-
-  // The sidebar changes what the Home tab shows, so a click brings that tab back first.
-  const showHome = () => useTerminalStore.getState().activate(HOME);
 
   const activeKey = useTerminalStore((s) => s.activeKey);
 
@@ -32,25 +28,21 @@ export function AppSidebar() {
       herdrPath={state?.herdr_path ?? null}
       herdrVersion={state?.herdr_version ?? null}
       onJump={(id) => {
-        showHome();
-        setView({ kind: "all" });
+        showHomeView({ kind: "all" });
         scrollToId(id);
       }}
       onProject={(g) => {
-        showHome();
-        setView({ kind: "all" });
+        showHomeView({ kind: "all" });
         setGroupBy("project");
         scrollToId(`group-${g.key}`);
       }}
       dashboardActive={activeKey === HOME && view.kind === "dashboard"}
       onDashboard={() => {
-        setView({ kind: "dashboard" });
-        showHome();
+        showHomeView({ kind: "dashboard" });
       }}
       activeWorkbox={view.kind === "workbox" ? view.machineId : null}
       onWorkbox={(id) => {
-        showHome();
-        setView({ kind: "workbox", machineId: id });
+        showHomeView({ kind: "workbox", machineId: id });
       }}
       onAddWorkbox={() => setSheet("add-workbox")}
       onSettings={openSettings}

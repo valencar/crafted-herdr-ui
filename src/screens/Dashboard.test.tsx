@@ -212,6 +212,24 @@ describe("Dashboard", () => {
     expect(useAppStore.getState().view).toEqual({ kind: "all" });
   });
 
+  it("in_the_narrow_column_a_card_click_and_the_all_agents_link_bring_home_back", async () => {
+    const terminalTab = () =>
+      act(() => useTerminalStore.setState({ activeKey: "buildbox::w1:p1" }));
+    terminalTab();
+    const user = setup(defaultState(), { narrow: true, visible: true });
+    const card = within(section("Needs you")).getAllByRole("article")[0];
+    await user.click(within(card).getByRole("button", { name: "Reply…" }));
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+
+    useAppStore.setState({ view: { kind: "dashboard" } });
+    terminalTab();
+    await user.click(screen.getByRole("button", { name: /^All agents \(/ }));
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+  });
+
   it("opening_a_done_row_opens_it_and_marks_it_seen", async () => {
     const user = setup();
     const finished = within(section("Needs you")).getByText(
