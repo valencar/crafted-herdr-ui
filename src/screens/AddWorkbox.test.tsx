@@ -130,7 +130,12 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useTerminalStore.setState({ tabs: [], activeKey: HOME, lastTermKey: null, folded: {} });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
   useAppStore.getState().clearToast();
   vi.useRealTimers();
   vi.unstubAllGlobals();

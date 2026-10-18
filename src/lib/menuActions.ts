@@ -59,7 +59,18 @@ export function runMenuAction(id: MenuId): void {
           .getState()
           .showToast("Open a session to start a terminal.", "info");
       } else {
-        useTerminalStore.getState().toggleHome();
+        const { tabs, activeKey, lastTermKey, toggleHome, activate } =
+          useTerminalStore.getState();
+        if (activeKey === HOME && lastTermKey === null) {
+          // Closing the last active tab leaves no "last terminal tab"; the store can't know the
+          // strip's order, so fall back to the tab the strip shows last.
+          const machines = useAppStore.getState().state?.machines ?? [];
+          const ordered = stripOrder(tabs, machines);
+          const last = ordered[ordered.length - 1];
+          if (last) activate(last.tabKey);
+        } else {
+          toggleHome();
+        }
       }
       break;
     // Home is never closed.

@@ -313,6 +313,19 @@ describe("Dashboard", () => {
     ).toBeInTheDocument();
   });
 
+  it("blocked_the_longest_says_now_for_a_fresh_block", () => {
+    setup(
+      appState(
+        machine("buildbox", undefined, {
+          ages: { "term-1": NOW - 10_000, "term-4": NOW - 20_000 },
+        }),
+      ),
+    );
+    const t = tile("Blocked the longest");
+    expect(within(t).getByText("now")).toBeInTheDocument();
+    expect(t).not.toHaveTextContent("under 1m");
+  });
+
   it("blocked_the_longest_shows_the_age_the_name_and_the_workbox", () => {
     setup();
     const t = tile("Blocked the longest");
@@ -625,9 +638,10 @@ describe("Dashboard", () => {
     expect(within(section("Workboxes")).getAllByRole("article")).toHaveLength(
       1,
     );
-    expect(
-      within(section("Needs you")).getByText("Nobody needs you right now."),
-    ).toBeInTheDocument();
+    // The empty states stand in for the Needs you section.
+    expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull();
+    expect(screen.queryByText("Nobody needs you right now.")).toBeNull();
+    expect(screen.getByRole("region", { name: "Right now" })).toBeTruthy();
   });
 
   it("keeps_the_machine_notices_of_home", () => {

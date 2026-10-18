@@ -158,61 +158,66 @@ export function Dashboard({ narrow = false, visible }: Props) {
         <p className="empty">Connecting to herdr…</p>
       ) : (
         <>
-          {rows.length === 0 && <NoAgentsYet machines={machines} />}
-
-          <Section title="Needs you" chip={`${needs.length} waiting`}>
-            {needs.length === 0 && <p>Nobody needs you right now.</p>}
-            {blocked.length > 0 && (
-              <div className="cards">
-                {blocked.map((r) => (
-                  <NeedsYouCard
-                    key={r.key}
-                    row={r}
-                    project={project(r)}
-                    selected={r.key === selectedKey}
-                    dim={isFailing(machineById.get(r.machineId))}
-                    note={failingNote(machineById.get(r.machineId), nowMs)}
-                    nowMs={nowMs}
-                    terminalName={terminalName}
-                    previewLines={NO_LINES}
-                    onSelect={(key) => {
-                      // From the column beside a terminal the list is behind the terminal.
-                      showHome();
-                      focusRow(key);
-                    }}
-                    onMarkSeen={markSeen}
-                  />
-                ))}
-              </div>
-            )}
-            {done.length > 0 && (
-              <div className="finished">
-                <div className="finished-title muted">
-                  Finished, not looked at yet
+          {/* With no agents at all the empty states take the Needs you section's place. */}
+          {rows.length === 0 ? (
+            <NoAgentsYet machines={machines} />
+          ) : (
+            <Section title="Needs you" chip={`${needs.length} waiting`}>
+              {needs.length === 0 && <p>Nobody needs you right now.</p>}
+              {blocked.length > 0 && (
+                <div className="cards">
+                  {blocked.map((r) => (
+                    <NeedsYouCard
+                      key={r.key}
+                      row={r}
+                      project={project(r)}
+                      selected={r.key === selectedKey}
+                      dim={isFailing(machineById.get(r.machineId))}
+                      note={failingNote(machineById.get(r.machineId), nowMs)}
+                      nowMs={nowMs}
+                      terminalName={terminalName}
+                      previewLines={NO_LINES}
+                      onSelect={(key) => {
+                        // From the column beside a terminal the list is behind the terminal.
+                        showHome();
+                        focusRow(key);
+                      }}
+                      onMarkSeen={markSeen}
+                    />
+                  ))}
                 </div>
-                <ul className="dash-list">
-                  {done.map((r) => {
-                    const age = formatAge(r.sinceMs, nowMs);
-                    return (
-                      <li key={r.key} className="dash-row">
-                        <StatusPill status={r.status} />
-                        <span className="mono dash-name">{r.name}</span>
-                        <span className="muted">{where(r)}</span>
-                        {age && (
-                          <span className="muted dash-age">{agoText(age)}</span>
-                        )}
-                        <OpenButton
-                          row={r}
-                          terminalName={terminalName}
-                          size="small"
-                        />
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
-          </Section>
+              )}
+              {done.length > 0 && (
+                <div className="finished">
+                  <div className="finished-title muted">
+                    Finished, not looked at yet
+                  </div>
+                  <ul className="dash-list">
+                    {done.map((r) => {
+                      const age = formatAge(r.sinceMs, nowMs);
+                      return (
+                        <li key={r.key} className="dash-row">
+                          <StatusPill status={r.status} />
+                          <span className="mono dash-name">{r.name}</span>
+                          <span className="muted">{where(r)}</span>
+                          {age && (
+                            <span className="muted dash-age">
+                              {agoText(age)}
+                            </span>
+                          )}
+                          <OpenButton
+                            row={r}
+                            terminalName={terminalName}
+                            size="small"
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+            </Section>
+          )}
 
           <Section title="Right now">
             <div className="tiles">

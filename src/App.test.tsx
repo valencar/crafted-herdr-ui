@@ -711,6 +711,24 @@ describe("terminal menu ids", () => {
     expect(screen.getByTestId("view-buildbox::w1:p1")).toBeVisible();
   });
 
+  it("toggle_terminal_with_no_last_tab_goes_to_the_last_tab_in_strip_order", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    openTabs("w1:p1", "w2:p1", "w1:p3");
+    // Closing the tab that was last active leaves Home with no "last terminal tab".
+    act(() => useTerminalStore.getState().closeTab("buildbox::w1:p3"));
+    expect(activeKey()).toBe(HOME);
+    expect(useTerminalStore.getState().lastTermKey).toBeNull();
+
+    await menu("toggle-terminal");
+    expect(activeKey()).toBe("buildbox::w2:p1");
+    // And from there it is the ordinary round trip.
+    await menu("toggle-terminal");
+    expect(activeKey()).toBe(HOME);
+    await menu("toggle-terminal");
+    expect(activeKey()).toBe("buildbox::w2:p1");
+  });
+
   it("toggle_terminal_without_tabs_shows_the_hint", async () => {
     render(<App />);
     await screen.findByRole("searchbox");
@@ -1564,6 +1582,28 @@ describe("the window chrome", () => {
       expect(useAppStore.getState().groupBy).toBe("project");
     });
 
+    it("hints_that_only_this_computer_is_there_until_a_workbox_is_added", async () => {
+      listBoxes("0.9.4", { ...box("local"), is_local: true });
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      expect(
+        await within(sidebar).findByText(/Only this computer so far/),
+      ).toBeInTheDocument();
+      act(() =>
+        useAppStore.setState({
+          state: {
+            ...useAppStore.getState().state!,
+            machines: [{ ...box("local"), is_local: true }, box("gpubox")],
+          },
+        }),
+      );
+      expect(
+        within(sidebar).queryByText(/Only this computer so far/),
+      ).toBeNull();
+    });
+
     it("dims_a_disabled_workbox_and_labels_it", async () => {
       listBoxes("0.9.4", box("buildbox"), box("gpubox", { kind: "disabled" }));
       render(<App />);
@@ -1763,12 +1803,43 @@ describe("the window chrome", () => {
       expect(screen.getByRole("status")).toHaveTextContent("herdr 0.8.8");
     });
 
-    it("shows_no_banner_for_0_9_0_and_newer", async () => {
-      listBoxes("0.9.0");
+    it.each(["0.9.0", "0.9.4", "0.10.0", "1.0.0"])(
+      "shows_no_banner_for_%s",
+      async (version) => {
+        listBoxes(version);
+        render(<App />);
+        await screen.findByRole("region", { name: "Needs you" });
+        expect(useAppStore.getState().state?.herdr_version).toBe(version);
+        expect(
+          screen.queryByText(/is older than this app supports/),
+        ).toBeNull();
+      },
+    );
+
+    it("an_unreadable_version_gets_the_banner_too", async () => {
+      listBoxes();
       render(<App />);
       await screen.findByRole("region", { name: "Needs you" });
-      expect(screen.queryByText(/is older than this app supports/)).toBeNull();
+      act(() =>
+        useAppStore.setState({
+          state: { ...useAppStore.getState().state!, herdr_version: null },
+        }),
+      );
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "herdr (unknown version) is older than this app supports (0.9.0+). Some actions may fail.",
+      );
     });
+
+    it.each(["not-a-version", "0.8"])(
+      "an_unrecognised_version_%s_gets_the_banner",
+      async (version) => {
+        listBoxes(version);
+        render(<App />);
+        expect(await screen.findByRole("status")).toHaveTextContent(
+          `herdr ${version} is older than this app supports`,
+        );
+      },
+    );
   });
 
   describe("the toast", () => {

@@ -57,7 +57,8 @@ function GroupLabel({
         <span className="dot" />
       </span>
       <span className="mono">{group.label}</span>
-      {folded && <span className="tab-group-count">{count}</span>}
+      {folded && " "}
+      {folded && <span className="tab-group-count">{`· ${count}`}</span>}
       {folded && needs > 0 && (
         <span id={needsId} className="chip tab-chip" data-tone="needs">
           {needs} needs input

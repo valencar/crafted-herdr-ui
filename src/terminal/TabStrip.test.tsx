@@ -241,7 +241,9 @@ describe("TabStrip", () => {
     expect(label).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("button", { name: /^planner/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^infra/ })).toBeNull();
-    expect(within(label).getByText("2 tabs")).toBeInTheDocument();
+    // The folded group reads as one chip: "{label} · N tabs".
+    expect(within(label).getByText("· 2 tabs")).toBeInTheDocument();
+    expect(label.textContent).toContain("buildbox · 2 tabs");
     expect(within(label).getByText("1 needs input")).toBeInTheDocument();
 
     await user.click(label);
@@ -255,7 +257,7 @@ describe("TabStrip", () => {
     open("buildbox", "w1:p2", "infra");
     useTerminalStore.getState().toggleFold("buildbox");
     render(<TabStrip homeLabel="Dashboard" />);
-    expect(screen.getByText("1 tab")).toBeInTheDocument();
+    expect(screen.getByText("· 1 tab")).toBeInTheDocument();
     expect(screen.queryByText(/needs input/)).toBeNull();
   });
 
