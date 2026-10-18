@@ -1,6 +1,6 @@
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { MachineView } from "./bindings/MachineView";
-import type { Row } from "./grouping";
+import { bySinceThenKey, type Row } from "./grouping";
 
 export type StatusCounts = {
   blocked: number;
@@ -28,16 +28,6 @@ export function statusCounts(rows: Row[]): StatusCounts {
     else if (r.status === "idle") counts.idle += 1;
   }
   return counts;
-}
-
-/** Oldest first (smallest `sinceMs`), unknown age last, then by key. */
-function bySinceThenKey(a: Row, b: Row): number {
-  if (a.sinceMs !== b.sinceMs) {
-    if (a.sinceMs === null) return 1;
-    if (b.sinceMs === null) return -1;
-    return a.sinceMs - b.sinceMs;
-  }
-  return a.key.localeCompare(b.key, "en");
 }
 
 /** The agent that has been blocked the longest; `null` when none is blocked. */
