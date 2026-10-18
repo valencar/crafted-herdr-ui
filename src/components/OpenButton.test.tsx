@@ -105,6 +105,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   useAppStore.getState().clearToast();
   useAppStore.setState({ state: null });
@@ -260,16 +261,20 @@ describe("OpenButton", () => {
     const { user } = setup();
     await user.click(chevron());
     const style = screen.getByRole("menu").style;
+    // Pinned inline: `.menu` (loaded after app.css) would otherwise win the cascade.
+    expect(style.position).toBe("fixed");
     expect(style.bottom).toBe("34px");
-    expect(style.top).toBe("");
+    expect(style.top).toBe("auto");
+    expect(style.left).toBe("auto");
+    expect(style.right).toBe(`${window.innerWidth - 500}px`);
     cleanup();
     spy.mockReturnValue(rect(20, 40));
     const second = setup();
     await second.user.click(chevron());
     const down = screen.getByRole("menu").style;
+    expect(down.position).toBe("fixed");
     expect(down.top).toBe("44px");
-    expect(down.bottom).toBe("");
-    vi.restoreAllMocks();
+    expect(down.bottom).toBe("auto");
   });
 
   it("clicks_do_not_reach_a_clickable_ancestor", async () => {

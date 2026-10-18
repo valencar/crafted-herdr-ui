@@ -18,6 +18,18 @@ type Props = {
   kbd?: string;
 };
 
+/**
+ * Set inline so no stylesheet order can undo it: `.menu` (windows.css, loaded after app.css) is
+ * absolute with its own top/right, and would otherwise win over any `.open-menu` rule.
+ */
+const PINNED: CSSProperties = {
+  position: "fixed",
+  top: "auto",
+  right: "auto",
+  bottom: "auto",
+  left: "auto",
+};
+
 /** Room the four-item menu needs; below this much space under the chevron it opens upwards. */
 const MENU_ROOM = 190;
 
@@ -35,7 +47,7 @@ export function OpenButton({
   kbd,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [place, setPlace] = useState<CSSProperties>({});
+  const [place, setPlace] = useState<CSSProperties>(PINNED);
   const rootRef = useRef<HTMLDivElement>(null);
   const chevronRef = useRef<HTMLButtonElement>(null);
   const tabs = useTerminalStore((s) => s.tabs);
@@ -98,8 +110,8 @@ export function OpenButton({
         const right = window.innerWidth - r.right;
         setPlace(
           r.bottom + MENU_ROOM > window.innerHeight && r.top > MENU_ROOM
-            ? { right, bottom: window.innerHeight - r.top + 4 }
-            : { right, top: r.bottom + 4 },
+            ? { ...PINNED, right, bottom: window.innerHeight - r.top + 4 }
+            : { ...PINNED, right, top: r.bottom + 4 },
         );
       }
     }

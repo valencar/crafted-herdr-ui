@@ -247,13 +247,8 @@ kbd {
 .open-split.is-needs .open-chev {
   border-left: 1px solid color-mix(in srgb, var(--on-needs) 25%, transparent);
 }
-/* Fixed, so the clipped group card cannot cut the menu off; the button sets top/right. */
-.open-menu {
-  position: fixed;
-  top: auto;
-  right: auto;
-  bottom: auto;
-  left: auto;
+/* Position is pinned inline (OpenButton): `.menu` in windows.css loads later and would win. */
+.menu.open-menu {
   min-width: 200px;
 }
 .menu-sep {
