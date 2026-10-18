@@ -343,7 +343,16 @@ it("focus-row selects and opens", async () => {
   useAppStore.setState({
     settings: { open_target: "external" } as unknown as Settings,
   });
-  act(() => handler(ipc.onFocusRow)("buildbox::w1:p2"));
+  // Opening elsewhere makes the app retry focusing the row on a timer (up to ~240 ms). Run
+  // that to its end here: left on real timers it would outlive this test and focus a row in
+  // the next test's window.
+  vi.useFakeTimers();
+  try {
+    act(() => handler(ipc.onFocusRow)("buildbox::w1:p2"));
+    act(() => vi.advanceTimersByTime(500));
+  } finally {
+    vi.useRealTimers();
+  }
   await waitFor(() =>
     expect(ipc.invokeTyped).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
