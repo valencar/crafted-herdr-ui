@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useModalOpen } from "../store/appStore";
 
 type Props = {
@@ -15,8 +16,9 @@ type Props = {
 
 /**
  * A modal confirmation. Focus starts on Cancel (the safe choice), Tab stays inside, Escape
- * cancels, and focus returns to where it was. While mounted it counts as an open modal, so
- * keyboard shortcuts stand down. Every destructive action goes through this.
+ * cancels, and focus returns to where it was. It renders on the body, so it shows whichever
+ * Home screen or tab is behind it. While mounted it counts as an open modal, so keyboard
+ * shortcuts stand down. Every destructive action goes through this.
  */
 export function ConfirmDialog({
   title,
@@ -56,7 +58,11 @@ export function ConfirmDialog({
     }
   };
 
-  return (
+  // On the body, whichever screen asks: a dialog opened from the Home slot would otherwise be
+  // hidden with it when a terminal tab takes over (a notification can do that), while its modal
+  // claim stayed and the menu shortcuts stood down for a dialog nobody could see. It also keeps
+  // a key typed in the dialog out of `.terminal-panel`.
+  return createPortal(
     <div className="scrim">
       <div
         className="dialog"
@@ -92,6 +98,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

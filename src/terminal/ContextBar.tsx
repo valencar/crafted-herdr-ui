@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { KindBadge } from "../components/KindBadge";
 import { StatusPill } from "../components/StatusPill";
@@ -36,14 +35,10 @@ function PaneActions({ row }: { row: Row }) {
       >
         Close pane…
       </button>
-      {/* On the body, not in `.terminal-panel`: the panel is its own stacking context, which
-          would leave the dialog under the Dashboard column beside it, and a key typed in the
-          dialog is not the terminal's. */}
-      {closing &&
-        createPortal(
-          <CloseConfirm row={row} onDone={() => setClosing(false)} />,
-          document.body,
-        )}
+      {/* The dialog renders on the body (`ConfirmDialog`), not in `.terminal-panel`: the panel
+          is its own stacking context, which would leave the dialog under the Dashboard column
+          beside it, and a key typed in the dialog is not the terminal's. */}
+      {closing && <CloseConfirm row={row} onDone={() => setClosing(false)} />}
     </>
   );
 }
@@ -76,7 +71,9 @@ export function ContextBar({ tab, row, onFind }: Props) {
         >
           <span aria-hidden="true">⌕</span>
         </button>
-        {row && <PaneActions row={row} />}
+        {/* Keyed by the pane, so a confirmation opened for one pane ends when another becomes
+            active, instead of closing the new one. */}
+        {row && <PaneActions key={row.key} row={row} />}
         <button
           type="button"
           className="btn btn-small"
