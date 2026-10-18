@@ -179,6 +179,22 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     if (active && !modalOpen()) termRef.current?.focus();
   }, [active, live]);
 
+  // A dialog that closes over the terminal restores focus to where it was opened from, which
+  // can be hidden (a Home screen under this tab) or gone (a keyed button). Then the terminal
+  // takes the keyboard back; focus the user left on a visible control stays there.
+  const modal = useAppStore((s) => s.sheet !== null || s.dialogOpen > 0);
+  useEffect(() => {
+    if (!active || modal) return;
+    const at = document.activeElement;
+    if (
+      at === null ||
+      at === document.body ||
+      !at.isConnected ||
+      at.closest("[hidden]") !== null
+    )
+      termRef.current?.focus();
+  }, [active, modal]);
+
   // The overlay's default button takes focus, so Enter reattaches or retries.
   const overlay = tab.state === "detached" || tab.state === "error";
   useEffect(() => {
