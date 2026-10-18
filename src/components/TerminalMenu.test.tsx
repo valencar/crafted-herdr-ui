@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../lib/bindings/Settings";
@@ -177,5 +183,26 @@ describe("TerminalMenu", () => {
     await user.keyboard("{ArrowDown}{ArrowUp}");
     expect(input).toHaveFocus();
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("escape_in_the_palette_opened_over_the_menu_returns_focus_to_the_picker_button", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({ settings: SETTINGS, toast: null });
+    const menu = (
+      <TerminalMenu terminal="ghostty" installed={["ghostty", "terminalApp"]} />
+    );
+    const { rerender } = render(menu);
+    const button = screen.getByRole("button", { name: /Opens in/ });
+    await user.click(button);
+    rerender(
+      <>
+        {menu}
+        <CommandPalette onClose={() => rerender(menu)} />
+      </>,
+    );
+    expect(screen.getByRole("combobox")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("combobox")).toBeNull();
+    await waitFor(() => expect(button).toHaveFocus());
   });
 });

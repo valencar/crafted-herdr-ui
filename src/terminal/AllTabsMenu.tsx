@@ -83,7 +83,7 @@ export function AllTabsMenu({
   };
 
   return (
-    <div className="menu-wrap tab-menu-wrap" ref={rootRef}>
+    <div className="menu-wrap tab-menu-wrap" data-menu-root ref={rootRef}>
       <button
         ref={buttonRef}
         type="button"

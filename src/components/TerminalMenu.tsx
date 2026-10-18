@@ -80,7 +80,7 @@ export function TerminalMenu({ terminal, installed }: Props) {
 
   const choices: TerminalId[] = [...installed, "custom"];
   return (
-    <div className="menu-wrap" ref={rootRef}>
+    <div className="menu-wrap" data-menu-root ref={rootRef}>
       <button
         ref={buttonRef}
         type="button"

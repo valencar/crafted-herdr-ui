@@ -36,24 +36,44 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const [previousFocus] = useState(
     () => document.activeElement as HTMLElement | null,
   );
+  // When that was an item of an open menu, the menu closes as the palette takes focus and the
+  // item goes with it: its menu's own button (same `data-menu-root`) is where focus returns.
+  const [menuTrigger] = useState(
+    () =>
+      previousFocus
+        ?.closest('[role="menu"]')
+        ?.closest("[data-menu-root]")
+        ?.querySelector<HTMLElement>('[aria-haspopup="menu"]') ?? null,
+  );
 
   useEffect(() => {
     inputRef.current?.focus();
     return () => {
-      // Once the palette is gone: an item that moved focus (a new tab, a sheet, a search box)
-      // keeps it; otherwise focus goes back to where it was, never to the page body.
-      window.setTimeout(() => {
+      // Focus goes back to where it was, never to the page body, unless an item moved it. It
+      // is done now, before the modal claim drops, so a terminal that refocuses when the claim
+      // drops finds focus already on a visible control and leaves it there. Where it was is
+      // the control it was opened from, or that control's menu button when it was a menu item.
+      const bodyHasFocus = () => {
         const now = document.activeElement;
-        if (now && now !== document.body) return;
-        const previous = previousFocus;
-        if (previous?.isConnected && previous !== document.body) {
-          previous.focus();
-        } else {
-          focusSearch();
-        }
+        return !now || now === document.body;
+      };
+      const target = [previousFocus, menuTrigger].find(
+        (el) =>
+          el?.isConnected &&
+          el !== document.body &&
+          el.closest("[hidden]") === null,
+      );
+      if (target && bodyHasFocus()) {
+        target.focus();
+        return;
+      }
+      // Otherwise once the item's own effects have run: an item that moved focus (a new tab, a
+      // sheet, a search box) keeps it; if nothing took it, Home's search box.
+      window.setTimeout(() => {
+        if (bodyHasFocus()) focusSearch();
       }, 0);
     };
-  }, [previousFocus]);
+  }, [previousFocus, menuTrigger]);
 
   const items = useMemo(() => {
     const store = useAppStore.getState();

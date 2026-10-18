@@ -354,6 +354,25 @@ describe("OpenButton", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("escape_in_the_palette_opened_over_the_menu_returns_focus_to_the_chevron", async () => {
+    // The menu closes (and its item unmounts) as the palette takes focus: the palette falls
+    // back to the menu's own button.
+    const user = userEvent.setup();
+    const menu = <OpenButton row={ROW} terminalName="Ghostty" />;
+    const { rerender } = render(menu);
+    await user.click(chevron());
+    rerender(
+      <>
+        {menu}
+        <CommandPalette onClose={() => rerender(menu)} />
+      </>,
+    );
+    expect(screen.getByRole("combobox")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("combobox")).toBeNull();
+    await waitFor(() => expect(chevron()).toHaveFocus());
+  });
+
   it("keys_typed_elsewhere_or_already_handled_do_not_move_the_menus_focus", async () => {
     const { user } = setup();
     await user.click(chevron());

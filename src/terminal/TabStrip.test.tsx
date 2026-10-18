@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
@@ -424,6 +431,27 @@ describe("All tabs menu", () => {
     await user.keyboard("{ArrowDown}{ArrowUp}");
     expect(input).toHaveFocus();
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("escape_in_the_palette_opened_over_the_menu_returns_focus_to_all_tabs", async () => {
+    const user = userEvent.setup();
+    open("buildbox", "w1:p1", "planner");
+    sizes.scroll = 900;
+    sizes.client = 300;
+    const strip = <TabStrip homeLabel="Dashboard" />;
+    const { rerender } = render(strip);
+    const button = screen.getByRole("button", { name: "All tabs" });
+    await user.click(button);
+    rerender(
+      <>
+        {strip}
+        <CommandPalette onClose={() => rerender(strip)} />
+      </>,
+    );
+    expect(screen.getByRole("combobox")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("combobox")).toBeNull();
+    await waitFor(() => expect(button).toHaveFocus());
   });
 
   it("the_button_shows_how_many_tabs_need_input", () => {

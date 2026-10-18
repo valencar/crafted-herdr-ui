@@ -3,6 +3,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TermEvent } from "../lib/bindings/TermEvent";
+import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAppStore } from "../store/appStore";
 
@@ -572,6 +573,63 @@ describe("TerminalView", () => {
       act(() => useAppStore.getState().closeDialog());
       expect(term().focus).not.toHaveBeenCalled();
       expect(screen.getByLabelText("Folder")).toHaveFocus();
+    });
+  });
+
+  describe("after the command palette closes over a terminal tab", () => {
+    // The palette gives focus back as it goes, before the modal claim drops, so the terminal's
+    // refocus (body, detached or hidden only) leaves a visible control alone.
+    function WithPalette({
+      shown,
+      onClose,
+    }: {
+      shown: boolean;
+      onClose: () => void;
+    }) {
+      return (
+        <>
+          <button type="button" aria-label="strip tab" />
+          <div className="terminal-panel">
+            <textarea aria-label="terminal input" />
+            <Harness />
+          </div>
+          {shown && <CommandPalette onClose={onClose} />}
+        </>
+      );
+    }
+    const openFrom = async (label: string) => {
+      useAppStore.setState({ sheet: null, dialogOpen: 0 });
+      const user = userEvent.setup();
+      const view = render(<WithPalette shown={false} onClose={() => {}} />);
+      await flush();
+      const from = screen.getByLabelText(label);
+      from.focus();
+      view.rerender(
+        <WithPalette
+          shown
+          onClose={() =>
+            view.rerender(<WithPalette shown={false} onClose={() => {}} />)
+          }
+        />,
+      );
+      expect(screen.getByRole("combobox")).toHaveFocus();
+      term().focus.mockClear();
+      return { user, from };
+    };
+
+    it("returns focus to a visible control outside the terminal", async () => {
+      const { user, from } = await openFrom("strip tab");
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("combobox")).toBeNull();
+      expect(from).toHaveFocus();
+      expect(term().focus).not.toHaveBeenCalled();
+    });
+
+    it("returns focus to the terminal when it was opened from inside it", async () => {
+      const { user, from } = await openFrom("terminal input");
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("combobox")).toBeNull();
+      expect(from).toHaveFocus();
     });
   });
 

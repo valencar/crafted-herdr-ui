@@ -187,7 +187,12 @@ export function OpenButton({
 
   return (
     // The cards select themselves on click; the menu must not hand that click to them.
-    <div className={classes} ref={rootRef} onClick={(e) => e.stopPropagation()}>
+    <div
+      className={classes}
+      data-menu-root
+      ref={rootRef}
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
         type="button"
         className="btn open-main"
