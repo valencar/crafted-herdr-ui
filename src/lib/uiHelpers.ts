@@ -139,6 +139,25 @@ export function isInTerminal(target: EventTarget | null): boolean {
 }
 
 /**
+ * Whether a key press on `document` is for an open menu: nothing handled it yet, and it was
+ * typed in the menu (or its button), or on the page body when focus is nowhere. A key typed in
+ * another control (the command palette's input) keeps that control's behaviour, so the menu
+ * must not move focus behind it.
+ */
+export function isKeyForMenu(
+  root: HTMLElement | null,
+  e: { defaultPrevented: boolean; target: EventTarget | null },
+): boolean {
+  if (e.defaultPrevented || !root) return false;
+  const target = e.target;
+  return (
+    !(target instanceof Node) ||
+    target === document.body ||
+    root.contains(target)
+  );
+}
+
+/**
  * The one page the app opens in the browser. Nothing is fetched: the default browser loads it,
  * and the capability allows this URL and no other.
  */

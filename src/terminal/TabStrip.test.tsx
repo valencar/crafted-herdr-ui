@@ -1,13 +1,22 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Snapshot } from "../lib/bindings/Snapshot";
+import { CommandPalette } from "../components/CommandPalette";
 import { useAppStore } from "../store/appStore";
 import { TabStrip } from "./TabStrip";
 import { HOME, useTerminalStore } from "./terminalStore";
+
+// xterm is tested on its own; the palette only reaches the panel through menu actions.
+vi.mock("./Workspace", () => ({
+  DEFAULT_FONT_SIZE: 13,
+  MIN_FONT_SIZE: 9,
+  MAX_FONT_SIZE: 24,
+  requestTerminalFind: vi.fn(),
+}));
 
 const fixture = raw.result.snapshot as unknown as Snapshot;
 
@@ -376,6 +385,44 @@ describe("All tabs menu", () => {
     await user.click(button);
     expect(screen.getByRole("menu")).toBeInTheDocument();
     await user.click(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("the_command_palette_keeps_its_arrow_keys_while_the_menu_was_open", async () => {
+    // ⌘K can come while the menu is open: the menu neither moves focus behind the palette nor
+    // stays open under it, and keys typed elsewhere or already handled are not its own.
+    const user = userEvent.setup();
+    open("buildbox", "w1:p1", "planner");
+    sizes.scroll = 900;
+    sizes.client = 300;
+    const { rerender } = render(<TabStrip homeLabel="Dashboard" />);
+    await user.click(screen.getByRole("button", { name: "All tabs" }));
+    expect(screen.getAllByRole("menuitem")[1]).toHaveFocus();
+
+    // A key typed in another control, or one already handled, leaves the menu's focus alone.
+    const elsewhere = document.body.appendChild(document.createElement("div"));
+    fireEvent.keyDown(elsewhere, { key: "ArrowDown" });
+    elsewhere.remove();
+    expect(screen.getAllByRole("menuitem")[1]).toHaveFocus();
+    const handled = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    handled.preventDefault();
+    screen.getAllByRole("menuitem")[1].dispatchEvent(handled);
+    expect(screen.getAllByRole("menuitem")[1]).toHaveFocus();
+
+    rerender(
+      <>
+        <TabStrip homeLabel="Dashboard" />
+        <CommandPalette onClose={() => {}} />
+      </>,
+    );
+    const input = screen.getByRole("combobox");
+    expect(input).toHaveFocus();
+    await user.keyboard("{ArrowDown}{ArrowUp}");
+    expect(input).toHaveFocus();
     expect(screen.queryByRole("menu")).toBeNull();
   });
 

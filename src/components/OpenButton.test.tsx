@@ -16,6 +16,7 @@ import {
   useTerminalStore,
   type TermTab,
 } from "../terminal/terminalStore";
+import { CommandPalette } from "./CommandPalette";
 import { OpenButton } from "./OpenButton";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -29,6 +30,14 @@ vi.mock("../lib/openRow", () => ({
   openFull: vi.fn(),
 }));
 import { openFull, openRow } from "../lib/openRow";
+
+// xterm is tested on its own; the palette only reaches the panel through menu actions.
+vi.mock("../terminal/Workspace", () => ({
+  DEFAULT_FONT_SIZE: 13,
+  MIN_FONT_SIZE: 9,
+  MAX_FONT_SIZE: 24,
+  requestTerminalFind: vi.fn(),
+}));
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
@@ -320,6 +329,52 @@ describe("OpenButton", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
     expect(chevron()).toHaveFocus();
+  });
+
+  it("the_command_palette_keeps_its_arrow_keys_while_the_menu_was_open", async () => {
+    // ⌘K can come while the menu is open. The palette handles its own arrows; the menu must
+    // neither move focus behind the modal nor stay open under it.
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <OpenButton row={ROW} terminalName="Ghostty" />,
+    );
+    await user.click(chevron());
+    expect(items()[0]).toHaveFocus();
+
+    rerender(
+      <>
+        <OpenButton row={ROW} terminalName="Ghostty" />
+        <CommandPalette onClose={() => {}} />
+      </>,
+    );
+    const input = screen.getByRole("combobox");
+    expect(input).toHaveFocus();
+    await user.keyboard("{ArrowDown}{ArrowUp}{Home}{End}");
+    expect(input).toHaveFocus();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("keys_typed_elsewhere_or_already_handled_do_not_move_the_menus_focus", async () => {
+    const { user } = setup();
+    await user.click(chevron());
+    expect(items()[0]).toHaveFocus();
+    // Typed in another control without taking focus from the menu.
+    fireEvent.keyDown(screen.getByRole("button", { name: "elsewhere" }), {
+      key: "ArrowDown",
+    });
+    expect(items()[0]).toHaveFocus();
+    // Handled by something else first (the palette's own arrow handling).
+    const handled = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    handled.preventDefault();
+    items()[0].dispatchEvent(handled);
+    expect(items()[0]).toHaveFocus();
+    // Its own keys still work.
+    await user.keyboard("{ArrowDown}");
+    expect(items()[1]).toHaveFocus();
   });
 
   it("the_menu_opens_upwards_when_there_is_no_room_below", async () => {
