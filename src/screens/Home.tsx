@@ -2,14 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { EmptyState } from "../components/EmptyState";
-import { Header } from "../components/Header";
-import { LocalDownCard, VersionBanner } from "../components/HomeNotices";
+import { LocalDownCard } from "../components/HomeNotices";
 import { Inspector } from "../components/Inspector";
 import { NeedsYouCard } from "../components/NeedsYouCard";
 import { ProjectGroup } from "../components/ProjectGroup";
 import { ReconnectBox } from "../components/ReconnectBox";
-import { Sidebar } from "../components/Sidebar";
-import { StoreToast } from "../components/Toast";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { formatStaleness, isPending, lastLines, plural } from "../lib/format";
 import {
@@ -26,15 +23,12 @@ import { invokeTyped } from "../lib/ipc";
 import { markSeen, openRow, useOpenWhenListed } from "../lib/openRow";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import {
-  openSettings,
-  scrollToId,
   terminalName as terminalLabel,
   useNow,
   useTerminals,
 } from "../lib/uiHelpers";
 import { useAppStore, type GroupBy } from "../store/appStore";
 import { useTerminalStore } from "../terminal/terminalStore";
-import { NewSession } from "./NewSession";
 
 const GROUP_TITLE: Record<GroupBy, string> = {
   project: "By project",
@@ -67,19 +61,16 @@ export function Home() {
   const state = useAppStore((s) => s.state);
   const selectedKey = useAppStore((s) => s.selectedKey);
   const groupBy = useAppStore((s) => s.groupBy);
-  const sheet = useAppStore((s) => s.sheet);
+  const query = useAppStore((s) => s.query);
   const select = useAppStore((s) => s.select);
   const setGroupBy = useAppStore((s) => s.setGroupBy);
   const setSheet = useAppStore((s) => s.setSheet);
-  const setView = useAppStore((s) => s.setView);
   const openNewSession = useAppStore((s) => s.openNewSession);
   // Only the selected row's text: another row's frame must not re-render Home.
   const previewText = useAppStore((s) =>
     s.preview && s.preview.key === s.selectedKey ? s.preview.text : null,
   );
   const report = useAppStore((s) => s.reportError);
-  const activityOpen = useAppStore((s) => s.activityOpen);
-  const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
 
@@ -90,11 +81,8 @@ export function Home() {
   );
   const panelOnRight = panelShown && placedRight;
 
-  const compact = useAppStore((s) => s.settings?.row_density === "compact");
-
   const nowMs = useNow(30_000);
-  const [query, setQuery] = useState("");
-  const { current: terminal, installed } = useTerminals();
+  const { current: terminal } = useTerminals();
   const [closingKey, setClosingKey] = useState<string | null>(null);
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
@@ -196,200 +184,167 @@ export function Home() {
     (m) => !m.is_local && m.health.kind === "attention",
   );
   return (
-    <div className={`app${compact ? " density-compact" : ""}`}>
-      <Header
-        herdrVersion={state?.herdr_version ?? null}
-        query={query}
-        onQuery={setQuery}
-        terminal={terminal}
-        installed={installed}
-        onNewSession={() => openNewSession()}
-      />
-      <VersionBanner />
-      <div className="body">
-        <Sidebar
-          needsCount={needsYou(rows).length}
-          agentCount={rows.filter((r) => r.status !== "shell").length}
-          projects={projectGroups}
-          machines={state?.machines ?? []}
-          herdrPath={state?.herdr_path ?? null}
-          herdrVersion={state?.herdr_version ?? null}
-          onJump={scrollToId}
-          onProject={(g) => {
-            setGroupBy("project");
-            scrollToId(`group-${g.key}`);
-          }}
-          activeWorkbox={null}
-          onWorkbox={(id) => setView({ kind: "workbox", machineId: id })}
-          onAddWorkbox={() => setSheet("add-workbox")}
-          onSettings={openSettings}
-          activityOpen={activityOpen}
-          onActivity={() => setActivityOpen(!activityOpen)}
-        />
-
-        <main className="main">
-          {localDown && <LocalDownCard error={localError} />}
-          {/* Once per machine, rows or not: an unreachable box must never vanish from Home. */}
-          {attentionMachines.map((m) => (
-            <EmptyState key={m.id} title={`${m.label} needs attention`}>
-              <p>
-                {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
-                {formatStaleness(m.last_ok_ms, nowMs)}
-              </p>
-              <ReconnectBox machineId={m.id} />
+    <div className="screen">
+      <main className="main">
+        {localDown && <LocalDownCard error={localError} />}
+        {/* Once per machine, rows or not: an unreachable box must never vanish from Home. */}
+        {attentionMachines.map((m) => (
+          <EmptyState key={m.id} title={`${m.label} needs attention`}>
+            <p>
+              {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
+              {formatStaleness(m.last_ok_ms, nowMs)}
+            </p>
+            <ReconnectBox machineId={m.id} />
+          </EmptyState>
+        ))}
+        {state === null ? (
+          <p className="empty">Connecting to herdr…</p>
+        ) : !hasAnyRows ? (
+          <>
+            <EmptyState title="No agents yet">
+              <p>Start one with ⌘N.</p>
             </EmptyState>
-          ))}
-          {state === null ? (
-            <p className="empty">Connecting to herdr…</p>
-          ) : !hasAnyRows ? (
-            <>
-              <EmptyState title="No agents yet">
-                <p>Start one with ⌘N.</p>
+            {onlyLocal && (
+              <EmptyState
+                title="Only this computer so far"
+                action={{
+                  label: "Add workbox",
+                  onClick: () => setSheet("add-workbox"),
+                }}
+              >
+                <p>
+                  Add a workbox to see the agents running on a machine you can
+                  reach over SSH.
+                </p>
               </EmptyState>
-              {onlyLocal && (
-                <EmptyState
-                  title="Only this computer so far"
-                  action={{
-                    label: "Add workbox",
-                    onClick: () => setSheet("add-workbox"),
-                  }}
-                >
-                  <p>
-                    Add a workbox to see the agents running on a machine you can
-                    reach over SSH.
-                  </p>
-                </EmptyState>
-              )}
-            </>
-          ) : (
-            <>
-              <section
-                id="needs-you"
-                className="section"
-                aria-labelledby="needs-h"
-              >
-                <div className="section-head">
-                  <h1 id="needs-h" className="section-title">
-                    Needs you
-                  </h1>
-                  <span className="muted">
-                    {needs.length === 0
-                      ? "All clear"
-                      : `${plural(needs.length, "agent", "agents")} waiting across ${plural(needsMachines, "workbox", "workboxes")}`}
-                  </span>
-                </div>
-                {needs.length > 0 && (
-                  <div className="cards">
-                    {needs.map((r) => (
-                      <NeedsYouCard
-                        key={r.key}
-                        row={r}
-                        project={projectOf.get(r.key) ?? null}
-                        selected={r.key === selectedKey}
-                        dim={dimmed(r.machineId)}
-                        note={noteFor(r.machineId)}
-                        nowMs={nowMs}
-                        terminalName={terminalName}
-                        previewLines={
-                          r.key === selectedKey ? previewLines : NO_LINES
-                        }
-                        onSelect={select}
-                        onOpen={openRow}
-                        onMarkSeen={markSeen}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section
-                id="by-group"
-                className="section"
-                aria-labelledby="group-h"
-              >
-                <div className="section-head">
-                  <h2 id="group-h" className="section-sub">
-                    {GROUP_TITLE[groupBy]}
-                  </h2>
-                  <div role="group" aria-label="Group by" className="segmented">
-                    {(["project", "workbox", "status"] as const).map((g) => (
-                      <button
-                        key={g}
-                        type="button"
-                        aria-pressed={groupBy === g}
-                        onClick={() => {
-                          setGroupBy(g);
-                          // Remembered for the next launch.
-                          invokeTyped("set_settings", {
-                            patch: { group_by: g },
-                          }).catch(report);
-                        }}
-                      >
-                        {g[0].toUpperCase() + g.slice(1)}
-                      </button>
-                    ))}
-                  </div>
-                  <span className="muted section-hint">
-                    {GROUP_HINT[groupBy]}
-                  </span>
-                </div>
-                {groups.length === 0 && (
-                  <p className="empty">No sessions match “{query.trim()}”.</p>
-                )}
-                {groups.map((g) => (
-                  <ProjectGroup
-                    key={g.key}
-                    group={g}
-                    showSession={groupBy === "project"}
-                    onNewSession={() =>
-                      openNewSession({
-                        machineId: g.machineId,
-                        // A loose-sessions group has no project folder.
-                        folder: g.tier !== 3 && g.folder ? g.folder : undefined,
-                      })
-                    }
-                  >
-                    {g.rows.map((r) => (
-                      <AgentRow
-                        key={r.key}
-                        row={r}
-                        selected={r.key === selectedKey}
-                        dim={dimmed(r.machineId)}
-                        note={noteFor(r.machineId)}
-                        showMachine={groupBy === "status"}
-                        nowMs={nowMs}
-                        terminalName={terminalName}
-                        onSelect={select}
-                        onOpen={openRow}
-                      />
-                    ))}
-                  </ProjectGroup>
-                ))}
-              </section>
-            </>
-          )}
-        </main>
-
-        {panelOnRight ? null : selectedRow && selectedMachine ? (
-          <Inspector
-            key={selectedRow.key}
-            row={selectedRow}
-            machine={selectedMachine}
-            project={projectOf.get(selectedRow.key) ?? null}
-            terminalName={terminalName}
-          />
+            )}
+          </>
         ) : (
-          <aside className="inspector" aria-label="Selected agent">
-            <p className="muted">Select an agent to see its details.</p>
-          </aside>
+          <>
+            <section
+              id="needs-you"
+              className="section"
+              aria-labelledby="needs-h"
+            >
+              <div className="section-head">
+                <h1 id="needs-h" className="section-title">
+                  Needs you
+                </h1>
+                <span className="muted">
+                  {needs.length === 0
+                    ? "All clear"
+                    : `${plural(needs.length, "agent", "agents")} waiting across ${plural(needsMachines, "workbox", "workboxes")}`}
+                </span>
+              </div>
+              {needs.length > 0 && (
+                <div className="cards">
+                  {needs.map((r) => (
+                    <NeedsYouCard
+                      key={r.key}
+                      row={r}
+                      project={projectOf.get(r.key) ?? null}
+                      selected={r.key === selectedKey}
+                      dim={dimmed(r.machineId)}
+                      note={noteFor(r.machineId)}
+                      nowMs={nowMs}
+                      terminalName={terminalName}
+                      previewLines={
+                        r.key === selectedKey ? previewLines : NO_LINES
+                      }
+                      onSelect={select}
+                      onOpen={openRow}
+                      onMarkSeen={markSeen}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section
+              id="by-group"
+              className="section"
+              aria-labelledby="group-h"
+            >
+              <div className="section-head">
+                <h2 id="group-h" className="section-sub">
+                  {GROUP_TITLE[groupBy]}
+                </h2>
+                <div role="group" aria-label="Group by" className="segmented">
+                  {(["project", "workbox", "status"] as const).map((g) => (
+                    <button
+                      key={g}
+                      type="button"
+                      aria-pressed={groupBy === g}
+                      onClick={() => {
+                        setGroupBy(g);
+                        // Remembered for the next launch.
+                        invokeTyped("set_settings", {
+                          patch: { group_by: g },
+                        }).catch(report);
+                      }}
+                    >
+                      {g[0].toUpperCase() + g.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <span className="muted section-hint">
+                  {GROUP_HINT[groupBy]}
+                </span>
+              </div>
+              {groups.length === 0 && (
+                <p className="empty">No sessions match “{query.trim()}”.</p>
+              )}
+              {groups.map((g) => (
+                <ProjectGroup
+                  key={g.key}
+                  group={g}
+                  showSession={groupBy === "project"}
+                  onNewSession={() =>
+                    openNewSession({
+                      machineId: g.machineId,
+                      // A loose-sessions group has no project folder.
+                      folder: g.tier !== 3 && g.folder ? g.folder : undefined,
+                    })
+                  }
+                >
+                  {g.rows.map((r) => (
+                    <AgentRow
+                      key={r.key}
+                      row={r}
+                      selected={r.key === selectedKey}
+                      dim={dimmed(r.machineId)}
+                      note={noteFor(r.machineId)}
+                      showMachine={groupBy === "status"}
+                      nowMs={nowMs}
+                      terminalName={terminalName}
+                      onSelect={select}
+                      onOpen={openRow}
+                    />
+                  ))}
+                </ProjectGroup>
+              ))}
+            </section>
+          </>
         )}
-      </div>
+      </main>
+
+      {panelOnRight ? null : selectedRow && selectedMachine ? (
+        <Inspector
+          key={selectedRow.key}
+          row={selectedRow}
+          machine={selectedMachine}
+          project={projectOf.get(selectedRow.key) ?? null}
+          terminalName={terminalName}
+        />
+      ) : (
+        <aside className="inspector" aria-label="Selected agent">
+          <p className="muted">Select an agent to see its details.</p>
+        </aside>
+      )}
 
       {closingRow && (
         <CloseConfirm row={closingRow} onDone={() => setClosingKey(null)} />
       )}
-      {sheet === "new-session" && <NewSession terminalName={terminalName} />}
-      <StoreToast />
     </div>
   );
 }

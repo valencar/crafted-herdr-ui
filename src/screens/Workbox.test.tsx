@@ -643,27 +643,29 @@ describe("Workbox", () => {
     expect(useAppStore.getState().pendingOpen).toBeNull();
   });
 
-  it("the_breadcrumb_returns_to_home", async () => {
+  it("the_breadcrumb_and_buttons_are_a_heading_row_at_the_top_of_main", async () => {
     const user = setup();
-    const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const main = screen.getByRole("main");
+    const nav = within(main).getByRole("navigation", { name: "Breadcrumb" });
     expect(within(nav).getByText("buildbox")).toBeInTheDocument();
+    expect(
+      within(main).getByRole("button", { name: "Open full Herdr ↗" }),
+    ).toBeInTheDocument();
+    expect(
+      within(main).getByRole("button", { name: /\+ New session/ }),
+    ).toBeInTheDocument();
+    // First thing in main, above the summary.
+    expect(main.firstElementChild).toContainElement(nav);
     await user.click(within(nav).getByRole("button", { name: "Workboxes" }));
     expect(useAppStore.getState().view).toEqual({ kind: "home" });
   });
 
-  it("the_sidebar_switches_workbox_and_marks_the_current_one", async () => {
-    const user = setup();
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
-    expect(
-      within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
-    ).toHaveAttribute("aria-current", "page");
-    await user.click(
-      within(sidebar).getByRole("button", { name: /^local\s*Online$/ }),
-    );
-    expect(useAppStore.getState().view).toEqual({
-      kind: "workbox",
-      machineId: "local",
-    });
+  it("renders_only_its_main_content", () => {
+    setup();
+    // The header, the sidebar and the toast are the app shell's.
+    expect(document.querySelector(".header")).toBeNull();
+    expect(document.querySelector(".app")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Sidebar" })).toBeNull();
   });
 
   it("an_unknown_workbox_says_so_and_links_home", async () => {

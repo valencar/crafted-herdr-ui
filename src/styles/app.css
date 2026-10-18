@@ -1029,7 +1029,17 @@ select.field {
   color: var(--text);
   font-weight: 600;
 }
-.workbox-header-actions {
+/* The Workbox screen's own heading, at the top of its main. */
+.workbox-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.workbox-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
 }
 
@@ -1607,9 +1617,12 @@ select.field {
 
 /* ---------- terminal panel ---------- */
 
-/* The screens and the terminal panel side by side; the panel keeps its tabs across screens. */
+/* The screens and the terminal panel side by side; the panel keeps its tabs across screens.
+   It fills what the sidebar leaves in the app's body. */
 .shell {
-  height: 100%;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   background: var(--bg);
 }
@@ -1626,10 +1639,12 @@ select.field {
   display: flex;
   flex-direction: column;
 }
-.shell-content > .app {
+/* A screen's main content, plus the Inspector on Home. */
+.screen {
   flex: 1;
+  min-width: 0;
   min-height: 0;
-  height: auto;
+  display: flex;
 }
 .terminal-panel {
   position: relative;

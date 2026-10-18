@@ -29,6 +29,8 @@ type AppStore = {
   /** A row key, `${machineId}::${paneId}`. */
   selectedKey: string | null;
   groupBy: GroupBy;
+  /** What the header's search box holds. Home filters its list by it; the box is the app's. */
+  query: string;
   sheet: Sheet;
   /** Set together with the sheet by `openNewSession`; cleared when the sheet closes. */
   sheetPrefill: SheetPrefill | null;
@@ -64,6 +66,7 @@ type AppStore = {
   focusRow: (key: string) => void;
   select: (key: string | null) => void;
   setGroupBy: (groupBy: GroupBy) => void;
+  setQuery: (query: string) => void;
   setSheet: (sheet: Sheet) => void;
   openNewSession: (prefill?: SheetPrefill) => void;
   setView: (view: View) => void;
@@ -119,6 +122,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   settings: null,
   selectedKey: null,
   groupBy: "project",
+  query: "",
   sheet: null,
   sheetPrefill: null,
   view: { kind: "home" },
@@ -136,6 +140,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   focusRow: (selectedKey) => set({ selectedKey, view: { kind: "home" } }),
   select: (selectedKey) => set({ selectedKey }),
   setGroupBy: (groupBy) => set({ groupBy }),
+  setQuery: (query) => set({ query }),
   setSheet: (sheet) => set({ sheet, sheetPrefill: null }),
   openNewSession: (prefill) =>
     set({ sheet: "new-session", sheetPrefill: prefill ?? null }),

@@ -4,11 +4,14 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "./lib/bindings/AppState";
+import type { Health } from "./lib/bindings/Health";
+import type { MachineView } from "./lib/bindings/MachineView";
 import type { MenuId } from "./lib/bindings/MenuId";
 import type { Settings } from "./lib/bindings/Settings";
 import type { Snapshot } from "./lib/bindings/Snapshot";
@@ -146,12 +149,18 @@ it("shows the Workbox screen when the view is a workbox, and Home otherwise", as
   useAppStore.setState({ view: { kind: "workbox", machineId: "buildbox" } });
   render(<App />);
   expect(
-    await screen.findByRole("navigation", { name: "Breadcrumb" }),
+    within(await screen.findByRole("main")).getByRole("navigation", {
+      name: "Breadcrumb",
+    }),
   ).toBeInTheDocument();
-  expect(screen.queryByRole("searchbox")).toBeNull();
+  // The header is the app's, not the screen's: the search box is there on both.
+  expect(screen.getByRole("searchbox")).toBeInTheDocument();
 
-  useAppStore.setState({ view: { kind: "home" } });
-  expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+  act(() => useAppStore.setState({ view: { kind: "home" } }));
+  await waitFor(() =>
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull(),
+  );
+  expect(screen.getByRole("searchbox")).toBeInTheDocument();
 });
 
 it("renders the Add workbox sheet over both Home and the Workbox screen", async () => {
@@ -974,5 +983,356 @@ describe("the Activity drawer", () => {
       screen.queryByRole("complementary", { name: "Activity" }),
     ).toBeNull();
     expect(useAppStore.getState().activityOpen).toBe(false);
+  });
+});
+
+describe("the window chrome", () => {
+  /** A machine with the fixture's agents. */
+  function box(id: string, health: Health = { kind: "online" }): MachineView {
+    return {
+      id,
+      label: id,
+      target: id,
+      session: "default",
+      is_local: false,
+      health,
+      snapshot: structuredClone(raw.result.snapshot) as unknown as Snapshot,
+      last_ok_ms: Date.now(),
+      ages: {},
+    };
+  }
+
+  function listBoxes(version = "0.9.4", ...machines: MachineView[]) {
+    ipc.getState.mockResolvedValue({
+      ...state,
+      herdr_version: version,
+      machines: machines.length ? machines : [box("buildbox"), box("gpubox")],
+    });
+    ipc.invokeTyped.mockImplementation(async (name: string) =>
+      name === "get_terminals"
+        ? { installed: ["ghostty"], default: "ghostty" }
+        : name === "list_agent_kinds"
+          ? ["claude"]
+          : name === "get_command_log"
+            ? []
+            : null,
+    );
+  }
+
+  beforeEach(() => {
+    useAppStore.setState({
+      view: { kind: "home" },
+      query: "",
+      dismissedVersion: null,
+      toast: null,
+      selectedKey: null,
+      groupBy: "project",
+    });
+  });
+
+  afterEach(() => {
+    useAppStore.setState({ query: "", toast: null, dismissedVersion: null });
+  });
+
+  it("renders_one_header_and_one_sidebar_on_home_and_on_a_workbox", async () => {
+    listBoxes();
+    const { container } = render(<App />);
+    await screen.findByRole("region", { name: "Needs you" });
+    const counts = () => [
+      screen.getAllByRole("navigation", { name: "Sidebar" }).length,
+      container.querySelectorAll(".header").length,
+      container.querySelectorAll(".app").length,
+      screen.getAllByRole("searchbox").length,
+    ];
+    expect(counts()).toEqual([1, 1, 1, 1]);
+
+    act(() =>
+      useAppStore.setState({ view: { kind: "workbox", machineId: "gpubox" } }),
+    );
+    await screen.findByRole("navigation", { name: "Breadcrumb" });
+    expect(counts()).toEqual([1, 1, 1, 1]);
+  });
+
+  it("the_header_search_is_the_stores_query_on_both_screens", async () => {
+    listBoxes();
+    const user = userEvent.setup();
+    render(<App />);
+    const search = await screen.findByRole("searchbox");
+    await user.type(search, "terraform");
+    expect(useAppStore.getState().query).toBe("terraform");
+    expect(
+      [...document.querySelectorAll("[data-row-key]")].map((e) =>
+        e.getAttribute("data-row-key"),
+      ),
+    ).toEqual(["buildbox::w1:p2", "gpubox::w1:p2"]);
+
+    // The query is not Home's: it survives a visit to a Workbox screen.
+    act(() =>
+      useAppStore.setState({ view: { kind: "workbox", machineId: "gpubox" } }),
+    );
+    expect(screen.getByRole("searchbox")).toHaveValue("terraform");
+
+    await user.click(screen.getByRole("searchbox"));
+    await user.keyboard("{Escape}");
+    expect(useAppStore.getState().query).toBe("");
+  });
+
+  it("header_shows_version_and_terminal_picker_label", async () => {
+    listBoxes();
+    render(<App />);
+    expect(await screen.findByText("for herdr 0.9.4")).toBeInTheDocument();
+    expect(await screen.findByText("Opens in Ghostty")).toBeInTheDocument();
+  });
+
+  it("the_header_new_session_button_opens_one_sheet_on_either_screen", async () => {
+    listBoxes();
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("region", { name: "Needs you" });
+    await user.click(screen.getByRole("button", { name: /^\+ New session/ }));
+    expect(useAppStore.getState().sheet).toBe("new-session");
+    expect(
+      await screen.findAllByRole("dialog", { name: "New session" }),
+    ).toHaveLength(1);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    act(() =>
+      useAppStore.setState({ view: { kind: "workbox", machineId: "gpubox" } }),
+    );
+    act(() => useAppStore.getState().openNewSession({ machineId: "gpubox" }));
+    expect(
+      await screen.findAllByRole("dialog", { name: "New session" }),
+    ).toHaveLength(1);
+  });
+
+  it("the_new_session_sheet_opens_over_home_and_escape_hands_the_shortcuts_back", async () => {
+    listBoxes();
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("region", { name: "Needs you" });
+    await user.keyboard("{Meta>}n{/Meta}");
+    expect(
+      await screen.findByRole("dialog", { name: "New session" }),
+    ).toBeInTheDocument();
+    expect(useAppStore.getState().dialogOpen).toBe(1);
+    ipc.invokeTyped.mockClear();
+    // Home's shortcuts stand down while the sheet is up.
+    await user.keyboard("{Meta>}r{/Meta}");
+    expect(ipc.invokeTyped).not.toHaveBeenCalledWith("refresh_now", {});
+    await user.keyboard("{Escape}");
+    expect(useAppStore.getState().sheet).toBeNull();
+    expect(useAppStore.getState().dialogOpen).toBe(0);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.keyboard("{Meta>}r{/Meta}");
+    expect(ipc.invokeTyped).toHaveBeenCalledWith("refresh_now", {});
+  });
+
+  it("a_project_plus_session_prefills_the_sheet_and_focus_returns_to_it_on_cancel", async () => {
+    listBoxes();
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("region", { name: "Needs you" });
+    const group = screen
+      .getAllByRole("region", { name: "web-app" })
+      .find((g) => within(g).queryByText("gpubox"))!;
+    const button = within(group).getByRole("button", {
+      name: /^New session in web-app/,
+    });
+    await user.click(button);
+    const dialog = await screen.findByRole("dialog", { name: "New session" });
+    expect(useAppStore.getState().sheetPrefill).toEqual({
+      machineId: "gpubox",
+      folder: "/home/dev/projects/web-app",
+    });
+    expect(within(dialog).getByRole("radio", { name: /gpubox/ })).toBeChecked();
+    expect(within(dialog).getByLabelText("Project folder")).toHaveValue(
+      "/home/dev/projects/web-app",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useAppStore.getState().sheetPrefill).toBeNull();
+    expect(button).toHaveFocus();
+  });
+
+  describe("the sidebar", () => {
+    it("a_workbox_opens_its_screen_and_is_marked_current_there", async () => {
+      listBoxes();
+      const user = userEvent.setup();
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      await user.click(
+        within(sidebar).getByRole("button", { name: /^gpubox\s*Online$/ }),
+      );
+      expect(useAppStore.getState().view).toEqual({
+        kind: "workbox",
+        machineId: "gpubox",
+      });
+      expect(
+        within(sidebar).getByRole("button", { name: /^gpubox\s*Online$/ }),
+      ).toHaveAttribute("aria-current", "page");
+      expect(
+        within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
+      ).not.toHaveAttribute("aria-current");
+
+      // Another workbox, straight from the Workbox screen.
+      await user.click(
+        within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
+      );
+      expect(useAppStore.getState().view).toEqual({
+        kind: "workbox",
+        machineId: "buildbox",
+      });
+    });
+
+    it("on_home_no_workbox_is_current", async () => {
+      listBoxes();
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      expect(
+        within(sidebar).queryAllByRole("button", { current: "page" }),
+      ).toEqual([]);
+    });
+
+    it("jumping_from_a_workbox_goes_home_first", async () => {
+      listBoxes();
+      const user = userEvent.setup();
+      useAppStore.setState({ view: { kind: "workbox", machineId: "gpubox" } });
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      await user.click(
+        within(sidebar).getByRole("button", { name: /^All agents/ }),
+      );
+      expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    });
+
+    it("a_project_goes_home_and_groups_by_project", async () => {
+      listBoxes();
+      const user = userEvent.setup();
+      useAppStore.setState({
+        view: { kind: "workbox", machineId: "gpubox" },
+        groupBy: "status",
+      });
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      await user.click(
+        within(sidebar).getAllByRole("button", { name: /web-app/ })[0],
+      );
+      expect(useAppStore.getState().view).toEqual({ kind: "home" });
+      expect(useAppStore.getState().groupBy).toBe("project");
+    });
+
+    it("dims_a_disabled_workbox_and_labels_it", async () => {
+      listBoxes("0.9.4", box("buildbox"), box("gpubox", { kind: "disabled" }));
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      expect(
+        within(sidebar).getByRole("button", { name: /^gpubox\s*Disabled$/ }),
+      ).toHaveClass("is-dim");
+      expect(
+        within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
+      ).not.toHaveClass("is-dim");
+    });
+
+    it("gives_each_project_dot_its_status_as_a_title", async () => {
+      listBoxes();
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      const dots = [
+        ...sidebar.querySelectorAll<HTMLElement>(".dot[data-status]"),
+      ];
+      expect(dots.length).toBeGreaterThan(0);
+      for (const dot of dots) {
+        expect(dot.title).toMatch(
+          /^(Needs input|Done, unseen|Working|Idle|Unknown|Shell)$/,
+        );
+      }
+    });
+  });
+
+  describe("the version banner", () => {
+    it("unsupported_version_banner_is_shown_once_and_can_be_dismissed", async () => {
+      listBoxes("0.8.9");
+      const user = userEvent.setup();
+      render(<App />);
+      const banner = await screen.findByRole("status");
+      expect(banner).toHaveTextContent(
+        "herdr 0.8.9 is older than this app supports (0.9.0+). Some actions may fail.",
+      );
+      await user.click(within(banner).getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByText(/is older than this app supports/)).toBeNull();
+    });
+
+    it("stays_dismissed_across_screens_and_returns_for_another_version", async () => {
+      listBoxes("0.8.9");
+      const user = userEvent.setup();
+      render(<App />);
+      await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+      expect(useAppStore.getState().dismissedVersion).toBe("0.8.9");
+      act(() =>
+        useAppStore.setState({
+          view: { kind: "workbox", machineId: "gpubox" },
+        }),
+      );
+      expect(screen.queryByRole("status")).toBeNull();
+      act(() =>
+        useAppStore.setState({
+          state: { ...state, herdr_version: "0.8.8", machines: [] },
+        }),
+      );
+      expect(screen.getByRole("status")).toHaveTextContent("herdr 0.8.8");
+    });
+
+    it("shows_no_banner_for_0_9_0_and_newer", async () => {
+      listBoxes("0.9.0");
+      render(<App />);
+      await screen.findByRole("region", { name: "Needs you" });
+      expect(screen.queryByText(/is older than this app supports/)).toBeNull();
+    });
+  });
+
+  describe("the toast", () => {
+    it("is_one_alert_on_either_screen_and_can_be_dismissed", async () => {
+      listBoxes();
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByRole("region", { name: "Needs you" });
+      act(() =>
+        useAppStore
+          .getState()
+          .reportError({ kind: "invalid", message: "pane is gone" }),
+      );
+      expect(await screen.findAllByRole("alert")).toHaveLength(1);
+      expect(screen.getByRole("alert")).toHaveTextContent("pane is gone");
+      await user.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByRole("alert")).toBeNull();
+
+      act(() =>
+        useAppStore.setState({
+          view: { kind: "workbox", machineId: "gpubox" },
+        }),
+      );
+      act(() =>
+        useAppStore
+          .getState()
+          .reportError({ kind: "invalid", message: "cannot reach gpubox" }),
+      );
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "cannot reach gpubox",
+      );
+    });
   });
 });

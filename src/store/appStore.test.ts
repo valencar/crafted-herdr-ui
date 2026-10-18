@@ -21,6 +21,7 @@ describe("appStore", () => {
     expect(s.sheet).toBeNull();
     expect(s.view).toEqual({ kind: "home" });
     expect(s.activityOpen).toBe(false);
+    expect(s.query).toBe("");
   });
 
   it("sets each field through its setter", () => {
@@ -37,6 +38,7 @@ describe("appStore", () => {
     s.setSheet("new-session");
     s.setView({ kind: "workbox", machineId: "buildbox" });
     s.setActivityOpen(true);
+    s.setQuery("terraform");
     expect(useAppStore.getState()).toMatchObject({
       state: app,
       selectedKey: "buildbox::w1:p1",
@@ -44,6 +46,7 @@ describe("appStore", () => {
       sheet: "new-session",
       view: { kind: "workbox", machineId: "buildbox" },
       activityOpen: true,
+      query: "terraform",
     });
   });
 

@@ -1,14 +1,23 @@
 import { useEffect } from "react";
 import { ActivityDrawer } from "./components/ActivityDrawer";
+import { AppSidebar } from "./components/AppSidebar";
 import { CommandPalette } from "./components/CommandPalette";
+import { Header } from "./components/Header";
+import { VersionBanner } from "./components/HomeNotices";
+import { StoreToast } from "./components/Toast";
 import { toRows } from "./lib/grouping";
 import { onFocusRow, onMenu, onNewSession, onOpenRow } from "./lib/ipc";
 import { runMenuAction } from "./lib/menuActions";
 import { defaultOpenHow, openRow } from "./lib/openRow";
-import { focusRowElement } from "./lib/uiHelpers";
+import {
+  focusRowElement,
+  terminalName as terminalLabel,
+  useTerminals,
+} from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
 import { Home } from "./screens/Home";
+import { NewSession } from "./screens/NewSession";
 import { Onboarding } from "./screens/Onboarding";
 import { Workbox } from "./screens/Workbox";
 import { useAppStore } from "./store/appStore";
@@ -27,6 +36,11 @@ function App() {
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const paletteOpen = useAppStore((s) => s.paletteOpen);
   const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
+  const herdrVersion = useAppStore((s) => s.state?.herdr_version ?? null);
+  const query = useAppStore((s) => s.query);
+  const setQuery = useAppStore((s) => s.setQuery);
+  const compact = useAppStore((s) => s.settings?.row_density === "compact");
+  const { current: terminal, installed } = useTerminals();
   const placement = useAppStore(
     (s) => s.settings?.terminal_placement ?? "bottom",
   );
@@ -103,18 +117,35 @@ function App() {
 
   return (
     <>
-      {/* The panel is a sibling of the screens, so its tabs survive a change of screen. */}
-      <div className={`shell placement-${placement}`}>
-        <div className="shell-content">
-          {view.kind === "workbox" ? (
-            <Workbox key={view.machineId} machineId={view.machineId} />
-          ) : (
-            <Home />
-          )}
+      {/* The window chrome is drawn once, here; the screens are only what goes in the middle. */}
+      <div className={`app${compact ? " density-compact" : ""}`}>
+        <Header
+          herdrVersion={herdrVersion}
+          query={query}
+          onQuery={setQuery}
+          terminal={terminal}
+          installed={installed}
+          onNewSession={() => openNewSession()}
+        />
+        <VersionBanner />
+        <div className="body">
+          <AppSidebar />
+          {/* The panel is a sibling of the screens, so its tabs survive a change of screen. */}
+          <div className={`shell placement-${placement}`}>
+            <div className="shell-content">
+              {view.kind === "workbox" ? (
+                <Workbox key={view.machineId} machineId={view.machineId} />
+              ) : (
+                <Home />
+              )}
+            </div>
+            {hasTabs && <TerminalPanel />}
+          </div>
         </div>
-        {hasTabs && <TerminalPanel />}
       </div>
-      {/* Here rather than in a screen, so it works on Home and on the Workbox screen. */}
+      {sheet === "new-session" && (
+        <NewSession terminalName={terminalLabel(terminal)} />
+      )}
       {sheet === "add-workbox" && <AddWorkbox />}
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
       {activityOpen && (
@@ -123,6 +154,7 @@ function App() {
           onClose={() => setActivityOpen(false)}
         />
       )}
+      <StoreToast />
     </>
   );
 }
