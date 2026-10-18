@@ -1,4 +1,11 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -215,6 +222,70 @@ describe("OpenButton", () => {
     });
     await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
     expect(useAppStore.getState().toastTone).toBe("info");
+  });
+
+  it("copy_attach_command_is_fetched_when_the_menu_opens_and_again_on_each_open", async () => {
+    const { user } = setup();
+    const fetches = () =>
+      invoke.mock.calls.filter((c) => c[0] === "copy_attach_command");
+    expect(fetches()).toHaveLength(0);
+    await user.click(chevron());
+    expect(fetches()).toEqual([
+      ["copy_attach_command", { machineId: "buildbox", paneId: "w1:p1" }],
+    ]);
+    await user.keyboard("{Escape}");
+    await user.click(chevron());
+    expect(fetches()).toHaveLength(2);
+  });
+
+  it("copy_attach_command_writes_to_the_clipboard_inside_the_click", async () => {
+    // WKWebView may refuse a clipboard write that follows an await after the gesture, so
+    // with the command already fetched the write happens synchronously in the click.
+    const { user } = setup();
+    await user.click(chevron());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Copy attach command" }),
+    );
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith(ATTACH);
+    await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
+  });
+
+  it("copy_attach_command_waits_for_the_command_when_it_is_not_ready_yet", async () => {
+    let resolve!: (command: string) => void;
+    invoke.mockReturnValue(
+      new Promise<string>((r) => {
+        resolve = r;
+      }),
+    );
+    const { user } = setup();
+    await user.click(chevron());
+    await user.click(
+      screen.getByRole("menuitem", { name: "Copy attach command" }),
+    );
+    expect(writeText).not.toHaveBeenCalled();
+    await act(async () => resolve(ATTACH));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(ATTACH));
+    await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
+  });
+
+  it("a_rejected_clipboard_write_goes_to_the_toast", async () => {
+    const { user } = setup();
+    writeText.mockRejectedValue(new Error("clipboard refused"));
+    await user.click(chevron());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Copy attach command" }),
+    );
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("clipboard refused"),
+    );
+    expect(useAppStore.getState().toastTone).toBe("error");
   });
 
   it("copy_attach_command_failure_goes_to_the_toast", async () => {

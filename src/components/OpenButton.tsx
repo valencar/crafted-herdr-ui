@@ -103,6 +103,29 @@ export function OpenButton({
     };
   }, [open]);
 
+  // The attach command, fetched each time the menu opens so "Copy attach command" can write it
+  // to the clipboard synchronously in the click: WKWebView may refuse a write that comes after
+  // an await, outside the user's gesture. `attach` is the pending fetch, `attachCommand` its
+  // result once it is in.
+  const attach = useRef<Promise<string> | null>(null);
+  const attachCommand = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    attachCommand.current = null;
+    const fetching = invokeTyped("copy_attach_command", {
+      machineId: row.machineId,
+      paneId: row.paneId,
+    });
+    attach.current = fetching;
+    // A failure surfaces only if the user asks to copy.
+    fetching.then(
+      (command) => {
+        if (attach.current === fetching) attachCommand.current = command;
+      },
+      () => {},
+    );
+  }, [open, row.machineId, row.paneId]);
+
   const toggle = () => {
     if (!open) {
       const r = chevronRef.current?.getBoundingClientRect();
@@ -124,16 +147,22 @@ export function OpenButton({
     action();
   };
 
-  const copyAttach = async () => {
-    try {
-      const command = await invokeTyped("copy_attach_command", {
-        machineId: row.machineId,
-        paneId: row.paneId,
-      });
-      await navigator.clipboard.writeText(command);
-      showToast("Copied", "info");
-    } catch (e) {
-      reportError(e);
+  const copyAttach = () => {
+    const copy = (command: string) => {
+      try {
+        void navigator.clipboard
+          .writeText(command)
+          .then(() => showToast("Copied", "info"), reportError);
+      } catch (e) {
+        reportError(e);
+      }
+    };
+    // The command is normally in already: write it before any await.
+    if (attachCommand.current !== null) {
+      copy(attachCommand.current);
+    } else if (attach.current) {
+      // Not back yet: copy as soon as it is (possibly outside the gesture).
+      attach.current.then(copy, reportError);
     }
   };
 
@@ -209,7 +238,7 @@ export function OpenButton({
             type="button"
             role="menuitem"
             className="menu-item"
-            onClick={() => choose(() => void copyAttach())}
+            onClick={() => choose(copyAttach)}
           >
             Copy attach command
           </button>
