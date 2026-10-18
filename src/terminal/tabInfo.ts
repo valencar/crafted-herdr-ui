@@ -53,3 +53,11 @@ export function tabDotStatus(
 ): string | undefined {
   return tab.state === "live" ? row?.status : tab.state;
 }
+
+/**
+ * The accessible name of a tab's row in the sidebar: "{title}, {status words}, terminal tab",
+ * else "{title} on {workbox}, terminal tab". The words are the strip's, so the two agree.
+ */
+export function tabTreeName(tab: TermTab, row: Row | undefined): string {
+  return `${tabName(tab, row)}, terminal tab`;
+}

@@ -469,6 +469,51 @@ kbd {
   border-radius: 9px;
   padding: 0 7px;
 }
+.nav-kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.nav-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-term {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 10px 4px 22px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-term:hover {
+  background: var(--nav-hover);
+}
+.nav-term[aria-current="page"] {
+  background: var(--selected);
+  color: var(--text);
+}
+.nav-term-icon {
+  flex-shrink: 0;
+}
+.nav-term .mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-more {
+  color: var(--text-4);
+  font-size: 12px;
+}
 .nav-heading {
   display: flex;
   align-items: center;

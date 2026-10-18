@@ -18,6 +18,8 @@ export function AppSidebar() {
   // The sidebar changes what the Home tab shows, so a click brings that tab back first.
   const showHome = () => useTerminalStore.getState().activate(HOME);
 
+  const activeKey = useTerminalStore((s) => s.activeKey);
+
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const projects = useMemo(() => groupByProject(rows), [rows]);
 
@@ -39,6 +41,11 @@ export function AppSidebar() {
         setView({ kind: "all" });
         setGroupBy("project");
         scrollToId(`group-${g.key}`);
+      }}
+      dashboardActive={activeKey === HOME && view.kind === "dashboard"}
+      onDashboard={() => {
+        setView({ kind: "dashboard" });
+        showHome();
       }}
       activeWorkbox={view.kind === "workbox" ? view.machineId : null}
       onWorkbox={(id) => {

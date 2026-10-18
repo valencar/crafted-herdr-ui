@@ -1426,27 +1426,86 @@ describe("the window chrome", () => {
         name: "Sidebar",
       });
       await user.click(
-        within(sidebar).getByRole("button", { name: /^gpubox\s*Online$/ }),
+        within(sidebar).getByRole("button", {
+          name: /^gpubox\s*Online\s*\d+$/,
+        }),
       );
       expect(useAppStore.getState().view).toEqual({
         kind: "workbox",
         machineId: "gpubox",
       });
       expect(
-        within(sidebar).getByRole("button", { name: /^gpubox\s*Online$/ }),
+        within(sidebar).getByRole("button", {
+          name: /^gpubox\s*Online\s*\d+$/,
+        }),
       ).toHaveAttribute("aria-current", "page");
       expect(
-        within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
+        within(sidebar).getByRole("button", {
+          name: /^buildbox\s*Online\s*\d+$/,
+        }),
       ).not.toHaveAttribute("aria-current");
 
       // Another workbox, straight from the Workbox screen.
       await user.click(
-        within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
+        within(sidebar).getByRole("button", {
+          name: /^buildbox\s*Online\s*\d+$/,
+        }),
       );
       expect(useAppStore.getState().view).toEqual({
         kind: "workbox",
         machineId: "buildbox",
       });
+    });
+
+    it("workbox_click_shows_the_workbox_in_the_home_tab", async () => {
+      listBoxes();
+      const user = userEvent.setup();
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      act(() => openTabs("w1:p1"));
+      expect(activeKey()).toBe("buildbox::w1:p1");
+      await user.click(
+        within(sidebar).getByRole("button", {
+          name: /^gpubox\s*Online\s*\d+$/,
+        }),
+      );
+      expect(activeKey()).toBe(HOME);
+      expect(useAppStore.getState().view).toEqual({
+        kind: "workbox",
+        machineId: "gpubox",
+      });
+    });
+
+    it("dashboard_shows_the_dashboard_in_the_home_tab", async () => {
+      listBoxes();
+      const user = userEvent.setup();
+      useAppStore.setState({ view: { kind: "workbox", machineId: "gpubox" } });
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      act(() => openTabs("w1:p1"));
+      const item = within(sidebar).getByRole("button", { name: /^Dashboard/ });
+      expect(item).not.toHaveAttribute("aria-current");
+      await user.click(item);
+      expect(activeKey()).toBe(HOME);
+      expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
+      expect(item).toHaveAttribute("aria-current", "page");
+    });
+
+    it("dashboard_is_not_current_while_a_terminal_tab_is_active", async () => {
+      listBoxes();
+      useAppStore.setState({ view: { kind: "dashboard" } });
+      render(<App />);
+      const sidebar = await screen.findByRole("navigation", {
+        name: "Sidebar",
+      });
+      const item = within(sidebar).getByRole("button", { name: /^Dashboard/ });
+      expect(item).toHaveAttribute("aria-current", "page");
+      act(() => openTabs("w1:p1"));
+      expect(item).not.toHaveAttribute("aria-current");
     });
 
     it("on_home_no_workbox_is_current", async () => {
@@ -1499,10 +1558,14 @@ describe("the window chrome", () => {
         name: "Sidebar",
       });
       expect(
-        within(sidebar).getByRole("button", { name: /^gpubox\s*Disabled$/ }),
+        within(sidebar).getByRole("button", {
+          name: /^gpubox\s*Disabled\s*\d+$/,
+        }),
       ).toHaveClass("is-dim");
       expect(
-        within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
+        within(sidebar).getByRole("button", {
+          name: /^buildbox\s*Online\s*\d+$/,
+        }),
       ).not.toHaveClass("is-dim");
     });
 
