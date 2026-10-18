@@ -419,6 +419,84 @@ describe("Workspace", () => {
       });
     });
 
+    describe("in_a_narrow_workspace", () => {
+      // jsdom has no layout: the workspace body reports the width the test gives it.
+      let bodyWidth = 0;
+      beforeEach(() => {
+        bodyWidth = 900;
+        vi.spyOn(
+          HTMLElement.prototype,
+          "clientWidth",
+          "get",
+        ).mockImplementation(function (this: HTMLElement) {
+          return this.classList.contains("workspace-body") ? bodyWidth : 0;
+        });
+      });
+      afterEach(() => vi.restoreAllMocks());
+
+      it("dragging_never_leaves_the_terminal_less_than_320px", () => {
+        splitOn(420);
+        open("w1:p1", "api-service");
+        ipc.invokeTyped.mockResolvedValue({ ...SETTINGS });
+        render(<Workspace>{home}</Workspace>);
+        const sep = handle();
+        fireEvent.pointerDown(sep, { pointerId: 1, clientX: 800 });
+        fireEvent.pointerMove(sep, { pointerId: 1, clientX: -900 });
+        expect(sep).toHaveAttribute("aria-valuenow", "580");
+        expect(column()).toHaveStyle({ width: "580px" });
+        fireEvent.pointerUp(sep, { pointerId: 1 });
+        expect(ipc.invokeTyped).toHaveBeenCalledWith("set_settings", {
+          patch: { dashboard_split_width: 580 },
+        });
+      });
+
+      it("the_arrow_keys_stop_at_the_workspace_width_minus_320", async () => {
+        const user = userEvent.setup();
+        splitOn(570);
+        open("w1:p1", "api-service");
+        ipc.invokeTyped.mockImplementation(
+          async (_name: string, args: { patch: object }) => ({
+            ...useAppStore.getState().settings,
+            ...args.patch,
+          }),
+        );
+        render(<Workspace>{home}</Workspace>);
+        handle().focus();
+        await user.keyboard("{ArrowLeft}");
+        expect(ipc.invokeTyped).toHaveBeenLastCalledWith("set_settings", {
+          patch: { dashboard_split_width: 580 },
+        });
+        await waitFor(() =>
+          expect(useAppStore.getState().settings?.dashboard_split_width).toBe(
+            580,
+          ),
+        );
+        ipc.invokeTyped.mockClear();
+        await user.keyboard("{ArrowLeft}");
+        expect(ipc.invokeTyped).not.toHaveBeenCalled();
+      });
+
+      it("a_saved_width_from_a_wider_window_is_shown_clamped", () => {
+        splitOn(1000);
+        open("w1:p1", "api-service");
+        render(<Workspace>{home}</Workspace>);
+        expect(handle()).toHaveAttribute("aria-valuenow", "580");
+      });
+
+      it("below_680px_the_floor_still_wins_for_the_saved_value", () => {
+        bodyWidth = 600;
+        splitOn(420);
+        open("w1:p1", "api-service");
+        ipc.invokeTyped.mockResolvedValue({ ...SETTINGS });
+        render(<Workspace>{home}</Workspace>);
+        const sep = handle();
+        fireEvent.pointerDown(sep, { pointerId: 1, clientX: 800 });
+        fireEvent.pointerMove(sep, { pointerId: 1, clientX: 0 });
+        // 360 is the least the settings accept; the stylesheet's max-width wins on screen.
+        expect(sep).toHaveAttribute("aria-valuenow", "360");
+      });
+    });
+
     it("dragging_the_handle_left_grows_the_column_and_saves_on_release", async () => {
       splitOn(420);
       open("w1:p1", "api-service");

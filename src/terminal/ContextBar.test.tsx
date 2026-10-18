@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../lib/grouping";
+import { isInTerminal } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 import { ContextBar } from "./ContextBar";
 import { HOME, useTerminalStore, type TermTab } from "./terminalStore";
@@ -151,6 +152,30 @@ describe("ContextBar", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     // The tab is still there.
     expect(useTerminalStore.getState().tabs).toHaveLength(2);
+  });
+
+  it("the_close_pane_dialog_is_outside_the_terminal_panel", async () => {
+    // `.terminal-panel` is its own stacking context, so a dialog inside it would sit under the
+    // Dashboard column beside it. The dialog goes to the body, with the app's other dialogs.
+    const user = userEvent.setup();
+    const { container } = render(
+      <div className="terminal-panel">
+        <ContextBar tab={paneTab} row={row} onFind={() => {}} />
+      </div>,
+    );
+    await terminalButton();
+    await user.click(screen.getByRole("button", { name: "Close pane…" }));
+    const dialog = screen.getByRole("dialog", { name: "Close planner?" });
+    expect(container.querySelector(".terminal-panel")!.contains(dialog)).toBe(
+      false,
+    );
+    expect(dialog.closest(".terminal-panel")).toBeNull();
+    expect(isInTerminal(dialog)).toBe(false);
+    expect(isInTerminal(screen.getByRole("button", { name: "Cancel" }))).toBe(
+      false,
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("full_ui_tab_has_only_find_and_detach", () => {

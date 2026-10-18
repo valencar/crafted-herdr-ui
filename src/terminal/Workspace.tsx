@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -26,8 +27,26 @@ const MAX_SPLIT_WIDTH = 1200;
 /** What an arrow key moves the resize handle by. */
 const KEY_STEP = 16;
 
-const clampWidth = (n: number) =>
-  Math.min(MAX_SPLIT_WIDTH, Math.max(MIN_SPLIT_WIDTH, Math.round(n)));
+/** The least the terminal keeps beside the Dashboard column. */
+const MIN_TERMINAL_WIDTH = 320;
+
+/**
+ * Keeps a column width in range, and, when the workspace's width is known (0 means it is not,
+ * as in a test with no layout), leaves the terminal at least 320 px. The settings accept
+ * nothing under 360, so in a workspace narrower than 680 the stylesheet's max-width does the
+ * rest on screen.
+ */
+const clampWidth = (n: number, workspaceWidth = 0) => {
+  const top =
+    workspaceWidth > 0
+      ? Math.max(MIN_SPLIT_WIDTH, workspaceWidth - MIN_TERMINAL_WIDTH)
+      : MAX_SPLIT_WIDTH;
+  return Math.min(
+    MAX_SPLIT_WIDTH,
+    top,
+    Math.max(MIN_SPLIT_WIDTH, Math.round(n)),
+  );
+};
 
 const FIND_EVENT = "crafted-herdr:terminal-find";
 
@@ -72,7 +91,22 @@ export function Workspace({ children }: { children: ReactNode }) {
   const showSplit = split && activeKey !== HOME;
   // The width being dragged or just chosen with the keys, until its save is back.
   const [pending, setPending] = useState<number | null>(null);
-  const width = pending ?? savedWidth;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // What the workspace measures: read live when a width is chosen, and followed (as state) so
+  // the width shown agrees with what the stylesheet's max-width allows.
+  const workspaceWidth = () => bodyRef.current?.clientWidth ?? 0;
+  const [bodyWidth, setBodyWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => setBodyWidth(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const width = clampWidth(pending ?? savedWidth, bodyWidth);
   const drag = useRef<{
     from: number;
     startWidth: number;
@@ -102,6 +136,7 @@ export function Workspace({ children }: { children: ReactNode }) {
     e.preventDefault();
     const next = clampWidth(
       width + (e.key === "ArrowLeft" ? KEY_STEP : -KEY_STEP),
+      workspaceWidth(),
     );
     if (next === width) return;
     setPending(next);
@@ -114,7 +149,7 @@ export function Workspace({ children }: { children: ReactNode }) {
   const onPointerMove = (e: PointerEvent) => {
     const d = drag.current;
     if (!d) return;
-    d.width = clampWidth(d.startWidth + d.from - e.clientX);
+    d.width = clampWidth(d.startWidth + d.from - e.clientX, workspaceWidth());
     setPending(d.width);
   };
   const onPointerUp = () => {
@@ -183,7 +218,10 @@ export function Workspace({ children }: { children: ReactNode }) {
   return (
     <section className="workspace" aria-label="Workspace">
       <TabStrip homeLabel={homeLabel} />
-      <div className={"workspace-body" + (showSplit ? " has-split" : "")}>
+      <div
+        ref={bodyRef}
+        className={"workspace-body" + (showSplit ? " has-split" : "")}
+      >
         <div className="home-slot" hidden={activeKey !== HOME}>
           {children}
         </div>

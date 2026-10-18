@@ -55,6 +55,14 @@ describe("app.css", () => {
     expect(rule(".palette")).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
 
+  it("never_lets_the_split_column_squeeze_the_terminal_below_320px", () => {
+    const column = rule(".split-column");
+    expect(column).toMatch(/max-width:\s*calc\(100% - 320px\)/);
+    expect(column).toMatch(/flex:\s*0 1 auto/);
+    // The floor gives way when the workspace is narrower than 680px.
+    expect(column).toMatch(/min-width:\s*min\(360px,\s*calc\(100% - 320px\)\)/);
+  });
+
   it("makes_the_collapsed_sidebar_a_56px_rail_and_compact_density_css_only", () => {
     expect(rule(".sidebar.is-collapsed")).toMatch(/flex:\s*0 0 56px/);
     expect(rule(".density-compact .row-main")).toMatch(/padding-top/);

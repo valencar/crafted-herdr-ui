@@ -1805,8 +1805,11 @@ select.field {
 }
 .split-column {
   position: relative;
-  flex: 0 0 auto;
-  min-width: 0;
+  /* Gives way before the terminal drops under 320px; below a 680px workspace the max-width
+     beats the 360px floor. */
+  flex: 0 1 auto;
+  min-width: min(360px, calc(100% - 320px));
+  max-width: calc(100% - 320px);
   min-height: 0;
   display: flex;
   flex-direction: column;

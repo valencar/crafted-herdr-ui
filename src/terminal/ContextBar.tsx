@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { KindBadge } from "../components/KindBadge";
 import { StatusPill } from "../components/StatusPill";
@@ -35,7 +36,14 @@ function PaneActions({ row }: { row: Row }) {
       >
         Close pane…
       </button>
-      {closing && <CloseConfirm row={row} onDone={() => setClosing(false)} />}
+      {/* On the body, not in `.terminal-panel`: the panel is its own stacking context, which
+          would leave the dialog under the Dashboard column beside it, and a key typed in the
+          dialog is not the terminal's. */}
+      {closing &&
+        createPortal(
+          <CloseConfirm row={row} onDone={() => setClosing(false)} />,
+          document.body,
+        )}
     </>
   );
 }
