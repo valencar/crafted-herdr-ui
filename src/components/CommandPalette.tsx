@@ -49,10 +49,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     inputRef.current?.focus();
     return () => {
-      // Focus goes back to where it was, never to the page body, unless an item moved it. It
-      // is done now, before the modal claim drops, so a terminal that refocuses when the claim
-      // drops finds focus already on a visible control and leaves it there. Where it was is
-      // the control it was opened from, or that control's menu button when it was a menu item.
+      // Focus goes back to where it was, never to the page body, unless an item moved it. Where
+      // it was is the control it was opened from, or that control's menu button when it was a
+      // menu item. It is done now, ahead of the re-render that the dropped modal claim causes,
+      // so a terminal that refocuses on that finds focus already on a visible control and
+      // leaves it there.
       const bodyHasFocus = () => {
         const now = document.activeElement;
         return !now || now === document.body;
@@ -63,14 +64,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           el !== document.body &&
           el.closest("[hidden]") === null,
       );
-      if (target && bodyHasFocus()) {
-        target.focus();
-        return;
-      }
-      // Otherwise once the item's own effects have run: an item that moved focus (a new tab, a
-      // sheet, a search box) keeps it; if nothing took it, Home's search box.
+      if (target && bodyHasFocus()) target.focus();
+      // And once more after the item's own effects and the browser's default action for the
+      // event that closed the palette: an item that moved focus (a new tab, a sheet, a search
+      // box) keeps it; if focus ended on the body, it goes back to the target, or to Home's
+      // search box when there is none.
       window.setTimeout(() => {
-        if (bodyHasFocus()) focusSearch();
+        if (!bodyHasFocus()) return;
+        if (target?.isConnected) target.focus();
+        else focusSearch();
       }, 0);
     };
   }, [previousFocus, menuTrigger]);
@@ -185,7 +187,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     <div
       className="scrim palette-scrim"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target !== e.currentTarget) return;
+        // The press must not clear focus (to the body, over a scrim that cannot take it) after
+        // the palette has handed it back.
+        e.preventDefault();
+        onClose();
       }}
     >
       <div

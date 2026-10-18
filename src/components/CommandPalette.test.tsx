@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -210,6 +217,39 @@ describe("CommandPalette", () => {
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "before" })).toHaveFocus(),
       );
+    });
+
+    it("a_press_on_the_scrim_dismisses_without_losing_the_origins_focus", async () => {
+      render(<button>before</button>);
+      openFrom(screen.getByRole("button", { name: "before" }));
+      const scrim = document.querySelector(".palette-scrim") as HTMLElement;
+      // Prevented, so the browser's default for the press (clearing focus) does not run.
+      expect(fireEvent.mouseDown(scrim)).toBe(false);
+      expect(screen.queryByRole("combobox")).toBeNull();
+      expect(screen.getByRole("button", { name: "before" })).toHaveFocus();
+    });
+
+    it("puts_focus_back_if_the_press_still_cleared_it", async () => {
+      render(<button>before</button>);
+      openFrom(screen.getByRole("button", { name: "before" }));
+      fireEvent.mouseDown(document.querySelector(".palette-scrim")!);
+      // What the browser's default action would do to the restored focus.
+      (document.activeElement as HTMLElement).blur();
+      expect(document.activeElement).toBe(document.body);
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "before" })).toHaveFocus(),
+      );
+    });
+
+    it("a_press_inside_the_palette_does_not_close_it", () => {
+      render(<button>before</button>);
+      openFrom(screen.getByRole("button", { name: "before" }));
+      expect(
+        fireEvent.mouseDown(
+          screen.getByRole("dialog", { name: "Command palette" }),
+        ),
+      ).toBe(true);
+      expect(screen.getByRole("combobox")).toBeInTheDocument();
     });
 
     it("returns_to_where_it_was_after_running_an_item_that_takes_no_focus", async () => {
