@@ -504,6 +504,68 @@ describe("Inspector live preview", () => {
     expect(unlisten).toHaveBeenCalled();
   });
 
+  describe("while a terminal tab hides the Home tab", () => {
+    const showTerminal = () =>
+      act(() =>
+        useTerminalStore.setState({
+          tabs: [
+            {
+              tabKey: "buildbox::w1:p3",
+              target: { kind: "pane", machineId: "buildbox", paneId: "w1:p3" },
+              title: "shell",
+              machineLabel: "buildbox",
+              state: "live",
+              error: null,
+              termId: 1,
+            },
+          ],
+          activeKey: "buildbox::w1:p3",
+        }),
+      );
+    const showHome = () =>
+      act(() => useTerminalStore.setState({ activeKey: HOME }));
+    const names = () => invoke.mock.calls.map(([name]) => name);
+    afterEach(() =>
+      useTerminalStore.setState({
+        tabs: [],
+        activeKey: HOME,
+        lastTermKey: null,
+        folded: {},
+      }),
+    );
+
+    it("stops_the_preview_when_hidden_and_restarts_it_when_Home_shows_again", async () => {
+      setup(BLOCKED);
+      await waitFor(() => expect(names()).toContain("start_preview"));
+
+      invoke.mockClear();
+      showTerminal();
+      await waitFor(() => expect(names()).toContain("stop_preview"));
+      expect(names()).not.toContain("start_preview");
+
+      invoke.mockClear();
+      showHome();
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith("start_preview", {
+          machineId: "buildbox",
+          paneId: "w1:p1",
+          isAgent: true,
+        }),
+      );
+      expect(names()).not.toContain("stop_preview");
+    });
+
+    it("never_starts_the_preview_while_hidden", async () => {
+      showTerminal();
+      setup(BLOCKED);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(names()).not.toContain("start_preview");
+      expect(names()).not.toContain("stop_preview");
+    });
+  });
+
   it("reports_it_when_the_preview_cannot_be_listened_to", async () => {
     listen.mockRejectedValue(new Error("event system unavailable"));
     setup();

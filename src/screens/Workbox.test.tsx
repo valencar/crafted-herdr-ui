@@ -732,6 +732,50 @@ describe("Workbox pane tails", () => {
     expect(calls("read_pane_tail")).toHaveLength(12);
   });
 
+  it("tails_pause_while_a_terminal_tab_hides_the_screen_and_resume_when_Home_shows", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
+    useAppStore.setState({
+      state: appState(machine("buildbox")),
+      view: { kind: "workbox", machineId: "buildbox" },
+      dialogOpen: 0,
+    });
+    render(<Workbox machineId="buildbox" />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(calls("read_pane_tail").length).toBeGreaterThan(0);
+
+    // A terminal tab is active: the screen is still mounted, but nobody sees it.
+    act(() =>
+      useTerminalStore.setState({
+        tabs: [
+          {
+            tabKey: "buildbox::w1:p1",
+            target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+            title: "planner",
+            machineLabel: "buildbox",
+            state: "live",
+            error: null,
+            termId: 1,
+          },
+        ],
+        activeKey: "buildbox::w1:p1",
+      }),
+    );
+    invoke.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(35_000);
+    });
+    expect(calls("read_pane_tail")).toHaveLength(0);
+
+    act(() => useTerminalStore.setState({ activeKey: HOME }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_500);
+    });
+    expect(calls("read_pane_tail").length).toBeGreaterThan(0);
+    useTerminalStore.setState({ tabs: [], lastTermKey: null, folded: {} });
+  });
+
   it("tails_stop_when_the_screen_goes_away", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
     useAppStore.setState({

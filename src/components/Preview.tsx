@@ -3,6 +3,7 @@ import { actionErrorMessage } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped, onPreview, toActionError } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
+import { useHomeVisible } from "../terminal/useHomeVisible";
 
 // start_preview and stop_preview run one after another. Tauri may otherwise handle two
 // invokes out of order, and a late "stop" would end the preview that was just started.
@@ -16,7 +17,8 @@ function inOrder<T>(job: () => Promise<T>): Promise<T> {
 /**
  * The live, read-only view of the row's terminal. It owns the preview's lifecycle: it starts
  * the Rust preview for this row, listens for frames (keeping those for this row in the
- * store, which the Needs-you cards read too), and stops the preview on unmount.
+ * store, which the Needs-you cards read too), and stops the preview on unmount. While the Home
+ * tab is hidden under a terminal tab the preview is stopped, and it restarts when Home shows.
  */
 export function Preview({ row }: { row: Row }) {
   const frame = useAppStore((s) => s.preview);
@@ -24,8 +26,11 @@ export function Preview({ row }: { row: Row }) {
   const reportError = useAppStore((s) => s.reportError);
   const { key, machineId, paneId } = row;
   const isAgent = row.status !== "shell";
+  const visible = useHomeVisible();
+  const started = useRef(false);
 
   useEffect(() => {
+    if (!visible) return;
     let alive = true;
     let unlisten: (() => void) | undefined;
     setPreview(null);
@@ -39,6 +44,7 @@ export function Preview({ row }: { row: Row }) {
         }
         unlisten = un;
         // Rust only emits changed frames, so the first one must find the listener in place.
+        started.current = true;
         inOrder(() =>
           invokeTyped("start_preview", { machineId, paneId, isAgent }),
         ).catch((e) => {
@@ -60,7 +66,14 @@ export function Preview({ row }: { row: Row }) {
       alive = false;
       unlisten?.();
     };
-  }, [key, machineId, paneId, isAgent, setPreview, reportError]);
+  }, [visible, key, machineId, paneId, isAgent, setPreview, reportError]);
+
+  // Hidden Home: nobody sees the frames, so Rust stops reading the pane.
+  useEffect(() => {
+    if (visible || !started.current) return;
+    started.current = false;
+    inOrder(() => invokeTyped("stop_preview")).catch(() => {});
+  }, [visible]);
 
   useEffect(
     () => () => {

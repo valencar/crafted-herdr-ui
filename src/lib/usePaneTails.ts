@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useHomeVisible } from "../terminal/useHomeVisible";
 import type { Row } from "./grouping";
 import { invokeTyped } from "./ipc";
 
@@ -30,9 +31,10 @@ export function tailTargets(rows: Row[]): string[] {
 }
 
 /**
- * The last line of each target pane, refreshed every 10 s for as long as the caller is
- * mounted (the Workbox screen is on screen). A failed read is ignored: the box keeps its old
- * line and the next round tries again.
+ * The last line of each target pane, refreshed every 10 s while the caller is mounted and on
+ * screen: rounds are skipped while the window is hidden, and while the Home tab is hidden
+ * under a terminal tab (the Workbox screen stays mounted then). A failed read is ignored: the
+ * box keeps its old line and the next round tries again.
  */
 export function usePaneTails(
   machineId: string,
@@ -44,6 +46,8 @@ export function usePaneTails(
   const inflight = useRef(new Set<string>());
   const alive = useRef(true);
   const key = targets.join("|");
+  const visible = useHomeVisible();
+  const shown = useRef(visible);
 
   const read = useCallback(
     async (paneIds: string[]) => {
@@ -80,16 +84,20 @@ export function usePaneTails(
   }, []);
 
   useEffect(() => {
+    shown.current = visible;
+  }, [visible]);
+
+  useEffect(() => {
     current.current = key ? key.split("|") : [];
     // Panes that just appeared get their line right away, not at the next round, unless the
-    // window is hidden (the next round while visible reads them).
-    if (document.hidden) return;
+    // window or the Home tab is hidden (coming back reads them).
+    if (document.hidden || !visible) return;
     void read(current.current.filter((id) => !fetched.current.has(id)));
-  }, [key, read]);
+  }, [key, read, visible]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (!document.hidden) void read(current.current);
+      if (!document.hidden && shown.current) void read(current.current);
     }, TAIL_EVERY_MS);
     return () => window.clearInterval(timer);
   }, [read]);

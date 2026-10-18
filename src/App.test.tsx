@@ -596,6 +596,48 @@ describe("terminal menu ids", () => {
     expect(activeKey()).toBe("gpubox::w1:p1");
   });
 
+  it("the All tabs menu's keys stay in the menu while Home shows", async () => {
+    const user = userEvent.setup();
+    const sizes = { scroll: 900, client: 300 };
+    Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+      configurable: true,
+      get: () => sizes.scroll,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => sizes.client,
+    });
+    try {
+      listBuildbox();
+      ipc.invokeTyped.mockImplementation(async (name: string) =>
+        name === "get_terminals" ? { installed: [], default: "ghostty" } : "",
+      );
+      render(<App />);
+      await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+      await screen.findByRole("button", { name: "All tabs" });
+      act(() => useAppStore.setState({ selectedKey: "buildbox::w1:p3" }));
+
+      await user.click(screen.getByRole("button", { name: "All tabs" }));
+      const items = screen.getAllByRole("menuitem");
+      expect(items[0]).toHaveFocus();
+
+      await user.keyboard("{ArrowDown}");
+      expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p3");
+      expect(screen.getByRole("menu")).toContainElement(
+        document.activeElement as HTMLElement,
+      );
+
+      await user.keyboard("{Backspace}");
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.getByRole("menu")).toContainElement(
+        document.activeElement as HTMLElement,
+      );
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollWidth");
+      Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+    }
+  });
+
   it("selecting_a_tab_unfolds_its_group", async () => {
     render(<App />);
     await screen.findByRole("searchbox");

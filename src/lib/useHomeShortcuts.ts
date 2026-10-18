@@ -35,8 +35,12 @@ export function useHomeShortcuts({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (sheet || useAppStore.getState().dialogOpen > 0) return;
-      // Keys typed in a terminal stay there.
-      if (isInTerminal(e.target)) return;
+      // Keys typed in a terminal stay there, and so do those a menu (the All tabs menu, the
+      // terminal picker) has taken for itself.
+      if (e.defaultPrevented || isInTerminal(e.target)) return;
+      if (e.target instanceof Element && e.target.closest('[role="menu"]')) {
+        return;
+      }
       const onHome = useTerminalStore.getState().activeKey === HOME;
       if (e.metaKey) {
         if (e.key === "n") {
