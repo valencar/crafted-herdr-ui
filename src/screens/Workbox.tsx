@@ -80,7 +80,7 @@ export function Workbox({ machineId }: { machineId: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [sheet, machineId, openNewSession]);
 
-  const goHome = () => setView({ kind: "home" });
+  const goHome = () => setView({ kind: "dashboard" });
 
   const run = (action: Promise<unknown>) => {
     action.catch(report);

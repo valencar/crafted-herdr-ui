@@ -45,7 +45,7 @@ export function runMenuAction(id: MenuId): void {
     }
     // The Dashboard is the Home tab showing its default view.
     case "dashboard":
-      useAppStore.getState().setView({ kind: "home" });
+      useAppStore.getState().setView({ kind: "dashboard" });
       useTerminalStore.getState().activate(HOME);
       break;
     // Switches between the Home tab and the terminal tab that was active last.
@@ -128,10 +128,17 @@ export function runMenuAction(id: MenuId): void {
     case "toggle-sidebar":
       toggleSidebar();
       break;
-    // On a terminal tab, Find searches its scrollback; on Home it is Home's search.
+    // On a terminal tab, Find searches its scrollback; on Home it is the All agents search,
+    // which the Dashboard and a Workbox screen don't have: bring that screen up first.
     case "find":
-      if (useTerminalStore.getState().activeKey !== HOME) requestTerminalFind();
-      else focusSearch();
+      if (useTerminalStore.getState().activeKey !== HOME) {
+        requestTerminalFind();
+      } else if (useAppStore.getState().view.kind !== "all") {
+        useAppStore.getState().setView({ kind: "all" });
+        window.setTimeout(focusSearch, 0);
+      } else {
+        focusSearch();
+      }
       break;
   }
 }

@@ -136,7 +136,7 @@ it("unsubscribes on unmount", async () => {
   expect(unlisten).toHaveBeenCalled();
 });
 
-it("shows the Workbox screen when the view is a workbox, and Home otherwise", async () => {
+it("shows the Workbox screen when the view is a workbox, All agents or the Dashboard otherwise", async () => {
   ipc.getState.mockResolvedValue({
     ...state,
     machines: [
@@ -160,14 +160,25 @@ it("shows the Workbox screen when the view is a workbox, and Home otherwise", as
       name: "Breadcrumb",
     }),
   ).toBeInTheDocument();
-  // The header is the app's, not the screen's: the search box is there on both.
-  expect(screen.getByRole("searchbox")).toBeInTheDocument();
+  // The header is the app's, not the screen's: the palette launcher is there on all of them.
+  const launcher = () =>
+    screen.getByRole("button", { name: /Search agents, workboxes, commands/ });
+  expect(launcher()).toBeInTheDocument();
+  expect(screen.queryByRole("searchbox")).toBeNull();
 
-  act(() => useAppStore.setState({ view: { kind: "home" } }));
+  act(() => useAppStore.setState({ view: { kind: "all" } }));
   await waitFor(() =>
     expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull(),
   );
+  expect(launcher()).toBeInTheDocument();
   expect(screen.getByRole("searchbox")).toBeInTheDocument();
+
+  act(() => useAppStore.setState({ view: { kind: "dashboard" } }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" }),
+  ).toBeInTheDocument();
+  expect(launcher()).toBeInTheDocument();
+  expect(screen.queryByRole("searchbox")).toBeNull();
 });
 
 it("renders the Add workbox sheet over both Home and the Workbox screen", async () => {
@@ -199,7 +210,7 @@ it("renders the Add workbox sheet over both Home and the Workbox screen", async 
     await screen.findByRole("dialog", { name: "Add workbox" }),
   ).toBeInTheDocument();
 
-  useAppStore.setState({ view: { kind: "home" } });
+  useAppStore.setState({ view: { kind: "all" } });
   rerender(<App />);
   expect(
     await screen.findByRole("dialog", { name: "Add workbox" }),
@@ -275,7 +286,7 @@ it("selects a row and shows Home when a notification is clicked", async () => {
   await waitFor(() => expect(ipc.onFocusRow).toHaveBeenCalled());
   await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
   act(() => handler(ipc.onFocusRow)("buildbox::w1:p1"));
-  expect(useAppStore.getState().view).toEqual({ kind: "home" });
+  expect(useAppStore.getState().view).toEqual({ kind: "all" });
   await waitFor(() =>
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1"),
   );
@@ -307,7 +318,7 @@ function listBuildbox() {
 
 it("focus-row selects and opens", async () => {
   useAppStore.setState({
-    view: { kind: "home" },
+    view: { kind: "all" },
     selectedKey: null,
     settings: { open_target: "app" } as unknown as Settings,
   });
@@ -345,7 +356,7 @@ it("focus-row selects and opens", async () => {
 
 it("a notification click that opens in the app leaves the Home row unfocused; an external one focuses it", async () => {
   useAppStore.setState({
-    view: { kind: "home" },
+    view: { kind: "all" },
     selectedKey: null,
     settings: { open_target: "app" } as unknown as Settings,
   });
@@ -389,7 +400,7 @@ it("a notification click that opens in the app leaves the Home row unfocused; an
 it("open-row event opens the tab", async () => {
   // The popover asks for "app" explicitly, whatever this window's setting says.
   useAppStore.setState({
-    view: { kind: "home" },
+    view: { kind: "all" },
     settings: { open_target: "external" } as unknown as Settings,
   });
   listBuildbox();
@@ -415,7 +426,7 @@ it("open-row event opens the tab", async () => {
 
 it("opens the tab but leaves the sheet alone when focus-row or open-row arrives behind it", async () => {
   useAppStore.setState({
-    view: { kind: "home" },
+    view: { kind: "all" },
     settings: { open_target: "app" } as unknown as Settings,
   });
   listBuildbox();
@@ -435,7 +446,7 @@ it("opens the tab but leaves the sheet alone when focus-row or open-row arrives 
 });
 
 it("opens the New session sheet when the tray or the popover asks", async () => {
-  useAppStore.setState({ sheet: null, view: { kind: "home" } });
+  useAppStore.setState({ sheet: null, view: { kind: "all" } });
   render(<App />);
   await waitFor(() => expect(ipc.onNewSession).toHaveBeenCalled());
   act(() => handler(ipc.onNewSession)());
@@ -443,7 +454,7 @@ it("opens the New session sheet when the tray or the popover asks", async () => 
 });
 
 it("opens Settings from the sidebar link, and leaves ⌘, to the native menu", async () => {
-  useAppStore.setState({ view: { kind: "home" } });
+  useAppStore.setState({ view: { kind: "all" } });
   render(<App />);
   await screen.findByRole("searchbox");
   // ⌘, is the menu's "Settings…" item, handled in Rust (menu.rs); the page ignores the keys.
@@ -456,7 +467,7 @@ it("opens Settings from the sidebar link, and leaves ⌘, to the native menu", a
 
 describe("menu events", () => {
   beforeEach(() => {
-    useAppStore.setState({ view: { kind: "home" } });
+    useAppStore.setState({ view: { kind: "all" } });
   });
 
   it("palette opens the command palette, and Esc closes it", async () => {
@@ -525,7 +536,7 @@ function openTabs(...paneIds: string[]) {
 describe("terminal menu ids", () => {
   beforeEach(() => {
     useAppStore.setState({
-      view: { kind: "home" },
+      view: { kind: "all" },
       settings: SETTINGS as unknown as Settings,
       toast: null,
     });
@@ -548,7 +559,7 @@ describe("terminal menu ids", () => {
 
     await menu("dashboard");
     expect(activeKey()).toBe(HOME);
-    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
     // The last terminal is remembered for ⌃`.
     expect(useTerminalStore.getState().lastTermKey).toBe("buildbox::w1:p1");
   });
@@ -727,6 +738,33 @@ describe("terminal menu ids", () => {
     expect(activeKey()).toBe(HOME);
   });
 
+  it("default_view_is_dashboard_and_home_tab_reads_dashboard", async () => {
+    // What the store starts with, not what an earlier test left behind.
+    useAppStore.setState({ view: useAppStore.getInitialState().view });
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Dashboard" }),
+    ).toBeInTheDocument();
+    const strip = screen.getByRole("navigation", { name: "Tabs" });
+    expect(within(strip).getAllByRole("button")[0]).toHaveAccessibleName(
+      "Dashboard",
+    );
+    // The list screen is not mounted behind it.
+    expect(screen.queryByRole("searchbox")).toBeNull();
+  });
+
+  it("menu_find_on_dashboard_switches_to_all_agents_and_focuses_search", async () => {
+    useAppStore.setState({ view: { kind: "dashboard" } });
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+    expect(screen.queryByRole("searchbox")).toBeNull();
+
+    await menu("find");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    await waitFor(() => expect(screen.getByRole("searchbox")).toHaveFocus());
+  });
+
   it("the Home view survives the trip to a terminal tab and back", async () => {
     ipc.getState.mockResolvedValue({
       ...state,
@@ -764,7 +802,7 @@ describe("terminal menu ids", () => {
       )[0],
     ).toHaveAccessibleName("buildbox");
 
-    act(() => useAppStore.setState({ view: { kind: "home" } }));
+    act(() => useAppStore.setState({ view: { kind: "all" } }));
     await screen.findByRole("searchbox");
     expect(screen.getByTestId("view-buildbox::w1:p1")).toBe(view);
   });
@@ -830,7 +868,7 @@ describe("terminal menu ids", () => {
     expect(activeKey()).toBe("buildbox::w1:p1");
     await user.click(screen.getByRole("button", { name: /^Needs you/ }));
     expect(activeKey()).toBe(HOME);
-    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
 
     await menu("tab1");
     await user.click(
@@ -840,7 +878,7 @@ describe("terminal menu ids", () => {
       ),
     );
     expect(activeKey()).toBe(HOME);
-    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
   });
 
   it("font menu ids save the clamped size", async () => {
@@ -944,7 +982,7 @@ describe("next-needs-you, split and sidebar menu ids", () => {
 
   beforeEach(() => {
     useAppStore.setState({
-      view: { kind: "home" },
+      view: { kind: "all" },
       settings: SETTINGS as unknown as Settings,
       selectedKey: null,
       toast: null,
@@ -1080,7 +1118,7 @@ it("stops listening for the window events on unmount", async () => {
 });
 
 it("onboarding_when_no_herdr", async () => {
-  useAppStore.setState({ view: { kind: "home" } });
+  useAppStore.setState({ view: { kind: "all" } });
   ipc.getState.mockResolvedValue({
     ...state,
     herdr_path: null,
@@ -1113,14 +1151,14 @@ it("shows_nothing_but_the_connecting_state_before_the_first_state", () => {
 
 describe("the Activity drawer", () => {
   beforeEach(() => {
-    useAppStore.setState({ view: { kind: "home" } });
+    useAppStore.setState({ view: { kind: "all" } });
     ipc.invokeTyped.mockImplementation(async (name: string) =>
       name === "get_command_log" ? [] : { installed: [], default: "ghostty" },
     );
   });
 
   it("toggles_with_the_activity_menu_event_on_every_screen", async () => {
-    useAppStore.setState({ view: { kind: "home" } });
+    useAppStore.setState({ view: { kind: "all" } });
     render(<App />);
     await screen.findByRole("searchbox");
     expect(
@@ -1210,7 +1248,7 @@ describe("the window chrome", () => {
 
   beforeEach(() => {
     useAppStore.setState({
-      view: { kind: "home" },
+      view: { kind: "all" },
       query: "",
       dismissedVersion: null,
       toast: null,
@@ -1231,7 +1269,9 @@ describe("the window chrome", () => {
       screen.getAllByRole("navigation", { name: "Sidebar" }).length,
       container.querySelectorAll(".header").length,
       container.querySelectorAll(".app").length,
-      screen.getAllByRole("searchbox").length,
+      screen.getAllByRole("button", {
+        name: /Search agents, workboxes, commands/,
+      }).length,
     ];
     expect(counts()).toEqual([1, 1, 1, 1]);
 
@@ -1242,7 +1282,7 @@ describe("the window chrome", () => {
     expect(counts()).toEqual([1, 1, 1, 1]);
   });
 
-  it("the_header_search_is_the_stores_query_on_both_screens", async () => {
+  it("the_all_agents_search_is_the_stores_query_and_survives_other_screens", async () => {
     listBoxes();
     const user = userEvent.setup();
     render(<App />);
@@ -1255,11 +1295,12 @@ describe("the window chrome", () => {
       ),
     ).toEqual(["buildbox::w1:p2", "gpubox::w1:p2"]);
 
-    // The query is not Home's: it survives a visit to a Workbox screen.
-    act(() =>
-      useAppStore.setState({ view: { kind: "workbox", machineId: "gpubox" } }),
-    );
-    expect(screen.getByRole("searchbox")).toHaveValue("terraform");
+    // The query is not the screen's: it survives a visit to the Dashboard and back.
+    act(() => useAppStore.setState({ view: { kind: "dashboard" } }));
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    act(() => useAppStore.setState({ view: { kind: "all" } }));
+    expect(await screen.findByRole("searchbox")).toHaveValue("terraform");
 
     await user.click(screen.getByRole("searchbox"));
     await user.keyboard("{Escape}");
@@ -1293,6 +1334,29 @@ describe("the window chrome", () => {
     expect(
       await screen.findAllByRole("dialog", { name: "New session" }),
     ).toHaveLength(1);
+  });
+
+  it("the_header_new_session_button_prefills_the_machine_on_a_workbox_view", async () => {
+    listBoxes();
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("region", { name: "Needs you" });
+    // The Workbox screen has a "+ New session" of its own; this is the Header's.
+    const header = () =>
+      within(document.querySelector(".header") as HTMLElement);
+    await user.click(header().getByRole("button", { name: /^\+ New session/ }));
+    expect(useAppStore.getState().sheetPrefill).toBeNull();
+    useAppStore.getState().setSheet(null);
+
+    act(() =>
+      useAppStore.setState({ view: { kind: "workbox", machineId: "gpubox" } }),
+    );
+    await screen.findByRole("navigation", { name: "Breadcrumb" });
+    await user.click(header().getByRole("button", { name: /^\+ New session/ }));
+    expect(useAppStore.getState().sheet).toBe("new-session");
+    expect(useAppStore.getState().sheetPrefill).toEqual({
+      machineId: "gpubox",
+    });
   });
 
   it("the_new_session_sheet_opens_over_home_and_escape_hands_the_shortcuts_back", async () => {
@@ -1398,7 +1462,7 @@ describe("the window chrome", () => {
       await user.click(
         within(sidebar).getByRole("button", { name: /^All agents/ }),
       );
-      expect(useAppStore.getState().view).toEqual({ kind: "home" });
+      expect(useAppStore.getState().view).toEqual({ kind: "all" });
     });
 
     it("a_project_goes_home_and_groups_by_project", async () => {
@@ -1415,7 +1479,7 @@ describe("the window chrome", () => {
       await user.click(
         within(sidebar).getAllByRole("button", { name: /web-app/ })[0],
       );
-      expect(useAppStore.getState().view).toEqual({ kind: "home" });
+      expect(useAppStore.getState().view).toEqual({ kind: "all" });
       expect(useAppStore.getState().groupBy).toBe("project");
     });
 

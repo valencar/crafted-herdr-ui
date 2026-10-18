@@ -13,13 +13,13 @@ afterEach(() => {
 });
 
 describe("appStore", () => {
-  it("starts empty with project grouping on the home view", () => {
+  it("starts empty with project grouping on the dashboard view", () => {
     const s = useAppStore.getState();
     expect(s.state).toBeNull();
     expect(s.selectedKey).toBeNull();
     expect(s.groupBy).toBe("project");
     expect(s.sheet).toBeNull();
-    expect(s.view).toEqual({ kind: "home" });
+    expect(s.view).toEqual({ kind: "dashboard" });
     expect(s.activityOpen).toBe(false);
     expect(s.query).toBe("");
   });
@@ -226,12 +226,12 @@ describe("appStore", () => {
     expect(useAppStore.getState().sheetPrefill).toBeNull();
   });
 
-  it("focusRow selects the row and goes back to Home", () => {
+  it("focusRow selects the row and shows All agents", () => {
     useAppStore.getState().setView({ kind: "workbox", machineId: "buildbox" });
     useAppStore.getState().focusRow("buildbox::w1:p1");
     const s = useAppStore.getState();
     expect(s.selectedKey).toBe("buildbox::w1:p1");
-    expect(s.view).toEqual({ kind: "home" });
+    expect(s.view).toEqual({ kind: "all" });
   });
 
   it("starts without settings and keeps them once they are read", () => {

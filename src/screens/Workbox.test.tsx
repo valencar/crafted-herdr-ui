@@ -281,7 +281,7 @@ describe("Workbox", () => {
     expect(calls("machine_remove")).toEqual([{ id: "buildbox" }]);
     // The workbox is gone, so the screen goes back to Home.
     await waitFor(() =>
-      expect(useAppStore.getState().view).toEqual({ kind: "home" }),
+      expect(useAppStore.getState().view).toEqual({ kind: "dashboard" }),
     );
   });
 
@@ -662,7 +662,7 @@ describe("Workbox", () => {
     // First thing in main, above the summary.
     expect(main.firstElementChild).toContainElement(nav);
     await user.click(within(nav).getByRole("button", { name: "Workboxes" }));
-    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
   });
 
   it("renders_only_its_main_content", () => {
@@ -679,7 +679,7 @@ describe("Workbox", () => {
     await user.click(
       screen.getByRole("button", { name: "Back to all workboxes" }),
     );
-    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
   });
 
   it("waits_for_the_first_state", () => {

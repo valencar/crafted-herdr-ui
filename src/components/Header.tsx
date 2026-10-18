@@ -1,10 +1,9 @@
 import type { TerminalId } from "../lib/bindings/TerminalId";
+import { useAppStore } from "../store/appStore";
 import { TerminalMenu } from "./TerminalMenu";
 
 type Props = {
   herdrVersion: string | null;
-  query: string;
-  onQuery: (q: string) => void;
   /** `null` until `get_terminals` answers. */
   terminal: TerminalId | null;
   installed: TerminalId[];
@@ -14,12 +13,11 @@ type Props = {
 /** The title bar: a drag region with a 78 px inset for the traffic lights. */
 export function Header({
   herdrVersion,
-  query,
-  onQuery,
   terminal,
   installed,
   onNewSession,
 }: Props) {
+  const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
   return (
     <header className="header" data-tauri-drag-region>
       <div className="brand" data-tauri-drag-region>
@@ -32,22 +30,14 @@ export function Header({
           </span>
         )}
       </div>
-      <label className="search">
-        <span className="sr-only">Search</span>
-        <input
-          type="search"
-          value={query}
-          placeholder="Jump to an agent, project, or workbox…"
-          onChange={(e) => onQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              onQuery("");
-              e.currentTarget.blur();
-            }
-          }}
-        />
-        <kbd>⌘F</kbd>
-      </label>
+      <button
+        type="button"
+        className="palette-launch"
+        onClick={() => setPaletteOpen(true)}
+      >
+        <span>Search agents, workboxes, commands</span>
+        <kbd>⌘K</kbd>
+      </button>
       <div className="header-actions">
         <TerminalMenu terminal={terminal} installed={installed} />
         <button

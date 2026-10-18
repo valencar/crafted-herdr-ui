@@ -90,7 +90,7 @@ function setup(
     selectedKey: null,
     groupBy: "project",
     sheet: null,
-    view: { kind: "home" },
+    view: { kind: "all" },
     toast: null,
     preview: null,
     dialogOpen: 0,
@@ -165,7 +165,26 @@ describe("AllAgents", () => {
     expect(document.querySelector(".header")).toBeNull();
     expect(document.querySelector(".app")).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Sidebar" })).toBeNull();
-    expect(screen.queryByRole("searchbox")).toBeNull();
+    // The list's search box is the first thing in main.
+    expect(screen.getByRole("main").firstElementChild).toContainElement(
+      screen.getByRole("searchbox"),
+    );
+  });
+
+  it("search_is_the_stores_query_and_escape_clears_it", async () => {
+    const user = setup();
+    const search = screen.getByRole("searchbox");
+    expect(search).toHaveAttribute(
+      "placeholder",
+      "Jump to an agent, project, or workbox…",
+    );
+    expect(search.closest("label")).toHaveTextContent("⌘F");
+    await user.type(search, "terraform");
+    expect(useAppStore.getState().query).toBe("terraform");
+    expect(search).toHaveValue("terraform");
+    await user.keyboard("{Escape}");
+    expect(useAppStore.getState().query).toBe("");
+    expect(search).not.toHaveFocus();
   });
 
   it("needs_you_section_lists_blocked_then_done", async () => {
@@ -479,13 +498,7 @@ describe("AllAgents", () => {
   });
 
   it("backspace_in_the_search_field_does_not_close_anything", async () => {
-    // The header's search box is the app's; any field outside the list stands in for it.
-    const user = setup(defaultState(), (home) => (
-      <>
-        <input type="search" aria-label="Search" />
-        {home}
-      </>
-    ));
+    const user = setup();
     useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
     await user.click(screen.getByRole("searchbox"));
     await user.keyboard("ab{Backspace}");
@@ -1072,8 +1085,9 @@ describe("Home states", () => {
       expect(dim).toHaveAttribute("data-dim", "true");
       expect(dim).toHaveTextContent("ssh: connection refused");
       expect(dim).not.toHaveTextContent("herdr machine reconnect");
+      // Under the search box, above everything else.
       const main = screen.getByRole("main");
-      expect(main.firstElementChild).toBe(
+      expect(main.children[1]).toBe(
         screen.getByRole("region", { name: "gpubox needs attention" }),
       );
     });

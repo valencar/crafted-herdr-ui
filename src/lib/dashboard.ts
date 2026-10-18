@@ -1,5 +1,6 @@
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { MachineView } from "./bindings/MachineView";
+import { formatStaleness } from "./format";
 import { bySinceThenKey, type Row } from "./grouping";
 
 export type StatusCounts = {
@@ -92,4 +93,23 @@ export function responseStats(
         : Math.round((durations[mid - 1] + durations[mid]) / 2);
   }
   return { medianMs, failed, calls: calls.length };
+}
+
+/** A workbox that is failing: its rows are the last good ones, so they show dimmed. */
+export function isFailing(m: MachineView | undefined): boolean {
+  return m?.health.kind === "attention" || m?.health.kind === "reconnecting";
+}
+
+/** "ssh failed · last updated 40s ago" for a failing workbox, else `null`. */
+export function failingNote(
+  m: MachineView | undefined,
+  nowMs: number,
+): string | null {
+  if (
+    !m ||
+    (m.health.kind !== "attention" && m.health.kind !== "reconnecting")
+  ) {
+    return null;
+  }
+  return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
 }

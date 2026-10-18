@@ -31,12 +31,12 @@ export function AppSidebar() {
       herdrVersion={state?.herdr_version ?? null}
       onJump={(id) => {
         showHome();
-        setView({ kind: "home" });
+        setView({ kind: "all" });
         scrollToId(id);
       }}
       onProject={(g) => {
         showHome();
-        setView({ kind: "home" });
+        setView({ kind: "all" });
         setGroupBy("project");
         scrollToId(`group-${g.key}`);
       }}

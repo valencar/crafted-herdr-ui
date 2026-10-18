@@ -62,4 +62,29 @@ describe("app.css", () => {
       expect(rule(selector)).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     }
   });
+
+  it("lays_the_dashboard_out_fluid_to_1180px_and_in_one_column_when_narrow", () => {
+    expect(rule(".dashboard")).toMatch(/max-width:\s*1180px/);
+    expect(rule(".dashboard")).toMatch(/margin:\s*0 auto/);
+    for (const selector of [".tiles", ".wb-cards"]) {
+      expect(rule(selector)).toMatch(/repeat\(auto-fit,\s*minmax\(/);
+    }
+    const narrow = rule(
+      ".dashboard.is-narrow .cards,\n.dashboard.is-narrow .tiles,\n.dashboard.is-narrow .wb-cards",
+    );
+    expect(narrow).toMatch(/grid-template-columns:\s*1fr\s*;/);
+  });
+
+  it("uses_only_token_colors_on_the_dashboard", () => {
+    for (const selector of [
+      ".tile",
+      ".wb-card",
+      ".status-bar",
+      '.status-bar-seg[data-status="blocked"]',
+      ".dash-list",
+      ".palette-launch",
+    ]) {
+      expect(rule(selector)).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    }
+  });
 });

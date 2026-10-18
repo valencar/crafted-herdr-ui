@@ -13,7 +13,11 @@ export type SheetPrefill = { machineId?: string; folder?: string };
 /** A just-created pane to open in the terminal once the state lists it. */
 export type PendingOpen = { key: string; machineId: string; paneId: string };
 export type ToastTone = "info" | "error";
-export type View = { kind: "home" } | { kind: "workbox"; machineId: string };
+/** What the Home tab shows: the Dashboard, the All agents list, or one workbox's screen. */
+export type View =
+  | { kind: "dashboard" }
+  | { kind: "all" }
+  | { kind: "workbox"; machineId: string };
 
 const TOAST_MS = 8000;
 const PENDING_MS = 10_000;
@@ -62,7 +66,7 @@ type AppStore = {
   preview: PreviewFrame | null;
   setState: (state: AppState) => void;
   setSettings: (settings: Settings) => void;
-  /** A notification was clicked: show Home with that row selected. */
+  /** A notification was clicked: show All agents with that row selected. */
   focusRow: (key: string) => void;
   select: (key: string | null) => void;
   setGroupBy: (groupBy: GroupBy) => void;
@@ -125,7 +129,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   query: "",
   sheet: null,
   sheetPrefill: null,
-  view: { kind: "home" },
+  view: { kind: "dashboard" },
   activityOpen: false,
   paletteOpen: false,
   dismissedVersion: null,
@@ -137,7 +141,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   pendingOpen: null,
   setState: (state) => set({ state }),
   setSettings: (settings) => set({ settings }),
-  focusRow: (selectedKey) => set({ selectedKey, view: { kind: "home" } }),
+  focusRow: (selectedKey) => set({ selectedKey, view: { kind: "all" } }),
   select: (selectedKey) => set({ selectedKey }),
   setGroupBy: (groupBy) => set({ groupBy }),
   setQuery: (query) => set({ query }),

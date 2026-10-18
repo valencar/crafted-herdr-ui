@@ -227,10 +227,10 @@ describe("CommandPalette", () => {
     expect(option).toBeDefined();
     await user.click(option as HTMLElement);
     expect(useAppStore.getState().groupBy).toBe("project");
-    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
     await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalled());
     target.remove();
-    useAppStore.setState({ groupBy: "project", view: { kind: "home" } });
+    useAppStore.setState({ groupBy: "project", view: { kind: "all" } });
   });
 
   it("says_so_when_nothing_matches", async () => {

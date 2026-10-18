@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
-import { EmptyState } from "../components/EmptyState";
-import { LocalDownCard } from "../components/HomeNotices";
+import { MachineNotices, NoAgentsYet } from "../components/HomeNotices";
 import { Inspector } from "../components/Inspector";
 import { NeedsYouCard } from "../components/NeedsYouCard";
 import { ProjectGroup } from "../components/ProjectGroup";
-import { ReconnectBox } from "../components/ReconnectBox";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { formatStaleness, isPending, lastLines, plural } from "../lib/format";
+import { failingNote, isFailing } from "../lib/dashboard";
+import { lastLines, plural } from "../lib/format";
 import {
   groupByProject,
   groupByStatus,
@@ -62,8 +61,8 @@ export function AllAgents() {
   const groupBy = useAppStore((s) => s.groupBy);
   const query = useAppStore((s) => s.query);
   const select = useAppStore((s) => s.select);
+  const setQuery = useAppStore((s) => s.setQuery);
   const setGroupBy = useAppStore((s) => s.setGroupBy);
-  const setSheet = useAppStore((s) => s.setSheet);
   const openNewSession = useAppStore((s) => s.openNewSession);
   // Only the selected row's text: another row's frame must not re-render Home.
   const previewText = useAppStore((s) =>
@@ -136,81 +135,38 @@ export function AllAgents() {
   const closingRow = rows.find((r) => r.key === closingKey) ?? null;
   const terminalName = terminalLabel(terminal);
 
-  const dimmed = (machineId: string) => {
-    const kind = machines.get(machineId)?.health.kind;
-    return kind === "attention" || kind === "reconnecting";
-  };
-  const noteFor = (machineId: string): string | null => {
-    const m = machines.get(machineId);
-    if (
-      !m ||
-      (m.health.kind !== "attention" && m.health.kind !== "reconnecting")
-    ) {
-      return null;
-    }
-    return `${m.health.error} · ${formatStaleness(m.last_ok_ms, nowMs)}`;
-  };
+  const dimmed = (machineId: string) => isFailing(machines.get(machineId));
+  const noteFor = (machineId: string) =>
+    failingNote(machines.get(machineId), nowMs);
 
   useHomeShortcuts({ navRows, actionRow, onClose: setClosingKey });
 
   const needsMachines = new Set(needs.map((r) => r.machineId)).size;
   const hasAnyRows = rows.length > 0;
-  const allMachines = state?.machines ?? [];
-  const onlyLocal = allMachines.every((m) => m.is_local);
-  // Local never gets the reconnect card below, so a herdr that isn't answering would be
-  // invisible. Say so, with the one thing to do.
-  const localDown = allMachines.find(
-    (m) =>
-      m.is_local &&
-      m.health.kind !== "online" &&
-      m.snapshot === null &&
-      !isPending(m.health),
-  );
-  const localError =
-    localDown &&
-    (localDown.health.kind === "attention" ||
-      localDown.health.kind === "reconnecting")
-      ? localDown.health.error.trim()
-      : "";
-  const attentionMachines = allMachines.filter(
-    (m) => !m.is_local && m.health.kind === "attention",
-  );
   return (
     <div className="screen">
       <main className="main">
-        {localDown && <LocalDownCard error={localError} />}
-        {/* Once per machine, rows or not: an unreachable box must never vanish from Home. */}
-        {attentionMachines.map((m) => (
-          <EmptyState key={m.id} title={`${m.label} needs attention`}>
-            <p>
-              {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
-              {formatStaleness(m.last_ok_ms, nowMs)}
-            </p>
-            <ReconnectBox machineId={m.id} />
-          </EmptyState>
-        ))}
+        <label className="search">
+          <span className="sr-only">Search</span>
+          <input
+            type="search"
+            value={query}
+            placeholder="Jump to an agent, project, or workbox…"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setQuery("");
+                e.currentTarget.blur();
+              }
+            }}
+          />
+          <kbd>⌘F</kbd>
+        </label>
+        <MachineNotices machines={state?.machines ?? []} nowMs={nowMs} />
         {state === null ? (
           <p className="empty">Connecting to herdr…</p>
         ) : !hasAnyRows ? (
-          <>
-            <EmptyState title="No agents yet">
-              <p>Start one with ⌘N.</p>
-            </EmptyState>
-            {onlyLocal && (
-              <EmptyState
-                title="Only this computer so far"
-                action={{
-                  label: "Add workbox",
-                  onClick: () => setSheet("add-workbox"),
-                }}
-              >
-                <p>
-                  Add a workbox to see the agents running on a machine you can
-                  reach over SSH.
-                </p>
-              </EmptyState>
-            )}
-          </>
+          <NoAgentsYet machines={state.machines} />
         ) : (
           <>
             <section

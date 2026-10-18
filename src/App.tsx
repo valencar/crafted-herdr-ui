@@ -17,6 +17,7 @@ import {
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
 import { AllAgents } from "./screens/AllAgents";
+import { Dashboard } from "./screens/Dashboard";
 import { NewSession } from "./screens/NewSession";
 import { Onboarding } from "./screens/Onboarding";
 import { Workbox } from "./screens/Workbox";
@@ -37,8 +38,6 @@ function App() {
   const paletteOpen = useAppStore((s) => s.paletteOpen);
   const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
   const herdrVersion = useAppStore((s) => s.state?.herdr_version ?? null);
-  const query = useAppStore((s) => s.query);
-  const setQuery = useAppStore((s) => s.setQuery);
   const compact = useAppStore((s) => s.settings?.row_density === "compact");
   const { current: terminal, installed } = useTerminals();
   // `null` is "herdr was not found"; before the first state there is nothing to say yet.
@@ -47,7 +46,7 @@ function App() {
   useStateSync();
   useSettingsSync();
 
-  // The saved grouping is where Home starts, and follows a change made in Settings.
+  // The saved grouping is where All agents starts, and follows a change made in Settings.
   useEffect(() => {
     if (groupBy) setGroupBy(groupBy);
   }, [groupBy, setGroupBy]);
@@ -121,11 +120,16 @@ function App() {
       <div className={`app${compact ? " density-compact" : ""}`}>
         <Header
           herdrVersion={herdrVersion}
-          query={query}
-          onQuery={setQuery}
           terminal={terminal}
           installed={installed}
-          onNewSession={() => openNewSession()}
+          // A Workbox screen's "+ New session" knows its machine already.
+          onNewSession={() =>
+            openNewSession(
+              view.kind === "workbox"
+                ? { machineId: view.machineId }
+                : undefined,
+            )
+          }
         />
         <VersionBanner />
         <div className="body">
@@ -135,8 +139,10 @@ function App() {
           <Workspace>
             {view.kind === "workbox" ? (
               <Workbox key={view.machineId} machineId={view.machineId} />
-            ) : (
+            ) : view.kind === "all" ? (
               <AllAgents />
+            ) : (
+              <Dashboard />
             )}
           </Workspace>
         </div>

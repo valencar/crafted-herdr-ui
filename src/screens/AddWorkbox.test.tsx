@@ -92,7 +92,7 @@ beforeEach(() => {
   useAppStore.setState({
     state: appState(LOCAL),
     sheet: "add-workbox",
-    view: { kind: "home" },
+    view: { kind: "all" },
     toast: null,
     toastTone: "error",
     dialogOpen: 0,

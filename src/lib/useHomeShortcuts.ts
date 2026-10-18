@@ -13,6 +13,8 @@ type Options = {
   actionRow: Row | null;
   /** Delete or Backspace on the selected row. */
   onClose: (key: string) => void;
+  /** Off for a second screen that is up beside the one handling the keys. Defaults to on. */
+  enabled?: boolean;
 };
 
 /**
@@ -24,6 +26,7 @@ export function useHomeShortcuts({
   navRows,
   actionRow,
   onClose,
+  enabled = true,
 }: Options): void {
   // A sheet is open: the shortcuts stand down.
   const sheet = useAppStore((s) => s.sheet);
@@ -33,6 +36,7 @@ export function useHomeShortcuts({
   const report = useAppStore((s) => s.reportError);
 
   useEffect(() => {
+    if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (sheet || useAppStore.getState().dialogOpen > 0) return;
       // Keys typed in a terminal stay there, and so do those a menu (the All tabs menu, the
@@ -79,6 +83,7 @@ export function useHomeShortcuts({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
+    enabled,
     sheet,
     actionRow,
     selectedKey,

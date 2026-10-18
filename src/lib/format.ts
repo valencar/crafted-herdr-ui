@@ -35,6 +35,11 @@ export function formatAge(
   return `${Math.floor(diff / DAY)}d`;
 }
 
+/** "2m ago", or "just now" for an age that `formatAge` calls "now". */
+export function agoText(age: string): string {
+  return age === "now" ? "just now" : `${age} ago`;
+}
+
 /**
  * "last updated 40s ago". Only for a machine that is not online: `last_ok_ms` is fresh
  * whenever it is.

@@ -45,7 +45,9 @@ export function Workspace({ children }: { children: ReactNode }) {
     view.kind === "workbox"
       ? (state?.machines.find((m) => m.id === view.machineId)?.label ??
         view.machineId)
-      : "Home";
+      : view.kind === "all"
+        ? "All agents"
+        : "Dashboard";
 
   // ---- find ----
   const handles = useRef(new Map<string, TerminalHandle>());

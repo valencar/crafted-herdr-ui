@@ -128,7 +128,7 @@ beforeEach(() => {
   useAppStore.setState({
     state: appState(),
     settings: SETTINGS,
-    view: { kind: "home" },
+    view: { kind: "all" },
     toast: null,
   });
   reset();
@@ -234,7 +234,12 @@ describe("Workspace", () => {
     render(<Workspace>{home}</Workspace>);
     const strip = screen.getByRole("navigation", { name: "Tabs" });
     expect(within(strip).getAllByRole("button")[0]).toHaveAccessibleName(
-      "Home",
+      "All agents",
+    );
+
+    act(() => useAppStore.setState({ view: { kind: "dashboard" } }));
+    expect(within(strip).getAllByRole("button")[0]).toHaveAccessibleName(
+      "Dashboard",
     );
 
     act(() =>

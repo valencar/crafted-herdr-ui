@@ -3,6 +3,8 @@ import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { MachineView } from "./bindings/MachineView";
 import {
   RESPONSE_WINDOW_MS,
+  failingNote,
+  isFailing,
   oldestBlocked,
   onlineSummary,
   responseStats,
@@ -201,5 +203,32 @@ describe("responseStats", () => {
       failed: 0,
       calls: 0,
     });
+  });
+});
+
+describe("failing workboxes", () => {
+  const NOW = 1_000_000;
+  it("only_attention_and_reconnecting_are_failing", () => {
+    expect(isFailing(undefined)).toBe(false);
+    expect(isFailing(machine("a", { kind: "online" }))).toBe(false);
+    expect(isFailing(machine("a", { kind: "disabled" }))).toBe(false);
+    expect(isFailing(machine("a", { kind: "attention", error: "x" }))).toBe(
+      true,
+    );
+    expect(
+      isFailing(
+        machine("a", { kind: "reconnecting", retry_in_ms: 1, error: "x" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("the_note_gives_the_error_and_the_staleness", () => {
+    const m = {
+      ...machine("a", { kind: "attention", error: "ssh failed" }),
+      last_ok_ms: NOW - 40_000,
+    };
+    expect(failingNote(m, NOW)).toBe("ssh failed · last updated 40s ago");
+    expect(failingNote(machine("a", { kind: "online" }), NOW)).toBeNull();
+    expect(failingNote(undefined, NOW)).toBeNull();
   });
 });
