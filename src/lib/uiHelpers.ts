@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
-import { useAppStore } from "../store/appStore";
+import { useAppStore, type View } from "../store/appStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import type { Settings } from "./bindings/Settings";
 import type { TerminalId } from "./bindings/TerminalId";
 import type { TerminalList } from "./bindings/TerminalList";
@@ -51,6 +52,21 @@ export function useTerminals(): Terminals {
 /** "Ghostty", or a generic name until the terminal is known. */
 export function terminalName(terminal: TerminalId | null): string {
   return terminal ? TERMINAL_LABEL[terminal] : "terminal";
+}
+
+/** Brings the Home tab forward (it may be hidden behind a terminal tab). */
+export function showHome(): void {
+  useTerminalStore.getState().activate(HOME);
+}
+
+/**
+ * Changes what the Home tab shows and makes sure it is showing: a view change from anywhere but
+ * Home (the sidebar, the palette, the Dashboard column beside a terminal) would otherwise do
+ * nothing visible under a terminal tab. ⌘J and a notification click decide this themselves.
+ */
+export function showHomeView(view: View): void {
+  showHome();
+  useAppStore.getState().setView(view);
 }
 
 /** Scrolls to an element after the next render (the screen may just have changed). */

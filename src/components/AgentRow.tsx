@@ -1,8 +1,8 @@
 import { memo } from "react";
 import { formatAge } from "../lib/format";
 import type { Row } from "../lib/grouping";
-import { useAppStore } from "../store/appStore";
 import { KindBadge } from "./KindBadge";
+import { OpenButton } from "./OpenButton";
 import { StatusPill } from "./StatusPill";
 
 type Props = {
@@ -16,7 +16,6 @@ type Props = {
   nowMs: number;
   terminalName: string;
   onSelect: (key: string) => void;
-  onOpen: (row: Row) => void;
 };
 
 export const AgentRow = memo(function AgentRow({
@@ -28,11 +27,7 @@ export const AgentRow = memo(function AgentRow({
   nowMs,
   terminalName,
   onSelect,
-  onOpen,
 }: Props) {
-  const inApp = useAppStore(
-    (s) => (s.settings?.open_target ?? "app") === "app",
-  );
   const title = row.title || row.name;
   const age = formatAge(row.sinceMs, nowMs);
   return (
@@ -60,18 +55,7 @@ export const AgentRow = memo(function AgentRow({
         <span className="mono row-pane">{row.paneId}</span>
         <span className="row-age">{age}</span>
       </button>
-      <button
-        type="button"
-        className="btn btn-small"
-        aria-label={
-          inApp
-            ? `Open ${row.name} here`
-            : `Open ${row.name} in ${terminalName}`
-        }
-        onClick={() => onOpen(row)}
-      >
-        Open ↗
-      </button>
+      <OpenButton row={row} terminalName={terminalName} size="small" />
     </li>
   );
 });

@@ -15,7 +15,7 @@ import type { SetupPrompt } from "../lib/bindings/SetupPrompt";
 import type { SetupStep } from "../lib/bindings/SetupStep";
 import { actionErrorMessage } from "../lib/format";
 import { invokeTyped, onMachineSetup, toActionError } from "../lib/ipc";
-import { terminalName, useTerminals } from "../lib/uiHelpers";
+import { showHomeView, terminalName, useTerminals } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 
 const POLL_MS = 2000;
@@ -68,7 +68,6 @@ type Waiting = Run & { via: "terminal" | "app" };
 export function AddWorkbox() {
   const state = useAppStore((s) => s.state);
   const setSheet = useAppStore((s) => s.setSheet);
-  const setView = useAppStore((s) => s.setView);
   const showToast = useAppStore((s) => s.showToast);
   const { current: terminal } = useTerminals();
   const terminalLabel = terminalName(terminal);
@@ -189,8 +188,8 @@ export function AddWorkbox() {
     if (!added) return;
     setSheet(null);
     showToast(`Added ${waiting.name}`, "info");
-    setView({ kind: "workbox", machineId: added.id });
-  }, [waiting, machines, setSheet, setView, showToast]);
+    showHomeView({ kind: "workbox", machineId: added.id });
+  }, [waiting, machines, setSheet, showToast]);
 
   const running = run !== null;
   const waitingNow = waiting !== null;

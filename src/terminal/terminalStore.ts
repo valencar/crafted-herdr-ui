@@ -15,46 +15,64 @@ export type TermTab = {
   termId: number | null;
 };
 
+/** The key of the pinned Home tab; every other key is a terminal tab's `tabKey`. */
+export const HOME = "home";
+
 type NewTab = Pick<TermTab, "tabKey" | "target" | "title" | "machineLabel">;
 
 type TerminalStore = {
   tabs: TermTab[];
-  activeKey: string | null;
-  panelOpen: boolean;
-  /** Focuses the tab with that key if there is one; else appends it. Opens the panel. */
+  /** `HOME` or the `tabKey` of the active terminal tab. */
+  activeKey: string;
+  /** The terminal tab that was active last (⌃` goes back to it); `null` when it is gone. */
+  lastTermKey: string | null;
+  /** The workbox ids whose tab group is folded. Lives only while the app runs. */
+  folded: Record<string, true>;
+  /** Focuses the tab with that key if there is one, else appends it; either way it becomes active. */
   openTab: (t: NewTab) => void;
   updateTab: (tabKey: string, patch: Partial<TermTab>) => void;
-  /** Activates the right neighbour, else the left; closes the panel when none is left. */
+  /** Removes the tab; when it was the active one, Home takes over. */
   closeTab: (tabKey: string) => void;
-  activate: (tabKey: string) => void;
-  /** 0-based; out of range does nothing. */
-  activateIndex: (i: number) => void;
-  /** Wraps around. */
-  cycle: (dir: 1 | -1) => void;
-  setPanelOpen: (open: boolean) => void;
-  togglePanel: () => void;
+  /** Home always; a terminal tab only if it exists. Showing a tab unfolds its group. */
+  activate: (key: string) => void;
+  /** Moves from the active key along `order` (Home first, then the tabs as the strip shows them), wrapping. */
+  cycle: (dir: 1 | -1, order: string[]) => void;
+  /** On Home: back to the last terminal tab, if it is still there. On a tab: Home. */
+  toggleHome: () => void;
+  toggleFold: (machineId: string) => void;
 };
+
+/** `folded` without one machine. */
+function unfold(
+  folded: Record<string, true>,
+  machineId: string,
+): Record<string, true> {
+  if (!(machineId in folded)) return folded;
+  const rest = { ...folded };
+  delete rest[machineId];
+  return rest;
+}
 
 export const useTerminalStore = create<TerminalStore>()((set, get) => ({
   tabs: [],
-  activeKey: null,
-  panelOpen: false,
+  activeKey: HOME,
+  lastTermKey: null,
+  folded: {},
   openTab: (t) =>
     set((s) => {
-      if (s.tabs.some((x) => x.tabKey === t.tabKey)) {
-        return { activeKey: t.tabKey, panelOpen: true };
-      }
+      const shown = {
+        activeKey: t.tabKey,
+        lastTermKey: t.tabKey,
+        folded: unfold(s.folded, t.target.machineId),
+      };
+      if (s.tabs.some((x) => x.tabKey === t.tabKey)) return shown;
       const tab: TermTab = {
         ...t,
         state: "opening",
         error: null,
         termId: null,
       };
-      return {
-        tabs: [...s.tabs, tab],
-        activeKey: t.tabKey,
-        panelOpen: true,
-      };
+      return { ...shown, tabs: [...s.tabs, tab] };
     }),
   updateTab: (tabKey, patch) =>
     set((s) => ({
@@ -62,32 +80,41 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
     })),
   closeTab: (tabKey) =>
     set((s) => {
-      const i = s.tabs.findIndex((t) => t.tabKey === tabKey);
-      if (i < 0) return {};
-      const tabs = s.tabs.filter((t) => t.tabKey !== tabKey);
-      if (tabs.length === 0) {
-        return { tabs, activeKey: null, panelOpen: false };
-      }
-      if (s.activeKey !== tabKey) return { tabs };
-      return { tabs, activeKey: (tabs[i] ?? tabs[i - 1]).tabKey };
+      if (!s.tabs.some((t) => t.tabKey === tabKey)) return {};
+      return {
+        tabs: s.tabs.filter((t) => t.tabKey !== tabKey),
+        activeKey: s.activeKey === tabKey ? HOME : s.activeKey,
+        lastTermKey: s.lastTermKey === tabKey ? null : s.lastTermKey,
+      };
     }),
-  activate: (tabKey) => {
-    if (get().tabs.some((t) => t.tabKey === tabKey)) {
-      set({ activeKey: tabKey });
-    }
-  },
-  activateIndex: (i) => {
-    const tab = get().tabs[i];
-    if (tab) set({ activeKey: tab.tabKey });
-  },
-  cycle: (dir) =>
+  activate: (key) =>
     set((s) => {
-      if (s.tabs.length === 0) return {};
-      const at = s.tabs.findIndex((t) => t.tabKey === s.activeKey);
-      const n = s.tabs.length;
-      const next = at < 0 ? (dir === 1 ? 0 : n - 1) : (at + dir + n) % n;
-      return { activeKey: s.tabs[next].tabKey };
+      if (key === HOME) return { activeKey: HOME };
+      const tab = s.tabs.find((t) => t.tabKey === key);
+      if (!tab) return {};
+      return {
+        activeKey: key,
+        lastTermKey: key,
+        folded: unfold(s.folded, tab.target.machineId),
+      };
     }),
-  setPanelOpen: (panelOpen) => set({ panelOpen }),
-  togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
+  cycle: (dir, order) => {
+    if (order.length === 0) return;
+    const at = order.indexOf(get().activeKey);
+    const n = order.length;
+    const next = at < 0 ? (dir === 1 ? 0 : n - 1) : (at + dir + n) % n;
+    get().activate(order[next]);
+  },
+  toggleHome: () => {
+    const { activeKey, lastTermKey, activate } = get();
+    if (activeKey !== HOME) activate(HOME);
+    else if (lastTermKey !== null) activate(lastTermKey);
+  },
+  toggleFold: (machineId) =>
+    set((s) => ({
+      folded:
+        machineId in s.folded
+          ? unfold(s.folded, machineId)
+          : { ...s.folded, [machineId]: true },
+    })),
 }));

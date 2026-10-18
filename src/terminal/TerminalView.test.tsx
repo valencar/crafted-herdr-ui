@@ -109,7 +109,7 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
 }));
 import { invokeTyped, openTerm } from "../lib/ipc";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
-import { useTerminalStore } from "./terminalStore";
+import { HOME, useTerminalStore } from "./terminalStore";
 import { xtermTheme } from "./xtermTheme";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
@@ -161,7 +161,12 @@ beforeEach(() => {
     return next++;
   });
   useAppStore.setState({ toast: null });
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
   useTerminalStore.getState().openTab({
     tabKey: KEY,
     target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },

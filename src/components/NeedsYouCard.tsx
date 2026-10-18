@@ -1,8 +1,7 @@
 import { memo } from "react";
 import { formatAge, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
-import type { OpenHow } from "../lib/openRow";
-import { useAppStore } from "../store/appStore";
+import { OpenButton } from "./OpenButton";
 import { StatusPill } from "./StatusPill";
 
 type Props = {
@@ -17,8 +16,6 @@ type Props = {
   /** The last few lines of the live preview; only the selected card has any. */
   previewLines: readonly string[];
   onSelect: (key: string) => void;
-  /** Without `how`, the row opens the way the "Open sessions" setting says. */
-  onOpen: (row: Row, how?: OpenHow) => void;
   onMarkSeen: (row: Row) => void;
 };
 
@@ -32,14 +29,9 @@ export const NeedsYouCard = memo(function NeedsYouCard({
   terminalName,
   previewLines,
   onSelect,
-  onOpen,
   onMarkSeen,
 }: Props) {
   const age = formatAge(row.sinceMs, nowMs);
-  const openTarget = useAppStore((s) => s.settings?.open_target ?? "app");
-  const otherTarget = openTarget === "app" ? "external" : "app";
-  const openLabel = (how: OpenHow) =>
-    how === "app" ? "Open here" : `Open in ${terminalName}`;
   const since = row.status === "blocked" ? "blocked" : "finished";
   return (
     <article
@@ -65,21 +57,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
         </pre>
       )}
       <div className="card-actions">
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => onOpen(row, openTarget)}
-        >
-          {openLabel(openTarget)}
-          {openTarget === "external" ? " ↗" : ""}
-        </button>
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() => onOpen(row, otherTarget)}
-        >
-          {openLabel(otherTarget)}
-        </button>
+        <OpenButton row={row} terminalName={terminalName} tone="needs" />
         {row.status === "done" ? (
           <button type="button" className="btn" onClick={() => onMarkSeen(row)}>
             Mark seen

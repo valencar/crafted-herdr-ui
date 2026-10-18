@@ -12,11 +12,12 @@ Screenshots coming soon.
 
 ## Features
 
-- **Needs you first.** Blocked and done agents sit at the top of Home, ahead of everything else.
-- **Group by project, workbox or status.** Switch views instantly; the sidebar jumps to any group.
-- **Terminal inside the app.** One click (or ⌘↩) attaches the pane in a tab at the bottom or right of the window, with several tabs open at once. If you would rather use another terminal, "Open in {Terminal}" attaches it in Ghostty, iTerm2, Terminal, Warp, WezTerm, Kitty, Alacritty, or a command of your own.
+- **A Dashboard home.** Who needs you, a few live numbers and the state of each workbox, on one screen. Blocked and done agents sit at the top, ahead of everything else.
+- **Tabbed workspace.** The Home tab (Dashboard, All agents or a Workbox screen) comes first; terminal tabs follow it, grouped by workbox. A terminal takes the whole middle of the window.
+- **One Open button.** "Open" attaches the pane in a terminal tab, or in your own terminal app, by your Settings choice; its menu offers the other ways and copies the attach command. If you would rather use another terminal, "Open in {Terminal}" attaches it in Ghostty, iTerm2, Terminal, Warp, WezTerm, Kitty, Alacritty, or a command of your own.
+- **Group by project, workbox or status.** In All agents, switch views instantly; the sidebar jumps to any group.
 - **Command palette and fast navigation.** ⌘K finds agents, projects, workboxes and commands; ⌘J jumps to the next agent that needs you.
-- **Split view and a native menu.** ⌘\ moves the terminal panel between the bottom and the right edge. The macOS menu bar carries every shortcut, and they work while a terminal has the keyboard.
+- **Dashboard beside the terminal and a native menu.** ⌘\ shows the Dashboard in a column next to the active terminal. The macOS menu bar carries every shortcut, and they work while a terminal has the keyboard.
 - **Live preview and reply.** The inspector follows a pane's recent output and lets you answer an idle agent. A blocked agent is never answered for you.
 - **New session.** Start a shell or an agent in a new tab, a split, a new workspace or a worktree, with the exact commands shown before you run them.
 - **Workbox management.** Check, reconnect, rename, enable, disable and remove workboxes. Add one through a guided sheet around `herdr machine add`.
@@ -69,18 +70,43 @@ Crafted Herdr talks to herdr only through its public CLI. It has no private prot
 
 The commands are visible in the **Activity drawer** (⌘⇧A): the calls the app runs itself, and the ones it opens in a tab of its own window (marked "opened in Crafted Herdr") or in your terminal (marked "opened in …", since the app can't see how they end). The version and help probes (`herdr --version`, `herdr agent start --help`) are not logged. The app never installs herdr, stops or replaces a server, answers a blocked agent, or passes `--takeover` or `--trust-repository` without an explicit click from you.
 
+## Workspace and Dashboard
+
+The middle of the window is a tab strip with the active tab under it, at full size.
+
+- **Home tab.** It is first, always there and never closable (⌘W does nothing on it). It shows the Dashboard by default, All agents (the searchable list with its Inspector and grouping) or a Workbox screen, and is named after what it shows. ⌘1, the sidebar's Dashboard item and the palette's "Go to Dashboard" bring it back.
+- **Terminal tabs.** Each is an attach client. They sit after Home, grouped by workbox (a label with the workbox's health dot) in the sidebar's workbox order, and keep the order they were opened in inside a group. Click a group label to fold it into one chip ("{workbox} · N tabs", plus "N needs input" when one does); selecting a tab in a folded group, from the sidebar, the palette, ⌘J or a notification, unfolds it. Folding is not saved. When the tabs don't fit, the strip scrolls and an **All tabs** menu lists every tab by workbox with its status.
+- **Switching keeps the terminal.** Moving to Home and back never loses scrollback or detaches anything. Closing the active terminal tab returns to Home.
+- **Context bar.** Above the active terminal: the agent, its status, kind, folder and workbox, then Find (⌘F), **Open in {Terminal}**, **Detach** (the same as ⌘W) and **Close pane…** (with its confirmation). A full herdr UI tab shows only Find and Detach.
+- **Sidebar.** Dashboard (⌘1), Needs you and All agents with counts, then each workbox with its health, its agent count and its open terminals nested under it, then the first three projects ("{n} more" shows the rest). ⌘B collapses it to a rail.
+
+The **Dashboard** reads top to bottom:
+
+- **Needs you.** Cards for agents waiting on you, blocked first, then oldest, each with its status and age and an Open button. A list of finished, not looked at yet agents follows. With nobody waiting it says "Nobody needs you right now." Cards show no terminal preview; click one (or Reply…) to open All agents on that row, where the preview and reply live.
+- **Right now.** Five tiles: Agents (a bar by status, with its text legend), Blocked the longest, Workboxes online, herdr response (the median time of herdr calls over the last 5 minutes, and how many failed) and Terminal tabs ("{n} of 16", by workbox).
+- **Workboxes.** A card per workbox with its health in words, a status bar, "Last updated 2s ago", its open tabs, and **Open herdr** (online) or **Retry now** (reconnecting or needing attention). A workbox that isn't online shows its last data dimmed, marked "as of {age} ago".
+- **Working now.** Working agents, longest-running first, each with an Open button, and a link to All agents.
+
+The Dashboard makes no herdr calls of its own. It reads the app's state and, only while it is visible, the in-memory command log once every 5 seconds for the response tile.
+
+**⌘\** shows the Dashboard in a resizable column (360 to 1200 px, remembered) on the right of the active terminal, in a single-column layout. Press it again to hide the column. On the Home tab it does nothing.
+
+### The Open button
+
+One split button opens an agent everywhere: needs-you cards, the Dashboard's lists, the Inspector and the Workbox screen. **Open** follows Settings › Open sessions in (a tab here, or your terminal app). Its chevron menu has **Open here**, **Open in {Terminal}**, **Open full herdr UI** (that workbox's whole herdr) and **Copy attach command**, which copies the attach command that "Open in {Terminal}" would run. When the row is already open in a terminal tab the button reads **Go to tab** (with its ⌘ number when it has one).
+
 ## Terminal inside the app
 
 "Open" attaches the pane in a terminal tab inside the window. The tab runs the same command "Open in {Terminal}" runs: `herdr terminal attach <terminal_id>` for a local pane, `ssh -t <target> …` for a remote one, or the full herdr UI when Settings › Terminal › "Attach as" is "Full herdr UI on that workbox". The app only ever runs the command it builds itself; nothing you type is turned into a command.
 
-- **Panel and tabs.** The panel sits at the bottom of the window or on its right (⌘\ switches). Drag its edge to resize it, and show or hide it with ⌃`. Each tab shows the agent's name, the workbox and the live status with its text label, and a tab whose agent needs you is highlighted. Tabs stay open when you move between Home and a Workbox screen. Opening a pane that already has a tab focuses that tab. At most 16 tabs can be open at once.
-- **Closing only detaches.** Closing a tab (⌘W), quitting the app or a crash ends the attach client and nothing else: your herdr pane and agent keep running. "Close pane" is a separate action and always asks first. When an attach ends by itself (herdr's detach key, an SSH drop, another client taking the session), the tab stays open as "Detached", with **Reattach** (Enter) and **Close tab** (⌘W).
+- **Tabs.** Each tab shows the agent's name and a status dot, plus a word chip ("Needs input", "Done, unseen") when the agent needs you or finished unseen; other states keep the status word in the tooltip. Tabs stay open when you move between the Home tab's screens. ⌃` switches between Home and the last terminal tab. Opening a pane that already has a tab focuses that tab. At most 16 tabs can be open at once.
+- **Closing only detaches.** Closing a tab (× or ⌘W), choosing Detach, quitting the app or a crash ends the attach client and nothing else: your herdr pane and agent keep running. "Close pane" is a separate action and always asks first. When an attach ends by itself (herdr's detach key, an SSH drop, another client taking the session), the tab stays open as "Detached", with **Reattach** (Enter) and **Close tab** (⌘W). Closing the active tab returns you to the Home tab.
 - **Tabs are not restored at launch.** The app never reattaches by itself, so it never takes a session over without you.
 - **Takeover prompts and "herdr not found"** appear inside the tab, and you answer them there.
-- **Typing belongs to the terminal.** Keys typed in the panel (Backspace, arrows, ⌃C and the rest) never trigger Home's list shortcuts. Menu shortcuts still work. ⌘C and ⌘V copy and paste. ⌘F finds in the active tab, and ⌘+, ⌘− and ⌘0 change the font size (saved).
+- **Typing belongs to the terminal.** Keys typed in the terminal (Backspace, arrows, ⌃C and the rest) never trigger the list shortcuts of All agents. Menu shortcuts still work. ⌘C and ⌘V copy and paste. ⌘F finds in the active terminal, and ⌘+, ⌘− and ⌘0 change the font size (saved).
 - **Links are copy-only.** ⌘-click on a URL copies it and shows "Link copied". The app opens no web link other than https://herdr.dev.
-- **Open in still available.** Settings › Terminal › "Open sessions" (In Crafted Herdr, or in your terminal app) chooses what "Open" does everywhere (rows, needs-you cards, the Inspector, ⌘↩, the palette, notifications and the menu-bar popover): open here, or in your terminal app. The Inspector and the needs-you cards always offer the other choice as a second button, and ⌘↩ in the palette opens the other way.
-- **Layout settings.** Window size and position, panel placement and size, terminal font size, the collapsed sidebar and row density (comfortable or compact, in Settings › Appearance) are remembered.
+- **Open in still available.** Settings › Terminal › "Open sessions" (In Crafted Herdr, or in your terminal app) chooses what "Open" does everywhere (rows, needs-you cards, the Inspector, ⌘↩, the palette, notifications and the menu-bar popover): open here, or in your terminal app. The Open button's menu always offers the other choice, and ⌘↩ in the palette opens the other way.
+- **Layout settings.** Window size and position, whether the Dashboard column is shown and its width, terminal font size, the collapsed sidebar and row density (comfortable or compact, in Settings › Appearance) are remembered.
 
 ## Terminal support
 
@@ -105,29 +131,30 @@ The native menu bar owns these, so they work while a terminal has the keyboard, 
 
 | Shortcut | Menu | Action |
 |---|---|---|
-| ⌘K | View | Command palette |
-| ⌃` | View | Show or hide the terminal panel |
-| ⌘\ | View | Move the terminal panel between the bottom and the right |
+| ⌘K | View | Command palette (also "Go to Dashboard", "All agents" and "Dashboard beside terminal") |
+| ⌘1 | View | Dashboard (the Home tab) |
+| ⌃` | View | Switch between Home and the last terminal tab |
+| ⌘\ | View | Show the Dashboard beside the terminal (does nothing on Home) |
 | ⌘B | View | Collapse or expand the sidebar |
 | ⌘J | View | Open the next agent that needs you |
-| ⌘F | View | Find: searches the active terminal tab when the terminal has focus, otherwise focuses Home's search |
+| ⌘F | View | Find in the terminal, or search All agents (on Home it opens All agents and focuses its search) |
 | ⌘= / ⌘− / ⌘0 | View | Bigger, smaller, reset terminal font |
 | ⇧⌘A | View | Activity drawer |
-| ⌘W | Terminal | Close (detach) the active tab |
-| ⌃Tab / ⌃⇧Tab | Terminal | Next / previous tab |
-| ⌘1 … ⌘9 | Terminal | Go to tab 1 … 9 |
+| ⌘W | Terminal | Close (detach) the active terminal tab (nothing on Home) |
+| ⌃Tab / ⌃⇧Tab | Terminal | Next / previous tab, Home included |
+| ⌘2 … ⌘9 | Terminal | Go to terminal tab 1 … 8, in strip order |
 | ⌘, | Crafted Herdr | Settings |
 
-Edit has the usual Undo, Redo, Cut, Copy, Paste and Select All. Crafted Herdr has About, Hide, Hide Others, Show All and Quit (⌘H, ⌥⌘H, ⌘Q), and Window has Minimize and Bring All to Front (⌘M for Minimize). There is no Close Window item, so ⌘W with no tab open does nothing; the red button still hides the window.
+Edit has the usual Undo, Redo, Cut, Copy, Paste and Select All. Crafted Herdr has About, Hide, Hide Others, Show All and Quit (⌘H, ⌥⌘H, ⌘Q), and Window has Minimize and Bring All to Front (⌘M for Minimize). There is no Close Window item, so ⌘W on Home does nothing; the red button still hides the window.
 
-These work on Home when the focus is not in a terminal:
+These work on the Home tab when the focus is not in a terminal. ⌘N and ⌘R work on the Dashboard too; the rest act only while Home shows All agents:
 
 | Shortcut | Action |
 |---|---|
 | ⌘N | New session |
-| ⌘↩ | Open the selected row (here or in your terminal, by your Settings choice) |
+| ⌘↩ | Open the selected row in All agents (here or in your terminal, by your Settings choice) |
 | ⌘R | Refresh |
-| ⌫ | Close the selected session (asks first) |
+| ⌫ | Close the selected session in All agents (asks first) |
 
 One shortcut is global rather than in a menu: ⌃⌥⌘H shows or hides the app from anywhere (it can be turned off in Settings).
 

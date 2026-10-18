@@ -7,7 +7,7 @@ vi.mock("./ipc", async (importOriginal) => ({
   invokeTyped: vi.fn(),
 }));
 import { invokeTyped } from "./ipc";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import type { Settings } from "./bindings/Settings";
 import { markSeen, openRow, openFull } from "./openRow";
 
@@ -37,7 +37,12 @@ function openSessionsIn(open_target: "app" | "external") {
 beforeEach(() => {
   invoke.mockReset().mockResolvedValue(null);
   useAppStore.setState({ toast: null });
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
   openSessionsIn("external");
 });
 
@@ -57,7 +62,6 @@ describe("openRow", () => {
       },
     ]);
     expect(store.activeKey).toBe("buildbox::w1:p1");
-    expect(store.panelOpen).toBe(true);
     expect(invoke.mock.calls).toEqual([["mark_seen", target]]);
   });
 
@@ -81,7 +85,12 @@ describe("openRow", () => {
     expect(useTerminalStore.getState().tabs).toHaveLength(1);
     expect(invoke).not.toHaveBeenCalled();
 
-    useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+    useTerminalStore.setState({
+      tabs: [],
+      activeKey: HOME,
+      lastTermKey: null,
+      folded: {},
+    });
     openSessionsIn("app");
     await openRow(row("blocked"), "external");
     expect(invoke.mock.calls).toEqual([["open_session", target]]);

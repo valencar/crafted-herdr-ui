@@ -4,7 +4,12 @@ import { toRows } from "../lib/grouping";
 import { runMenuAction } from "../lib/menuActions";
 import { openRow } from "../lib/openRow";
 import { buildItems, rankItems, type PaletteItem } from "../lib/palette";
-import { focusSearch, openSettings, scrollToId } from "../lib/uiHelpers";
+import {
+  focusSearch,
+  openSettings,
+  scrollToId,
+  showHomeView,
+} from "../lib/uiHelpers";
 import { useAppStore, useModalOpen } from "../store/appStore";
 
 /** Scrolls the active option into view as the arrow keys move. */
@@ -73,8 +78,18 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         },
         {
           id: "toggle-split",
-          label: "Toggle split",
+          label: "Dashboard beside terminal",
           run: () => runMenuAction("toggle-split"),
+        },
+        {
+          id: "go-to-dashboard",
+          label: "Go to Dashboard",
+          run: () => runMenuAction("dashboard"),
+        },
+        {
+          id: "all-agents",
+          label: "All agents",
+          run: () => showHomeView({ kind: "all" }),
         },
         {
           id: "next-needs-you",
@@ -97,12 +112,12 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       ],
       open: (row, how) => void openRow(row, how),
       goToProject: (key) => {
-        // The group is only on the page when Home is grouped by project (as the sidebar does).
-        store.setView({ kind: "home" });
+        // The group is only on the page when All agents is grouped by project (as the sidebar does).
+        showHomeView({ kind: "all" });
         store.setGroupBy("project");
         scrollToId(`group-${key}`);
       },
-      goToWorkbox: (machineId) => store.setView({ kind: "workbox", machineId }),
+      goToWorkbox: (machineId) => showHomeView({ kind: "workbox", machineId }),
       openTarget,
     });
   }, [state, openTarget]);

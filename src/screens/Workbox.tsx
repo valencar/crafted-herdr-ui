@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { PaneBox } from "../components/PaneBox";
-import { Sidebar } from "../components/Sidebar";
 import { TabCard } from "../components/TabCard";
-import { StoreToast } from "../components/Toast";
 import {
   WorkboxDialogs,
   type WorkboxDialog,
@@ -11,21 +9,12 @@ import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
 import type { Pane } from "../lib/bindings/Pane";
 import type { Workspace } from "../lib/bindings/Workspace";
 import { shortPath } from "../lib/format";
-import { groupByProject, isNeedsYou, needsYou, toRows } from "../lib/grouping";
+import { isNeedsYou, toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
-import { openFull, openRow, useOpenWhenListed } from "../lib/openRow";
+import { openFull, openRow } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
-import {
-  isEditable,
-  isInTerminal,
-  scrollToId,
-  openSettings,
-  terminalName as terminalLabel,
-  useTerminals,
-  useNow,
-} from "../lib/uiHelpers";
+import { isEditable, isInTerminal, useNow } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
-import { NewSession } from "./NewSession";
 
 /** herdr's answer when a workspace has linked worktree workspaces (spec section 7). */
 const GROUP_CLOSE_CODE = "workspace_group_close_required";
@@ -42,16 +31,10 @@ export function Workbox({ machineId }: { machineId: string }) {
   const state = useAppStore((s) => s.state);
   const sheet = useAppStore((s) => s.sheet);
   const setView = useAppStore((s) => s.setView);
-  const setSheet = useAppStore((s) => s.setSheet);
-  const setGroupBy = useAppStore((s) => s.setGroupBy);
   const openNewSession = useAppStore((s) => s.openNewSession);
   const report = useAppStore((s) => s.reportError);
-  const activityOpen = useAppStore((s) => s.activityOpen);
-  const setActivityOpen = useAppStore((s) => s.setActivityOpen);
-  const compact = useAppStore((s) => s.settings?.row_density === "compact");
 
   const nowMs = useNow(30_000);
-  const { current: terminal } = useTerminals();
   const [dialog, setDialog] = useState<WorkboxDialog | null>(null);
   const [checkedAtMs, setCheckedAtMs] = useState<number | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -71,15 +54,12 @@ export function Workbox({ machineId }: { machineId: string }) {
     () => new Map(rows.map((r) => [r.paneId, r])),
     [rows],
   );
-  const projects = useMemo(() => groupByProject(allRows), [allRows]);
   // A machine that is not answering is not read; its boxes keep their last line.
   const targets = useMemo(
     () => (online ? tailTargets(rows) : []),
     [online, rows],
   );
   const tails = usePaneTails(machineId, targets);
-
-  useOpenWhenListed(rows);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -98,7 +78,7 @@ export function Workbox({ machineId }: { machineId: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [sheet, machineId, openNewSession]);
 
-  const goHome = () => setView({ kind: "home" });
+  const goHome = () => setView({ kind: "dashboard" });
 
   const run = (action: Promise<unknown>) => {
     action.catch(report);
@@ -143,32 +123,6 @@ export function Workbox({ machineId }: { machineId: string }) {
       }
     }
   };
-
-  const sidebar = (
-    <Sidebar
-      needsCount={needsYou(allRows).length}
-      agentCount={allRows.filter((r) => r.status !== "shell").length}
-      projects={projects}
-      machines={state?.machines ?? []}
-      herdrPath={state?.herdr_path ?? null}
-      herdrVersion={state?.herdr_version ?? null}
-      activeWorkbox={machineId}
-      onJump={(id) => {
-        goHome();
-        scrollToId(id);
-      }}
-      onProject={(g) => {
-        goHome();
-        setGroupBy("project");
-        scrollToId(`group-${g.key}`);
-      }}
-      onWorkbox={(id) => setView({ kind: "workbox", machineId: id })}
-      onAddWorkbox={() => setSheet("add-workbox")}
-      onSettings={openSettings}
-      activityOpen={activityOpen}
-      onActivity={() => setActivityOpen(!activityOpen)}
-    />
-  );
 
   // A disabled machine shows no workspaces, even when a snapshot is still cached, so its
   // counts are all zero rather than a mix of cached and empty.
@@ -359,37 +313,36 @@ export function Workbox({ machineId }: { machineId: string }) {
   const label = machine?.label ?? machineId;
 
   return (
-    <div className={`app${compact ? " density-compact" : ""}`}>
-      <header className="header" data-tauri-drag-region>
-        <nav className="breadcrumb" aria-label="Breadcrumb">
-          <button type="button" className="crumb" onClick={goHome}>
-            Workboxes
-          </button>
-          <span aria-hidden="true">/</span>
-          <span className="crumb-current">{label}</span>
-        </nav>
-        <div className="header-actions workbox-header-actions">
-          <button
-            type="button"
-            className="btn"
-            disabled={machine === null}
-            onClick={() => void openFull(machineId, label)}
-          >
-            Open full Herdr ↗
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => openNewSession({ machineId })}
-          >
-            + New session <kbd>⌘N</kbd>
-          </button>
+    <div className="screen">
+      <main className="main">
+        <div className="workbox-heading">
+          <nav className="breadcrumb" aria-label="Breadcrumb">
+            <button type="button" className="crumb" onClick={goHome}>
+              Workboxes
+            </button>
+            <span aria-hidden="true">/</span>
+            <span className="crumb-current">{label}</span>
+          </nav>
+          <div className="workbox-heading-actions">
+            <button
+              type="button"
+              className="btn"
+              disabled={machine === null}
+              onClick={() => void openFull(machineId, label)}
+            >
+              Open full Herdr ↗
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => openNewSession({ machineId })}
+            >
+              + New session <kbd>⌘N</kbd>
+            </button>
+          </div>
         </div>
-      </header>
-      <div className="body">
-        {sidebar}
-        <main className="main">{content}</main>
-      </div>
+        {content}
+      </main>
 
       <WorkboxDialogs
         dialog={dialog}
@@ -399,11 +352,6 @@ export function Workbox({ machineId }: { machineId: string }) {
         onRemoved={goHome}
         onCloseWorkspace={closeWorkspace}
       />
-
-      {sheet === "new-session" && (
-        <NewSession terminalName={terminalLabel(terminal)} />
-      )}
-      <StoreToast />
     </div>
   );
 }

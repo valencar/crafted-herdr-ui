@@ -9,7 +9,7 @@ import type { Pane } from "../lib/bindings/Pane";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import type { Settings } from "../lib/bindings/Settings";
 import { useAppStore } from "../store/appStore";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { Workbox } from "./Workbox";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -111,7 +111,12 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   useAppStore.setState({ settings: null });
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
 });
 
 describe("Workbox", () => {
@@ -276,7 +281,7 @@ describe("Workbox", () => {
     expect(calls("machine_remove")).toEqual([{ id: "buildbox" }]);
     // The workbox is gone, so the screen goes back to Home.
     await waitFor(() =>
-      expect(useAppStore.getState().view).toEqual({ kind: "home" }),
+      expect(useAppStore.getState().view).toEqual({ kind: "dashboard" }),
     );
   });
 
@@ -614,56 +619,29 @@ describe("Workbox", () => {
     expect(useAppStore.getState().sheet).toBeNull();
   });
 
-  it("a_created_session_for_this_workbox_opens_once_listed", async () => {
-    setup();
-    act(() =>
-      useAppStore.getState().setPendingOpen({
-        key: "buildbox::w9:p9",
-        machineId: "buildbox",
-        paneId: "w9:p9",
-      }),
-    );
-    expect(calls("open_session")).toEqual([]);
-    // The next poll lists the new pane.
-    act(() => {
-      const state = useAppStore.getState().state!;
-      const next = structuredClone(state);
-      const snap = next.machines[1].snapshot!;
-      snap.panes = [
-        ...snap.panes,
-        { ...snap.panes[2], pane_id: "w9:p9", terminal_id: "term-9" },
-      ];
-      useAppStore.getState().setState(next);
-    });
-    await waitFor(() =>
-      expect(calls("open_session")).toEqual([
-        { machineId: "buildbox", paneId: "w9:p9" },
-      ]),
-    );
-    expect(useAppStore.getState().pendingOpen).toBeNull();
-  });
-
-  it("the_breadcrumb_returns_to_home", async () => {
+  it("the_breadcrumb_and_buttons_are_a_heading_row_at_the_top_of_main", async () => {
     const user = setup();
-    const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const main = screen.getByRole("main");
+    const nav = within(main).getByRole("navigation", { name: "Breadcrumb" });
     expect(within(nav).getByText("buildbox")).toBeInTheDocument();
+    expect(
+      within(main).getByRole("button", { name: "Open full Herdr ↗" }),
+    ).toBeInTheDocument();
+    expect(
+      within(main).getByRole("button", { name: /\+ New session/ }),
+    ).toBeInTheDocument();
+    // First thing in main, above the summary.
+    expect(main.firstElementChild).toContainElement(nav);
     await user.click(within(nav).getByRole("button", { name: "Workboxes" }));
-    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
   });
 
-  it("the_sidebar_switches_workbox_and_marks_the_current_one", async () => {
-    const user = setup();
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
-    expect(
-      within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
-    ).toHaveAttribute("aria-current", "page");
-    await user.click(
-      within(sidebar).getByRole("button", { name: /^local\s*Online$/ }),
-    );
-    expect(useAppStore.getState().view).toEqual({
-      kind: "workbox",
-      machineId: "local",
-    });
+  it("renders_only_its_main_content", () => {
+    setup();
+    // The header, the sidebar and the toast are the app shell's.
+    expect(document.querySelector(".header")).toBeNull();
+    expect(document.querySelector(".app")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Sidebar" })).toBeNull();
   });
 
   it("an_unknown_workbox_says_so_and_links_home", async () => {
@@ -672,7 +650,7 @@ describe("Workbox", () => {
     await user.click(
       screen.getByRole("button", { name: "Back to all workboxes" }),
     );
-    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
   });
 
   it("waits_for_the_first_state", () => {
@@ -723,6 +701,50 @@ describe("Workbox pane tails", () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
     expect(calls("read_pane_tail")).toHaveLength(12);
+  });
+
+  it("tails_pause_while_a_terminal_tab_hides_the_screen_and_resume_when_Home_shows", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
+    useAppStore.setState({
+      state: appState(machine("buildbox")),
+      view: { kind: "workbox", machineId: "buildbox" },
+      dialogOpen: 0,
+    });
+    render(<Workbox machineId="buildbox" />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(calls("read_pane_tail").length).toBeGreaterThan(0);
+
+    // A terminal tab is active: the screen is still mounted, but nobody sees it.
+    act(() =>
+      useTerminalStore.setState({
+        tabs: [
+          {
+            tabKey: "buildbox::w1:p1",
+            target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+            title: "planner",
+            machineLabel: "buildbox",
+            state: "live",
+            error: null,
+            termId: 1,
+          },
+        ],
+        activeKey: "buildbox::w1:p1",
+      }),
+    );
+    invoke.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(35_000);
+    });
+    expect(calls("read_pane_tail")).toHaveLength(0);
+
+    act(() => useTerminalStore.setState({ activeKey: HOME }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_500);
+    });
+    expect(calls("read_pane_tail").length).toBeGreaterThan(0);
+    useTerminalStore.setState({ tabs: [], lastTermKey: null, folded: {} });
   });
 
   it("tails_stop_when_the_screen_goes_away", async () => {

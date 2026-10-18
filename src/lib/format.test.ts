@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import {
   STATUS_LABEL,
+  agoText,
   TERMINAL_LABEL,
   actionErrorMessage,
   agentNameProblem,
@@ -281,5 +282,14 @@ describe("agentNameProblem", () => {
     for (const bad of ["", "Bad Name", "1abc", "has.dot", "a".repeat(33)]) {
       expect(agentNameProblem(bad)).toBe(rust);
     }
+  });
+});
+
+describe("agoText", () => {
+  it("reads_an_age_as_time_ago", () => {
+    expect(agoText("2m")).toBe("2m ago");
+    expect(agoText("3d")).toBe("3d ago");
+    // "now ago" is not English.
+    expect(agoText("now")).toBe("just now");
   });
 });

@@ -130,16 +130,21 @@ export function isNeedsYou(r: Row): boolean {
   return r.status === "blocked" || r.status === "done";
 }
 
-/** Blocked before done; within each, oldest first (smallest `sinceMs`), unknown age last. */
+/** Oldest first (smallest `sinceMs`), unknown age last, then by key. */
+export function bySinceThenKey(a: Row, b: Row): number {
+  if (a.sinceMs !== b.sinceMs) {
+    if (a.sinceMs === null) return 1;
+    if (b.sinceMs === null) return -1;
+    return a.sinceMs - b.sinceMs;
+  }
+  return a.key.localeCompare(b.key, "en");
+}
+
+/** Blocked before done; within each, `bySinceThenKey`. */
 export function needsYou(rows: Row[]): Row[] {
   return rows.filter(isNeedsYou).sort((a, b) => {
     if (a.status !== b.status) return a.status === "blocked" ? -1 : 1;
-    if (a.sinceMs !== b.sinceMs) {
-      if (a.sinceMs === null) return 1;
-      if (b.sinceMs === null) return -1;
-      return a.sinceMs - b.sinceMs;
-    }
-    return a.key.localeCompare(b.key, "en");
+    return bySinceThenKey(a, b);
   });
 }
 

@@ -17,9 +17,9 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
 import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
-import { Home } from "./Home";
+import { AllAgents } from "./AllAgents";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -40,7 +40,8 @@ const rowRenders = vi.mocked(formatAge);
 
 /** Waits out the terminal lookup, which re-renders every row once, then zeroes the counter. */
 async function settleRows() {
-  await screen.findByText("Opens in Ghostty");
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_terminals"));
+  await act(async () => {});
   rowRenders.mockClear();
 }
 
@@ -90,7 +91,7 @@ function setup(
     selectedKey: null,
     groupBy: "project",
     sheet: null,
-    view: { kind: "home" },
+    view: { kind: "all" },
     toast: null,
     preview: null,
     dialogOpen: 0,
@@ -98,9 +99,10 @@ function setup(
     pendingSelectKey: null,
     pendingOpen: null,
     dismissedVersion: null,
+    query: "",
   });
   const user = userEvent.setup();
-  render(wrap(<Home />));
+  render(wrap(<AllAgents />));
   return user;
 }
 
@@ -145,10 +147,47 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   useAppStore.setState({ settings: null });
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
 });
 
-describe("Home", () => {
+describe("AllAgents", () => {
+  it("renders_only_its_main_content_and_the_inspector", () => {
+    setup();
+    expect(screen.getByRole("main")).toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "Selected agent" }),
+    ).toBeInTheDocument();
+    // The header, the sidebar, the banner and the toast are the app shell's.
+    expect(document.querySelector(".header")).toBeNull();
+    expect(document.querySelector(".app")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Sidebar" })).toBeNull();
+    // The list's search box is the first thing in main.
+    expect(screen.getByRole("main").firstElementChild).toContainElement(
+      screen.getByRole("searchbox"),
+    );
+  });
+
+  it("search_is_the_stores_query_and_escape_clears_it", async () => {
+    const user = setup();
+    const search = screen.getByRole("searchbox");
+    expect(search).toHaveAttribute(
+      "placeholder",
+      "Jump to an agent, project, or workbox…",
+    );
+    expect(search.closest("label")).toHaveTextContent("⌘F");
+    await user.type(search, "terraform");
+    expect(useAppStore.getState().query).toBe("terraform");
+    expect(search).toHaveValue("terraform");
+    await user.keyboard("{Escape}");
+    expect(useAppStore.getState().query).toBe("");
+    expect(search).not.toHaveFocus();
+  });
+
   it("needs_you_section_lists_blocked_then_done", async () => {
     setup();
     const section = screen.getByRole("region", { name: "Needs you" });
@@ -165,43 +204,60 @@ describe("Home", () => {
     // Done cards carry "Mark seen"; blocked ones do not.
     expect(within(cards[0]).queryByText("Mark seen")).toBeNull();
     expect(within(cards[2]).getByText("Mark seen")).toBeInTheDocument();
-    expect(await screen.findAllByText("Open in Ghostty ↗")).toHaveLength(4);
+    // One Open split button per card, and none of the old pair.
+    expect(screen.getAllByRole("button", { name: /^Open / })).toHaveLength(
+      4 + screen.getAllByRole("listitem").length,
+    );
+    expect(screen.queryByText(/^Open here/)).toBeNull();
+    expect(screen.queryByText(/^Open in /)).toBeNull();
   });
 
-  it("needs_you_cards_pair_the_default_open_with_the_other_way", async () => {
-    setup();
-    await screen.findAllByText("Open in Ghostty ↗");
+  it("needs_you_cards_carry_one_needs_toned_open_split_button", async () => {
+    const user = setup();
     const card = () => within(screen.getAllByRole("article")[0]);
-    expect(
-      card().getByRole("button", { name: "Open in Ghostty ↗" }),
-    ).toHaveClass("btn-primary");
-    expect(card().getByRole("button", { name: "Open here" })).not.toHaveClass(
-      "btn-primary",
+    const split = screen
+      .getAllByRole("article")[0]
+      .querySelector(".open-split");
+    expect(split).toHaveClass("is-needs");
+    expect(card().queryByRole("button", { name: /^Open here/ })).toBeNull();
+    expect(card().queryByRole("button", { name: /^Open in / })).toBeNull();
+    await user.click(
+      card().getByRole("button", { name: /^More ways to open / }),
     );
-    cleanup();
-    useAppStore.setState({
-      settings: { open_target: "app" } as unknown as Settings,
-    });
+    expect(
+      within(screen.getByRole("menu")).getAllByRole("menuitem"),
+    ).toHaveLength(4);
+  });
+
+  it("open_buttons_name_their_row_for_screen_readers", () => {
     setup();
-    await screen.findAllByText("Open in Ghostty");
-    expect(card().getByRole("button", { name: "Open here" })).toHaveClass(
-      "btn-primary",
-    );
+    const mains = screen
+      .getAllByRole("button", { name: /^Open / })
+      .filter((b) => b.classList.contains("open-main"));
+    expect(mains.length).toBeGreaterThan(4);
+    for (const b of mains) {
+      // The visible text stays "Open"; the name adds the row.
+      expect(b).toHaveTextContent(/^Open$/);
+      expect(b).toHaveAccessibleName(/^Open \S+/);
+    }
+    const line = within(rowItem("gpubox::w1:p1"));
+    const label = line
+      .getByRole("button", { name: /^Open / })
+      .getAttribute("aria-label")!;
+    const rowName = label.slice("Open ".length);
     expect(
-      card().getByRole("button", { name: "Open in Ghostty" }),
-    ).not.toHaveClass("btn-primary");
+      line.getByRole("button", { name: `More ways to open ${rowName}` }),
+    ).toBeInTheDocument();
   });
 
   it("open_here_on_a_card_opens_a_tab_without_open_session", async () => {
     useAppStore.setState({
-      settings: { open_target: "app" } as unknown as Settings,
+      settings: { open_target: "external" } as unknown as Settings,
     });
     const user = setup();
-    await user.click(
-      within(screen.getAllByRole("article")[0]).getByRole("button", {
-        name: "Open here",
-      }),
-    );
+    const card = within(screen.getAllByRole("article")[0]);
+    await user.click(card.getByRole("button", { name: /^More ways to open / }));
+    await user.click(screen.getByRole("menuitem", { name: "Open here" }));
     expect(useTerminalStore.getState().tabs).toHaveLength(1);
     expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
@@ -219,18 +275,6 @@ describe("Home", () => {
     expect(
       screen.getByRole("complementary", { name: "Selected agent" }),
     ).toHaveTextContent("planner");
-  });
-
-  it("a_sidebar_workbox_opens_its_screen", async () => {
-    const user = setup();
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
-    await user.click(
-      within(sidebar).getByRole("button", { name: /^gpubox\s*Online$/ }),
-    );
-    expect(useAppStore.getState().view).toEqual({
-      kind: "workbox",
-      machineId: "gpubox",
-    });
   });
 
   it("group_toggle_switches_views", async () => {
@@ -304,25 +348,23 @@ describe("Home", () => {
   });
 
   it("search_filters_rows", async () => {
-    const user = setup();
-    const search = screen.getByRole("searchbox");
-    await user.type(search, "terraform");
+    setup();
+    // The header owns the search box; it writes the store's query.
+    act(() => useAppStore.getState().setQuery("terraform"));
     expect(
       [...document.querySelectorAll("[data-row-key]")].map((e) =>
         e.getAttribute("data-row-key"),
       ),
     ).toEqual(["buildbox::w1:p2", "gpubox::w1:p2"]);
 
-    await user.clear(search);
-    await user.type(search, "gpubox");
+    act(() => useAppStore.getState().setQuery("gpubox"));
     const keys = [...document.querySelectorAll("[data-row-key]")].map((e) =>
       e.getAttribute("data-row-key"),
     );
     expect(keys.length).toBeGreaterThan(0);
     expect(keys.every((k) => k?.startsWith("gpubox::"))).toBe(true);
 
-    await user.clear(search);
-    await user.type(search, "zzz-nothing");
+    act(() => useAppStore.getState().setQuery("zzz-nothing"));
     expect(screen.getByText(/No sessions match/)).toBeInTheDocument();
   });
 
@@ -360,9 +402,9 @@ describe("Home", () => {
         name: /^Open /,
       }),
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent("pane is gone");
-    await user.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByRole("alert")).toBeNull();
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("pane is gone"),
+    );
   });
 
   it("only_non_online_machines_show_staleness", () => {
@@ -370,17 +412,8 @@ describe("Home", () => {
     expect(screen.queryByText(/last updated/)).toBeNull();
   });
 
-  it("header_shows_version_and_terminal_picker_label", async () => {
-    setup();
-    expect(screen.getByText("for herdr 0.9.4")).toBeInTheDocument();
-    expect(await screen.findByText("Opens in Ghostty")).toBeInTheDocument();
-  });
-
-  it("new_session_button_and_shortcut_open_the_sheet", async () => {
+  it("the_new_session_shortcut_opens_the_sheet", async () => {
     const user = setup();
-    await user.click(screen.getByRole("button", { name: /^\+ New session/ }));
-    expect(useAppStore.getState().sheet).toBe("new-session");
-    useAppStore.setState({ sheet: null });
     await user.keyboard("{Meta>}n{/Meta}");
     expect(useAppStore.getState().sheet).toBe("new-session");
   });
@@ -388,7 +421,8 @@ describe("Home", () => {
   it("cmd_k_is_left_to_the_native_menu", async () => {
     const user = setup();
     await user.keyboard("{Meta>}k{/Meta}");
-    expect(screen.getByRole("searchbox")).not.toHaveFocus();
+    expect(document.body).toHaveFocus();
+    expect(useAppStore.getState().sheet).toBeNull();
   });
 
   it("cmd_r_refreshes", async () => {
@@ -445,12 +479,8 @@ describe("Home", () => {
     const cards = within(
       screen.getByRole("region", { name: "Needs you" }),
     ).getAllByRole("article");
-    await user.click(
-      within(cards[0]).getByRole("button", { name: /^Open in/ }),
-    );
-    await user.click(
-      within(cards[2]).getByRole("button", { name: /^Open in/ }),
-    );
+    await user.click(within(cards[0]).getByRole("button", { name: /^Open / }));
+    await user.click(within(cards[2]).getByRole("button", { name: /^Open / }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "buildbox",
@@ -518,12 +548,9 @@ describe("Home", () => {
     expect(invoke).not.toHaveBeenCalledWith("refresh_now", {});
   });
 
-  it("hides the Inspector while the terminal panel is open on the right", () => {
-    useAppStore.setState({
-      settings: {
-        terminal_placement: "right",
-      } as unknown as Settings,
-    });
+  it("backspace_does_nothing_while_a_terminal_tab_is_active", async () => {
+    const user = setup();
+    useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
     useTerminalStore.setState({
       tabs: [
         {
@@ -537,21 +564,25 @@ describe("Home", () => {
         },
       ],
       activeKey: "buildbox::w1:p1",
-      panelOpen: true,
+      lastTermKey: "buildbox::w1:p1",
+      folded: {},
     });
-    setup();
-    expect(screen.queryByLabelText("Selected agent")).toBeNull();
+    // The Home list is still mounted but hidden: focus is on the page, not in the terminal.
+    expect(document.activeElement).toBe(document.body);
+    await user.keyboard("{Backspace}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.keyboard("{Delete}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.keyboard("{ArrowDown}");
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p3");
+    await user.keyboard("{ArrowUp}");
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p3");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
 
-    act(() => useTerminalStore.setState({ panelOpen: false }));
-    expect(screen.getByLabelText("Selected agent")).toBeInTheDocument();
-
-    act(() => {
-      useTerminalStore.setState({ panelOpen: true });
-      useAppStore.setState({
-        settings: { terminal_placement: "bottom" } as unknown as Settings,
-      });
-    });
-    expect(screen.getByLabelText("Selected agent")).toBeInTheDocument();
+    // ⌘N and ⌘R are the app's, whichever tab shows.
+    await user.keyboard("{Meta>}n{/Meta}");
+    expect(useAppStore.getState().sheet).toBe("new-session");
   });
 
   it("clears_the_selection_when_the_row_disappears", async () => {
@@ -620,12 +651,12 @@ describe("Home", () => {
     expect(commits).not.toHaveBeenCalled();
   });
 
-  // Memoization guard: it counts row renders, not timing. The `user.type` below re-renders Home
-  // (its search state changes) without changing any row's props, so a row that loses `memo`, or
+  // Memoization guard: it counts row renders, not timing. The query change below re-renders Home
+  // (its search query changes in the store) without changing any row's props, so a row that loses `memo`, or
   // gets an unstable prop such as a new callback each render, renders again and fails these.
   it("home_re_rendering_for_an_unrelated_reason_re_renders_no_row", async () => {
     const commits = vi.fn();
-    const user = setup(defaultState(), (home) => (
+    setup(defaultState(), (home) => (
       <Profiler id="home" onRender={commits}>
         {home}
       </Profiler>
@@ -633,7 +664,7 @@ describe("Home", () => {
     await settleRows();
     commits.mockClear();
     // A blank query keeps every row visible, so only Home's own state changes.
-    await user.type(screen.getByRole("searchbox"), " ");
+    act(() => useAppStore.getState().setQuery(" "));
     expect(commits).toHaveBeenCalled();
     expect(rowRenders).not.toHaveBeenCalled();
   });
@@ -678,10 +709,8 @@ describe("Home", () => {
   it("backspace_and_cmd_enter_ignore_a_selection_hidden_by_search", async () => {
     const user = setup();
     useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
-    const search = screen.getByRole("searchbox");
-    await user.type(search, "terraform");
-    // Leave the field without changing the search; the selected shell is filtered out.
-    search.blur();
+    // The selected shell is filtered out by the search.
+    act(() => useAppStore.getState().setQuery("terraform"));
     await user.keyboard("{Backspace}");
     expect(screen.queryByRole("dialog")).toBeNull();
     await user.keyboard("{Meta>}{Enter}{/Meta}");
@@ -697,38 +726,18 @@ describe("Home", () => {
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 
-  it("the_new_session_sheet_opens_over_home_and_escape_hands_the_shortcuts_back", async () => {
+  it("the_list_shortcuts_stand_down_while_the_new_session_sheet_is_open", async () => {
     const user = setup();
-    await user.keyboard("{Meta>}n{/Meta}");
-    const dialog = await screen.findByRole("dialog", { name: "New session" });
-    expect(dialog).toBeInTheDocument();
-    expect(useAppStore.getState().dialogOpen).toBe(1);
-    // Home's shortcuts stand down while the sheet is up.
+    // The sheet itself is the app shell's; Home only has to stand down for it.
+    act(() => useAppStore.getState().openNewSession());
     await user.keyboard("{Meta>}r{/Meta}");
     expect(invoke).not.toHaveBeenCalledWith("refresh_now", {});
-    await user.keyboard("{Escape}");
-    expect(useAppStore.getState().sheet).toBeNull();
-    expect(useAppStore.getState().dialogOpen).toBe(0);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => useAppStore.getState().setSheet(null));
     await user.keyboard("{Meta>}r{/Meta}");
     expect(invoke).toHaveBeenCalledWith("refresh_now", {});
   });
 
-  it("the_plus_session_button_opens_the_sheet_and_focus_returns_to_it_on_cancel", async () => {
-    const user = setup();
-    const button = screen.getAllByRole("button", {
-      name: /^New session in /,
-    })[0];
-    await user.click(button);
-    expect(
-      await screen.findByRole("dialog", { name: "New session" }),
-    ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(button).toHaveFocus();
-  });
-
-  it("a_project_cards_plus_session_prefills_its_workbox_and_folder", async () => {
+  it("a_project_cards_plus_session_asks_for_the_sheet_with_its_workbox_and_folder", async () => {
     const user = setup();
     const group = screen
       .getAllByRole("region", { name: "web-app" })
@@ -736,141 +745,10 @@ describe("Home", () => {
     await user.click(
       within(group).getByRole("button", { name: /^New session in web-app/ }),
     );
-    const dialog = await screen.findByRole("dialog", { name: "New session" });
+    expect(useAppStore.getState().sheet).toBe("new-session");
     expect(useAppStore.getState().sheetPrefill).toEqual({
       machineId: "gpubox",
       folder: "/home/dev/projects/web-app",
-    });
-    expect(within(dialog).getByRole("radio", { name: /gpubox/ })).toBeChecked();
-    expect(within(dialog).getByLabelText("Project folder")).toHaveValue(
-      "/home/dev/projects/web-app",
-    );
-    await user.keyboard("{Escape}");
-    expect(useAppStore.getState().sheetPrefill).toBeNull();
-  });
-
-  describe("a_just_created_session", () => {
-    const KEY = "buildbox::w9:p9";
-    const withNewPane = () => {
-      const m = machine("buildbox");
-      m.snapshot!.panes.push({
-        ...m.snapshot!.panes[0],
-        pane_id: "w9:p9",
-        terminal_id: "term-99",
-      });
-      return appState(m, machine("gpubox"));
-    };
-
-    it("is_selected_once_its_row_shows_up", () => {
-      setup();
-      act(() => useAppStore.getState().setPendingSelectKey(KEY));
-      expect(useAppStore.getState().selectedKey).toBeNull();
-      act(() => useAppStore.getState().setState(withNewPane()));
-      expect(useAppStore.getState().selectedKey).toBe(KEY);
-      expect(useAppStore.getState().pendingSelectKey).toBeNull();
-    });
-
-    it("is_opened_in_a_tab_when_the_setting_says_app", () => {
-      useAppStore.setState({
-        settings: { open_target: "app" } as unknown as Settings,
-      });
-      setup();
-      act(() =>
-        useAppStore
-          .getState()
-          .setPendingOpen({ key: KEY, machineId: "buildbox", paneId: "w9:p9" }),
-      );
-      act(() => useAppStore.getState().setState(withNewPane()));
-      expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
-        KEY,
-      ]);
-      expect(invoke).not.toHaveBeenCalledWith(
-        "open_session",
-        expect.anything(),
-      );
-    });
-
-    it("is_opened_only_after_its_row_shows_up_and_only_once", () => {
-      setup();
-      const target = { key: KEY, machineId: "buildbox", paneId: "w9:p9" };
-      act(() => useAppStore.getState().setPendingOpen(target));
-      // Another poll that does not list the pane yet.
-      act(() => useAppStore.getState().setState(defaultState()));
-      expect(invoke).not.toHaveBeenCalledWith(
-        "open_session",
-        expect.anything(),
-      );
-      act(() => useAppStore.getState().setState(withNewPane()));
-      expect(invoke).toHaveBeenCalledWith("open_session", {
-        machineId: "buildbox",
-        paneId: "w9:p9",
-      });
-      expect(useAppStore.getState().pendingOpen).toBeNull();
-      act(() => useAppStore.getState().setState(withNewPane()));
-      expect(
-        invoke.mock.calls.filter((c) => c[0] === "open_session"),
-      ).toHaveLength(1);
-      expect(invoke).not.toHaveBeenCalledWith("mark_seen", expect.anything());
-    });
-
-    it("reports_a_failed_open_as_a_toast", async () => {
-      setup();
-      invoke.mockImplementation(async (name: string) => {
-        if (name === "open_session")
-          throw { kind: "invalid", message: "no terminal" };
-        return null;
-      });
-      act(() =>
-        useAppStore
-          .getState()
-          .setPendingOpen({ key: KEY, machineId: "buildbox", paneId: "w9:p9" }),
-      );
-      act(() => useAppStore.getState().setState(withNewPane()));
-      await waitFor(() =>
-        expect(useAppStore.getState().toast).toBe("no terminal"),
-      );
-    });
-
-    it("reports_an_open_whose_row_never_shows_up", () => {
-      vi.useFakeTimers({ now: NOW });
-      try {
-        setup();
-        act(() =>
-          useAppStore.getState().setPendingOpen({
-            key: KEY,
-            machineId: "buildbox",
-            paneId: "w9:p9",
-          }),
-        );
-        act(() => {
-          vi.advanceTimersByTime(10_000);
-        });
-        expect(screen.getByRole("alert")).toHaveTextContent(
-          "The new session hasn't appeared yet; open it from the list when it does.",
-        );
-        expect(invoke).not.toHaveBeenCalledWith(
-          "open_session",
-          expect.anything(),
-        );
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it("is_dropped_after_10_seconds_if_it_never_shows_up", () => {
-      vi.useFakeTimers({ now: NOW });
-      try {
-        setup();
-        act(() => useAppStore.getState().setPendingSelectKey(KEY));
-        act(() => {
-          vi.advanceTimersByTime(10_000);
-        });
-        expect(useAppStore.getState().pendingSelectKey).toBeNull();
-        act(() => useAppStore.getState().setState(withNewPane()));
-        expect(useAppStore.getState().selectedKey).toBeNull();
-      } finally {
-        vi.useRealTimers();
-      }
     });
   });
 
@@ -885,13 +763,13 @@ describe("Home", () => {
           message: "",
         }),
       );
-      expect(screen.getByRole("alert")).toHaveTextContent(
+      expect(useAppStore.getState().toast).toBe(
         "May have been applied; refreshing…",
       );
       act(() => {
         vi.advanceTimersByTime(8_000);
       });
-      expect(screen.queryByRole("alert")).toBeNull();
+      expect(useAppStore.getState().toast).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -904,58 +782,6 @@ describe("Home states", () => {
   const noAgents = (m: MachineView): MachineView => ({
     ...m,
     snapshot: { ...structuredClone(fixture), agents: [], panes: [] },
-  });
-
-  it("unsupported_version_banner", async () => {
-    const user = setup({ ...defaultState(), herdr_version: "0.8.9" });
-    const banner = screen.getByRole("status");
-    expect(banner).toHaveTextContent(
-      "herdr 0.8.9 is older than this app supports (0.9.0+). Some actions may fail.",
-    );
-    await user.click(within(banner).getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText(/is older than this app supports/)).toBeNull();
-  });
-
-  it("shows_the_banner_for_a_version_that_does_not_parse_or_is_missing", () => {
-    setup({ ...defaultState(), herdr_version: null });
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "herdr (unknown version) is older than this app supports (0.9.0+).",
-    );
-  });
-
-  it("shows_no_banner_for_0_9_0_and_newer", () => {
-    for (const version of ["0.9.0", "0.9.4", "0.10.0", "1.0.0"]) {
-      setup({ ...defaultState(), herdr_version: version });
-      expect(screen.queryByText(/is older than this app supports/)).toBeNull();
-      cleanup();
-    }
-  });
-
-  it("brings_the_banner_back_when_the_version_changes", async () => {
-    const user = setup({ ...defaultState(), herdr_version: "0.8.9" });
-    await user.click(screen.getByRole("button", { name: "Dismiss" }));
-    act(() =>
-      useAppStore.setState({
-        state: { ...defaultState(), herdr_version: "0.8.9" },
-      }),
-    );
-    expect(screen.queryByRole("status")).toBeNull();
-    act(() =>
-      useAppStore.setState({
-        state: { ...defaultState(), herdr_version: "0.8.8" },
-      }),
-    );
-    expect(screen.getByRole("status")).toHaveTextContent("herdr 0.8.8");
-  });
-
-  it("keeps_the_banner_dismissed_when_home_is_shown_again", async () => {
-    const user = setup({ ...defaultState(), herdr_version: "0.8.9" });
-    await user.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(useAppStore.getState().dismissedVersion).toBe("0.8.9");
-    // Going to a Workbox screen and back unmounts Home; the store remembers.
-    cleanup();
-    render(<Home />);
-    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("empty_agents_state", () => {
@@ -977,13 +803,12 @@ describe("Home states", () => {
     await user.click(within(card).getByRole("button", { name: "Add workbox" }));
     expect(useAppStore.getState().sheet).toBe("add-workbox");
 
-    // With agents on screen only the sidebar hint remains.
+    // With agents on screen the card is gone.
     cleanup();
     setup(appState(LOCAL()));
     expect(
       screen.queryByRole("region", { name: "Only this computer so far" }),
     ).toBeNull();
-    expect(screen.getByText(/Only this computer so far/)).toBeVisible();
   });
 
   it("stale_label_from_last_ok", () => {
@@ -1149,8 +974,9 @@ describe("Home states", () => {
       expect(dim).toHaveAttribute("data-dim", "true");
       expect(dim).toHaveTextContent("ssh: connection refused");
       expect(dim).not.toHaveTextContent("herdr machine reconnect");
+      // Under the search box, above everything else.
       const main = screen.getByRole("main");
-      expect(main.firstElementChild).toBe(
+      expect(main.children[1]).toBe(
         screen.getByRole("region", { name: "gpubox needs attention" }),
       );
     });
@@ -1197,34 +1023,6 @@ describe("Home states", () => {
     });
   });
 
-  it("dims_a_disabled_workbox_in_the_sidebar_and_labels_it", () => {
-    setup(
-      appState(machine("buildbox"), machine("gpubox", { kind: "disabled" })),
-    );
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
-    const disabled = within(sidebar).getByRole("button", {
-      name: /^gpubox\s*Disabled$/,
-    });
-    expect(disabled).toHaveClass("is-dim");
-    expect(
-      within(sidebar).getByRole("button", { name: /^buildbox\s*Online$/ }),
-    ).not.toHaveClass("is-dim");
-  });
-
-  it("gives_each_project_dot_its_status_as_a_title", () => {
-    setup();
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
-    const dots = [
-      ...sidebar.querySelectorAll<HTMLElement>(".dot[data-status]"),
-    ];
-    expect(dots.length).toBeGreaterThan(0);
-    for (const dot of dots) {
-      expect(dot.title).toMatch(
-        /^(Needs input|Done, unseen|Working|Idle|Unknown|Shell)$/,
-      );
-    }
-  });
-
   it("labels_each_group_by_a_generated_id_even_when_the_folder_has_spaces", () => {
     const spaced = JSON.parse(
       JSON.stringify(fixture).replace(
@@ -1260,14 +1058,5 @@ describe("Home states", () => {
     );
     // The view still switched.
     expect(useAppStore.getState().groupBy).toBe("status");
-  });
-
-  it("toggles_the_activity_drawer_from_the_sidebar_footer", async () => {
-    const user = setup();
-    useAppStore.setState({ activityOpen: false });
-    await user.click(screen.getByRole("button", { name: /^Activity/ }));
-    expect(useAppStore.getState().activityOpen).toBe(true);
-    await user.click(screen.getByRole("button", { name: /^Activity/ }));
-    expect(useAppStore.getState().activityOpen).toBe(false);
   });
 });

@@ -1,19 +1,29 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { ActivityDrawer } from "./components/ActivityDrawer";
+import { AppSidebar } from "./components/AppSidebar";
 import { CommandPalette } from "./components/CommandPalette";
+import { Header } from "./components/Header";
+import { VersionBanner } from "./components/HomeNotices";
+import { StoreToast } from "./components/Toast";
 import { toRows } from "./lib/grouping";
 import { onFocusRow, onMenu, onNewSession, onOpenRow } from "./lib/ipc";
 import { runMenuAction } from "./lib/menuActions";
-import { defaultOpenHow, openRow } from "./lib/openRow";
-import { focusRowElement } from "./lib/uiHelpers";
+import { defaultOpenHow, openRow, useOpenWhenListed } from "./lib/openRow";
+import {
+  focusRowElement,
+  terminalName as terminalLabel,
+  useTerminals,
+} from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
-import { Home } from "./screens/Home";
+import { AllAgents } from "./screens/AllAgents";
+import { Dashboard } from "./screens/Dashboard";
+import { NewSession } from "./screens/NewSession";
 import { Onboarding } from "./screens/Onboarding";
 import { Workbox } from "./screens/Workbox";
 import { useAppStore } from "./store/appStore";
-import { TerminalPanel } from "./terminal/TerminalPanel";
-import { useTerminalStore } from "./terminal/terminalStore";
+import { HOME, useTerminalStore } from "./terminal/terminalStore";
+import { Workspace } from "./terminal/Workspace";
 
 function App() {
   const view = useAppStore((s) => s.view);
@@ -27,17 +37,22 @@ function App() {
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const paletteOpen = useAppStore((s) => s.paletteOpen);
   const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
-  const placement = useAppStore(
-    (s) => s.settings?.terminal_placement ?? "bottom",
-  );
-  const hasTabs = useTerminalStore((s) => s.tabs.length > 0);
+  const herdrVersion = useAppStore((s) => s.state?.herdr_version ?? null);
+  const compact = useAppStore((s) => s.settings?.row_density === "compact");
+  const { current: terminal, installed } = useTerminals();
   // `null` is "herdr was not found"; before the first state there is nothing to say yet.
   const herdrMissing = useAppStore((s) => s.state?.herdr_path === null);
 
   useStateSync();
   useSettingsSync();
 
-  // The saved grouping is where Home starts, and follows a change made in Settings.
+  // A just-created session is selected and opened once the state lists it, from here so it
+  // works on every Home screen and under a terminal tab.
+  const state = useAppStore((s) => s.state);
+  const rows = useMemo(() => (state ? toRows(state) : []), [state]);
+  useOpenWhenListed(rows);
+
+  // The saved grouping is where All agents starts, and follows a change made in Settings.
   useEffect(() => {
     if (groupBy) setGroupBy(groupBy);
   }, [groupBy, setGroupBy]);
@@ -55,10 +70,14 @@ function App() {
     };
     // A notification click selects the row (v1), then opens it the way the setting says. When
     // it opens in the app, the terminal keeps the keyboard: moving focus to the Home row would
-    // put the user's next keys (Backspace closes a session) on the wrong thing.
+    // put the user's next keys (Backspace closes a session) on the wrong thing. Opened
+    // elsewhere, the Home tab has to be the one showing for the row to be seen and focused.
     onFocusRow((key) => {
       focusRow(key);
-      if (defaultOpenHow() !== "app") focusRowElement(key);
+      if (defaultOpenHow() !== "app") {
+        useTerminalStore.getState().activate(HOME);
+        focusRowElement(key);
+      }
       const row = rowFor(key);
       if (row) void openRow(row);
     })
@@ -103,18 +122,40 @@ function App() {
 
   return (
     <>
-      {/* The panel is a sibling of the screens, so its tabs survive a change of screen. */}
-      <div className={`shell placement-${placement}`}>
-        <div className="shell-content">
-          {view.kind === "workbox" ? (
-            <Workbox key={view.machineId} machineId={view.machineId} />
-          ) : (
-            <Home />
-          )}
+      {/* The window chrome is drawn once, here; the screens are only what goes in the middle. */}
+      <div className={`app${compact ? " density-compact" : ""}`}>
+        <Header
+          herdrVersion={herdrVersion}
+          terminal={terminal}
+          installed={installed}
+          // A Workbox screen's "+ New session" knows its machine already.
+          onNewSession={() =>
+            openNewSession(
+              view.kind === "workbox"
+                ? { machineId: view.machineId }
+                : undefined,
+            )
+          }
+        />
+        <VersionBanner />
+        <div className="body">
+          <AppSidebar />
+          {/* The Home tab shows the current screen; terminal tabs sit beside it in the workspace,
+              so they survive a change of screen. */}
+          <Workspace>
+            {view.kind === "workbox" ? (
+              <Workbox key={view.machineId} machineId={view.machineId} />
+            ) : view.kind === "all" ? (
+              <AllAgents />
+            ) : (
+              <Dashboard />
+            )}
+          </Workspace>
         </div>
-        {hasTabs && <TerminalPanel />}
       </div>
-      {/* Here rather than in a screen, so it works on Home and on the Workbox screen. */}
+      {sheet === "new-session" && (
+        <NewSession terminalName={terminalLabel(terminal)} />
+      )}
       {sheet === "add-workbox" && <AddWorkbox />}
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
       {activityOpen && (
@@ -123,6 +164,7 @@ function App() {
           onClose={() => setActivityOpen(false)}
         />
       )}
+      <StoreToast />
     </>
   );
 }

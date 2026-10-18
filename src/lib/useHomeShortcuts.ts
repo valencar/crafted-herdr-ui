@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useAppStore } from "../store/appStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import type { Row } from "./grouping";
 import { invokeTyped } from "./ipc";
 import { openRow } from "./openRow";
@@ -12,13 +13,20 @@ type Options = {
   actionRow: Row | null;
   /** Delete or Backspace on the selected row. */
   onClose: (key: string) => void;
+  /** Off for a second screen that is up beside the one handling the keys. Defaults to on. */
+  enabled?: boolean;
 };
 
-/** Home's keyboard shortcuts: ⌘N, ⌘R, ⌘↩, the arrow keys and Delete. */
+/**
+ * Home's keyboard shortcuts: ⌘N, ⌘R, ⌘↩, the arrow keys and Delete. The list keys act only
+ * while the Home tab shows (its list stays mounted, hidden, under a terminal tab); ⌘N and ⌘R
+ * are the app's and work on every tab whenever focus is outside the terminal.
+ */
 export function useHomeShortcuts({
   navRows,
   actionRow,
   onClose,
+  enabled = true,
 }: Options): void {
   // A sheet is open: the shortcuts stand down.
   const sheet = useAppStore((s) => s.sheet);
@@ -28,10 +36,16 @@ export function useHomeShortcuts({
   const report = useAppStore((s) => s.reportError);
 
   useEffect(() => {
+    if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (sheet || useAppStore.getState().dialogOpen > 0) return;
-      // Keys typed in a terminal stay there.
-      if (isInTerminal(e.target)) return;
+      // Keys typed in a terminal stay there, and so do those a menu (the All tabs menu, the
+      // terminal picker) has taken for itself.
+      if (e.defaultPrevented || isInTerminal(e.target)) return;
+      if (e.target instanceof Element && e.target.closest('[role="menu"]')) {
+        return;
+      }
+      const onHome = useTerminalStore.getState().activeKey === HOME;
       if (e.metaKey) {
         if (e.key === "n") {
           e.preventDefault();
@@ -39,13 +53,13 @@ export function useHomeShortcuts({
         } else if (e.key === "r") {
           e.preventDefault();
           invokeTyped("refresh_now", {}).catch(report);
-        } else if (e.key === "Enter" && actionRow) {
+        } else if (e.key === "Enter" && onHome && actionRow) {
           e.preventDefault();
           openRow(actionRow);
         }
         return;
       }
-      if (e.ctrlKey || e.altKey || isEditable(e.target)) return;
+      if (!onHome || e.ctrlKey || e.altKey || isEditable(e.target)) return;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         if (navRows.length === 0) return;
         e.preventDefault();
@@ -69,6 +83,7 @@ export function useHomeShortcuts({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
+    enabled,
     sheet,
     actionRow,
     selectedKey,

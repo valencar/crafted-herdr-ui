@@ -5,6 +5,7 @@ import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { SetupEvent } from "../lib/bindings/SetupEvent";
 import { useAppStore } from "../store/appStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -92,7 +93,7 @@ beforeEach(() => {
   useAppStore.setState({
     state: appState(LOCAL),
     sheet: "add-workbox",
-    view: { kind: "home" },
+    view: { kind: "all" },
     toast: null,
     toastTone: "error",
     dialogOpen: 0,
@@ -129,6 +130,12 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
   useAppStore.getState().clearToast();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -191,6 +198,15 @@ describe("AddWorkbox", () => {
     ]);
     expect(useAppStore.getState().sheet).toBe("add-workbox");
 
+    // A terminal tab is in front, as when the sheet is opened from the sidebar over one.
+    act(() =>
+      useTerminalStore.getState().openTab({
+        tabKey: "buildbox::w1:p1",
+        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+        title: "planner",
+        machineLabel: "buildbox",
+      }),
+    );
     // A different machine appears first: not the one we are waiting for.
     act(() =>
       useAppStore
@@ -215,6 +231,8 @@ describe("AddWorkbox", () => {
     expect(s.toast).toBe("Added Gpu box");
     expect(s.toastTone).toBe("info");
     expect(s.view).toEqual({ kind: "workbox", machineId: "gpubox-1" });
+    // The new workbox's screen is on the Home tab, which has to be the one showing.
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
 
     // The poll stops with the sheet.
     const polled = callsTo("refresh_now").length;

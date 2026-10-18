@@ -15,7 +15,7 @@ import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { toRows } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { Inspector } from "./Inspector";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -259,46 +259,48 @@ describe("Inspector actions", () => {
     useAppStore.setState({ settings: { open_target } as unknown as Settings });
   afterEach(() => {
     useAppStore.setState({ settings: null });
-    useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+    useTerminalStore.setState({
+      tabs: [],
+      activeKey: HOME,
+      lastTermKey: null,
+      folded: {},
+    });
   });
 
-  it("primary follows open_target and the secondary does the other", () => {
-    openSessionsIn("app");
-    setup();
-    const buttons = () =>
-      screen
-        .getAllByRole("button", { name: /^Open (here|in Ghostty)/ })
-        .map((b) => [b.textContent, b.classList.contains("btn-primary")]);
-    expect(buttons()).toEqual([
-      ["Open here ⌘↩", true],
-      ["Open in Ghostty", false],
-    ]);
-    cleanup();
-    openSessionsIn("external");
-    setup();
-    expect(buttons()).toEqual([
-      ["Open in Ghostty ⌘↩", true],
-      ["Open here", false],
-    ]);
-  });
-
-  it("⌘↩ uses the default", () => {
-    // The shortcut itself is Home's (it calls openRow with no target); the hint sits on the
-    // primary button, so it moves with the setting.
+  it("has_one_open_split_button_with_the_hint_on_its_main_part", async () => {
     for (const target of ["app", "external"] as const) {
       openSessionsIn(target);
-      setup();
-      const hint = screen.getByText("⌘↩");
-      expect(hint.closest("button")).toHaveClass("btn-primary");
+      const { user } = setup();
+      // The two open buttons are gone: the ways to open live in the chevron menu.
+      expect(screen.queryByRole("button", { name: /^Open here/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+      const main = screen.getByRole("button", { name: "Open planner" });
+      expect(main).toHaveTextContent("Open⌘↩");
       expect(screen.getAllByText("⌘↩")).toHaveLength(1);
+      expect(screen.queryByRole("menu")).toBeNull();
+      await user.click(
+        screen.getByRole("button", { name: "More ways to open planner" }),
+      );
+      expect(
+        within(screen.getByRole("menu")).getByRole("menuitem", {
+          name: "Open in Ghostty",
+        }),
+      ).toBeInTheDocument();
       cleanup();
     }
   });
 
   it("open_here_opens_a_tab_and_open_in_runs_open_session", async () => {
+    // Both menu items ignore the setting.
     openSessionsIn("external");
     const { user } = setup();
-    await user.click(screen.getByRole("button", { name: "Open here" }));
+    const choose = async (name: string) => {
+      await user.click(
+        screen.getByRole("button", { name: "More ways to open planner" }),
+      );
+      await user.click(screen.getByRole("menuitem", { name }));
+    };
+    await choose("Open here");
     expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
       "buildbox::w1:p1",
     ]);
@@ -307,7 +309,10 @@ describe("Inspector actions", () => {
     openSessionsIn("app");
     const second = setup();
     await second.user.click(
-      screen.getByRole("button", { name: "Open in Ghostty" }),
+      screen.getByRole("button", { name: "More ways to open planner" }),
+    );
+    await second.user.click(
+      screen.getByRole("menuitem", { name: "Open in Ghostty" }),
     );
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
@@ -318,7 +323,7 @@ describe("Inspector actions", () => {
   it("open_runs_open_session", async () => {
     openSessionsIn("external");
     const { user } = setup();
-    await user.click(screen.getByRole("button", { name: /^Open in Ghostty/ }));
+    await user.click(screen.getByRole("button", { name: "Open planner" }));
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
       paneId: "w1:p1",
@@ -328,7 +333,7 @@ describe("Inspector actions", () => {
   it("open_marks_a_done_agent_seen_after_it_opened", async () => {
     openSessionsIn("external");
     const { user } = setup(DONE);
-    await user.click(screen.getByRole("button", { name: /^Open in Ghostty/ }));
+    await user.click(screen.getByRole("button", { name: `Open ${DONE.name}` }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "buildbox",
@@ -497,6 +502,68 @@ describe("Inspector live preview", () => {
     unmount();
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("stop_preview"));
     expect(unlisten).toHaveBeenCalled();
+  });
+
+  describe("while a terminal tab hides the Home tab", () => {
+    const showTerminal = () =>
+      act(() =>
+        useTerminalStore.setState({
+          tabs: [
+            {
+              tabKey: "buildbox::w1:p3",
+              target: { kind: "pane", machineId: "buildbox", paneId: "w1:p3" },
+              title: "shell",
+              machineLabel: "buildbox",
+              state: "live",
+              error: null,
+              termId: 1,
+            },
+          ],
+          activeKey: "buildbox::w1:p3",
+        }),
+      );
+    const showHome = () =>
+      act(() => useTerminalStore.setState({ activeKey: HOME }));
+    const names = () => invoke.mock.calls.map(([name]) => name);
+    afterEach(() =>
+      useTerminalStore.setState({
+        tabs: [],
+        activeKey: HOME,
+        lastTermKey: null,
+        folded: {},
+      }),
+    );
+
+    it("stops_the_preview_when_hidden_and_restarts_it_when_Home_shows_again", async () => {
+      setup(BLOCKED);
+      await waitFor(() => expect(names()).toContain("start_preview"));
+
+      invoke.mockClear();
+      showTerminal();
+      await waitFor(() => expect(names()).toContain("stop_preview"));
+      expect(names()).not.toContain("start_preview");
+
+      invoke.mockClear();
+      showHome();
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith("start_preview", {
+          machineId: "buildbox",
+          paneId: "w1:p1",
+          isAgent: true,
+        }),
+      );
+      expect(names()).not.toContain("stop_preview");
+    });
+
+    it("never_starts_the_preview_while_hidden", async () => {
+      showTerminal();
+      setup(BLOCKED);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(names()).not.toContain("start_preview");
+      expect(names()).not.toContain("stop_preview");
+    });
   });
 
   it("reports_it_when_the_preview_cannot_be_listened_to", async () => {

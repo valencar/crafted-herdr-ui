@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +9,7 @@ import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import { useAppStore } from "../store/appStore";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { CommandPalette } from "./CommandPalette";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -19,7 +19,7 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
 import { invokeTyped } from "../lib/ipc";
 
 // xterm is tested on its own; the palette only reaches the panel through menu actions.
-vi.mock("../terminal/TerminalPanel", () => ({
+vi.mock("../terminal/Workspace", () => ({
   DEFAULT_FONT_SIZE: 13,
   MIN_FONT_SIZE: 9,
   MAX_FONT_SIZE: 24,
@@ -79,7 +79,12 @@ beforeEach(() => {
     toast: null,
     dialogOpen: 0,
   });
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
 });
 
 afterEach(() => {
@@ -102,8 +107,7 @@ describe("CommandPalette", () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "toggle");
     const first = screen.getAllByRole("option")[0];
-    // The shorter label wins the tie.
-    expect(first).toHaveTextContent("Toggle split");
+    expect(first).toHaveTextContent("Dashboard beside terminal");
     expect(screen.getAllByRole("option")[1]).toHaveTextContent(
       "Toggle terminal",
     );
@@ -123,6 +127,42 @@ describe("CommandPalette", () => {
     expect(useAppStore.getState().toast).toBe(
       "Open a session to start a terminal.",
     );
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("has_go_to_dashboard_and_all_agents_commands", async () => {
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "go to dash");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent(
+      "Go to Dashboard",
+    );
+    useAppStore.setState({ view: { kind: "all" } });
+    await user.keyboard("{Enter}");
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    onClose.mockReset();
+    useTerminalStore.setState({ activeKey: "buildbox::w1:p1" });
+    const again = open();
+    await again.type(screen.getByRole("combobox"), "all agents");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("All agents");
+    await again.keyboard("{Enter}");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+  });
+
+  it("dashboard_beside_terminal_command_label", async () => {
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "dashboard beside");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent(
+      "Dashboard beside terminal",
+    );
+    expect(screen.queryByText("Toggle split")).toBeNull();
+    // Same action as ⌘\: with Home active it does nothing.
+    await user.keyboard("{Enter}");
+    expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -222,10 +262,37 @@ describe("CommandPalette", () => {
     expect(option).toBeDefined();
     await user.click(option as HTMLElement);
     expect(useAppStore.getState().groupBy).toBe("project");
-    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
     await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalled());
     target.remove();
-    useAppStore.setState({ groupBy: "project", view: { kind: "home" } });
+    useAppStore.setState({ groupBy: "project", view: { kind: "all" } });
+  });
+
+  it("shows_a_workbox_and_a_project_on_home_when_a_terminal_tab_is_active", async () => {
+    const project = groupByProject(toRows(state)).find((g) => g.folder);
+    expect(project).toBeDefined();
+    const pick = async (query: string, tag: string) => {
+      useTerminalStore.setState({ activeKey: "buildbox::w1:p1" });
+      useAppStore.setState({ view: { kind: "dashboard" } });
+      const user = open();
+      await user.type(screen.getByRole("combobox"), query);
+      const option = screen
+        .getAllByRole("option")
+        .find((o) => o.querySelector(".palette-tag")?.textContent === tag);
+      expect(option).toBeDefined();
+      await user.click(option as HTMLElement);
+      cleanup();
+    };
+    await pick("buildbox", "Workboxes");
+    expect(useAppStore.getState().view).toEqual({
+      kind: "workbox",
+      machineId: "buildbox",
+    });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+
+    await pick(project?.name ?? "", "Projects");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
   });
 
   it("says_so_when_nothing_matches", async () => {

@@ -19,6 +19,7 @@ const SETTINGS_ITEM: &str = "settings";
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum MenuId {
     Palette,
+    Dashboard,
     ToggleTerminal,
     ToggleSplit,
     ToggleSidebar,
@@ -39,7 +40,6 @@ pub enum MenuId {
     Tab6,
     Tab7,
     Tab8,
-    Tab9,
 }
 
 impl MenuId {
@@ -48,6 +48,7 @@ impl MenuId {
     fn key(self) -> &'static str {
         match self {
             MenuId::Palette => "palette",
+            MenuId::Dashboard => "dashboard",
             MenuId::ToggleTerminal => "toggle-terminal",
             MenuId::ToggleSplit => "toggle-split",
             MenuId::ToggleSidebar => "toggle-sidebar",
@@ -68,7 +69,6 @@ impl MenuId {
             MenuId::Tab6 => "tab6",
             MenuId::Tab7 => "tab7",
             MenuId::Tab8 => "tab8",
-            MenuId::Tab9 => "tab9",
         }
     }
 
@@ -87,7 +87,6 @@ impl MenuId {
                 | MenuId::Tab6
                 | MenuId::Tab7
                 | MenuId::Tab8
-                | MenuId::Tab9
         )
     }
 }
@@ -97,8 +96,13 @@ pub fn items() -> Vec<(MenuId, &'static str, &'static str)> {
     use MenuId::*;
     vec![
         (Palette, "Command Palette", "CmdOrCtrl+K"),
+        (Dashboard, "Dashboard", "CmdOrCtrl+1"),
         (ToggleTerminal, "Toggle Terminal", "Ctrl+Backquote"),
-        (ToggleSplit, "Toggle Split", "CmdOrCtrl+Backslash"),
+        (
+            ToggleSplit,
+            "Dashboard Beside Terminal",
+            "CmdOrCtrl+Backslash",
+        ),
         (ToggleSidebar, "Toggle Sidebar", "CmdOrCtrl+B"),
         (NextNeedsYou, "Next Needs-You", "CmdOrCtrl+J"),
         (Find, "Find", "CmdOrCtrl+F"),
@@ -109,15 +113,14 @@ pub fn items() -> Vec<(MenuId, &'static str, &'static str)> {
         (CloseTab, "Close Tab", "CmdOrCtrl+W"),
         (NextTab, "Next Tab", "Ctrl+Tab"),
         (PrevTab, "Previous Tab", "Ctrl+Shift+Tab"),
-        (Tab1, "Tab 1", "CmdOrCtrl+1"),
-        (Tab2, "Tab 2", "CmdOrCtrl+2"),
-        (Tab3, "Tab 3", "CmdOrCtrl+3"),
-        (Tab4, "Tab 4", "CmdOrCtrl+4"),
-        (Tab5, "Tab 5", "CmdOrCtrl+5"),
-        (Tab6, "Tab 6", "CmdOrCtrl+6"),
-        (Tab7, "Tab 7", "CmdOrCtrl+7"),
-        (Tab8, "Tab 8", "CmdOrCtrl+8"),
-        (Tab9, "Tab 9", "CmdOrCtrl+9"),
+        (Tab1, "Tab 1", "CmdOrCtrl+2"),
+        (Tab2, "Tab 2", "CmdOrCtrl+3"),
+        (Tab3, "Tab 3", "CmdOrCtrl+4"),
+        (Tab4, "Tab 4", "CmdOrCtrl+5"),
+        (Tab5, "Tab 5", "CmdOrCtrl+6"),
+        (Tab6, "Tab 6", "CmdOrCtrl+7"),
+        (Tab7, "Tab 7", "CmdOrCtrl+8"),
+        (Tab8, "Tab 8", "CmdOrCtrl+9"),
     ]
 }
 
@@ -237,7 +240,38 @@ mod tests {
         assert_eq!(MenuId::ToggleTerminal.key(), "toggle-terminal");
         assert_eq!(MenuId::NextNeedsYou.key(), "next-needs-you");
         assert_eq!(MenuId::Tab1.key(), "tab1");
-        assert_eq!(MenuId::Tab9.key(), "tab9");
+        assert_eq!(MenuId::Tab8.key(), "tab8");
+        assert_eq!(MenuId::Dashboard.key(), "dashboard");
+    }
+
+    #[test]
+    fn dashboard_is_cmd_1_and_tabs_are_cmd_2_to_9() {
+        let all = items();
+        let find = |id: MenuId| all.iter().find(|(i, ..)| *i == id).copied().unwrap();
+        assert_eq!(
+            find(MenuId::Dashboard),
+            (MenuId::Dashboard, "Dashboard", "CmdOrCtrl+1")
+        );
+        let tabs = [
+            MenuId::Tab1,
+            MenuId::Tab2,
+            MenuId::Tab3,
+            MenuId::Tab4,
+            MenuId::Tab5,
+            MenuId::Tab6,
+            MenuId::Tab7,
+            MenuId::Tab8,
+        ];
+        for (n, id) in tabs.into_iter().enumerate() {
+            let (_, label, accel) = find(id);
+            assert_eq!(label, format!("Tab {}", n + 1));
+            assert_eq!(accel, format!("CmdOrCtrl+{}", n + 2));
+            assert!(id.in_terminal_menu(), "{id:?} sits in the Terminal menu");
+        }
+        // The Dashboard is a View item, and the split item says what it does now.
+        assert!(!MenuId::Dashboard.in_terminal_menu());
+        assert_eq!(find(MenuId::ToggleSplit).1, "Dashboard Beside Terminal");
+        assert_eq!(find(MenuId::ToggleSplit).2, "CmdOrCtrl+Backslash");
     }
 
     #[test]

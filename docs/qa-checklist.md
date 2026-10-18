@@ -175,6 +175,8 @@ None of these were run by the implementer (they need a GUI session or a real her
 
 ## v0.2
 
+Items marked "replaced by v0.3" describe the v0.2 bottom/right panel; the `## v0.3` section below covers what took its place.
+
 - [ ] ⌘W with no tab open does nothing; the red button still hides the window.
 - [ ] ⌘C/⌘V work in text inputs (Edit menu).
 - [ ] Menu shortcuts fire while a terminal has focus.
@@ -183,23 +185,50 @@ None of these were run by the implementer (they need a GUI session or a real her
 - [ ] A terminal tab renders with the bundled Geist Mono at the right cell width on first open (no misaligned columns after the font loads) and honours the terminal font-size setting; the 16 ANSI colors read well on the dark background (`ls --color`, a TUI).
 - [ ] In a terminal tab, ⌘-click on a URL copies it and shows "Link copied"; a plain click does nothing and no browser opens.
 - [ ] An exited or detached tab shows "Detached" with Reattach focused (Enter reattaches); Retry works after a failed open; closing the tab leaves the herdr pane running.
-- [ ] Resizing the window or panel reflows the running program in the active tab; inactive tabs catch up when shown.
+- [ ] Resizing the window or panel reflows the running program in the active tab; inactive tabs catch up when shown. (Panel part replaced by v0.3: the terminal takes the middle, and the ⌘\ column is checked under v0.3.)
 - [ ] Typing in a tab: ⌃C, arrows, Backspace and a full-screen agent TUI work, and none of those keys moves Home's selection or opens its Close dialog.
-- [ ] Panel resize and placement persist: drag the handle (and use the arrow keys on it), quit and relaunch, and the panel comes back at the same size and on the same edge (bottom or right). On the right, Home's Inspector is hidden while the panel is open.
-- [ ] Tabs survive Home ↔ Workbox: scrollback and the running program are intact after switching screens and after ⌃` hides and shows the panel.
+- [ ] ~~Panel resize and placement persist (bottom or right edge).~~ Replaced by v0.3: there is no bottom/right panel; the ⌘\ Dashboard column's width persists (see `## v0.3`).
+- [ ] Tabs survive Home ↔ Workbox: scrollback and the running program are intact after switching screens and after ⌃` goes to Home and back. (Replaced by v0.3 for the panel wording: ⌃` now switches between Home and the last terminal tab.)
 - [ ] A tab for an agent that needs you is highlighted in the tab strip, and the tab shows "Opening…" until its session is up.
 - [ ] ⌘F inside a terminal opens the find bar (Enter next, ⇧Enter previous, Esc closes and returns focus to the terminal); ⌘F elsewhere focuses Home's search box.
 - [ ] ⌘+ / ⌘− / ⌘0 change the terminal font size within 9 to 24 and reset to 13, and the size persists.
-- [ ] With the panel open, the Close dialog, the New session sheet and the Activity drawer sit above it (dimmed scrim over the terminal, no terminal layer on top).
+- [ ] With a terminal tab open, the Close dialog, the New session sheet and the Activity drawer sit above it (dimmed scrim over the terminal, no terminal layer on top).
 - [ ] Notification click opens the tab.
 - [ ] Popover Open brings the main window with the tab.
 - [ ] Open in {Terminal} still launches the external app.
-- [ ] ⌘K opens the command palette from Home, the Workbox screen and while a terminal has focus; it sits above the terminal panel (dimmed scrim over it) and under the Activity drawer; ↑/↓ move, Enter runs, ⌘Enter opens an agent the other way (here vs. the external terminal), Esc closes and returns focus to where it was.
+- [ ] ⌘K opens the command palette from Home, the Workbox screen and while a terminal has focus; it sits above the terminal (dimmed scrim over it) and under the Activity drawer; ↑/↓ move, Enter runs, ⌘Enter opens an agent the other way (here vs. the external terminal), Esc closes and returns focus to where it was.
 - [ ] In the palette, typing finds agents, projects, workboxes and commands; an empty query lists needs-you agents first, then commands; choosing a project scrolls Home to its group, and a workbox opens its screen. While it is open, typing never reaches the terminal behind it.
 - [ ] Compact density and collapsed sidebar look right at 50+ agents.
-- [ ] ⌘J cycles through the agents that need you (blocked first), selects each on Home and opens it in the terminal panel; with nobody waiting it shows "Nobody needs you right now."
-- [ ] ⌘\ moves the terminal panel between the bottom and the right edge (and shows it if hidden), and the choice survives a relaunch.
+- [ ] ⌘J cycles through the agents that need you (blocked first), selects each on Home and opens it in a terminal tab; with nobody waiting it shows "Nobody needs you right now."
+- [ ] ~~⌘\ moves the terminal panel between the bottom and the right edge.~~ Replaced by v0.3: ⌘\ now shows the Dashboard beside the terminal (see `## v0.3`).
 - [ ] ⌘B collapses the sidebar to a 56 px rail (workbox initials with health dots, tooltips naming each workbox and its health) and back, on Home and on the Workbox screen; the rail's expand button works.
 - [ ] Window size and position persist across quit and relaunch.
 - [ ] Quitting with open terminal tabs leaves every herdr pane running (check `herdr pane list`).
 - [ ] ⌘C/⌘V copy and paste work inside a terminal tab.
+
+## v0.3
+
+Dashboard home and the tabbed workspace. Use generic data (buildbox, gpubox, api-service) where you can, and the `herdr-ui-qa` workspace on the test workbox for anything that opens or closes panes.
+
+- [ ] The Dashboard renders with real workboxes: summary line, Needs you, the five Right now tiles, a card per workbox and Working now. It lays out well inside the Home tab at a wide and a narrow window (grids wrap, one column when narrow, no horizontal scroll).
+- [ ] With nobody waiting, Needs you says "Nobody needs you right now."; with no agents at all, the usual empty and onboarding states show instead.
+- [ ] Open an agent from a card: the terminal takes the middle of the window, and switching to Home (⌘1) and back keeps its scrollback and the running program.
+- [ ] Tabs are grouped by workbox in the sidebar's workbox order. Clicking a group label folds it into a chip ("{workbox} · N tabs", plus "N needs input" when one does) and clicking again unfolds it. ⌘J, a notification, a sidebar terminal row, the palette, ⌘2–⌘9 or ⌃Tab landing on a tab in a folded group unfolds it.
+- [ ] Open enough tabs (up to the 16 cap) that the strip no longer fits: it scrolls sideways, the active tab stays in view, and the "All tabs" menu appears at the end, listing every tab by workbox with its status; arrows move through it, Escape closes it and returns focus to the button, and choosing a tab activates it.
+- [ ] Tab-strip, sidebar and context-bar visuals look right: status dots with their words ("Needs input", "Done, unseen") on the tabs that need them, the light orange tint for needs-input, "Opening…", "Detached" and "Error" chips, workbox group labels with a health dot, the sidebar's nested terminal rows, and the Home tab's home icon and label ("Dashboard", "All agents" or the workbox name).
+- [ ] The context bar above the terminal shows the agent, status, kind and folder · workbox, with Find, "Open in {Terminal}", Detach and "Close pane…" (a full herdr UI tab shows only Find and Detach). Detach does the same as ⌘W; "Close pane…" still asks first.
+- [ ] While the terminal has the keyboard: ⌘1 goes to the Dashboard, ⌘2–⌘9 select terminal tabs in strip order, ⌃` switches between Home and the last terminal tab (with no terminal tab open it shows "Open a session to start a terminal."), ⌃Tab and ⌃⇧Tab cycle all tabs including Home, and ⌘W closes (detaches) the active tab and returns to Home. ⌘W on Home does nothing.
+- [ ] On the strip, with a terminal tab active, Backspace, arrows and ⌘↩ do nothing to the hidden Home list (no row selected, opened or "Close…" dialog), and the same holds with focus in the context bar or on the window body.
+- [ ] ⌘\ with a terminal tab active shows the Dashboard in a column on the right; pressing it again hides it; on Home it does nothing. Drag the handle and use the arrow keys on it (360 to 1200 px), quit and relaunch, and the width (and whether the column is shown) comes back.
+- [ ] The terminal re-fits when the ⌘\ column appears, disappears and while it is dragged (no cut-off lines or stale columns in a full-screen TUI).
+- [ ] On a narrow window the ⌘\ column does not hide the terminal: the terminal keeps a usable width.
+- [ ] The Open button reads "Open" and follows Settings › Open sessions in; its menu has "Open here", "Open in {Terminal}", "Open full herdr UI" and "Copy attach command". When the row already has a tab it reads "Go to tab" (with ⌘2 to ⌘9 when it has one).
+- [ ] The Open menu is placed correctly (it is fixed-position): from the last row of an All agents group, from a Dashboard row at the bottom of the page (Working now), from a needs-you card, and from the Inspector. Near the bottom edge of the window it flips up and is never clipped. Arrow keys move through it, Escape closes it and focus goes back to the chevron.
+- [ ] "Copy attach command" shows "Copied", and pasting it into a terminal attaches the same pane as "Open in {Terminal}" (a local pane, and a remote one over `ssh -t`).
+- [ ] A reconnecting (or needs-attention) workbox card is dimmed and marked "as of {age} ago", shows "Retry now" and no "Open herdr"; a disabled workbox shows no action; the workbox's tab group and the Workboxes online tile still render.
+- [ ] The Activity log shows no extra herdr calls while the Dashboard is open beyond the app's normal polling (snapshots and machine status); leaving it open for a minute adds nothing, and the "herdr response" tile still updates.
+- [ ] With a terminal tab active, the Inspector's preview and the Workbox screen's pane-tail reads stop (no `agent read` or `pane read` in the Activity log), and resume when Home is shown.
+- [ ] ⌘F in a terminal opens its find bar; ⌘F on Home switches to All agents and focuses its search. On All agents, arrows, ⌘↩ and Backspace/Delete still work.
+- [ ] ⌘K lists "Go to Dashboard", "All agents" and "Dashboard beside terminal", and each works.
+- [ ] The sidebar shows Dashboard, Needs you, All agents, each workbox with its health, agent count and nested open terminals, and the first 3 projects with "{n} more". ⌘B collapses it to the rail (Dashboard, needs-you and workbox icons with health; nested terminals hidden).
+- [ ] Settings no longer offers terminal placement or panel size. A `settings.json` from v0.2 (with `terminal_placement` and `terminal_panel_size`) still loads, ignoring the old keys, and the other settings (and the Dashboard column) are intact.
