@@ -112,7 +112,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       ],
       open: (row, how) => void openRow(row, how),
       goToProject: (key) => {
-        // The group is only on the page when All agents is grouped by project (as the sidebar does).
+        // The group is only on the page when All agents is grouped by project (as the sidebar does),
+        // and not filtered out by a saved search.
+        store.setQuery("");
         showHomeView({ kind: "all" });
         store.setGroupBy("project");
         scrollToId(`group-${key}`);

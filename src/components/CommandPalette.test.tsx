@@ -268,6 +268,35 @@ describe("CommandPalette", () => {
     useAppStore.setState({ groupBy: "project", view: { kind: "all" } });
   });
 
+  it("choosing_a_project_clears_the_saved_all_agents_search", async () => {
+    // A project the search filters out has no group on the page to scroll to.
+    const project = groupByProject(toRows(state)).find((g) => g.folder);
+    expect(project).toBeDefined();
+    useAppStore.setState({
+      query: "no such agent",
+      view: { kind: "dashboard" },
+    });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), project?.name ?? "");
+    const option = screen
+      .getAllByRole("option")
+      .find((o) => o.querySelector(".palette-tag")?.textContent === "Projects");
+    await user.click(option as HTMLElement);
+    expect(useAppStore.getState().query).toBe("");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    useAppStore.setState({ view: { kind: "all" } });
+  });
+
+  it("an_ordinary_view_switch_keeps_the_saved_search", async () => {
+    useAppStore.setState({ query: "api", view: { kind: "dashboard" } });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "All agents");
+    await user.keyboard("{Enter}");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    expect(useAppStore.getState().query).toBe("api");
+    useAppStore.setState({ query: "" });
+  });
+
   it("shows_a_workbox_and_a_project_on_home_when_a_terminal_tab_is_active", async () => {
     const project = groupByProject(toRows(state)).find((g) => g.folder);
     expect(project).toBeDefined();

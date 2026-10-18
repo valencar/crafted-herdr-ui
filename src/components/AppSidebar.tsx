@@ -11,6 +11,7 @@ export function AppSidebar() {
   const view = useAppStore((s) => s.view);
   const setGroupBy = useAppStore((s) => s.setGroupBy);
   const setSheet = useAppStore((s) => s.setSheet);
+  const setQuery = useAppStore((s) => s.setQuery);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
 
@@ -32,6 +33,8 @@ export function AppSidebar() {
         scrollToId(id);
       }}
       onProject={(g) => {
+        // A project the saved search filters out has no group to scroll to.
+        setQuery("");
         showHomeView({ kind: "all" });
         setGroupBy("project");
         scrollToId(`group-${g.key}`);
