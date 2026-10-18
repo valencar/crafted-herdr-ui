@@ -2,7 +2,7 @@
 
 An open-source macOS app (Tauri 2 + React/TypeScript) that gives the [herdr](https://herdr.dev) terminal workspace manager a desktop UI. The app shows every machine ("workbox") and every agent grouped by project, with "needs you" first. It opens any pane in the user's own terminal, and drives everything through the user's installed `herdr` CLI.
 
-- Spec (the authority): `docs/superpowers/specs/2026-10-16-crafted-herdr-ui-design.md`
+- Spec (the authority): `docs/superpowers/specs/2026-10-16-crafted-herdr-ui-design.md`, extended by the addenda `2026-10-17-v0.2-in-app-terminal-design.md` and `2026-10-17-v0.3-workspace-design.md` (Dashboard home and the tabbed workspace; where they disagree, the later one wins)
 - Plan (tasks 0–17): `docs/superpowers/plans/2026-10-16-crafted-herdr-ui-v1.md`
 - Area guides: `src-tauri/CLAUDE.md` (Rust core) and `src/CLAUDE.md` (React UI), once those folders exist.
 
@@ -37,7 +37,7 @@ scripts/check-no-personal-data.sh
 - Errors: stderr JSON `{error:{code,message}}` with exit 1; usage errors exit 2.
 - Attach: `herdr terminal attach <terminal_id>` locally. For remote machines, `ssh -t <target> …`, because `--machine` doesn't forward attach. A non-default session needs `HERDR_SESSION=<name>`.
 - Snapshots carry no timestamps; the app records the times it observes changes itself.
-- The in-app terminal is just another attach client: a tab runs exactly the argv `open_argv` builds (the same command "Open in {Terminal}" runs) on a pty, and closing a tab ends only that client, never the herdr pane.
+- The in-app terminal is just another attach client: a workspace tab runs exactly the argv `open_argv` builds (the same command "Open in {Terminal}" runs) on a pty, and closing a tab ends only that client, never the herdr pane.
 
 ## Build orchestration (how this repo is being built)
 

@@ -17,8 +17,8 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 | `preview.rs` | `PreviewManager` (the live preview, emitting only changed frames), `PreviewFrame`, the one-line pane read |
 | `ssh_config.rs`, `machine_setup/` | Host alias parsing; pty-driven `machine add` (`transcript.rs` is the pure prompt/step parser and `SetupRun`; `mod.rs` the thread driver over `pty.rs`) |
 | `pty.rs` | the shared pseudo-terminal spawner: `TermSize`, `PtySpawner`/`PortablePty` (spawns at a size), `PtyControl` (kill, wait, try_wait, resize), `SpawnedPty`; used by `machine_setup/` and the in-app terminal |
-| `menu.rs` | the native app menu: `MenuId`, the `items()` table (id, label, accelerator), the `build` of the App, Edit, View, Terminal and Window menus, and `on_event`, which forwards a chosen item to the main window as a `"menu"` event |
-| `settings.rs` | `Settings` (merge + validation), the `settings.json` store, herdr re-resolution (`HerdrLocator`) |
+| `menu.rs` | the native app menu: `MenuId`, the `items()` table (id, label, accelerator), the `build` of the App, Edit, View, Terminal and Window menus (Dashboard ⌘1, Toggle Terminal ⌃`, "Dashboard Beside Terminal" ⌘\, and Tab 1–8 on ⌘2–⌘9 in the Terminal menu), and `on_event`, which forwards a chosen item to the main window as a `"menu"` event |
+| `settings.rs` | `Settings` (merge + validation; `dashboard_split` and `dashboard_split_width`, 360–1200, for the Dashboard column; the v0.2 `terminal_placement` and `terminal_panel_size` keys are gone and ignored if a stored file still has them), the `settings.json` store, herdr re-resolution (`HerdrLocator`) |
 | `notify.rs`, `tray.rs` | notifications from `Transition`s; tray, badge, popover and Settings windows, global shortcut |
 
 ## Rules

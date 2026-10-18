@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "crafted-herdr-ui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "muda",
  "portable-pty",
