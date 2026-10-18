@@ -137,9 +137,9 @@ describe("OpenButton", () => {
     });
     expect(main).toHaveTextContent("Go to tab");
     expect(main).toHaveTextContent("⌘3");
+    // openRow("app") focuses the existing tab, and marks a done row seen.
     await user.click(main);
-    expect(useTerminalStore.getState().activeKey).toBe("buildbox::w1:p1");
-    expect(openRow).not.toHaveBeenCalled();
+    expect(openRow).toHaveBeenCalledWith(ROW, "app");
   });
 
   it("go_to_tab_without_shortcut_past_the_eighth", () => {
@@ -149,9 +149,11 @@ describe("OpenButton", () => {
         tab("w1:p1"),
       ],
     });
-    setup();
+    // Even with a `kbd` hint for "Open", "Go to tab" shows no key.
+    setup({ kbd: "⌘↩" });
     const main = screen.getByRole("button", { name: "Go to tab api-service" });
     expect(main).toHaveTextContent(/^Go to tab$/);
+    expect(screen.queryByText("⌘↩")).toBeNull();
   });
 
   it("an_optional_kbd_hint_sits_inside_the_main_button_only", () => {
@@ -246,6 +248,42 @@ describe("OpenButton", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
     expect(chevron()).toHaveFocus();
+  });
+
+  it("the_menu_opens_upwards_when_there_is_no_room_below", async () => {
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(600);
+    const rect = (top: number, bottom: number) =>
+      ({ top, bottom, left: 0, right: 500, width: 20, height: 20 }) as DOMRect;
+    const spy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(rect(570, 590));
+    const { user } = setup();
+    await user.click(chevron());
+    const style = screen.getByRole("menu").style;
+    expect(style.bottom).toBe("34px");
+    expect(style.top).toBe("");
+    cleanup();
+    spy.mockReturnValue(rect(20, 40));
+    const second = setup();
+    await second.user.click(chevron());
+    const down = screen.getByRole("menu").style;
+    expect(down.top).toBe("44px");
+    expect(down.bottom).toBe("");
+    vi.restoreAllMocks();
+  });
+
+  it("clicks_do_not_reach_a_clickable_ancestor", async () => {
+    const onCard = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <div onClick={onCard}>
+        <OpenButton row={ROW} terminalName="Ghostty" />
+      </div>,
+    );
+    await user.click(chevron());
+    await user.click(screen.getByRole("menuitem", { name: "Open here" }));
+    await user.click(screen.getByRole("button", { name: "Open api-service" }));
+    expect(onCard).not.toHaveBeenCalled();
   });
 
   it("outside_click_closes", async () => {

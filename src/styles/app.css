@@ -250,6 +250,9 @@ kbd {
 /* Fixed, so the clipped group card cannot cut the menu off; the button sets top/right. */
 .open-menu {
   position: fixed;
+  top: auto;
+  right: auto;
+  bottom: auto;
   left: auto;
   min-width: 200px;
 }

@@ -39,7 +39,6 @@ export function OpenButton({
   const rootRef = useRef<HTMLDivElement>(null);
   const chevronRef = useRef<HTMLButtonElement>(null);
   const tabs = useTerminalStore((s) => s.tabs);
-  const activate = useTerminalStore((s) => s.activate);
   const machines = useAppStore((s) => s.state?.machines ?? NO_MACHINES);
   const reportError = useAppStore((s) => s.reportError);
   const showToast = useAppStore((s) => s.showToast);
@@ -47,7 +46,8 @@ export function OpenButton({
   const hasTab = tabs.some((t) => t.tabKey === row.key);
   const shortcut = hasTab ? tabShortcut(row.key, tabs, machines) : null;
   const label = hasTab ? "Go to tab" : "Open";
-  const hint = hasTab ? (shortcut === null ? kbd : `⌘${shortcut}`) : kbd;
+  // "Go to tab" shows its own ⌘ number or nothing; the `kbd` hint belongs to "Open".
+  const hint = hasTab ? (shortcut === null ? null : `⌘${shortcut}`) : kbd;
   const name = `${label} ${row.name}${shortcut === null ? "" : ` (⌘${shortcut})`}`;
 
   useEffect(() => {
@@ -135,12 +135,15 @@ export function OpenButton({
     .join(" ");
 
   return (
-    <div className={classes} ref={rootRef}>
+    // The cards select themselves on click; the menu must not hand that click to them.
+    <div className={classes} ref={rootRef} onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className="btn open-main"
         aria-label={name}
-        onClick={() => (hasTab ? activate(row.key) : void openRow(row))}
+        // An open tab is focused (and its group unfolded) by `openTab`; `openRow` also marks a
+        // done row seen.
+        onClick={() => void (hasTab ? openRow(row, "app") : openRow(row))}
       >
         {label}
         {hint && <kbd className="mono">{hint}</kbd>}

@@ -229,6 +229,42 @@ describe("Dashboard", () => {
     expect(calls("mark_seen")).toHaveLength(1);
   });
 
+  it("a_cards_open_button_and_menu_leave_the_dashboard_in_place", async () => {
+    const user = setup();
+    const card = within(section("Needs you")).getAllByRole("article")[0];
+    await user.click(
+      within(card).getByRole("button", { name: /^More ways to open / }),
+    );
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
+    await user.keyboard("{Escape}");
+    await user.click(within(card).getByRole("button", { name: /^Open / }));
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
+    expect(useAppStore.getState().selectedKey).toBeNull();
+  });
+
+  it("go_to_tab_on_a_done_row_activates_the_tab_and_marks_it_seen", async () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          tabKey: "buildbox::w2:p1",
+          target: { kind: "pane", machineId: "buildbox", paneId: "w2:p1" },
+          title: "tester",
+          machineLabel: "buildbox",
+          state: "live",
+          error: null,
+          termId: null,
+        },
+      ],
+      activeKey: HOME,
+    });
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: /^Go to tab tester/ }));
+    expect(useTerminalStore.getState().activeKey).toBe("buildbox::w2:p1");
+    expect(calls("mark_seen")).toHaveLength(1);
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
+  });
+
   it("nobody_waiting_says_so", () => {
     const quiet = { "w1:p1": "working", "w2:p1": "idle" };
     setup(
