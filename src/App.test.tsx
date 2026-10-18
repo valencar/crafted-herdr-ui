@@ -16,7 +16,7 @@ import type { MenuId } from "./lib/bindings/MenuId";
 import type { Settings } from "./lib/bindings/Settings";
 import type { Snapshot } from "./lib/bindings/Snapshot";
 import { useAppStore } from "./store/appStore";
-import { useTerminalStore } from "./terminal/terminalStore";
+import { HOME, useTerminalStore } from "./terminal/terminalStore";
 import App from "./App";
 
 // xterm is tested on its own; the shell only needs a box where a tab's view goes.
@@ -45,6 +45,8 @@ const ipc = vi.hoisted(() => ({
   toActionError: (e: unknown) => e,
 }));
 vi.mock("./lib/ipc", () => ipc);
+
+const activeKey = () => useTerminalStore.getState().activeKey;
 
 const state: AppState = {
   machines: [],
@@ -78,7 +80,12 @@ afterEach(() => {
     paletteOpen: false,
     dialogOpen: 0,
   });
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
 });
 
 it("loads the state on mount, then subscribes to pushes", async () => {
@@ -313,10 +320,15 @@ it("focus-row selects and opens", async () => {
   expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
     "buildbox::w1:p1",
   ]);
-  expect(useTerminalStore.getState().panelOpen).toBe(true);
+  expect(activeKey()).toBe("buildbox::w1:p1");
 
   // With the external terminal as the target, the click opens that instead.
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
   useAppStore.setState({
     settings: { open_target: "external" } as unknown as Settings,
   });
@@ -358,13 +370,15 @@ it("a notification click that opens in the app leaves the Home row unfocused; an
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
     expect(useTerminalStore.getState().tabs).toHaveLength(1);
     expect(document.activeElement).not.toBe(button);
+    expect(activeKey()).toBe("buildbox::w1:p1");
 
-    useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+    // Opening elsewhere, the Home list is what shows: the terminal tab gives way to it.
     useAppStore.setState({
       settings: { open_target: "external" } as unknown as Settings,
     });
     act(() => handler(ipc.onFocusRow)("buildbox::w1:p1"));
     act(() => vi.advanceTimersByTime(500));
+    expect(activeKey()).toBe(HOME);
     expect(document.activeElement).toBe(button);
   } finally {
     vi.useRealTimers();
@@ -494,7 +508,7 @@ describe("menu events", () => {
     await menu("tab3");
     await menu("next-tab");
     expect(useAppStore.getState().activityOpen).toBe(false);
-    expect(useTerminalStore.getState().activeKey).toBeNull();
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
   });
 });
 
@@ -508,8 +522,6 @@ function openTabs(...paneIds: string[]) {
     });
   }
 }
-const activeKey = () => useTerminalStore.getState().activeKey;
-
 describe("terminal menu ids", () => {
   beforeEach(() => {
     useAppStore.setState({
@@ -527,44 +539,117 @@ describe("terminal menu ids", () => {
     useAppStore.setState({ settings: null, toast: null });
   });
 
-  it("tab menu ids switch, cycle and close tabs", async () => {
+  it("dashboard_activates_home", async () => {
     render(<App />);
     await screen.findByRole("searchbox");
-    openTabs("w1:p1", "w2:p1", "w1:p3");
-    expect(activeKey()).toBe("buildbox::w1:p3");
-    expect(await screen.findAllByRole("tab")).toHaveLength(3);
+    openTabs("w1:p1");
+    useAppStore.setState({ view: { kind: "workbox", machineId: "buildbox" } });
+    expect(activeKey()).toBe("buildbox::w1:p1");
+
+    await menu("dashboard");
+    expect(activeKey()).toBe(HOME);
+    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+    // The last terminal is remembered for ⌃`.
+    expect(useTerminalStore.getState().lastTermKey).toBe("buildbox::w1:p1");
+  });
+
+  it("tab1_selects_the_first_tab_in_strip_order_not_open_order", async () => {
+    // gpubox comes after buildbox in the machine list, though it was opened first.
+    ipc.getState.mockResolvedValue({
+      ...state,
+      machines: ["buildbox", "gpubox"].map((id) => ({
+        id,
+        label: id,
+        target: id,
+        session: "default",
+        is_local: false,
+        health: { kind: "online" as const },
+        snapshot: null,
+        last_ok_ms: 1,
+        ages: {},
+      })),
+    });
+    render(<App />);
+    await screen.findByRole("searchbox");
+    await waitFor(() =>
+      expect(useAppStore.getState().state?.machines).toHaveLength(2),
+    );
+    act(() => {
+      useTerminalStore.getState().openTab({
+        tabKey: "gpubox::w1:p1",
+        target: { kind: "pane", machineId: "gpubox", paneId: "w1:p1" },
+        title: "gpu job",
+        machineLabel: "gpubox",
+      });
+    });
+    openTabs("w1:p1", "w2:p1");
+    expect(activeKey()).toBe("buildbox::w2:p1");
 
     await menu("tab1");
     expect(activeKey()).toBe("buildbox::w1:p1");
     await menu("tab2");
     expect(activeKey()).toBe("buildbox::w2:p1");
+    await menu("tab3");
+    expect(activeKey()).toBe("gpubox::w1:p1");
     // Out of range does nothing.
-    await menu("tab9");
-    expect(activeKey()).toBe("buildbox::w2:p1");
-
-    await menu("next-tab");
-    expect(activeKey()).toBe("buildbox::w1:p3");
-    await menu("next-tab");
-    expect(activeKey()).toBe("buildbox::w1:p1");
-    await menu("prev-tab");
-    expect(activeKey()).toBe("buildbox::w1:p3");
-
-    await menu("close-tab");
-    expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
-      "buildbox::w1:p1",
-      "buildbox::w2:p1",
-    ]);
-    expect(screen.getAllByRole("tab")).toHaveLength(2);
-    await menu("close-tab");
-    await menu("close-tab");
-    // The last tab closing hides the panel altogether.
-    expect(useTerminalStore.getState().tabs).toEqual([]);
-    expect(screen.queryByRole("region", { name: "Terminal" })).toBeNull();
-    // With nothing open, close-tab has nothing to close.
-    await menu("close-tab");
+    await menu("tab4");
+    expect(activeKey()).toBe("gpubox::w1:p1");
   });
 
-  it("toggle-terminal hides and shows the panel without dropping the tabs, and explains itself with none", async () => {
+  it("selecting_a_tab_unfolds_its_group", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    openTabs("w1:p1");
+    act(() => {
+      useTerminalStore.getState().activate(HOME);
+      useTerminalStore.getState().toggleFold("buildbox");
+    });
+    await menu("tab1");
+    expect(activeKey()).toBe("buildbox::w1:p1");
+    expect(useTerminalStore.getState().folded).toEqual({});
+  });
+
+  it("close_tab_on_home_does_nothing", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
+    openTabs("w1:p1");
+    act(() => useTerminalStore.getState().activate(HOME));
+    await menu("close-tab");
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
+    expect(activeKey()).toBe(HOME);
+
+    // On a terminal tab it detaches it and lands on Home.
+    await menu("tab1");
+    await menu("close-tab");
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+    expect(activeKey()).toBe(HOME);
+    // With nothing open, there is nothing to close.
+    await menu("close-tab");
+    expect(activeKey()).toBe(HOME);
+  });
+
+  it("toggle_terminal_switches_home_and_last_tab", async () => {
+    const { container } = render(<App />);
+    await screen.findByRole("searchbox");
+    openTabs("w1:p1", "w2:p1");
+    await menu("tab1");
+    const slot = container.querySelector<HTMLElement>(".home-slot")!;
+    expect(slot).not.toBeVisible();
+
+    await menu("toggle-terminal");
+    expect(activeKey()).toBe(HOME);
+    expect(slot).toBeVisible();
+    // The views stay mounted while Home shows.
+    expect(screen.getByTestId("view-buildbox::w1:p1")).toBeInTheDocument();
+    expect(screen.getByTestId("view-buildbox::w2:p1")).toBeInTheDocument();
+
+    await menu("toggle-terminal");
+    expect(activeKey()).toBe("buildbox::w1:p1");
+    expect(slot).not.toBeVisible();
+    expect(screen.getByTestId("view-buildbox::w1:p1")).toBeVisible();
+  });
+
+  it("toggle_terminal_without_tabs_shows_the_hint", async () => {
     render(<App />);
     await screen.findByRole("searchbox");
     await menu("toggle-terminal");
@@ -572,46 +657,35 @@ describe("terminal menu ids", () => {
       "Open a session to start a terminal.",
     );
     expect(useAppStore.getState().toastTone).toBe("info");
-    expect(useTerminalStore.getState().panelOpen).toBe(false);
-
-    openTabs("w1:p1");
-    const panel = await screen.findByRole("region", { name: "Terminal" });
-    expect(panel).toBeVisible();
-    await menu("toggle-terminal");
-    expect(useTerminalStore.getState().panelOpen).toBe(false);
-    expect(panel).not.toBeVisible();
-    expect(screen.getByTestId("view-buildbox::w1:p1")).toBeInTheDocument();
-    await menu("toggle-terminal");
-    expect(panel).toBeVisible();
+    expect(activeKey()).toBe(HOME);
   });
 
-  it("tab shortcuts bring back a hidden panel", async () => {
+  it("next_tab_cycles_through_home", async () => {
     render(<App />);
     await screen.findByRole("searchbox");
-    openTabs("w1:p1", "w2:p1");
-    const panel = await screen.findByRole("region", { name: "Terminal" });
-    const hide = () =>
-      act(() => useTerminalStore.getState().setPanelOpen(false));
+    openTabs("w1:p1", "w2:p1", "w1:p3");
+    act(() => useTerminalStore.getState().activate(HOME));
 
-    for (const [id, key] of [
-      ["tab1", "buildbox::w1:p1"],
-      ["next-tab", "buildbox::w2:p1"],
-      ["prev-tab", "buildbox::w1:p1"],
-    ] as const) {
-      hide();
-      expect(panel).not.toBeVisible();
-      await menu(id);
-      expect(panel).toBeVisible();
-      expect(activeKey()).toBe(key);
+    const seen: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      await menu("next-tab");
+      seen.push(activeKey());
     }
-
-    // A tab that doesn't exist shows nothing, so the panel stays hidden.
-    hide();
-    await menu("tab9");
-    expect(panel).not.toBeVisible();
+    expect(seen).toEqual([
+      "buildbox::w1:p1",
+      "buildbox::w2:p1",
+      "buildbox::w1:p3",
+      HOME,
+    ]);
+    await menu("prev-tab");
+    expect(activeKey()).toBe("buildbox::w1:p3");
+    await menu("prev-tab");
+    await menu("prev-tab");
+    await menu("prev-tab");
+    expect(activeKey()).toBe(HOME);
   });
 
-  it("the panel survives moving between Home and the Workbox screen", async () => {
+  it("the Home view survives the trip to a terminal tab and back", async () => {
     ipc.getState.mockResolvedValue({
       ...state,
       machines: [
@@ -632,6 +706,7 @@ describe("terminal menu ids", () => {
     await screen.findByRole("searchbox");
     openTabs("w1:p1");
     const view = await screen.findByTestId("view-buildbox::w1:p1");
+    act(() => useTerminalStore.getState().activate(HOME));
 
     act(() =>
       useAppStore.setState({
@@ -640,29 +715,90 @@ describe("terminal menu ids", () => {
     );
     await screen.findByRole("navigation", { name: "Breadcrumb" });
     expect(screen.getByTestId("view-buildbox::w1:p1")).toBe(view);
+    // The Home tab is named after the workbox on show.
+    expect(
+      within(screen.getByRole("navigation", { name: "Tabs" })).getAllByRole(
+        "button",
+      )[0],
+    ).toHaveAccessibleName("buildbox");
 
     act(() => useAppStore.setState({ view: { kind: "home" } }));
     await screen.findByRole("searchbox");
     expect(screen.getByTestId("view-buildbox::w1:p1")).toBe(view);
   });
 
-  it("puts the panel beside the screens in the saved placement", async () => {
-    useAppStore.setState({
-      settings: {
-        ...SETTINGS,
-        terminal_placement: "right",
-      } as unknown as Settings,
-    });
+  it("the workspace is there with no tab at all, and the shell has no placement classes", async () => {
     const { container } = render(<App />);
     await screen.findByRole("searchbox");
+    expect(screen.getByRole("region", { name: "Workspace" })).toBeVisible();
+    expect(container.querySelector(".shell")).toBeNull();
+    expect(container.querySelector(".body")?.lastElementChild).toHaveClass(
+      "workspace",
+    );
+  });
+
+  it("sidebar clicks bring Home back before changing the view", async () => {
+    const user = userEvent.setup();
+    ipc.getState.mockResolvedValue({
+      ...state,
+      machines: [
+        {
+          id: "buildbox",
+          label: "buildbox",
+          target: "buildbox",
+          session: "default",
+          is_local: false,
+          health: { kind: "online" },
+          snapshot: raw.result.snapshot as unknown as Snapshot,
+          last_ok_ms: 1,
+          ages: {},
+        },
+      ],
+    });
+    ipc.invokeTyped.mockImplementation(async (name: string) =>
+      name === "get_terminals"
+        ? { installed: [], default: "ghostty" }
+        : name === "get_command_log"
+          ? []
+          : "",
+    );
+    render(<App />);
+    await screen.findByRole("searchbox");
+    await waitFor(() =>
+      expect(useAppStore.getState().state?.machines).toHaveLength(1),
+    );
     openTabs("w1:p1");
-    await screen.findByRole("region", { name: "Terminal" });
-    const shell = container.querySelector(".shell");
-    expect(shell).toHaveClass("placement-right");
-    expect([...shell!.children].map((c) => c.className)).toEqual([
-      "shell-content",
-      expect.stringContaining("terminal-panel"),
-    ]);
+    expect(activeKey()).toBe("buildbox::w1:p1");
+
+    // The workbox entry.
+    await user.click(screen.getByRole("button", { name: /^buildbox/ }));
+    expect(activeKey()).toBe(HOME);
+    expect(useAppStore.getState().view).toEqual({
+      kind: "workbox",
+      machineId: "buildbox",
+    });
+
+    // The jump items and the project entries.
+    act(() =>
+      useAppStore.setState({
+        view: { kind: "workbox", machineId: "buildbox" },
+      }),
+    );
+    await menu("tab1");
+    expect(activeKey()).toBe("buildbox::w1:p1");
+    await user.click(screen.getByRole("button", { name: /^Needs you/ }));
+    expect(activeKey()).toBe(HOME);
+    expect(useAppStore.getState().view).toEqual({ kind: "home" });
+
+    await menu("tab1");
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Sidebar" })).getByRole(
+        "button",
+        { name: /api-service/ },
+      ),
+    );
+    expect(activeKey()).toBe(HOME);
+    expect(useAppStore.getState().view).toEqual({ kind: "home" });
   });
 
   it("font menu ids save the clamped size", async () => {
@@ -708,11 +844,11 @@ describe("terminal menu ids", () => {
     expect(saved()[saved().length - 1]).toEqual({ terminal_font_size: 13 });
   });
 
-  it("find focuses the Home search box unless focus is inside the terminal panel", async () => {
+  it("find focuses the Home search box on Home and searches the terminal on a terminal tab", async () => {
     render(<App />);
     const search = await screen.findByRole("searchbox");
     openTabs("w1:p1");
-    await screen.findByRole("region", { name: "Terminal" });
+    act(() => useTerminalStore.getState().activate(HOME));
 
     await menu("find");
     expect(search).toHaveFocus();
@@ -720,10 +856,7 @@ describe("terminal menu ids", () => {
       screen.queryByRole("searchbox", { name: "Find in terminal" }),
     ).toBeNull();
 
-    // xterm keeps focus in a textarea inside the panel.
-    const input = document.createElement("textarea");
-    screen.getByRole("region", { name: "Terminal" }).append(input);
-    input.focus();
+    await menu("tab1");
     await menu("find");
     expect(
       await screen.findByRole("searchbox", { name: "Find in terminal" }),
@@ -821,24 +954,38 @@ describe("next-needs-you, split and sidebar menu ids", () => {
     expect(useAppStore.getState().toast).toBeNull();
   });
 
-  it("toggle-split flips terminal_placement and shows the panel", async () => {
+  it("⌘J with sessions opening elsewhere shows Home, where the row is selected", async () => {
+    useAppStore.setState({
+      settings: { ...SETTINGS, open_target: "external" } as unknown as Settings,
+    });
     render(<App />);
     await screen.findByRole("searchbox");
-    // No tabs: the setting still flips, and there is no panel to show.
+    openTabs("w1:p3");
+    const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+    act(() => push(buildboxState()));
+    await waitFor(() =>
+      expect(useAppStore.getState().state?.machines).toHaveLength(1),
+    );
+
+    await menu("next-needs-you");
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(activeKey()).toBe(HOME);
+    expect(ipc.invokeTyped).toHaveBeenCalledWith("open_session", {
+      machineId: "buildbox",
+      paneId: "w1:p1",
+    });
+  });
+
+  it("toggle-split still flips terminal_placement while Task 7 replaces it", async () => {
+    render(<App />);
+    await screen.findByRole("searchbox");
     await menu("toggle-split");
     expect(saved()).toEqual([{ terminal_placement: "right" }]);
-    expect(useTerminalStore.getState().panelOpen).toBe(false);
     await waitFor(() =>
       expect(useAppStore.getState().settings?.terminal_placement).toBe("right"),
     );
-
-    openTabs("w1:p1");
-    const panel = await screen.findByRole("region", { name: "Terminal" });
-    act(() => useTerminalStore.getState().setPanelOpen(false));
-    expect(panel).not.toBeVisible();
     await menu("toggle-split");
     expect(saved()[1]).toEqual({ terminal_placement: "bottom" });
-    expect(panel).toBeVisible();
   });
 
   it("toggle-sidebar saves sidebar_collapsed", async () => {

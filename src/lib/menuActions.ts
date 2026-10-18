@@ -1,21 +1,17 @@
 import { useAppStore } from "../store/appStore";
+import { stripOrder } from "../terminal/tabOrder";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import {
   DEFAULT_FONT_SIZE,
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
   requestTerminalFind,
-} from "../terminal/TerminalPanel";
-import { useTerminalStore } from "../terminal/terminalStore";
+} from "../terminal/Workspace";
 import type { MenuId } from "./bindings/MenuId";
 import { toRows } from "./grouping";
 import { nextNeedsYou } from "./nextNeedsYou";
-import { openRow } from "./openRow";
-import {
-  focusSearch,
-  isInTerminal,
-  saveSettings,
-  toggleSidebar,
-} from "./uiHelpers";
+import { defaultOpenHow, openRow } from "./openRow";
+import { focusSearch, saveSettings, toggleSidebar } from "./uiHelpers";
 
 /** Saves the terminal font size one step up or down (within 9 to 24), or back to the default. */
 function saveFontSize(id: "font-bigger" | "font-smaller" | "font-reset") {
@@ -47,29 +43,39 @@ export function runMenuAction(id: MenuId): void {
       }
       break;
     }
+    // The Dashboard is the Home tab showing its default view.
+    case "dashboard":
+      useAppStore.getState().setView({ kind: "home" });
+      useTerminalStore.getState().activate(HOME);
+      break;
+    // Switches between the Home tab and the terminal tab that was active last.
     case "toggle-terminal":
       if (useTerminalStore.getState().tabs.length === 0) {
         useAppStore
           .getState()
           .showToast("Open a session to start a terminal.", "info");
       } else {
-        useTerminalStore.getState().togglePanel();
+        useTerminalStore.getState().toggleHome();
       }
       break;
+    // Home is never closed.
     case "close-tab": {
       const { activeKey, closeTab } = useTerminalStore.getState();
-      if (activeKey) closeTab(activeKey);
+      if (activeKey !== HOME) closeTab(activeKey);
       break;
     }
-    // A tab shortcut shows the tab: it also brings back a hidden panel.
+    // Home is part of the cycle, ahead of the tabs as the strip shows them.
     case "next-tab":
     case "prev-tab": {
-      const terminals = useTerminalStore.getState();
-      if (terminals.tabs.length === 0) break;
-      terminals.cycle(id === "next-tab" ? 1 : -1);
-      terminals.setPanelOpen(true);
+      const { tabs, cycle } = useTerminalStore.getState();
+      const machines = useAppStore.getState().state?.machines ?? [];
+      cycle(id === "next-tab" ? 1 : -1, [
+        HOME,
+        ...stripOrder(tabs, machines).map((t) => t.tabKey),
+      ]);
       break;
     }
+    // ⌘2 to ⌘9 pick the first eight tabs in strip order (⌘1 is the Dashboard).
     case "tab1":
     case "tab2":
     case "tab3":
@@ -77,14 +83,11 @@ export function runMenuAction(id: MenuId): void {
     case "tab5":
     case "tab6":
     case "tab7":
-    case "tab8":
-    case "tab9": {
-      const terminals = useTerminalStore.getState();
-      const at = Number(id.slice(3)) - 1;
-      if (at < terminals.tabs.length) {
-        terminals.activateIndex(at);
-        terminals.setPanelOpen(true);
-      }
+    case "tab8": {
+      const { tabs, activate } = useTerminalStore.getState();
+      const machines = useAppStore.getState().state?.machines ?? [];
+      const tab = stripOrder(tabs, machines)[Number(id.slice(3)) - 1];
+      if (tab) activate(tab.tabKey);
       break;
     }
     case "font-bigger":
@@ -105,27 +108,29 @@ export function runMenuAction(id: MenuId): void {
         showToast("Nobody needs you right now.", "info");
       } else {
         focusRow(row.key);
+        // Opened elsewhere, the row is selected on Home, so Home has to be showing.
+        if (defaultOpenHow() !== "app")
+          useTerminalStore.getState().activate(HOME);
         void openRow(row);
       }
       break;
     }
-    // Moves the panel between the bottom and the right edge, and shows it if there are tabs.
+    // Nothing draws the placement any more; the setting is still flipped until the Dashboard
+    // column replaces this item.
     case "toggle-split": {
       const placement =
         useAppStore.getState().settings?.terminal_placement ?? "bottom";
       saveSettings({
         terminal_placement: placement === "bottom" ? "right" : "bottom",
       });
-      const terminals = useTerminalStore.getState();
-      if (terminals.tabs.length > 0) terminals.setPanelOpen(true);
       break;
     }
     case "toggle-sidebar":
       toggleSidebar();
       break;
-    // In a terminal, Find searches its scrollback; anywhere else it is Home's search.
+    // On a terminal tab, Find searches its scrollback; on Home it is Home's search.
     case "find":
-      if (isInTerminal(document.activeElement)) requestTerminalFind();
+      if (useTerminalStore.getState().activeKey !== HOME) requestTerminalFind();
       else focusSearch();
       break;
   }

@@ -9,7 +9,7 @@ import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import { useAppStore } from "../store/appStore";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { CommandPalette } from "./CommandPalette";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -19,7 +19,7 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
 import { invokeTyped } from "../lib/ipc";
 
 // xterm is tested on its own; the palette only reaches the panel through menu actions.
-vi.mock("../terminal/TerminalPanel", () => ({
+vi.mock("../terminal/Workspace", () => ({
   DEFAULT_FONT_SIZE: 13,
   MIN_FONT_SIZE: 9,
   MAX_FONT_SIZE: 24,
@@ -79,7 +79,12 @@ beforeEach(() => {
     toast: null,
     dialogOpen: 0,
   });
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
 });
 
 afterEach(() => {

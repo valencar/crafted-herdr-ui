@@ -15,7 +15,7 @@ import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { toRows } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { Inspector } from "./Inspector";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -259,7 +259,12 @@ describe("Inspector actions", () => {
     useAppStore.setState({ settings: { open_target } as unknown as Settings });
   afterEach(() => {
     useAppStore.setState({ settings: null });
-    useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+    useTerminalStore.setState({
+      tabs: [],
+      activeKey: HOME,
+      lastTermKey: null,
+      folded: {},
+    });
   });
 
   it("primary follows open_target and the secondary does the other", () => {

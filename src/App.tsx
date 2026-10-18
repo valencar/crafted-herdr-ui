@@ -21,8 +21,8 @@ import { NewSession } from "./screens/NewSession";
 import { Onboarding } from "./screens/Onboarding";
 import { Workbox } from "./screens/Workbox";
 import { useAppStore } from "./store/appStore";
-import { TerminalPanel } from "./terminal/TerminalPanel";
-import { useTerminalStore } from "./terminal/terminalStore";
+import { HOME, useTerminalStore } from "./terminal/terminalStore";
+import { Workspace } from "./terminal/Workspace";
 
 function App() {
   const view = useAppStore((s) => s.view);
@@ -41,10 +41,6 @@ function App() {
   const setQuery = useAppStore((s) => s.setQuery);
   const compact = useAppStore((s) => s.settings?.row_density === "compact");
   const { current: terminal, installed } = useTerminals();
-  const placement = useAppStore(
-    (s) => s.settings?.terminal_placement ?? "bottom",
-  );
-  const hasTabs = useTerminalStore((s) => s.tabs.length > 0);
   // `null` is "herdr was not found"; before the first state there is nothing to say yet.
   const herdrMissing = useAppStore((s) => s.state?.herdr_path === null);
 
@@ -69,10 +65,14 @@ function App() {
     };
     // A notification click selects the row (v1), then opens it the way the setting says. When
     // it opens in the app, the terminal keeps the keyboard: moving focus to the Home row would
-    // put the user's next keys (Backspace closes a session) on the wrong thing.
+    // put the user's next keys (Backspace closes a session) on the wrong thing. Opened
+    // elsewhere, the Home tab has to be the one showing for the row to be seen and focused.
     onFocusRow((key) => {
       focusRow(key);
-      if (defaultOpenHow() !== "app") focusRowElement(key);
+      if (defaultOpenHow() !== "app") {
+        useTerminalStore.getState().activate(HOME);
+        focusRowElement(key);
+      }
       const row = rowFor(key);
       if (row) void openRow(row);
     })
@@ -130,17 +130,15 @@ function App() {
         <VersionBanner />
         <div className="body">
           <AppSidebar />
-          {/* The panel is a sibling of the screens, so its tabs survive a change of screen. */}
-          <div className={`shell placement-${placement}`}>
-            <div className="shell-content">
-              {view.kind === "workbox" ? (
-                <Workbox key={view.machineId} machineId={view.machineId} />
-              ) : (
-                <Home />
-              )}
-            </div>
-            {hasTabs && <TerminalPanel />}
-          </div>
+          {/* The Home tab shows the current screen; terminal tabs sit beside it in the workspace,
+              so they survive a change of screen. */}
+          <Workspace>
+            {view.kind === "workbox" ? (
+              <Workbox key={view.machineId} machineId={view.machineId} />
+            ) : (
+              <Home />
+            )}
+          </Workspace>
         </div>
       </div>
       {sheet === "new-session" && (

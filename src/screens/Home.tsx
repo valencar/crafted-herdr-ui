@@ -28,7 +28,6 @@ import {
   useTerminals,
 } from "../lib/uiHelpers";
 import { useAppStore, type GroupBy } from "../store/appStore";
-import { useTerminalStore } from "../terminal/terminalStore";
 
 const GROUP_TITLE: Record<GroupBy, string> = {
   project: "By project",
@@ -73,13 +72,6 @@ export function Home() {
   const report = useAppStore((s) => s.reportError);
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
-
-  // A panel docked on the right takes the Inspector's place while it is open.
-  const panelShown = useTerminalStore((s) => s.panelOpen && s.tabs.length > 0);
-  const placedRight = useAppStore(
-    (s) => s.settings?.terminal_placement === "right",
-  );
-  const panelOnRight = panelShown && placedRight;
 
   const nowMs = useNow(30_000);
   const { current: terminal } = useTerminals();
@@ -328,7 +320,7 @@ export function Home() {
         )}
       </main>
 
-      {panelOnRight ? null : selectedRow && selectedMachine ? (
+      {selectedRow && selectedMachine ? (
         <Inspector
           key={selectedRow.key}
           row={selectedRow}

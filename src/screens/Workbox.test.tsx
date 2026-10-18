@@ -9,7 +9,7 @@ import type { Pane } from "../lib/bindings/Pane";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import type { Settings } from "../lib/bindings/Settings";
 import { useAppStore } from "../store/appStore";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { Workbox } from "./Workbox";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -111,7 +111,12 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   useAppStore.setState({ settings: null });
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
 });
 
 describe("Workbox", () => {

@@ -17,7 +17,7 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
 import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
 import { Home } from "./Home";
 
@@ -146,7 +146,12 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   useAppStore.setState({ settings: null });
-  useTerminalStore.setState({ tabs: [], activeKey: null, panelOpen: false });
+  useTerminalStore.setState({
+    tabs: [],
+    activeKey: HOME,
+    lastTermKey: null,
+    folded: {},
+  });
 });
 
 describe("Home", () => {
@@ -516,12 +521,9 @@ describe("Home", () => {
     expect(invoke).not.toHaveBeenCalledWith("refresh_now", {});
   });
 
-  it("hides the Inspector while the terminal panel is open on the right", () => {
-    useAppStore.setState({
-      settings: {
-        terminal_placement: "right",
-      } as unknown as Settings,
-    });
+  it("backspace_does_nothing_while_a_terminal_tab_is_active", async () => {
+    const user = setup();
+    useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
     useTerminalStore.setState({
       tabs: [
         {
@@ -535,21 +537,25 @@ describe("Home", () => {
         },
       ],
       activeKey: "buildbox::w1:p1",
-      panelOpen: true,
+      lastTermKey: "buildbox::w1:p1",
+      folded: {},
     });
-    setup();
-    expect(screen.queryByLabelText("Selected agent")).toBeNull();
+    // The Home list is still mounted but hidden: focus is on the page, not in the terminal.
+    expect(document.activeElement).toBe(document.body);
+    await user.keyboard("{Backspace}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.keyboard("{Delete}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.keyboard("{ArrowDown}");
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p3");
+    await user.keyboard("{ArrowUp}");
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p3");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
 
-    act(() => useTerminalStore.setState({ panelOpen: false }));
-    expect(screen.getByLabelText("Selected agent")).toBeInTheDocument();
-
-    act(() => {
-      useTerminalStore.setState({ panelOpen: true });
-      useAppStore.setState({
-        settings: { terminal_placement: "bottom" } as unknown as Settings,
-      });
-    });
-    expect(screen.getByLabelText("Selected agent")).toBeInTheDocument();
+    // ⌘N and ⌘R are the app's, whichever tab shows.
+    await user.keyboard("{Meta>}n{/Meta}");
+    expect(useAppStore.getState().sheet).toBe("new-session");
   });
 
   it("clears_the_selection_when_the_row_disappears", async () => {
