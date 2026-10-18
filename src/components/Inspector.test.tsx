@@ -267,43 +267,40 @@ describe("Inspector actions", () => {
     });
   });
 
-  it("primary follows open_target and the secondary does the other", () => {
-    openSessionsIn("app");
-    setup();
-    const buttons = () =>
-      screen
-        .getAllByRole("button", { name: /^Open (here|in Ghostty)/ })
-        .map((b) => [b.textContent, b.classList.contains("btn-primary")]);
-    expect(buttons()).toEqual([
-      ["Open here ⌘↩", true],
-      ["Open in Ghostty", false],
-    ]);
-    cleanup();
-    openSessionsIn("external");
-    setup();
-    expect(buttons()).toEqual([
-      ["Open in Ghostty ⌘↩", true],
-      ["Open here", false],
-    ]);
-  });
-
-  it("⌘↩ uses the default", () => {
-    // The shortcut itself is Home's (it calls openRow with no target); the hint sits on the
-    // primary button, so it moves with the setting.
+  it("has_one_open_split_button_with_the_hint_on_its_main_part", async () => {
     for (const target of ["app", "external"] as const) {
       openSessionsIn(target);
-      setup();
-      const hint = screen.getByText("⌘↩");
-      expect(hint.closest("button")).toHaveClass("btn-primary");
+      const { user } = setup();
+      // The two open buttons are gone: the ways to open live in the chevron menu.
+      expect(screen.queryByRole("button", { name: /^Open here/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+      const main = screen.getByRole("button", { name: "Open planner" });
+      expect(main).toHaveTextContent("Open⌘↩");
       expect(screen.getAllByText("⌘↩")).toHaveLength(1);
+      expect(screen.queryByRole("menu")).toBeNull();
+      await user.click(
+        screen.getByRole("button", { name: "More ways to open planner" }),
+      );
+      expect(
+        within(screen.getByRole("menu")).getByRole("menuitem", {
+          name: "Open in Ghostty",
+        }),
+      ).toBeInTheDocument();
       cleanup();
     }
   });
 
   it("open_here_opens_a_tab_and_open_in_runs_open_session", async () => {
+    // Both menu items ignore the setting.
     openSessionsIn("external");
     const { user } = setup();
-    await user.click(screen.getByRole("button", { name: "Open here" }));
+    const choose = async (name: string) => {
+      await user.click(
+        screen.getByRole("button", { name: "More ways to open planner" }),
+      );
+      await user.click(screen.getByRole("menuitem", { name }));
+    };
+    await choose("Open here");
     expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
       "buildbox::w1:p1",
     ]);
@@ -312,7 +309,10 @@ describe("Inspector actions", () => {
     openSessionsIn("app");
     const second = setup();
     await second.user.click(
-      screen.getByRole("button", { name: "Open in Ghostty" }),
+      screen.getByRole("button", { name: "More ways to open planner" }),
+    );
+    await second.user.click(
+      screen.getByRole("menuitem", { name: "Open in Ghostty" }),
     );
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
@@ -323,7 +323,7 @@ describe("Inspector actions", () => {
   it("open_runs_open_session", async () => {
     openSessionsIn("external");
     const { user } = setup();
-    await user.click(screen.getByRole("button", { name: /^Open in Ghostty/ }));
+    await user.click(screen.getByRole("button", { name: "Open planner" }));
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
       paneId: "w1:p1",
@@ -333,7 +333,7 @@ describe("Inspector actions", () => {
   it("open_marks_a_done_agent_seen_after_it_opened", async () => {
     openSessionsIn("external");
     const { user } = setup(DONE);
-    await user.click(screen.getByRole("button", { name: /^Open in Ghostty/ }));
+    await user.click(screen.getByRole("button", { name: `Open ${DONE.name}` }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "buildbox",

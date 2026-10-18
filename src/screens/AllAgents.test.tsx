@@ -40,7 +40,8 @@ const rowRenders = vi.mocked(formatAge);
 
 /** Waits out the terminal lookup, which re-renders every row once, then zeroes the counter. */
 async function settleRows() {
-  await screen.findAllByText(/^Open in Ghostty/);
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_terminals"));
+  await act(async () => {});
   rowRenders.mockClear();
 }
 
@@ -203,43 +204,60 @@ describe("AllAgents", () => {
     // Done cards carry "Mark seen"; blocked ones do not.
     expect(within(cards[0]).queryByText("Mark seen")).toBeNull();
     expect(within(cards[2]).getByText("Mark seen")).toBeInTheDocument();
-    expect(await screen.findAllByText("Open in Ghostty ↗")).toHaveLength(4);
+    // One Open split button per card, and none of the old pair.
+    expect(screen.getAllByRole("button", { name: /^Open / })).toHaveLength(
+      4 + screen.getAllByRole("listitem").length,
+    );
+    expect(screen.queryByText(/^Open here/)).toBeNull();
+    expect(screen.queryByText(/^Open in /)).toBeNull();
   });
 
-  it("needs_you_cards_pair_the_default_open_with_the_other_way", async () => {
-    setup();
-    await screen.findAllByText("Open in Ghostty ↗");
+  it("needs_you_cards_carry_one_needs_toned_open_split_button", async () => {
+    const user = setup();
     const card = () => within(screen.getAllByRole("article")[0]);
-    expect(
-      card().getByRole("button", { name: "Open in Ghostty ↗" }),
-    ).toHaveClass("btn-primary");
-    expect(card().getByRole("button", { name: "Open here" })).not.toHaveClass(
-      "btn-primary",
+    const split = screen
+      .getAllByRole("article")[0]
+      .querySelector(".open-split");
+    expect(split).toHaveClass("is-needs");
+    expect(card().queryByRole("button", { name: /^Open here/ })).toBeNull();
+    expect(card().queryByRole("button", { name: /^Open in / })).toBeNull();
+    await user.click(
+      card().getByRole("button", { name: /^More ways to open / }),
     );
-    cleanup();
-    useAppStore.setState({
-      settings: { open_target: "app" } as unknown as Settings,
-    });
+    expect(
+      within(screen.getByRole("menu")).getAllByRole("menuitem"),
+    ).toHaveLength(4);
+  });
+
+  it("open_buttons_name_their_row_for_screen_readers", () => {
     setup();
-    await screen.findAllByText("Open in Ghostty");
-    expect(card().getByRole("button", { name: "Open here" })).toHaveClass(
-      "btn-primary",
-    );
+    const mains = screen
+      .getAllByRole("button", { name: /^Open / })
+      .filter((b) => b.classList.contains("open-main"));
+    expect(mains.length).toBeGreaterThan(4);
+    for (const b of mains) {
+      // The visible text stays "Open"; the name adds the row.
+      expect(b).toHaveTextContent(/^Open$/);
+      expect(b).toHaveAccessibleName(/^Open \S+/);
+    }
+    const line = within(rowItem("gpubox::w1:p1"));
+    const label = line
+      .getByRole("button", { name: /^Open / })
+      .getAttribute("aria-label")!;
+    const rowName = label.slice("Open ".length);
     expect(
-      card().getByRole("button", { name: "Open in Ghostty" }),
-    ).not.toHaveClass("btn-primary");
+      line.getByRole("button", { name: `More ways to open ${rowName}` }),
+    ).toBeInTheDocument();
   });
 
   it("open_here_on_a_card_opens_a_tab_without_open_session", async () => {
     useAppStore.setState({
-      settings: { open_target: "app" } as unknown as Settings,
+      settings: { open_target: "external" } as unknown as Settings,
     });
     const user = setup();
-    await user.click(
-      within(screen.getAllByRole("article")[0]).getByRole("button", {
-        name: "Open here",
-      }),
-    );
+    const card = within(screen.getAllByRole("article")[0]);
+    await user.click(card.getByRole("button", { name: /^More ways to open / }));
+    await user.click(screen.getByRole("menuitem", { name: "Open here" }));
     expect(useTerminalStore.getState().tabs).toHaveLength(1);
     expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
@@ -461,12 +479,8 @@ describe("AllAgents", () => {
     const cards = within(
       screen.getByRole("region", { name: "Needs you" }),
     ).getAllByRole("article");
-    await user.click(
-      within(cards[0]).getByRole("button", { name: /^Open in/ }),
-    );
-    await user.click(
-      within(cards[2]).getByRole("button", { name: /^Open in/ }),
-    );
+    await user.click(within(cards[0]).getByRole("button", { name: /^Open / }));
+    await user.click(within(cards[2]).getByRole("button", { name: /^Open / }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "buildbox",

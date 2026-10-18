@@ -19,7 +19,7 @@ import {
   type Row,
 } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { markSeen, openRow, useOpenWhenListed } from "../lib/openRow";
+import { markSeen, useOpenWhenListed } from "../lib/openRow";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import {
   terminalName as terminalLabel,
@@ -200,7 +200,6 @@ export function AllAgents() {
                         r.key === selectedKey ? previewLines : NO_LINES
                       }
                       onSelect={select}
-                      onOpen={openRow}
                       onMarkSeen={markSeen}
                     />
                   ))}
@@ -266,7 +265,6 @@ export function AllAgents() {
                       nowMs={nowMs}
                       terminalName={terminalName}
                       onSelect={select}
-                      onOpen={openRow}
                     />
                   ))}
                 </ProjectGroup>

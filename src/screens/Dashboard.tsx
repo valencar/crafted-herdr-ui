@@ -2,6 +2,7 @@ import { useId, useMemo, type ReactNode } from "react";
 import { MachineNotices, NoAgentsYet } from "../components/HomeNotices";
 import { MetricTile } from "../components/MetricTile";
 import { NeedsYouCard } from "../components/NeedsYouCard";
+import { OpenButton } from "../components/OpenButton";
 import { legendText, StatusBar } from "../components/StatusBar";
 import { StatusPill } from "../components/StatusPill";
 import { WorkboxCard } from "../components/WorkboxCard";
@@ -23,7 +24,7 @@ import {
   type Row,
 } from "../lib/grouping";
 import { runMenuAction } from "../lib/menuActions";
-import { markSeen, openRow } from "../lib/openRow";
+import { markSeen } from "../lib/openRow";
 import {
   terminalName as terminalLabel,
   useNow,
@@ -174,7 +175,6 @@ export function Dashboard({ narrow = false, visible }: Props) {
                     terminalName={terminalName}
                     previewLines={NO_LINES}
                     onSelect={(key) => focusRow(key)}
-                    onOpen={openRow}
                     onMarkSeen={markSeen}
                   />
                 ))}
@@ -196,13 +196,11 @@ export function Dashboard({ narrow = false, visible }: Props) {
                         {age && (
                           <span className="muted dash-age">{agoText(age)}</span>
                         )}
-                        <button
-                          type="button"
-                          className="btn btn-small"
-                          onClick={() => void openRow(r)}
-                        >
-                          Open
-                        </button>
+                        <OpenButton
+                          row={r}
+                          terminalName={terminalName}
+                          size="small"
+                        />
                       </li>
                     );
                   })}
@@ -297,13 +295,11 @@ export function Dashboard({ narrow = false, visible }: Props) {
                           Working for {age === "now" ? "under 1m" : age}
                         </span>
                       )}
-                      <button
-                        type="button"
-                        className="btn btn-small"
-                        onClick={() => void openRow(r)}
-                      >
-                        Open
-                      </button>
+                      <OpenButton
+                        row={r}
+                        terminalName={terminalName}
+                        size="small"
+                      />
                     </li>
                   );
                 })}

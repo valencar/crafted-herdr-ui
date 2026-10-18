@@ -187,6 +187,78 @@ kbd {
   font-size: 13px;
   border-radius: var(--radius-m);
 }
+/* ---------- the Open split button ---------- */
+
+.open-split {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.open-split .open-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.open-split .open-chev {
+  padding: 6px 7px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left-color: var(--border);
+}
+.open-split kbd {
+  color: inherit;
+  opacity: 0.6;
+}
+.open-split.is-small .btn {
+  padding: 3px 8px;
+  font-size: 11.5px;
+}
+.open-split.is-small .open-main {
+  border-radius: var(--radius-s) 0 0 var(--radius-s);
+}
+.open-split.is-small .open-chev {
+  padding: 3px 6px;
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+}
+.open-split.is-wide {
+  display: flex;
+  width: 100%;
+}
+.open-split.is-wide .open-main {
+  flex: 1;
+  justify-content: center;
+  padding: 10px 14px;
+  font-size: 13px;
+  border-radius: var(--radius-m) 0 0 var(--radius-m);
+}
+.open-split.is-wide .open-chev {
+  padding: 10px 12px;
+  font-size: 13px;
+  border-radius: 0 var(--radius-m) var(--radius-m) 0;
+}
+.open-split.is-needs .btn {
+  background: var(--st-needs);
+  color: var(--on-needs);
+  border-color: transparent;
+  font-weight: 600;
+}
+.open-split.is-needs .btn:hover {
+  filter: brightness(1.1);
+}
+.open-split.is-needs .open-chev {
+  border-left: 1px solid color-mix(in srgb, var(--on-needs) 25%, transparent);
+}
+/* Fixed, so the clipped group card cannot cut the menu off; the button sets top/right. */
+.open-menu {
+  position: fixed;
+  left: auto;
+  min-width: 200px;
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border-strong);
+}
+
 .inspector .cmdbox {
   margin-top: auto;
   overflow-wrap: anywhere;
@@ -685,7 +757,7 @@ kbd {
 }
 .agent-row.is-dim .row-main > :not(.row-text),
 .agent-row.is-dim .row-title,
-.agent-row.is-dim > .btn {
+.agent-row.is-dim > .open-split {
   opacity: 0.5;
 }
 

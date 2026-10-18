@@ -185,8 +185,17 @@ describe("Dashboard", () => {
     expect(within(rows[0]).getByText("web-app · buildbox")).toBeInTheDocument();
     expect(within(rows[0]).getByText("3m ago")).toBeInTheDocument();
     expect(
-      within(rows[0]).getByRole("button", { name: "Open" }),
+      within(rows[0]).getByRole("button", { name: "Open tester" }),
     ).toBeInTheDocument();
+    // One split button: the visible text is short, the chevron holds the other ways.
+    expect(within(rows[0]).getByText("Open")).toBeInTheDocument();
+    expect(
+      within(rows[0]).getByRole("button", { name: "More ways to open tester" }),
+    ).toHaveAttribute("aria-haspopup", "menu");
+    expect(
+      within(rows[0]).getByText("Open").closest(".open-split"),
+    ).toHaveClass("is-small");
+    expect(within(rows[0]).queryByText(/^Open (here|in )/)).toBeNull();
     expect(within(rows[1]).getByText("web-app · gpubox")).toBeInTheDocument();
     // The cards come first on the page.
     expect(
@@ -210,7 +219,7 @@ describe("Dashboard", () => {
     ).parentElement!;
     await user.click(
       within(within(finished).getAllByRole("listitem")[0]).getByRole("button", {
-        name: "Open",
+        name: /^Open /,
       }),
     );
     expect(calls("open_session")[0][1]).toEqual({
@@ -469,7 +478,7 @@ describe("Dashboard", () => {
     expect(within(items[1]).getByText("Working for 10m")).toBeInTheDocument();
     expect(within(items[1]).getByText("buildbox")).toBeInTheDocument();
 
-    await user.click(within(items[0]).getByRole("button", { name: "Open" }));
+    await user.click(within(items[0]).getByRole("button", { name: /^Open / }));
     expect(calls("open_session")[0][1]).toEqual({
       machineId: "gpubox",
       paneId: "w1:p2",
