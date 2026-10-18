@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { AppSidebar } from "./components/AppSidebar";
 import { CommandPalette } from "./components/CommandPalette";
@@ -8,7 +8,7 @@ import { StoreToast } from "./components/Toast";
 import { toRows } from "./lib/grouping";
 import { onFocusRow, onMenu, onNewSession, onOpenRow } from "./lib/ipc";
 import { runMenuAction } from "./lib/menuActions";
-import { defaultOpenHow, openRow } from "./lib/openRow";
+import { defaultOpenHow, openRow, useOpenWhenListed } from "./lib/openRow";
 import {
   focusRowElement,
   terminalName as terminalLabel,
@@ -45,6 +45,12 @@ function App() {
 
   useStateSync();
   useSettingsSync();
+
+  // A just-created session is selected and opened once the state lists it, from here so it
+  // works on every Home screen and under a terminal tab.
+  const state = useAppStore((s) => s.state);
+  const rows = useMemo(() => (state ? toRows(state) : []), [state]);
+  useOpenWhenListed(rows);
 
   // The saved grouping is where All agents starts, and follows a change made in Settings.
   useEffect(() => {

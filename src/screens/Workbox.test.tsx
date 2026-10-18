@@ -619,35 +619,6 @@ describe("Workbox", () => {
     expect(useAppStore.getState().sheet).toBeNull();
   });
 
-  it("a_created_session_for_this_workbox_opens_once_listed", async () => {
-    setup();
-    act(() =>
-      useAppStore.getState().setPendingOpen({
-        key: "buildbox::w9:p9",
-        machineId: "buildbox",
-        paneId: "w9:p9",
-      }),
-    );
-    expect(calls("open_session")).toEqual([]);
-    // The next poll lists the new pane.
-    act(() => {
-      const state = useAppStore.getState().state!;
-      const next = structuredClone(state);
-      const snap = next.machines[1].snapshot!;
-      snap.panes = [
-        ...snap.panes,
-        { ...snap.panes[2], pane_id: "w9:p9", terminal_id: "term-9" },
-      ];
-      useAppStore.getState().setState(next);
-    });
-    await waitFor(() =>
-      expect(calls("open_session")).toEqual([
-        { machineId: "buildbox", paneId: "w9:p9" },
-      ]),
-    );
-    expect(useAppStore.getState().pendingOpen).toBeNull();
-  });
-
   it("the_breadcrumb_and_buttons_are_a_heading_row_at_the_top_of_main", async () => {
     const user = setup();
     const main = screen.getByRole("main");

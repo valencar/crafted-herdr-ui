@@ -1600,6 +1600,136 @@ describe("the window chrome", () => {
     });
   });
 
+  describe("a created session with Open when ready", () => {
+    const KEY = "buildbox::w9:p9";
+    const target = { key: KEY, machineId: "buildbox", paneId: "w9:p9" };
+    /** The next poll: the fixture plus the new pane. */
+    const withNewPane = (): AppState => {
+      const m = box("buildbox");
+      m.snapshot!.panes.push({
+        ...m.snapshot!.panes[0],
+        pane_id: "w9:p9",
+        terminal_id: "term-99",
+      });
+      return { ...state, machines: [m, box("gpubox")] };
+    };
+    const tabKeys = () => useTerminalStore.getState().tabs.map((t) => t.tabKey);
+
+    beforeEach(() => {
+      useAppStore.setState({
+        settings: { open_target: "app" } as unknown as Settings,
+        pendingOpen: null,
+        pendingSelectKey: null,
+      });
+    });
+    afterEach(() => {
+      useAppStore.setState({
+        settings: null,
+        pendingOpen: null,
+        pendingSelectKey: null,
+      });
+    });
+
+    const views = [
+      ["the Dashboard", { kind: "dashboard" }],
+      ["All agents", { kind: "all" }],
+      ["a Workbox screen", { kind: "workbox", machineId: "buildbox" }],
+    ] as const;
+
+    it.each(views)("opens the tab while Home shows %s", async (_n, view) => {
+      listBoxes();
+      useAppStore.setState({ view });
+      render(<App />);
+      await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+      act(() => useAppStore.getState().setPendingSelectKey(KEY));
+      act(() => useAppStore.getState().setPendingOpen(target));
+      expect(tabKeys()).toEqual([]);
+      act(() => useAppStore.getState().setState(withNewPane()));
+      expect(tabKeys()).toEqual([KEY]);
+      expect(useAppStore.getState().pendingOpen).toBeNull();
+      expect(useAppStore.getState().pendingSelectKey).toBeNull();
+      expect(useAppStore.getState().selectedKey).toBe(KEY);
+      expect(useAppStore.getState().toast).toBeNull();
+    });
+
+    it("opens the tab once, not once per mounted screen, while a terminal tab is active", async () => {
+      listBoxes();
+      useAppStore.setState({ view: { kind: "dashboard" } });
+      render(<App />);
+      await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+      act(() => openTabs("w1:p1"));
+      expect(activeKey()).toBe("buildbox::w1:p1");
+      act(() => useAppStore.getState().setPendingOpen(target));
+      act(() => useAppStore.getState().setState(withNewPane()));
+      expect(tabKeys()).toEqual(["buildbox::w1:p1", KEY]);
+      expect(activeKey()).toBe(KEY);
+      expect(
+        ipc.invokeTyped.mock.calls.filter(([n]) => n === "open_session"),
+      ).toEqual([]);
+    });
+
+    it("opens only once and only through open_session when it opens elsewhere", async () => {
+      listBoxes();
+      useAppStore.setState({
+        view: { kind: "dashboard" },
+        settings: { open_target: "terminal" } as unknown as Settings,
+      });
+      render(<App />);
+      await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+      act(() => useAppStore.getState().setPendingOpen(target));
+      act(() => useAppStore.getState().setState(withNewPane()));
+      act(() => useAppStore.getState().setState(withNewPane()));
+      expect(
+        ipc.invokeTyped.mock.calls.filter(([n]) => n === "open_session"),
+      ).toEqual([["open_session", { machineId: "buildbox", paneId: "w9:p9" }]]);
+      expect(tabKeys()).toEqual([]);
+    });
+
+    it("reports a failed open as a toast", async () => {
+      listBoxes();
+      const base = ipc.invokeTyped.getMockImplementation()!;
+      ipc.invokeTyped.mockImplementation(
+        async (name: string, args?: unknown) => {
+          if (name === "open_session")
+            throw { kind: "invalid", message: "no terminal" };
+          return base(name, args);
+        },
+      );
+      useAppStore.setState({
+        view: { kind: "dashboard" },
+        settings: { open_target: "terminal" } as unknown as Settings,
+      });
+      render(<App />);
+      await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+      act(() => useAppStore.getState().setPendingOpen(target));
+      act(() => useAppStore.getState().setState(withNewPane()));
+      await waitFor(() =>
+        expect(useAppStore.getState().toast).toBe("no terminal"),
+      );
+    });
+
+    it("drops a pending open that never shows up with the error toast", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        listBoxes();
+        render(<App />);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        act(() => useAppStore.getState().setPendingOpen(target));
+        act(() => {
+          vi.advanceTimersByTime(10_000);
+        });
+        expect(useAppStore.getState().toast).toBe(
+          "The new session hasn't appeared yet; open it from the list when it does.",
+        );
+        expect(tabKeys()).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("the version banner", () => {
     it("unsupported_version_banner_is_shown_once_and_can_be_dismissed", async () => {
       listBoxes("0.8.9");

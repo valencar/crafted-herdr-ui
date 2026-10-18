@@ -67,13 +67,23 @@ export function markSeen(row: Row): void {
 }
 
 /**
- * A session was just created with "Open when ready": opens it once its row is in `rows`
- * (`open_session` reads the pane from the state, so it can't run before then). It follows the
- * "Open sessions" setting like any other Open.
+ * A session was just created: selects its row, and with "Open when ready" opens it, once the
+ * row is in `rows` (`open_session` reads the pane from the state, so it can't run before then).
+ * It follows the "Open sessions" setting like any other Open. Mounted once, by `App`, so it
+ * works whichever screen the Home tab shows, and while a terminal tab is active.
  */
 export function useOpenWhenListed(rows: Row[]): void {
   const pendingOpen = useAppStore((s) => s.pendingOpen);
   const setPendingOpen = useAppStore((s) => s.setPendingOpen);
+  const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
+  const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
+  const select = useAppStore((s) => s.select);
+  useEffect(() => {
+    if (pendingSelectKey && rows.some((r) => r.key === pendingSelectKey)) {
+      select(pendingSelectKey);
+      setPendingSelectKey(null);
+    }
+  }, [pendingSelectKey, rows, select, setPendingSelectKey]);
   useEffect(() => {
     const row = pendingOpen && rows.find((r) => r.key === pendingOpen.key);
     if (!row) return;

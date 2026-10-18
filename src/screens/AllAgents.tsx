@@ -19,7 +19,7 @@ import {
   type Row,
 } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { markSeen, useOpenWhenListed } from "../lib/openRow";
+import { markSeen } from "../lib/openRow";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import {
   terminalName as terminalLabel,
@@ -69,8 +69,6 @@ export function AllAgents() {
     s.preview && s.preview.key === s.selectedKey ? s.preview.text : null,
   );
   const report = useAppStore((s) => s.reportError);
-  const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
-  const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
 
   const nowMs = useNow(30_000);
   const { current: terminal } = useTerminals();
@@ -91,15 +89,6 @@ export function AllAgents() {
       select(null);
     }
   }, [state, rows, selectedKey, select]);
-
-  // A session was just created: select it once the next poll lists its row.
-  useEffect(() => {
-    if (pendingSelectKey && rows.some((r) => r.key === pendingSelectKey)) {
-      select(pendingSelectKey);
-      setPendingSelectKey(null);
-    }
-  }, [pendingSelectKey, rows, select, setPendingSelectKey]);
-  useOpenWhenListed(rows);
 
   // No search: `visible` is `rows` itself, so the project groups built for the sidebar are
   // the ones to show.

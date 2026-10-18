@@ -11,7 +11,7 @@ import type { Workspace } from "../lib/bindings/Workspace";
 import { shortPath } from "../lib/format";
 import { isNeedsYou, toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
-import { openFull, openRow, useOpenWhenListed } from "../lib/openRow";
+import { openFull, openRow } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
 import { isEditable, isInTerminal, useNow } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
@@ -60,8 +60,6 @@ export function Workbox({ machineId }: { machineId: string }) {
     [online, rows],
   );
   const tails = usePaneTails(machineId, targets);
-
-  useOpenWhenListed(rows);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
