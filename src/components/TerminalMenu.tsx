@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { TerminalId } from "../lib/bindings/TerminalId";
 import { TERMINAL_LABEL } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
-import { openSettings } from "../lib/uiHelpers";
+import { isKeyForMenu, openSettings } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 
 type Props = {
@@ -38,6 +38,9 @@ export function TerminalMenu({ terminal, installed }: Props) {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
+      // Not this menu's key: something else already handled it, or it was typed in another
+      // control (the palette's input).
+      if (!isKeyForMenu(rootRef.current, e)) return;
       if (e.key === "Escape") {
         setOpen(false);
         buttonRef.current?.focus();
@@ -49,11 +52,17 @@ export function TerminalMenu({ terminal, installed }: Props) {
         all[(at + step + all.length) % all.length]?.focus();
       }
     };
+    // Focus moving to another control (the palette opening) leaves the menu behind: close it.
+    const onFocusIn = (e: FocusEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocusIn);
     };
   }, [open]);
 

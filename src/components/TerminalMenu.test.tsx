@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../lib/bindings/Settings";
@@ -9,7 +9,16 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   invokeTyped: vi.fn(),
 }));
 import { invokeTyped } from "../lib/ipc";
+import { CommandPalette } from "./CommandPalette";
 import { TerminalMenu } from "./TerminalMenu";
+
+// xterm is tested on its own; the palette only reaches the panel through menu actions.
+vi.mock("../terminal/Workspace", () => ({
+  DEFAULT_FONT_SIZE: 13,
+  MIN_FONT_SIZE: 9,
+  MAX_FONT_SIZE: 24,
+  requestTerminalFind: vi.fn(),
+}));
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
@@ -129,5 +138,44 @@ describe("TerminalMenu", () => {
     await user.click(screen.getByRole("menuitemradio", { name: "Terminal" }));
     await vi.waitFor(() => expect(useAppStore.getState().toast).toBe("Nope."));
     useAppStore.getState().clearToast();
+  });
+
+  it("the_command_palette_keeps_its_arrow_keys_while_the_menu_was_open", async () => {
+    // ⌘K can come while the menu is open: the menu neither moves focus behind the palette nor
+    // stays open under it, and keys typed elsewhere or already handled are not its own.
+    const user = userEvent.setup();
+    useAppStore.setState({ settings: SETTINGS, toast: null });
+    const menu = (
+      <TerminalMenu terminal="ghostty" installed={["ghostty", "terminalApp"]} />
+    );
+    const { rerender } = render(menu);
+    await user.click(screen.getByRole("button", { name: /Opens in/ }));
+    const items = () => screen.getAllByRole("menuitemradio");
+    expect(items()[0]).toHaveFocus();
+
+    const elsewhere = document.body.appendChild(document.createElement("div"));
+    fireEvent.keyDown(elsewhere, { key: "ArrowDown" });
+    elsewhere.remove();
+    expect(items()[0]).toHaveFocus();
+    const handled = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    handled.preventDefault();
+    items()[0].dispatchEvent(handled);
+    expect(items()[0]).toHaveFocus();
+
+    rerender(
+      <>
+        {menu}
+        <CommandPalette onClose={() => {}} />
+      </>,
+    );
+    const input = screen.getByRole("combobox");
+    expect(input).toHaveFocus();
+    await user.keyboard("{ArrowDown}{ArrowUp}");
+    expect(input).toHaveFocus();
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });
