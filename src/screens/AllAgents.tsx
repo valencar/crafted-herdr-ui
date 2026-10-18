@@ -56,7 +56,7 @@ function matches(row: Row, query: string): boolean {
   );
 }
 
-export function Home() {
+export function AllAgents() {
   const state = useAppStore((s) => s.state);
   const selectedKey = useAppStore((s) => s.selectedKey);
   const groupBy = useAppStore((s) => s.groupBy);

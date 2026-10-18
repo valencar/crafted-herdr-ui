@@ -16,7 +16,7 @@ import {
 } from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { AddWorkbox } from "./screens/AddWorkbox";
-import { Home } from "./screens/Home";
+import { AllAgents } from "./screens/AllAgents";
 import { NewSession } from "./screens/NewSession";
 import { Onboarding } from "./screens/Onboarding";
 import { Workbox } from "./screens/Workbox";
@@ -136,7 +136,7 @@ function App() {
             {view.kind === "workbox" ? (
               <Workbox key={view.machineId} machineId={view.machineId} />
             ) : (
-              <Home />
+              <AllAgents />
             )}
           </Workspace>
         </div>

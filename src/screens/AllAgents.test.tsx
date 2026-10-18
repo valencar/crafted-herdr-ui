@@ -19,7 +19,7 @@ import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
-import { Home } from "./Home";
+import { AllAgents } from "./AllAgents";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -101,7 +101,7 @@ function setup(
     query: "",
   });
   const user = userEvent.setup();
-  render(wrap(<Home />));
+  render(wrap(<AllAgents />));
   return user;
 }
 
@@ -154,7 +154,7 @@ afterEach(() => {
   });
 });
 
-describe("Home", () => {
+describe("AllAgents", () => {
   it("renders_only_its_main_content_and_the_inspector", () => {
     setup();
     expect(screen.getByRole("main")).toBeInTheDocument();
