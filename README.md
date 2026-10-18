@@ -8,7 +8,11 @@ Crafted Herdr is a macOS app (Tauri 2, React and TypeScript). It shows all your 
 
 ## Screenshots
 
-Screenshots coming soon.
+![The Dashboard: who needs you, live numbers and every workbox, with terminal tabs grouped by workbox](docs/images/dashboard.png)
+
+![A terminal tab takes the middle of the window; the sidebar lists each workbox's open terminals](docs/images/terminal.png)
+
+<sub>Rendered from the v0.3 design with sample data (workboxes `buildbox` and `gpubox`, projects `api-service`, `web-app` and `infra`); the running app follows the same layout.</sub>
 
 ## Features
 
