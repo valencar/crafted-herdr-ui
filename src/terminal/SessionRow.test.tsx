@@ -138,6 +138,18 @@ describe("SessionRow", () => {
     ).not.toHaveAttribute("data-tone");
   });
 
+  it("only_a_blocked_tab_is_marked_as_needing_you", () => {
+    open("buildbox", "w1:p1", "planner"); // blocked
+    open("buildbox", "w1:p2", "infra"); // working
+    open("buildbox", "w2:p1", "tester"); // done, unseen
+    render(<Harness machineId="buildbox" />);
+    const tab = (name: RegExp) =>
+      screen.getByRole("button", { name }).closest(".session-tab");
+    expect(tab(/^planner/)).toHaveAttribute("data-needs", "true");
+    expect(tab(/^tester/)).not.toHaveAttribute("data-needs");
+    expect(tab(/^infra/)).not.toHaveAttribute("data-needs");
+  });
+
   it("a_full_ui_tab_reads_herdr_over_full_herdr_ui", () => {
     useTerminalStore.getState().openTab({
       tabKey: "full::buildbox",
@@ -241,17 +253,62 @@ describe("SessionRow", () => {
         "infra, Working",
         "tester on gpubox",
       ]);
+      // By workbox, in the strip's order.
+      expect(
+        within(menu)
+          .getAllByRole("group")
+          .map((g) => g.getAttribute("aria-label")),
+      ).toEqual(["buildbox", "gpubox"]);
 
       await user.click(
         within(menu).getByRole("menuitem", { name: /^planner/ }),
       );
       expect(useTerminalStore.getState().activeKey).toBe("buildbox::w1:p1");
       expect(screen.queryByRole("menu")).toBeNull();
+      expect(button).toHaveFocus();
 
       // Stops overflowing: the button goes.
       sizes.scroll = 100;
       act(() => open("gpubox", "w1:p2", "web"));
       expect(screen.queryByRole("button", { name: "All tabs" })).toBeNull();
+    });
+
+    it("the_menu_closes_on_escape_or_an_outside_press_and_arrows_move", async () => {
+      const user = userEvent.setup();
+      open("buildbox", "w1:p1", "planner");
+      sizes.scroll = 900;
+      sizes.client = 300;
+      render(<Harness machineId="buildbox" />);
+      const button = screen.getByRole("button", { name: "All tabs" });
+
+      await user.click(button);
+      const items = screen.getAllByRole("menuitem");
+      // The active tab is the one focused first.
+      expect(items[1]).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(items[0]).toHaveFocus();
+      await user.keyboard("{ArrowUp}");
+      expect(items[1]).toHaveFocus();
+
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(button).toHaveFocus();
+
+      await user.click(button);
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      await user.click(document.body);
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    it("the_button_shows_how_many_tabs_need_input", () => {
+      open("buildbox", "w1:p1", "planner"); // blocked
+      open("buildbox", "w2:p1", "tester"); // done
+      open("buildbox", "w1:p2", "infra"); // working
+      sizes.scroll = 900;
+      sizes.client = 300;
+      render(<Harness machineId="buildbox" />);
+      const button = screen.getByRole("button", { name: "All tabs" });
+      expect(within(button).getByText("1 needs input")).toBeInTheDocument();
     });
   });
 });

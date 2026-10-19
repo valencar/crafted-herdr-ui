@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { isNeedsYou, projectNames, type Row } from "../lib/grouping";
+import { projectNames, type Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import { AllTabsMenu } from "./AllTabsMenu";
 import {
@@ -65,7 +65,8 @@ export function SessionRow({
         {group.tabs.map((tab) => {
           const row = rows.get(tab.tabKey);
           const active = tab.tabKey === activeKey;
-          const needs = row !== undefined && isNeedsYou(row);
+          // Only a tab blocked on the user is tinted; a finished one is not (spec 2.2).
+          const needs = row?.status === "blocked";
           const shortcut = tabShortcut(tab.tabKey, allTabs, machines);
           const sub = tabSubline(tab, row, projects.get(tab.tabKey) ?? null);
           const status = row?.status;
