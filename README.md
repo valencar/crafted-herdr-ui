@@ -76,10 +76,11 @@ The commands are visible in the **Activity drawer** (⌘⇧A): the calls the app
 
 ## Workspace and Dashboard
 
-The middle of the window is a tab strip with the active tab under it, at full size.
+The middle of the window is a two-row tab strip with the active tab under it, at full size. The top row has Home and one tab per workbox; the second row shows that workbox's tabs (or, on Home, the Home views).
 
 - **Home tab.** It is first, always there and never closable (⌘W does nothing on it). It shows the Dashboard by default, All agents (the searchable list with its Inspector and grouping) or a Workbox screen, and is named after what it shows. ⌘1, the sidebar's Dashboard item and the palette's "Go to Dashboard" bring it back.
-- **Terminal tabs.** Each is an attach client. They sit after Home, grouped by workbox (a label with the workbox's health dot) in the sidebar's workbox order, and keep the order they were opened in inside a group. Click a group label to fold it into one chip ("{workbox} · N tabs", plus "N needs input" when one does); selecting a tab in a folded group, from the sidebar, the palette, ⌘J or a notification, unfolds it. Folding is not saved. When the tabs don't fit, the strip scrolls and an **All tabs** menu lists every tab by workbox with its status.
+- **Workbox row.** Home first, then one tab per workbox with its health dot, its tab count and a "needs input" badge when one of its tabs waits on you. Clicking a workbox goes back to the tab you last used there, or its first tab.
+- **Tabs row.** Under a workbox, its terminal tabs, each with a status dot and a second line with its status in words ("Working", "Needs input", "Detached"…), then **New on {workbox}** (the new-session sheet, prefilled with that workbox) and, when the tabs don't fit, a scroll with the active tab kept in view and an **All tabs** menu that lists every tab by workbox with its status. On Home, this row holds the Home views instead: Dashboard, All agents or a workbox screen. ⌘2–⌘9 still count tabs across all workboxes in the order they appear.
 - **Switching keeps the terminal.** Moving to Home and back never loses scrollback or detaches anything. Closing the active terminal tab returns to Home.
 - **Context bar.** Above the active terminal: the agent, its status, kind, folder and workbox, then Find (⌘F), **Open in {Terminal}**, **Detach** (the same as ⌘W) and **Close pane…** (with its confirmation). A full herdr UI tab shows only Find and Detach.
 - **Sidebar.** Dashboard (⌘1), Needs you and All agents with counts, then each workbox with its health, its agent count and its open terminals nested under it, then the first three projects ("{n} more" shows the rest). ⌘B collapses it to a rail.
