@@ -1846,135 +1846,321 @@ select.field {
   background: var(--panel);
 }
 
-/* ---------- tab strip ---------- */
+/* ---------- tab rows ---------- */
 
-.tab-strip {
+/* Two rows over the workspace body: the workboxes, then the active workbox's session tabs (or
+   the Home views). Each row's active tab takes the background of what is below it and joins it
+   with inverse-curved bottom corners, as Chrome draws a tab. */
+.tab-rows {
   flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
 }
-.tab-strip-scroll {
+.wb-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  height: 44px;
+  background: var(--bg);
+}
+.session-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  height: 54px;
+  background: var(--selected);
+}
+/* The scrolling part of a row. The side padding leaves room for the active tab's corners. */
+.wb-row-scroll,
+.session-row-scroll {
   flex: 1 1 0;
   min-width: 0;
+  align-self: stretch;
   display: flex;
-  align-items: stretch;
+  align-items: flex-end;
   gap: 2px;
-  padding: 4px 6px 0;
+  padding: 0 12px;
   overflow-x: auto;
   scrollbar-width: none;
 }
-.tab-strip-scroll::-webkit-scrollbar {
+.wb-row-scroll::-webkit-scrollbar,
+.session-row-scroll::-webkit-scrollbar {
   display: none;
 }
-.tab-group {
+.home-views {
   flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
+  align-items: flex-end;
   gap: 2px;
-  margin-left: 6px;
+  height: 54px;
+  padding: 0 12px;
+  background: var(--selected);
 }
-.tab-group-label {
-  flex: 0 0 auto;
-  align-self: center;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
+
+.wb-tab,
+.session-tab,
+.home-view {
+  position: relative;
+  border-radius: 10px 10px 0 0;
   color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
 }
-.tab-group-label:hover {
-  background: var(--nav-hover);
-}
-.tab-group-label:focus-visible,
-.ws-tab-main:focus-visible,
-.ws-tab .icon-btn:focus-visible,
-.tab-new:focus-visible {
+.wb-tab:focus-visible,
+.session-tab-main:focus-visible,
+.session-tab .icon-btn:focus-visible,
+.session-new:focus-visible,
+.home-view:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
-.tab-group-count {
-  color: var(--text-4);
-}
-.ws-tab {
-  flex: 0 0 auto;
-  max-width: 260px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding-right: 4px;
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: var(--radius-s) var(--radius-s) 0 0;
-  color: var(--text-3);
-}
-.ws-tab:hover {
-  background: var(--hover);
-}
-.ws-tab[data-active="true"] {
-  background: var(--bg);
-  border-color: var(--border);
+.wb-tab[data-active="true"],
+.session-tab[data-active="true"],
+.home-view[data-active="true"] {
+  z-index: 1;
   color: var(--text);
-  /* The active tab is marked by a line, not by colour alone. */
-  box-shadow: inset 0 2px 0 var(--text);
 }
-.ws-tab[data-needs="true"]:has(.dot[data-status="blocked"]) {
-  background: color-mix(in srgb, var(--st-needs) 10%, transparent);
+/* The inverse corners of an active tab: a quarter of the row below's colour, with the tab's
+   own corner cut out of it. */
+.wb-tab[data-active="true"]::before,
+.wb-tab[data-active="true"]::after,
+.session-tab[data-active="true"]::before,
+.session-tab[data-active="true"]::after,
+.home-view[data-active="true"]::before,
+.home-view[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
 }
-.ws-tab[data-needs="true"][data-active="true"]:has(
-    .dot[data-status="blocked"]
-  ) {
-  background: color-mix(in srgb, var(--st-needs) 10%, var(--bg));
+.wb-tab[data-active="true"]::before,
+.session-tab[data-active="true"]::before,
+.home-view[data-active="true"]::before {
+  left: -10px;
 }
-.ws-tab-main {
-  min-width: 0;
+.wb-tab[data-active="true"]::after,
+.session-tab[data-active="true"]::after,
+.home-view[data-active="true"]::after {
+  right: -10px;
+}
+
+/* -- row 1: Home and the workboxes -- */
+
+.wb-tab {
+  flex: 0 0 auto;
+  height: 36px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 4px 5px 10px;
+  gap: 8px;
+  padding: 0 14px;
   background: transparent;
   border: 0;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  cursor: default;
+  cursor: pointer;
 }
-.ws-tab-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.wb-tab:hover {
+  background: var(--segment);
+}
+.wb-tab[data-active="true"] {
+  background: var(--selected);
+}
+.wb-tab[data-active="true"]::before {
+  background: radial-gradient(
+    circle at 0 0,
+    transparent 10px,
+    var(--selected) 10.5px
+  );
+}
+.wb-tab[data-active="true"]::after {
+  background: radial-gradient(
+    circle at 100% 0,
+    transparent 10px,
+    var(--selected) 10.5px
+  );
+}
+.wb-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  margin: 0 6px 9px;
+  background: var(--border-strong);
+}
+.wb-tab-label {
+  font-weight: 600;
   white-space: nowrap;
+}
+.wb-tab-count,
+.wb-tab-needs {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.wb-tab-count {
+  background: var(--chip);
+  color: var(--text-4);
+}
+.wb-tab-needs {
+  background: var(--st-needs);
+  color: var(--on-needs);
+  font-weight: 600;
 }
 .ws-home-icon {
   flex-shrink: 0;
 }
-.tab-chip {
+
+/* -- row 2: the active workbox's sessions -- */
+
+.session-tab {
+  flex: 0 1 228px;
+  min-width: 160px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding-right: 6px;
+}
+.session-tab:hover {
+  background: var(--nav-hover);
+}
+.session-tab[data-needs="true"] {
+  background: color-mix(in srgb, var(--st-needs) 7%, transparent);
+}
+/* After the tint, so a needs-input tab still shows its hover fill.
+   Not the active tab: it keeps the context bar's fill and its join. */
+.session-tab[data-needs="true"]:not([data-active="true"]):hover {
+  background: color-mix(in srgb, var(--st-needs) 12%, var(--nav-hover));
+}
+.session-tab[data-active="true"] {
+  background: var(--panel);
+}
+/* Active, the tab shows an orange top edge instead of the tint. */
+.session-tab[data-active="true"][data-needs="true"] {
+  box-shadow: inset 0 2px 0 var(--st-needs);
+}
+.session-tab[data-active="true"]::before {
+  background: radial-gradient(
+    circle at 0 0,
+    transparent 10px,
+    var(--panel) 10.5px
+  );
+}
+.session-tab[data-active="true"]::after {
+  background: radial-gradient(
+    circle at 100% 0,
+    transparent 10px,
+    var(--panel) 10.5px
+  );
+}
+.session-tab-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: center;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 1px;
+  padding: 0 4px 0 14px;
+  background: transparent;
+  border: 0;
+  border-radius: 10px 0 0 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.session-tab-title {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-tab-sub {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--text-4);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-tab-sub[data-tone="needs"] {
+  color: var(--st-needs);
+}
+.session-tab-sub[data-tone="done"] {
+  color: var(--st-done);
+}
+.session-new {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin: 0 0 6px 6px;
+  padding: 0 10px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-m);
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.session-new:hover {
+  background: var(--nav-hover);
+  color: var(--text);
+}
+
+/* -- row 2 on Home: the Home views -- */
+
+.home-view {
+  flex: 0 0 auto;
+  height: 44px;
+  padding: 0 18px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.home-view:hover {
+  background: var(--nav-hover);
+}
+.home-view[data-active="true"] {
+  background: var(--bg);
+}
+.home-view[data-active="true"]::before {
+  background: radial-gradient(
+    circle at 0 0,
+    transparent 10px,
+    var(--bg) 10.5px
+  );
+}
+.home-view[data-active="true"]::after {
+  background: radial-gradient(
+    circle at 100% 0,
+    transparent 10px,
+    var(--bg) 10.5px
+  );
+}
+
+/* -- the All tabs menu, at the end of the session row -- */
+
+.tab-menu-needs {
   flex-shrink: 0;
   font-family: inherit;
   font-weight: 600;
   font-size: 11px;
   white-space: nowrap;
-}
-.tab-chip[data-tone="needs"] {
   color: var(--st-needs);
   background: color-mix(in srgb, var(--st-needs) 13%, transparent);
-}
-.tab-chip[data-tone="done"] {
-  color: var(--st-done);
-  background: color-mix(in srgb, var(--st-done) 12%, transparent);
-}
-.tab-new {
-  flex: 0 0 auto;
-  align-self: center;
-  margin-left: 4px;
-  padding: 2px 6px;
 }
 .tab-menu-wrap {
   flex: 0 0 auto;
@@ -2008,6 +2194,7 @@ select.field {
 .context-bar {
   flex: 0 0 auto;
   display: flex;
+  background: var(--panel);
   align-items: center;
   justify-content: space-between;
   gap: 12px;

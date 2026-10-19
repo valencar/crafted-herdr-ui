@@ -95,4 +95,85 @@ describe("app.css", () => {
       expect(rule(selector)).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     }
   });
+
+  it("tab_rows_use_only_token_colors", () => {
+    for (const selector of [
+      ".wb-row",
+      ".wb-tab",
+      '.wb-tab[data-active="true"]',
+      ".wb-tab-needs",
+      ".session-row",
+      ".session-tab",
+      '.session-tab[data-active="true"]',
+      '.session-tab-sub[data-tone="needs"]',
+    ]) {
+      expect(rule(selector)).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    }
+  });
+
+  it("active_tabs_join_the_row_below", () => {
+    // The variable a rule paints its background with.
+    const background = (selector: string) =>
+      /background:\s*(var\(--[a-z0-9-]+\))\s*;/.exec(rule(selector))?.[1];
+    expect(background('.wb-tab[data-active="true"]')).toBeDefined();
+    expect(background('.wb-tab[data-active="true"]')).toBe(
+      background(".session-row"),
+    );
+    expect(background('.session-tab[data-active="true"]')).toBeDefined();
+    expect(background('.session-tab[data-active="true"]')).toBe(
+      background(".context-bar"),
+    );
+  });
+
+  it("a_needs_input_session_tab_still_shows_a_hover_fill", () => {
+    // The hover rule for a tinted tab comes after the tint, or the tint would always win.
+    const at = (selector: string) =>
+      css.search(
+        new RegExp(selector.replace(/[[\]().*]/g, "\\$&") + "\\s*\\{"),
+      );
+    const tint = at('.session-tab[data-needs="true"]');
+    const hover = at(
+      '.session-tab[data-needs="true"]:not([data-active="true"]):hover',
+    );
+    expect(tint).toBeGreaterThan(-1);
+    expect(hover).toBeGreaterThan(tint);
+    expect(at(".session-tab:hover")).toBeLessThan(tint);
+    expect(at('.session-tab[data-active="true"]')).toBeGreaterThan(hover);
+    expect(
+      rule('.session-tab[data-needs="true"]:not([data-active="true"]):hover'),
+    ).toMatch(/background:\s*color-mix\(/);
+    expect(
+      rule('.session-tab[data-needs="true"]:not([data-active="true"]):hover'),
+    ).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+
+  it("the_active_needs_tab_keeps_its_join_on_hover", () => {
+    const hover =
+      '.session-tab[data-needs="true"]:not([data-active="true"]):hover';
+    expect(rule(hover)).toMatch(/background:/);
+    expect(rule(hover)).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    // The un-guarded selector would outrank the active tab's own fill.
+    expect(() => rule('.session-tab[data-needs="true"]:hover')).toThrow();
+    // Any needs hover that paints a background must skip the active tab.
+    const offenders = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+      .filter(
+        (m) =>
+          /(^|[;\s])background\s*:/.test(m[2]) &&
+          m[1].includes('[data-needs="true"]') &&
+          m[1].includes(":hover") &&
+          !m[1].includes(':not([data-active="true"])'),
+      )
+      .map((m) => m[1].trim());
+    expect(offenders).toEqual([]);
+  });
+
+  it("the_active_home_view_joins_the_workspace_below", () => {
+    // Home's screens sit directly on the workspace, so the view takes the workspace's colour.
+    const background = (selector: string) =>
+      /background:\s*(var\(--[a-z0-9-]+\))\s*;/.exec(rule(selector))?.[1];
+    expect(background('.home-view[data-active="true"]')).toBeDefined();
+    expect(background('.home-view[data-active="true"]')).toBe(
+      background(".workspace"),
+    );
+  });
 });

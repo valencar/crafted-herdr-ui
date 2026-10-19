@@ -20,7 +20,7 @@ beforeEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
+    lastByMachine: {},
   });
 });
 
@@ -30,12 +30,9 @@ describe("terminalStore", () => {
     expect(store().activeKey).toBe(HOME);
     expect(store().lastTermKey).toBeNull();
     expect(store().tabs).toEqual([]);
-    expect(store().folded).toEqual({});
   });
 
-  it("open_tab_activates_and_records_last_and_unfolds_its_machine", () => {
-    store().toggleFold("buildbox");
-    store().toggleFold("gpubox");
+  it("open_tab_activates_and_records_last", () => {
     store().openTab(tab("w1:p1"));
     expect(store().activeKey).toBe("buildbox::w1:p1");
     expect(store().lastTermKey).toBe("buildbox::w1:p1");
@@ -44,8 +41,6 @@ describe("terminalStore", () => {
       error: null,
       termId: null,
     });
-    // Only the opened tab's machine unfolds.
-    expect(store().folded).toEqual({ gpubox: true });
   });
 
   it("opening_the_same_key_twice_focuses_the_existing_tab", () => {
@@ -158,25 +153,47 @@ describe("terminalStore", () => {
     expect(store().activeKey).toBe(HOME);
   });
 
-  it("toggle_fold_flips_one_machine", () => {
-    store().toggleFold("buildbox");
-    expect(store().folded).toEqual({ buildbox: true });
-    store().toggleFold("gpubox");
-    expect(store().folded).toEqual({ buildbox: true, gpubox: true });
-    store().toggleFold("buildbox");
-    expect(store().folded).toEqual({ gpubox: true });
+  it("open_and_activate_remember_the_last_tab_per_workbox", () => {
+    expect(store().lastByMachine).toEqual({});
+    store().openTab(tab("w1:p1"));
+    store().openTab(tab("w1:p2"));
+    store().openTab(tab("w1:p1", "gpubox"));
+    store().activate("buildbox::w1:p1");
+    const expected = {
+      buildbox: "buildbox::w1:p1",
+      gpubox: "gpubox::w1:p1",
+    };
+    expect(store().lastByMachine).toEqual(expected);
+    store().activate(HOME);
+    expect(store().lastByMachine).toEqual(expected);
   });
 
-  it("activating_a_tab_in_a_folded_group_unfolds_it", () => {
+  it("activate_machine_restores_the_remembered_tab", () => {
     store().openTab(tab("w1:p1"));
+    store().openTab(tab("w1:p2"));
     store().openTab(tab("w1:p1", "gpubox"));
-    store().toggleFold("buildbox");
-    store().toggleFold("gpubox");
     store().activate("buildbox::w1:p1");
-    expect(store().folded).toEqual({ gpubox: true });
-    // Cycling onto a tab goes through activate, so it unfolds too.
-    store().cycle(1, [HOME, "buildbox::w1:p1", "gpubox::w1:p1"]);
-    expect(store().activeKey).toBe("gpubox::w1:p1");
-    expect(store().folded).toEqual({});
+    store().activate("gpubox::w1:p1");
+    store().activateMachine("buildbox");
+    expect(store().activeKey).toBe("buildbox::w1:p1");
+    expect(store().lastTermKey).toBe("buildbox::w1:p1");
+  });
+
+  it("activate_machine_falls_back_when_the_remembered_tab_closed", () => {
+    store().openTab(tab("w1:p1"));
+    store().openTab(tab("w1:p2"));
+    expect(store().lastByMachine.buildbox).toBe("buildbox::w1:p2");
+    store().closeTab("buildbox::w1:p2");
+    expect(store().lastByMachine.buildbox).toBeUndefined();
+    store().activate(HOME);
+    store().activateMachine("buildbox");
+    expect(store().activeKey).toBe("buildbox::w1:p1");
+  });
+
+  it("activate_machine_without_tabs_does_nothing", () => {
+    store().openTab(tab("w1:p1"));
+    store().activate(HOME);
+    store().activateMachine("staging");
+    expect(store().activeKey).toBe(HOME);
   });
 });

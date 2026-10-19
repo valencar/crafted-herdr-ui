@@ -84,7 +84,6 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
 });
 
@@ -338,7 +337,6 @@ it("focus-row selects and opens", async () => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
   useAppStore.setState({
     settings: { open_target: "external" } as unknown as Settings,
@@ -616,7 +614,7 @@ describe("terminal menu ids", () => {
     expect(activeKey()).toBe("gpubox::w1:p1");
   });
 
-  it("the All tabs menu's keys stay in the menu while Home shows", async () => {
+  it("the All tabs menu's keys stay in the menu under a terminal tab", async () => {
     const user = userEvent.setup();
     const sizes = { scroll: 900, client: 300 };
     Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
@@ -634,12 +632,15 @@ describe("terminal menu ids", () => {
       );
       render(<App />);
       await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
+      // The menu sits in the session row, so a terminal tab is showing.
+      act(() => openTabs("w1:p1"));
       await screen.findByRole("button", { name: "All tabs" });
       act(() => useAppStore.setState({ selectedKey: "buildbox::w1:p3" }));
 
       await user.click(screen.getByRole("button", { name: "All tabs" }));
       const items = screen.getAllByRole("menuitem");
-      expect(items[0]).toHaveFocus();
+      // The active tab is the one focused first.
+      expect(items[1]).toHaveFocus();
 
       await user.keyboard("{ArrowDown}");
       expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p3");
@@ -658,17 +659,20 @@ describe("terminal menu ids", () => {
     }
   });
 
-  it("selecting_a_tab_unfolds_its_group", async () => {
+  it("selecting_a_tab_makes_its_workbox_active", async () => {
     render(<App />);
     await screen.findByRole("searchbox");
     openTabs("w1:p1");
-    act(() => {
-      useTerminalStore.getState().activate(HOME);
-      useTerminalStore.getState().toggleFold("buildbox");
-    });
+    act(() => useTerminalStore.getState().activate(HOME));
     await menu("tab1");
     expect(activeKey()).toBe("buildbox::w1:p1");
-    expect(useTerminalStore.getState().folded).toEqual({});
+    const current = within(
+      screen.getByRole("navigation", { name: "Workboxes" }),
+    )
+      .getAllByRole("button")
+      .filter((b) => b.getAttribute("aria-current") === "true");
+    expect(current).toHaveLength(1);
+    expect(current[0]).toHaveAccessibleName(/^buildbox,/);
   });
 
   it("close_tab_on_home_does_nothing", async () => {
@@ -765,7 +769,7 @@ describe("terminal menu ids", () => {
     expect(activeKey()).toBe(HOME);
   });
 
-  it("default_view_is_dashboard_and_home_tab_reads_dashboard", async () => {
+  it("default_view_is_dashboard_and_the_home_tab_reads_home", async () => {
     // What the store starts with, not what an earlier test left behind.
     useAppStore.setState({ view: useAppStore.getInitialState().view });
     expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
@@ -773,10 +777,16 @@ describe("terminal menu ids", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Dashboard" }),
     ).toBeInTheDocument();
-    const strip = screen.getByRole("navigation", { name: "Tabs" });
-    expect(within(strip).getAllByRole("button")[0]).toHaveAccessibleName(
-      "Dashboard",
+    const workboxes = screen.getByRole("navigation", { name: "Workboxes" });
+    expect(within(workboxes).getAllByRole("button")[0]).toHaveAccessibleName(
+      "Home",
     );
+    expect(
+      within(screen.getByRole("navigation", { name: "Home views" })).getByRole(
+        "button",
+        { name: "Dashboard" },
+      ),
+    ).toHaveAttribute("aria-current", "page");
     // The list screen is not mounted behind it.
     expect(screen.queryByRole("searchbox")).toBeNull();
   });
@@ -822,12 +832,13 @@ describe("terminal menu ids", () => {
     );
     await screen.findByRole("navigation", { name: "Breadcrumb" });
     expect(screen.getByTestId("view-buildbox::w1:p1")).toBe(view);
-    // The Home tab is named after the workbox on show.
+    // The Home views row names the workbox on show; the Home tab stays "Home".
     expect(
-      within(screen.getByRole("navigation", { name: "Tabs" })).getAllByRole(
+      within(screen.getByRole("navigation", { name: "Home views" })).getByRole(
         "button",
-      )[0],
-    ).toHaveAccessibleName("buildbox");
+        { name: "buildbox" },
+      ),
+    ).toHaveAttribute("aria-current", "page");
 
     act(() => useAppStore.setState({ view: { kind: "all" } }));
     await screen.findByRole("searchbox");

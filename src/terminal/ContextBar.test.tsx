@@ -65,7 +65,6 @@ beforeEach(() => {
     tabs: [paneTab, fullTab],
     activeKey: paneTab.tabKey,
     lastTermKey: paneTab.tabKey,
-    folded: {},
   });
 });
 afterEach(() => {
@@ -73,7 +72,6 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
 });
 

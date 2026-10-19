@@ -41,7 +41,6 @@ beforeEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
   openSessionsIn("external");
 });
@@ -89,7 +88,6 @@ describe("openRow", () => {
       tabs: [],
       activeKey: HOME,
       lastTermKey: null,
-      folded: {},
     });
     openSessionsIn("app");
     await openRow(row("blocked"), "external");

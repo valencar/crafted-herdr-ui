@@ -112,7 +112,6 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
   useAppStore.setState({ state: null });
 });
@@ -322,7 +321,7 @@ describe("Sidebar", () => {
     ).not.toHaveAttribute("aria-current");
   });
 
-  it("nested_terminal_activates_its_tab_and_unfolds_its_group", async () => {
+  it("nested_terminal_activates_its_tab", async () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
       state: {
@@ -334,17 +333,12 @@ describe("Sidebar", () => {
     });
     openTab("w1:p1", "agent w1:p1");
     openTab("w2:p1", "agent w2:p1");
-    act(() => {
-      useTerminalStore.getState().activate(HOME);
-      useTerminalStore.getState().toggleFold("buildbox");
-    });
-    expect(useTerminalStore.getState().folded).toEqual({ buildbox: true });
+    act(() => useTerminalStore.getState().activate(HOME));
     renderSidebar(false, { machines });
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: /^agent w1:p1,/ }));
     expect(useTerminalStore.getState().activeKey).toBe("buildbox::w1:p1");
-    expect(useTerminalStore.getState().folded).toEqual({});
   });
 
   it("projects_show_three_then_n_more_then_show_fewer", async () => {

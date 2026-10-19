@@ -15,8 +15,9 @@ import { Workbox } from "./Workbox";
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
+  copyText: vi.fn(),
 }));
-import { invokeTyped } from "../lib/ipc";
+import { copyText, invokeTyped } from "../lib/ipc";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
@@ -115,7 +116,6 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
 });
 
@@ -744,7 +744,7 @@ describe("Workbox pane tails", () => {
       await vi.advanceTimersByTimeAsync(10_500);
     });
     expect(calls("read_pane_tail").length).toBeGreaterThan(0);
-    useTerminalStore.setState({ tabs: [], lastTermKey: null, folded: {} });
+    useTerminalStore.setState({ tabs: [], lastTermKey: null });
   });
 
   it("tails_stop_when_the_screen_goes_away", async () => {
@@ -839,12 +839,7 @@ describe("Workbox pane tails", () => {
         machine("buildbox", {}, { kind: "attention", error: "ssh: denied" }),
       ),
     );
-    // After `userEvent.setup`, which installs a clipboard stub of its own.
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      value: { writeText },
-      configurable: true,
-    });
+    vi.mocked(copyText).mockResolvedValue(undefined);
     const summary = screen.getByRole("region", { name: "buildbox" });
     expect(
       await within(summary).findByText(/herdr machine reconnect buildbox/),
@@ -852,7 +847,7 @@ describe("Workbox pane tails", () => {
     await user.click(
       within(summary).getByRole("button", { name: /^Copy command/ }),
     );
-    expect(writeText).toHaveBeenCalledWith("herdr machine reconnect buildbox");
+    expect(copyText).toHaveBeenCalledWith("herdr machine reconnect buildbox");
   });
 
   it("a_failed_re_check_clears_the_old_checked_note", async () => {

@@ -156,7 +156,6 @@ const reset = () =>
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
 
 beforeEach(() => {
@@ -182,7 +181,7 @@ describe("Workspace", () => {
     const { container } = render(<Workspace>{home}</Workspace>);
     const region = screen.getByRole("region", { name: "Workspace" });
     expect(
-      within(region).getByRole("navigation", { name: "Tabs" }),
+      within(region).getByRole("navigation", { name: "Workboxes" }),
     ).toBeVisible();
     expect(region.querySelector(".workspace-body")).toBe(
       container.querySelector(".workspace-body"),
@@ -268,26 +267,31 @@ describe("Workspace", () => {
     expect(screen.queryByTestId("context-bar")).toBeNull();
   });
 
-  it("the_home_tab_is_named_after_the_view", () => {
+  it("the_home_views_row_names_the_view", () => {
     render(<Workspace>{home}</Workspace>);
-    const strip = screen.getByRole("navigation", { name: "Tabs" });
-    expect(within(strip).getAllByRole("button")[0]).toHaveAccessibleName(
-      "All agents",
-    );
+    const row = () => screen.getByRole("navigation", { name: "Home views" });
+    const current = () =>
+      within(row())
+        .getAllByRole("button")
+        .filter((b) => b.getAttribute("aria-current") === "page")
+        .map((b) => b.textContent);
+    // The pinned Home tab always reads "Home".
+    expect(
+      within(
+        screen.getByRole("navigation", { name: "Workboxes" }),
+      ).getAllByRole("button")[0],
+    ).toHaveAccessibleName("Home");
+    expect(current()).toEqual(["All agents"]);
 
     act(() => useAppStore.setState({ view: { kind: "dashboard" } }));
-    expect(within(strip).getAllByRole("button")[0]).toHaveAccessibleName(
-      "Dashboard",
-    );
+    expect(current()).toEqual(["Dashboard"]);
 
     act(() =>
       useAppStore.setState({
         view: { kind: "workbox", machineId: "buildbox" },
       }),
     );
-    expect(within(strip).getAllByRole("button")[0]).toHaveAccessibleName(
-      "buildbox",
-    );
+    expect(current()).toEqual(["buildbox"]);
 
     // A machine that is gone is named by its id.
     act(() =>
@@ -295,9 +299,7 @@ describe("Workspace", () => {
         view: { kind: "workbox", machineId: "staging" },
       }),
     );
-    expect(within(strip).getAllByRole("button")[0]).toHaveAccessibleName(
-      "staging",
-    );
+    expect(current()).toEqual(["staging"]);
   });
 
   it("gives the views the saved font size", () => {

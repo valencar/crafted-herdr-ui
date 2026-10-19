@@ -22,8 +22,9 @@ import { OpenButton } from "./OpenButton";
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
+  copyText: vi.fn(),
 }));
-import { invokeTyped } from "../lib/ipc";
+import { copyText, invokeTyped } from "../lib/ipc";
 
 vi.mock("../lib/openRow", () => ({
   openRow: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("../terminal/Workspace", () => ({
 }));
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
+const copy = vi.mocked(copyText);
 const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
 
 const ROW: Row = {
@@ -84,12 +86,6 @@ function tab(paneId: string): TermTab {
 
 function setup(props: Partial<Parameters<typeof OpenButton>[0]> = {}) {
   const user = userEvent.setup();
-  // userEvent installs its own clipboard stub; ours goes on top of it.
-  writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText },
-    configurable: true,
-  });
   const view = render(
     <div>
       <OpenButton row={ROW} terminalName="Ghostty" {...props} />
@@ -103,11 +99,10 @@ const chevron = () =>
   screen.getByRole("button", { name: "More ways to open api-service" });
 const items = () => screen.getAllByRole("menuitem");
 
-let writeText: ReturnType<typeof vi.fn>;
-
 beforeEach(() => {
   invoke.mockReset();
   invoke.mockResolvedValue(ATTACH);
+  copy.mockReset().mockResolvedValue(undefined);
   vi.mocked(openRow).mockReset();
   vi.mocked(openFull).mockReset();
   useAppStore.setState({
@@ -129,7 +124,6 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
 });
 
@@ -224,7 +218,7 @@ describe("OpenButton", () => {
     await user.click(
       screen.getByRole("menuitem", { name: "Copy attach command" }),
     );
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(ATTACH));
+    await waitFor(() => expect(copy).toHaveBeenCalledWith(ATTACH));
     expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
       machineId: "buildbox",
       paneId: "w1:p1",
@@ -247,19 +241,14 @@ describe("OpenButton", () => {
     expect(fetches()).toHaveLength(2);
   });
 
-  it("copy_attach_command_writes_to_the_clipboard_inside_the_click", async () => {
-    // WKWebView may refuse a clipboard write that follows an await after the gesture, so
-    // with the command already fetched the write happens synchronously in the click.
+  it("copy_attach_command_copies_the_rust_command", async () => {
     const { user } = setup();
     await user.click(chevron());
-    await act(async () => {
-      await Promise.resolve();
-    });
-    fireEvent.click(
+    await user.click(
       screen.getByRole("menuitem", { name: "Copy attach command" }),
     );
-    expect(writeText).toHaveBeenCalledTimes(1);
-    expect(writeText).toHaveBeenCalledWith(ATTACH);
+    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
+    expect(copy).toHaveBeenCalledWith(ATTACH);
     await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
   });
 
@@ -275,24 +264,23 @@ describe("OpenButton", () => {
     await user.click(
       screen.getByRole("menuitem", { name: "Copy attach command" }),
     );
-    expect(writeText).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
     await act(async () => resolve(ATTACH));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(ATTACH));
+    await waitFor(() => expect(copy).toHaveBeenCalledWith(ATTACH));
     await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
   });
 
-  it("a_rejected_clipboard_write_goes_to_the_toast", async () => {
+  it("a_refused_copy_shows_the_error_toast", async () => {
     const { user } = setup();
-    writeText.mockRejectedValue(new Error("clipboard refused"));
+    copy.mockRejectedValue(new Error("NotAllowedError"));
     await user.click(chevron());
-    await act(async () => {
-      await Promise.resolve();
-    });
-    fireEvent.click(
+    await user.click(
       screen.getByRole("menuitem", { name: "Copy attach command" }),
     );
     await waitFor(() =>
-      expect(useAppStore.getState().toast).toBe("clipboard refused"),
+      expect(useAppStore.getState().toast).toBe(
+        "Couldn’t copy to the clipboard.",
+      ),
     );
     expect(useAppStore.getState().toastTone).toBe("error");
   });
@@ -308,7 +296,7 @@ describe("OpenButton", () => {
       expect(useAppStore.getState().toast).toBe("no attach here"),
     );
     expect(useAppStore.getState().toastTone).toBe("error");
-    expect(writeText).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
   });
 
   it("arrow_keys_wrap_and_escape_returns_focus_to_the_chevron", async () => {

@@ -134,7 +134,6 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
   useAppStore.getState().clearToast();
   vi.useRealTimers();

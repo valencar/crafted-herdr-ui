@@ -10,8 +10,11 @@ class MockChannel<T> {
 }
 vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: MockChannel }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
+const writeText = vi.fn();
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText }));
 
 const {
+  copyText,
   getSettings,
   getState,
   invokeTyped,
@@ -29,6 +32,20 @@ const {
 beforeEach(() => {
   invoke.mockReset();
   listen.mockReset();
+  writeText.mockReset();
+});
+
+describe("copyText", () => {
+  it("copy_text_writes_through_the_clipboard_plugin", async () => {
+    writeText.mockResolvedValue(undefined);
+    await copyText("https://example.com/x");
+    expect(writeText).toHaveBeenCalledWith("https://example.com/x");
+  });
+
+  it("rejects_with_the_plugin_error", async () => {
+    writeText.mockRejectedValue(new Error("refused"));
+    await expect(copyText("x")).rejects.toThrow("refused");
+  });
 });
 
 describe("invokeTyped", () => {
@@ -171,9 +188,9 @@ describe("openTerm", () => {
       paneId: "w1:p1",
     };
 
-    await expect(
-      openTerm(target, 80, 24, (e) => events.push(e)),
-    ).resolves.toBe(7);
+    await expect(openTerm(target, 80, 24, (e) => events.push(e))).resolves.toBe(
+      7,
+    );
 
     expect(invoke).toHaveBeenCalledWith("term_open", {
       target,

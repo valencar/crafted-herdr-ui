@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { STATUS_LABEL } from "../lib/format";
+import { shortPath, STATUS_LABEL } from "../lib/format";
 import { isNeedsYou, toRows, type Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import type { TermTab } from "./terminalStore";
@@ -32,12 +32,6 @@ export function tabStatus(tab: TermTab, row: Row | undefined): string | null {
   return row && isNeedsYou(row) ? `${state} · ${rowLabel}` : state;
 }
 
-/** The status word chip on a tab: shown for a session state, or a live agent that needs you. */
-export function tabChip(tab: TermTab, row: Row | undefined): string | null {
-  if (tab.state !== "live") return tabStatus(tab, row);
-  return row && isNeedsYou(row) ? STATUS_LABEL[row.status] : null;
-}
-
 /** The accessible name of a tab: "{title}, {status words}", else "{title} on {workbox}". */
 export function tabName(tab: TermTab, row: Row | undefined): string {
   const words = tabStatus(tab, row);
@@ -60,4 +54,23 @@ export function tabDotStatus(
  */
 export function tabTreeName(tab: TermTab, row: Row | undefined): string {
   return `${tabName(tab, row)}, terminal tab`;
+}
+
+/**
+ * The second line of a tab: "{project or short folder} · {status words}", else whichever of the
+ * two exists, else "" (an empty line isn't rendered). The full herdr UI says what it is.
+ */
+export function tabSubline(
+  tab: TermTab,
+  row: Row | undefined,
+  project: string | null,
+): string {
+  if (tab.target.kind === "full") return "Full herdr UI";
+  const place = project ?? (row?.folder ? shortPath(row.folder) : null);
+  return [place, tabStatus(tab, row)].filter(Boolean).join(" · ");
+}
+
+/** How many of the tabs show a blocked agent. */
+export function countNeeds(tabs: TermTab[], rows: Map<string, Row>): number {
+  return tabs.filter((t) => rows.get(t.tabKey)?.status === "blocked").length;
 }

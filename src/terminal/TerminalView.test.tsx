@@ -108,14 +108,16 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
   openTerm: vi.fn(),
+  copyText: vi.fn(),
 }));
-import { invokeTyped, openTerm } from "../lib/ipc";
+import { copyText, invokeTyped, openTerm } from "../lib/ipc";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
 import { HOME, useTerminalStore } from "./terminalStore";
 import { xtermTheme } from "./xtermTheme";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const open = vi.mocked(openTerm);
+const copy = vi.mocked(copyText);
 
 const KEY = "buildbox::w1:p1";
 const emitters: ((e: TermEvent) => void)[] = [];
@@ -157,6 +159,7 @@ beforeEach(() => {
   emitters.length = 0;
   h.search.findNext.mockClear();
   invoke.mockReset().mockResolvedValue(null);
+  copy.mockReset().mockResolvedValue(undefined);
   let next = 7;
   open.mockReset().mockImplementation(async (_target, _c, _r, onEvent) => {
     emitters.push(onEvent);
@@ -167,7 +170,6 @@ beforeEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
   useTerminalStore.getState().openTab({
     tabKey: KEY,
@@ -402,35 +404,44 @@ describe("TerminalView", () => {
     );
   });
 
-  it("command_clicks_on_a_link_copy_it_and_toast_Link_copied", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  it("meta_click_copies_the_link_and_says_so", async () => {
+    copy.mockResolvedValue(undefined);
     render(<Harness />);
     await flush();
     await act(async () =>
       h.linkHandler?.({ metaKey: true }, "https://x.dev/a"),
     );
-    expect(writeText).toHaveBeenCalledWith("https://x.dev/a");
+    expect(copy).toHaveBeenCalledWith("https://x.dev/a");
     expect(useAppStore.getState().toast).toBe("Link copied");
     expect(useAppStore.getState().toastTone).toBe("info");
   });
 
-  it("a_plain_click_on_a_link_does_nothing", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  it("plain_click_copies_nothing", async () => {
     render(<Harness />);
     await flush();
     await act(async () =>
       h.linkHandler?.({ metaKey: false }, "https://x.dev/a"),
     );
-    expect(writeText).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
     expect(useAppStore.getState().toast).toBeNull();
   });
 
+  it("a_refused_copy_shows_the_error_toast", async () => {
+    copy.mockRejectedValue(new Error("NotAllowedError"));
+    render(<Harness />);
+    await flush();
+    await act(async () =>
+      h.linkHandler?.({ metaKey: true }, "https://x.dev/a"),
+    );
+    expect(useAppStore.getState().toast).toBe(
+      "Couldn’t copy to the clipboard.",
+    );
+    expect(useAppStore.getState().toastTone).toBe("error");
+  });
+
   it("osc8_hyperlinks_are_copy_only_too", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+    copy.mockResolvedValue(undefined);
     const windowOpen = vi.fn();
-    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
     vi.stubGlobal("open", windowOpen);
     render(<Harness />);
     await flush();
@@ -442,12 +453,12 @@ describe("TerminalView", () => {
     await act(async () =>
       handler.activate({ metaKey: false }, "https://x.dev/a"),
     );
-    expect(writeText).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
     expect(useAppStore.getState().toast).toBeNull();
     await act(async () =>
       handler.activate({ metaKey: true }, "https://x.dev/a"),
     );
-    expect(writeText).toHaveBeenCalledWith("https://x.dev/a");
+    expect(copy).toHaveBeenCalledWith("https://x.dev/a");
     expect(useAppStore.getState().toast).toBe("Link copied");
     expect(windowOpen).not.toHaveBeenCalled();
   });

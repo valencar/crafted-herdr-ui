@@ -96,7 +96,7 @@ export function AllTabsMenu({
       >
         All tabs
         {needsCount > 0 && (
-          <span id={needsId} className="chip tab-chip" data-tone="needs">
+          <span id={needsId} className="chip tab-menu-needs">
             {needsCount} needs input
           </span>
         )}

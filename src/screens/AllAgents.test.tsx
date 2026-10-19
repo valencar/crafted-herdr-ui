@@ -25,8 +25,9 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
   onPreview: vi.fn(),
+  copyText: vi.fn(),
 }));
-import { invokeTyped, onPreview } from "../lib/ipc";
+import { copyText, invokeTyped, onPreview } from "../lib/ipc";
 
 // AgentRow and NeedsYouCard each call formatAge once per render and Home never does, so its
 // call count says how many rows rendered.
@@ -151,7 +152,6 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
 });
 
@@ -605,7 +605,6 @@ describe("AllAgents", () => {
       ],
       activeKey: "buildbox::w1:p1",
       lastTermKey: "buildbox::w1:p1",
-      folded: {},
     });
     // The Home list is still mounted but hidden: focus is on the page, not in the terminal.
     expect(document.activeElement).toBe(document.body);
@@ -980,17 +979,11 @@ describe("Home states", () => {
       expect(document.querySelector(".agent-row .cmdbox")).toBeNull();
       expect(document.querySelector(".card .cmdbox")).toBeNull();
 
-      // The clipboard stub must be in place after userEvent.setup replaced it.
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: vi.fn().mockResolvedValue(undefined) },
-        configurable: true,
-      });
+      vi.mocked(copyText).mockResolvedValue(undefined);
       await user.click(
         within(card).getByRole("button", { name: /^Copy command/ }),
       );
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        "herdr machine reconnect gpubox",
-      );
+      expect(copyText).toHaveBeenCalledWith("herdr machine reconnect gpubox");
       expect(
         await within(card).findByRole("button", { name: "Copied" }),
       ).toBeVisible();

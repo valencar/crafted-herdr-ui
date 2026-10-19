@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { AppState } from "./bindings/AppState";
 import type { ActionError } from "./bindings/ActionError";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
@@ -192,6 +193,15 @@ export async function invokeTyped<K extends CommandName>(
   } catch (e) {
     throw toActionError(e);
   }
+}
+
+/**
+ * Puts `text` on the clipboard through the Tauri clipboard plugin. WebKit refuses the web
+ * clipboard API outside a user gesture it accepts, so this is the only clipboard write in
+ * the UI. Rejects with the plugin's error.
+ */
+export function copyText(text: string): Promise<void> {
+  return writeText(text);
 }
 
 /** The current state, for a UI that started after the first `"state"` event. */

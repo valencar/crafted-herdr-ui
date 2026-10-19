@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Row } from "../lib/grouping";
-import { invokeTyped } from "../lib/ipc";
+import { copyText, invokeTyped } from "../lib/ipc";
 import { openFull, openRow } from "../lib/openRow";
 import { isKeyForMenu } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
@@ -113,10 +113,9 @@ export function OpenButton({
     };
   }, [open]);
 
-  // The attach command, fetched each time the menu opens so "Copy attach command" can write it
-  // to the clipboard synchronously in the click: WKWebView may refuse a write that comes after
-  // an await, outside the user's gesture. `attach` is the pending fetch, `attachCommand` its
-  // result once it is in.
+  // The attach command, fetched each time the menu opens, so "Copy attach command" is
+  // instant. The copy no longer has to happen inside the click, so this is only a head start.
+  // `attach` is the pending fetch, `attachCommand` its result once it is in.
   const attach = useRef<Promise<string> | null>(null);
   const attachCommand = useRef<string | null>(null);
   useEffect(() => {
@@ -158,20 +157,19 @@ export function OpenButton({
   };
 
   const copyAttach = () => {
-    const copy = (command: string) => {
+    const copy = async (command: string) => {
       try {
-        void navigator.clipboard
-          .writeText(command)
-          .then(() => showToast("Copied", "info"), reportError);
-      } catch (e) {
-        reportError(e);
+        await copyText(command);
+      } catch {
+        reportError(new Error("Couldn’t copy to the clipboard."));
+        return;
       }
+      showToast("Copied", "info");
     };
-    // The command is normally in already: write it before any await.
+    // The command is normally in already; otherwise copy as soon as it is.
     if (attachCommand.current !== null) {
-      copy(attachCommand.current);
+      void copy(attachCommand.current);
     } else if (attach.current) {
-      // Not back yet: copy as soon as it is (possibly outside the gesture).
       attach.current.then(copy, reportError);
     }
   };
@@ -197,8 +195,7 @@ export function OpenButton({
         type="button"
         className="btn open-main"
         aria-label={name}
-        // An open tab is focused (and its group unfolded) by `openTab`; `openRow` also marks a
-        // done row seen.
+        // An open tab is focused by `openTab`; `openRow` also marks a done row seen.
         onClick={() => void (hasTab ? openRow(row, "app") : openRow(row))}
       >
         {label}
