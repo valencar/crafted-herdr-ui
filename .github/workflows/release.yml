@@ -39,6 +39,7 @@ jobs:
 
       # Ad-hoc signed (bundle.macOS.signingIdentity "-" in tauri.conf.json), not notarized.
       # The README documents the first-launch steps and the optional Developer ID setup.
+      # The release starts as a draft so it never goes public without its assets; the next step publishes it.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -49,3 +50,19 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target universal-apple-darwin
+
+      # GitHub's generated notes (merged PRs since the previous release), then the install caveat.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body > "$notes"
+          cat >> "$notes" <<'EOF'
+
+          ## Install
+
+          Download the universal `.dmg` (Apple Silicon and Intel) and drag **Crafted Herdr** to Applications. This build is ad-hoc signed and not notarized, so macOS blocks the first launch; the [README](${{ github.server_url }}/${{ github.repository }}#install) has the steps to open it.
+          EOF
+          gh release edit "$TAG" --draft=false --latest --notes-file "$notes"

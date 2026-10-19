@@ -153,7 +153,7 @@ None of these were run by the implementer (they need a real GUI session and a ma
 
 ## Task 17
 
-- [ ] From a pushed `v*` tag, the Release workflow finishes and leaves a draft GitHub Release with a universal `.dmg`. On an Apple Silicon Mac, download it, drag the app to Applications, and confirm the first-launch steps in the README (right-click › Open, or `xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"`) are enough to start it (the build is ad-hoc signed, not notarized).
+- [ ] From a pushed `v*` tag, the Release workflow finishes and publishes a GitHub Release (marked Latest, with generated notes) carrying a universal `.dmg`. On an Apple Silicon Mac, download it, drag the app to Applications, and confirm the first-launch steps in the README (right-click › Open, or `xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"`) are enough to start it (the build is ad-hoc signed, not notarized).
 - [ ] `pnpm tauri build` (full bundle with the DMG step, in a GUI session) opens the DMG window with the new icon, and `Crafted Herdr.app` inside shows it too.
 
 ## Final review fixes
