@@ -22,8 +22,9 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
   onPreview: vi.fn(),
+  copyText: vi.fn(),
 }));
-import { invokeTyped, onPreview } from "../lib/ipc";
+import { copyText, invokeTyped, onPreview } from "../lib/ipc";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const listen = vi.mocked(onPreview);
@@ -72,11 +73,8 @@ beforeEach(() => {
 
 function setup(row = BLOCKED) {
   const user = userEvent.setup();
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText },
-    configurable: true,
-  });
+  const copy = vi.mocked(copyText);
+  copy.mockReset().mockResolvedValue(undefined);
   const view = render(
     <Inspector
       row={row}
@@ -85,7 +83,7 @@ function setup(row = BLOCKED) {
       terminalName="Ghostty"
     />,
   );
-  return { user, writeText, ...view };
+  return { user, copy, ...view };
 }
 
 describe("Inspector details", () => {
@@ -150,7 +148,7 @@ describe("Inspector when Rust refuses the attach command", () => {
       }
       return null;
     });
-    const { user, writeText } = setup();
+    const { user, copy } = setup();
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Copy command" }),
@@ -158,7 +156,7 @@ describe("Inspector when Rust refuses the attach command", () => {
     );
     await user.click(screen.getByRole("button", { name: "Copy command" }));
     expect(useAppStore.getState().toast).toBe("Pane w1:p1 has no terminal.");
-    expect(writeText).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
     expect(screen.queryByText(/^\$/)).toBeNull();
   });
 });
@@ -439,17 +437,17 @@ describe("Inspector actions", () => {
   });
 
   it("copy_command_writes_to_the_clipboard_and_says_copied", async () => {
-    const { user, writeText } = setup();
+    const { user, copy } = setup();
     await user.click(screen.getByRole("button", { name: "Copy command" }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(ATTACH));
+    await waitFor(() => expect(copy).toHaveBeenCalledWith(ATTACH));
     expect(
       await screen.findByRole("button", { name: "Copied" }),
     ).toBeInTheDocument();
   });
 
   it("a_failed_copy_is_reported", async () => {
-    const { user, writeText } = setup();
-    writeText.mockRejectedValue(new Error("denied"));
+    const { user, copy } = setup();
+    copy.mockRejectedValue(new Error("denied"));
     await user.click(screen.getByRole("button", { name: "Copy command" }));
     await waitFor(() =>
       expect(useAppStore.getState().toast).toBe(

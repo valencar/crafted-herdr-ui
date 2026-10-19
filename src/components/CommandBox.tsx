@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { copyText } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
 
 const COPIED_MS = 2000;
@@ -25,7 +26,7 @@ export function CopyButton({
   useEffect(() => () => clearTimeout(timer.current), []);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
     } catch {
       reportError(new Error("Couldn’t copy to the clipboard."));
       return;

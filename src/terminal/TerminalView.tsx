@@ -11,8 +11,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { actionErrorMessage } from "../lib/format";
-import { toActionError } from "../lib/ipc";
+import { copyText } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
 import { useTerminalStore, type TermTab } from "./terminalStore";
 import { useTermSession } from "./useTermSession";
@@ -26,12 +25,12 @@ const RESIZE_DEBOUNCE_MS = 50;
  */
 function copyLink(event: { metaKey: boolean }, uri: string): void {
   if (!event.metaKey) return;
-  navigator.clipboard.writeText(uri).then(
+  copyText(uri).then(
     () => useAppStore.getState().showToast("Link copied", "info"),
-    (e: unknown) =>
+    () =>
       useAppStore
         .getState()
-        .showToast(actionErrorMessage(toActionError(e)), "error"),
+        .showToast("Couldn’t copy to the clipboard.", "error"),
   );
 }
 

@@ -9,10 +9,12 @@ import { ActivityDrawer } from "./ActivityDrawer";
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
+  copyText: vi.fn(),
 }));
-import { invokeTyped } from "../lib/ipc";
+import { copyText, invokeTyped } from "../lib/ipc";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
+const copy = vi.mocked(copyText);
 
 const at = (h: number, m: number, s: number) =>
   new Date(2026, 9, 16, h, m, s).getTime();
@@ -41,11 +43,6 @@ const onClose = vi.fn();
 
 async function open() {
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  // After `userEvent.setup`, which installs a clipboard stub of its own.
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText: vi.fn().mockResolvedValue(undefined) },
-    configurable: true,
-  });
   const view = render(<ActivityDrawer machines={machines} onClose={onClose} />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -59,6 +56,7 @@ function rows(): HTMLElement[] {
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
+  copy.mockReset().mockResolvedValue(undefined);
   log = [
     entry({
       atMs: at(9, 5, 7),
@@ -116,16 +114,14 @@ describe("ActivityDrawer", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    expect(copy).toHaveBeenCalledWith(
       "herdr --machine m-1 agent prompt w1:p1 'hello world'",
     );
     expect(within(older).getByRole("button")).toHaveTextContent("Copied");
 
     const [newest] = rows();
     await user.click(within(newest).getByRole("button", { name: /^Copy/ }));
-    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
-      "herdr pane close w1:p2",
-    );
+    expect(copy).toHaveBeenLastCalledWith("herdr pane close w1:p2");
   });
 
   it("copies_a_local_entry_without_a_machine_flag", async () => {
@@ -150,7 +146,7 @@ describe("ActivityDrawer", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(line);
+      expect(copy).toHaveBeenLastCalledWith(line);
     }
   });
 
@@ -185,9 +181,7 @@ describe("ActivityDrawer", () => {
     const row = rows()[0];
     expect(row).toHaveAttribute("data-failed", "false");
     await user.click(within(row).getByRole("button", { name: /^Copy/ }));
-    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
-      "herdr terminal attach t1",
-    );
+    expect(copy).toHaveBeenLastCalledWith("herdr terminal attach t1");
   });
 
   it("still_marks_a_call_without_an_exit_code_but_with_an_error_as_failed", async () => {

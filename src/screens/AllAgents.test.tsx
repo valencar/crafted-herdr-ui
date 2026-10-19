@@ -25,8 +25,9 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
   onPreview: vi.fn(),
+  copyText: vi.fn(),
 }));
-import { invokeTyped, onPreview } from "../lib/ipc";
+import { copyText, invokeTyped, onPreview } from "../lib/ipc";
 
 // AgentRow and NeedsYouCard each call formatAge once per render and Home never does, so its
 // call count says how many rows rendered.
@@ -980,17 +981,11 @@ describe("Home states", () => {
       expect(document.querySelector(".agent-row .cmdbox")).toBeNull();
       expect(document.querySelector(".card .cmdbox")).toBeNull();
 
-      // The clipboard stub must be in place after userEvent.setup replaced it.
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: vi.fn().mockResolvedValue(undefined) },
-        configurable: true,
-      });
+      vi.mocked(copyText).mockResolvedValue(undefined);
       await user.click(
         within(card).getByRole("button", { name: /^Copy command/ }),
       );
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        "herdr machine reconnect gpubox",
-      );
+      expect(copyText).toHaveBeenCalledWith("herdr machine reconnect gpubox");
       expect(
         await within(card).findByRole("button", { name: "Copied" }),
       ).toBeVisible();
