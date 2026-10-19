@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { STATUS_LABEL } from "../lib/format";
+import { shortPath, STATUS_LABEL } from "../lib/format";
 import { isNeedsYou, toRows, type Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import type { TermTab } from "./terminalStore";
@@ -60,4 +60,23 @@ export function tabDotStatus(
  */
 export function tabTreeName(tab: TermTab, row: Row | undefined): string {
   return `${tabName(tab, row)}, terminal tab`;
+}
+
+/**
+ * The second line of a tab: "{project or short folder} · {status words}", else whichever of the
+ * two exists, else "" (an empty line isn't rendered). The full herdr UI says what it is.
+ */
+export function tabSubline(
+  tab: TermTab,
+  row: Row | undefined,
+  project: string | null,
+): string {
+  if (tab.target.kind === "full") return "Full herdr UI";
+  const place = project ?? (row?.folder ? shortPath(row.folder) : null);
+  return [place, tabStatus(tab, row)].filter(Boolean).join(" · ");
+}
+
+/** How many of the tabs show a blocked agent. */
+export function countNeeds(tabs: TermTab[], rows: Map<string, Row>): number {
+  return tabs.filter((t) => rows.get(t.tabKey)?.status === "blocked").length;
 }

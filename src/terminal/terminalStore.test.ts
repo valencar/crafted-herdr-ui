@@ -21,6 +21,7 @@ beforeEach(() => {
     activeKey: HOME,
     lastTermKey: null,
     folded: {},
+    lastByMachine: {},
   });
 });
 
@@ -178,5 +179,49 @@ describe("terminalStore", () => {
     store().cycle(1, [HOME, "buildbox::w1:p1", "gpubox::w1:p1"]);
     expect(store().activeKey).toBe("gpubox::w1:p1");
     expect(store().folded).toEqual({});
+  });
+
+  it("open_and_activate_remember_the_last_tab_per_workbox", () => {
+    expect(store().lastByMachine).toEqual({});
+    store().openTab(tab("w1:p1"));
+    store().openTab(tab("w1:p2"));
+    store().openTab(tab("w1:p1", "gpubox"));
+    store().activate("buildbox::w1:p1");
+    const expected = {
+      buildbox: "buildbox::w1:p1",
+      gpubox: "gpubox::w1:p1",
+    };
+    expect(store().lastByMachine).toEqual(expected);
+    store().activate(HOME);
+    expect(store().lastByMachine).toEqual(expected);
+  });
+
+  it("activate_machine_restores_the_remembered_tab", () => {
+    store().openTab(tab("w1:p1"));
+    store().openTab(tab("w1:p2"));
+    store().openTab(tab("w1:p1", "gpubox"));
+    store().activate("buildbox::w1:p1");
+    store().activate("gpubox::w1:p1");
+    store().activateMachine("buildbox");
+    expect(store().activeKey).toBe("buildbox::w1:p1");
+    expect(store().lastTermKey).toBe("buildbox::w1:p1");
+  });
+
+  it("activate_machine_falls_back_when_the_remembered_tab_closed", () => {
+    store().openTab(tab("w1:p1"));
+    store().openTab(tab("w1:p2"));
+    expect(store().lastByMachine.buildbox).toBe("buildbox::w1:p2");
+    store().closeTab("buildbox::w1:p2");
+    expect(store().lastByMachine.buildbox).toBeUndefined();
+    store().activate(HOME);
+    store().activateMachine("buildbox");
+    expect(store().activeKey).toBe("buildbox::w1:p1");
+  });
+
+  it("activate_machine_without_tabs_does_nothing", () => {
+    store().openTab(tab("w1:p1"));
+    store().activate(HOME);
+    store().activateMachine("staging");
+    expect(store().activeKey).toBe(HOME);
   });
 });
