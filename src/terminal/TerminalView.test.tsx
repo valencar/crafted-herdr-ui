@@ -170,7 +170,6 @@ beforeEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
   useTerminalStore.getState().openTab({
     tabKey: KEY,

@@ -152,7 +152,6 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
 });
 
@@ -606,7 +605,6 @@ describe("AllAgents", () => {
       ],
       activeKey: "buildbox::w1:p1",
       lastTermKey: "buildbox::w1:p1",
-      folded: {},
     });
     // The Home list is still mounted but hidden: focus is on the page, not in the terminal.
     expect(document.activeElement).toBe(document.body);

@@ -64,8 +64,6 @@ export function requestTerminalFind(): void {
 export function Workspace({ children }: { children: ReactNode }) {
   const tabs = useTerminalStore((s) => s.tabs);
   const activeKey = useTerminalStore((s) => s.activeKey);
-  const state = useAppStore((s) => s.state);
-  const view = useAppStore((s) => s.view);
   const fontSize = useAppStore(
     (s) => s.settings?.terminal_font_size ?? DEFAULT_FONT_SIZE,
   );
@@ -76,15 +74,6 @@ export function Workspace({ children }: { children: ReactNode }) {
   );
   const setSettings = useAppStore((s) => s.setSettings);
   const report = useAppStore((s) => s.reportError);
-
-  // The Home tab is named after what it shows.
-  const homeLabel =
-    view.kind === "workbox"
-      ? (state?.machines.find((m) => m.id === view.machineId)?.label ??
-        view.machineId)
-      : view.kind === "all"
-        ? "All agents"
-        : "Dashboard";
 
   // ---- the Dashboard column beside a terminal ----
   // It is there only next to a terminal tab; on Home the Dashboard is the Home screen itself.
@@ -217,7 +206,7 @@ export function Workspace({ children }: { children: ReactNode }) {
 
   return (
     <section className="workspace" aria-label="Workspace">
-      <TabStrip homeLabel={homeLabel} />
+      <TabStrip />
       <div
         ref={bodyRef}
         className={"workspace-body" + (showSplit ? " has-split" : "")}

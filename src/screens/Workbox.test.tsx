@@ -116,7 +116,6 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
   });
 });
 
@@ -745,7 +744,7 @@ describe("Workbox pane tails", () => {
       await vi.advanceTimersByTimeAsync(10_500);
     });
     expect(calls("read_pane_tail").length).toBeGreaterThan(0);
-    useTerminalStore.setState({ tabs: [], lastTermKey: null, folded: {} });
+    useTerminalStore.setState({ tabs: [], lastTermKey: null });
   });
 
   it("tails_stop_when_the_screen_goes_away", async () => {

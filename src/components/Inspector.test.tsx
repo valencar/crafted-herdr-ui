@@ -261,7 +261,6 @@ describe("Inspector actions", () => {
       tabs: [],
       activeKey: HOME,
       lastTermKey: null,
-      folded: {},
     });
   });
 
@@ -528,7 +527,6 @@ describe("Inspector live preview", () => {
         tabs: [],
         activeKey: HOME,
         lastTermKey: null,
-        folded: {},
       }),
     );
 

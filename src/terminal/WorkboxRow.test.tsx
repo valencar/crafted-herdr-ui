@@ -55,7 +55,6 @@ const reset = () => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
-    folded: {},
     lastByMachine: {},
   });
 };

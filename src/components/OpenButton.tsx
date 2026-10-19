@@ -195,8 +195,7 @@ export function OpenButton({
         type="button"
         className="btn open-main"
         aria-label={name}
-        // An open tab is focused (and its group unfolded) by `openTab`; `openRow` also marks a
-        // done row seen.
+        // An open tab is focused by `openTab`; `openRow` also marks a done row seen.
         onClick={() => void (hasTab ? openRow(row, "app") : openRow(row))}
       >
         {label}

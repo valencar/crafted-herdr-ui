@@ -32,12 +32,6 @@ export function tabStatus(tab: TermTab, row: Row | undefined): string | null {
   return row && isNeedsYou(row) ? `${state} · ${rowLabel}` : state;
 }
 
-/** The status word chip on a tab: shown for a session state, or a live agent that needs you. */
-export function tabChip(tab: TermTab, row: Row | undefined): string | null {
-  if (tab.state !== "live") return tabStatus(tab, row);
-  return row && isNeedsYou(row) ? STATUS_LABEL[row.status] : null;
-}
-
 /** The accessible name of a tab: "{title}, {status words}", else "{title} on {workbox}". */
 export function tabName(tab: TermTab, row: Row | undefined): string {
   const words = tabStatus(tab, row);

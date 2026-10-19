@@ -26,8 +26,6 @@ type TerminalStore = {
   activeKey: string;
   /** The terminal tab that was active last (⌃` goes back to it); `null` when it is gone. */
   lastTermKey: string | null;
-  /** The workbox ids whose tab group is folded. Lives only while the app runs. */
-  folded: Record<string, true>;
   /** Each workbox's last active tab (machine id to `tabKey`); `activateMachine` goes back to it. Lives only while the app runs. */
   lastByMachine: Record<string, string>;
   /** Focuses the tab with that key if there is one, else appends it; either way it becomes active. */
@@ -35,7 +33,7 @@ type TerminalStore = {
   updateTab: (tabKey: string, patch: Partial<TermTab>) => void;
   /** Removes the tab; when it was the active one, Home takes over. */
   closeTab: (tabKey: string) => void;
-  /** Home always; a terminal tab only if it exists. Showing a tab unfolds its group. */
+  /** Home always; a terminal tab only if it exists. */
   activate: (key: string) => void;
   /** Activates the workbox's remembered tab if it is still open, else its first open tab; does nothing with none. */
   activateMachine: (machineId: string) => void;
@@ -43,32 +41,18 @@ type TerminalStore = {
   cycle: (dir: 1 | -1, order: string[]) => void;
   /** On Home: back to the last terminal tab, if it is still there. On a tab: Home. */
   toggleHome: () => void;
-  toggleFold: (machineId: string) => void;
 };
-
-/** `folded` without one machine. */
-function unfold(
-  folded: Record<string, true>,
-  machineId: string,
-): Record<string, true> {
-  if (!(machineId in folded)) return folded;
-  const rest = { ...folded };
-  delete rest[machineId];
-  return rest;
-}
 
 export const useTerminalStore = create<TerminalStore>()((set, get) => ({
   tabs: [],
   activeKey: HOME,
   lastTermKey: null,
-  folded: {},
   lastByMachine: {},
   openTab: (t) =>
     set((s) => {
       const shown = {
         activeKey: t.tabKey,
         lastTermKey: t.tabKey,
-        folded: unfold(s.folded, t.target.machineId),
         lastByMachine: {
           ...s.lastByMachine,
           [t.target.machineId]: t.tabKey,
@@ -107,7 +91,6 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
       return {
         activeKey: key,
         lastTermKey: key,
-        folded: unfold(s.folded, tab.target.machineId),
         lastByMachine: {
           ...s.lastByMachine,
           [tab.target.machineId]: key,
@@ -134,11 +117,4 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
     if (activeKey !== HOME) activate(HOME);
     else if (lastTermKey !== null) activate(lastTermKey);
   },
-  toggleFold: (machineId) =>
-    set((s) => ({
-      folded:
-        machineId in s.folded
-          ? unfold(s.folded, machineId)
-          : { ...s.folded, [machineId]: true },
-    })),
 }));

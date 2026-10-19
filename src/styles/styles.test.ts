@@ -95,4 +95,33 @@ describe("app.css", () => {
       expect(rule(selector)).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     }
   });
+
+  it("tab_rows_use_only_token_colors", () => {
+    for (const selector of [
+      ".wb-row",
+      ".wb-tab",
+      '.wb-tab[data-active="true"]',
+      ".wb-tab-needs",
+      ".session-row",
+      ".session-tab",
+      '.session-tab[data-active="true"]',
+      '.session-tab-sub[data-tone="needs"]',
+    ]) {
+      expect(rule(selector)).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    }
+  });
+
+  it("active_tabs_join_the_row_below", () => {
+    // The variable a rule paints its background with.
+    const background = (selector: string) =>
+      /background:\s*(var\(--[a-z0-9-]+\))\s*;/.exec(rule(selector))?.[1];
+    expect(background('.wb-tab[data-active="true"]')).toBeDefined();
+    expect(background('.wb-tab[data-active="true"]')).toBe(
+      background(".session-row"),
+    );
+    expect(background('.session-tab[data-active="true"]')).toBeDefined();
+    expect(background('.session-tab[data-active="true"]')).toBe(
+      background(".context-bar"),
+    );
+  });
 });
