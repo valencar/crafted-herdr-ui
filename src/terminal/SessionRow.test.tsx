@@ -191,6 +191,32 @@ describe("SessionRow", () => {
     expect(screen.getByRole("button", { name: /^infra/ })).toBeInTheDocument();
   });
 
+  it("no_new_session_button_for_a_stray_or_a_disabled_workbox", () => {
+    open("staging", "w1:p1", "tester"); // not in the machine list
+    open("gpubox", "w1:p1", "planner");
+    const state = appState();
+    state.machines[1].health = { kind: "disabled" };
+    act(() => useAppStore.setState({ state }));
+    const { rerender } = render(<Harness machineId="staging" />);
+    expect(screen.getByRole("button", { name: /^tester/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^New session on/ }),
+    ).toBeNull();
+
+    rerender(<Harness machineId="gpubox" />);
+    expect(
+      screen.getByRole("button", { name: /^planner/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^New session on/ }),
+    ).toBeNull();
+
+    act(() => useAppStore.setState({ state: appState() }));
+    expect(
+      screen.getByRole("button", { name: "New session on gpubox" }),
+    ).toBeInTheDocument();
+  });
+
   it("new_on_workbox_opens_the_sheet_prefilled", async () => {
     const user = userEvent.setup();
     open("buildbox", "w1:p1", "planner");

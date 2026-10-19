@@ -119,27 +119,31 @@ export function SessionRow({
             </div>
           );
         })}
-        <button
-          type="button"
-          className="session-new"
-          aria-label={`New session on ${group.label}`}
-          onClick={() => openNewSession({ machineId: group.machineId })}
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            aria-hidden="true"
-            focusable="false"
+        {/* The sheet lists only machines that are present and not disabled, so a stray or
+            disabled workbox would silently get another one. */}
+        {group.machine && group.machine.health.kind !== "disabled" && (
+          <button
+            type="button"
+            className="session-new"
+            aria-label={`New session on ${group.label}`}
+            onClick={() => openNewSession({ machineId: group.machineId })}
           >
-            <path d="M8 3v10M3 8h10" />
-          </svg>
-          New on <span className="mono">{group.label}</span>
-        </button>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+            New on <span className="mono">{group.label}</span>
+          </button>
+        )}
       </div>
       {overflowing && (
         <AllTabsMenu

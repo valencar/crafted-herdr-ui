@@ -2029,6 +2029,10 @@ select.field {
 .session-tab[data-needs="true"] {
   background: color-mix(in srgb, var(--st-needs) 7%, transparent);
 }
+/* After the tint, so a needs-input tab still shows its hover fill. */
+.session-tab[data-needs="true"]:hover {
+  background: color-mix(in srgb, var(--st-needs) 12%, var(--nav-hover));
+}
 .session-tab[data-active="true"] {
   background: var(--panel);
 }
