@@ -35,8 +35,18 @@ function resolveImport(from: string, spec: string): string | null {
   return null;
 }
 
+/**
+ * Runtime import edges: `import … from`, `export … from` and bare `import "x"`. Type-only forms
+ * (`import type …`, `export type … from`) are erased at build time, so they pull in no code.
+ */
 const IMPORT_RE =
-  /(?:^|\n)\s*(?:import|export)\b[^"'`;]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']/g;
+  /(?:^|\n)\s*(?:import|export)\b(?!\s+type\s+(?!from\b))[^"'`;]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']/g;
+
+/** The module specifiers a source text imports at runtime. */
+export function runtimeImports(text: string): string[] {
+  return [...text.matchAll(IMPORT_RE)].map((m) => m[1] ?? m[2]);
+}
+
 /** A call of a command by name: `invokeTyped("x"`, `invoke("x"` or `invoke<T>("x"`. */
 const INVOKE_RE = /\binvoke(?:Typed)?(?:<[^>]*>)?\(\s*["']([a-z_]+)["']/g;
 /** Only the typed calls: what `ipc.ts` itself uses for the helpers every window imports. */
@@ -62,8 +72,8 @@ function commandsReachableFrom(entry: string): string[] {
       for (const m of text.matchAll(INVOKE_RE)) found.add(m[1]);
       if (OPEN_TERM_RE.test(text)) found.add("term_open");
     }
-    for (const m of text.matchAll(IMPORT_RE)) {
-      const next = resolveImport(file, m[1] ?? m[2]);
+    for (const spec of runtimeImports(text)) {
+      const next = resolveImport(file, spec);
       if (next) visit(next);
     }
   };
@@ -104,6 +114,30 @@ describe("capabilities", () => {
       expect(granted).toEqual(commands.map(kebab).sort());
     },
   );
+});
+
+describe("runtimeImports", () => {
+  it("skips_type_only_imports_and_reexports", () => {
+    const text = [
+      'import type { A } from "./a";',
+      'import type B from "./b";',
+      'import type * as C from "./c";',
+      'export type { D } from "./d";',
+      'export type * from "./e";',
+      'import { f } from "./f";',
+      'import g, { type H } from "./g";',
+      'export { i } from "./i";',
+      'export * from "./j";',
+      'import "./k";',
+      'import type from "./l";',
+    ].join("\n");
+    expect(runtimeImports(text)).toEqual(["./f", "./g", "./i", "./j", "./k", "./l"]);
+  });
+
+  it("reads_multiline_named_imports", () => {
+    const text = 'import {\n  a,\n  b,\n} from "./m";\nimport type {\n  C,\n} from "./n";';
+    expect(runtimeImports(text)).toEqual(["./m"]);
+  });
 });
 
 describe("app manifest", () => {
