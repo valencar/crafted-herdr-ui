@@ -8,16 +8,6 @@ import type { TerminalList } from "./bindings/TerminalList";
 import { TERMINAL_LABEL } from "./format";
 import { invokeTyped } from "./ipc";
 
-/** The current time, refreshed every `everyMs`. */
-export function useNow(everyMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), everyMs);
-    return () => window.clearInterval(t);
-  }, [everyMs]);
-  return now;
-}
-
 /** The terminals `get_terminals` found, and the one sessions open in. */
 export type Terminals = {
   /** The chosen terminal, or the default one; `null` until `get_terminals` has answered. */

@@ -2,7 +2,7 @@ import { useId } from "react";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { formatChecked, formatStaleness } from "../lib/format";
-import { useNow } from "../lib/uiHelpers";
+import { useNow } from "../lib/useNow";
 import { ReconnectBox } from "./ReconnectBox";
 
 export type Counts = {

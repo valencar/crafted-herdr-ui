@@ -21,11 +21,8 @@ import {
 import { invokeTyped } from "../lib/ipc";
 import { markSeen } from "../lib/openRow";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
-import {
-  terminalName as terminalLabel,
-  useNow,
-  useTerminals,
-} from "../lib/uiHelpers";
+import { terminalName as terminalLabel, useTerminals } from "../lib/uiHelpers";
+import { useNow } from "../lib/useNow";
 import { useAppStore, type GroupBy } from "../store/appStore";
 
 const GROUP_TITLE: Record<GroupBy, string> = {

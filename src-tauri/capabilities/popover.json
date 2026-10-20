@@ -1,7 +1,19 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "popover",
-  "description": "Capability for the menu bar popover: events only",
-  "windows": ["popover"],
-  "permissions": ["core:default"]
+  "description": "Capability for the menu bar popover: events, reading state, and opening rows or the app. No settings writes and no terminal sessions",
+  "windows": [
+    "popover"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-get-settings",
+    "allow-get-state",
+    "allow-mark-seen",
+    "allow-open-full-herdr",
+    "allow-open-session",
+    "allow-show-main",
+    "allow-show-main-new-session",
+    "allow-show-main-open-row"
+  ]
 }

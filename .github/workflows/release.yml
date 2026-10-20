@@ -4,7 +4,8 @@ on:
   push:
     tags: ["v*"]
 
-# Read-only by default; the release job asks for what it needs, and the tap job stays read-only.
+# Read-only by default. Only the publish job can write, and it runs none of the repo's
+# dependency code: the build job (which does) holds no write token.
 permissions:
   contents: read
 
@@ -12,51 +13,93 @@ jobs:
   check:
     uses: ./.github/workflows/ci.yml
 
-  release:
+  # Builds the universal app and DMG. It runs the project's dependencies (pnpm, cargo build
+  # scripts), so it is read-only and keeps no credentials in the checkout.
+  build:
     needs: check
     runs-on: macos-14
     timeout-minutes: 60
     permissions:
-      contents: write
-      # Lets the last step start the Pages workflow (GITHUB_TOKEN-published releases start none).
-      actions: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: src-tauri
 
       # Ad-hoc signed (bundle.macOS.signingIdentity "-" in tauri.conf.json), not notarized.
       # The README documents the first-launch steps and the optional Developer ID setup.
-      # The release starts as a draft so it never goes public without its assets; the next step publishes it.
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build the universal app and DMG
+        run: pnpm tauri build --target universal-apple-darwin
+
+      # The asset names the site and the Homebrew cask rely on:
+      #   Crafted.Herdr_<version>_universal.dmg and Crafted.Herdr_universal.app.tar.gz
+      # (the app bundle at the top level of the archive, as earlier releases had it).
+      - name: Collect the assets
+        run: |
+          bundle="src-tauri/target/universal-apple-darwin/release/bundle"
+          out="$RUNNER_TEMP/assets"
+          mkdir -p "$out"
+          for dmg in "$bundle"/dmg/*.dmg; do
+            name=$(basename "$dmg")
+            cp "$dmg" "$out/${name// /.}"
+          done
+          app=$(ls -d "$bundle"/macos/*.app)
+          COPYFILE_DISABLE=1 tar -czf "$out/Crafted.Herdr_universal.app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
+          ls -l "$out"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Crafted Herdr ${{ github.ref_name }}
-          releaseBody: See the README for install steps. This build is not notarized.
-          releaseDraft: true
-          prerelease: false
-          args: --target universal-apple-darwin
+          name: release-assets
+          path: ${{ runner.temp }}/assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # Turns the built files into the public release. It checks out nothing and runs no build tools:
+  # it only downloads the assets, hashes them and talks to GitHub with the job's write token.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      # Lets the last step start the Pages workflow (GITHUB_TOKEN-published releases start none).
+      actions: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/assets
+
+      - name: Checksums
+        run: |
+          cd "$RUNNER_TEMP/assets"
+          sha256sum -- *.dmg *.app.tar.gz > "$RUNNER_TEMP/SHA256SUMS.txt"
+          mv "$RUNNER_TEMP/SHA256SUMS.txt" SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       # GitHub's generated notes (merged PRs since the previous release), then the install caveat.
+      # The release starts as a draft so it never goes public without its assets; the edit below
+      # publishes it. A re-run of a failed publish updates the draft or release that is there.
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,14 +114,25 @@ jobs:
           With Homebrew: `brew install --cask valencar/tap/crafted-herdr` (upgrade with `brew upgrade --cask crafted-herdr`).
 
           Or download the universal `.dmg` (Apple Silicon and Intel) and drag **Crafted Herdr** to Applications. This build is ad-hoc signed and not notarized, so macOS blocks the first launch; the [README](${{ github.server_url }}/${{ github.repository }}#install) has the steps to open it.
+
+          Each file's SHA-256 is in `SHA256SUMS.txt`.
           EOF
-          gh release edit "$TAG" --draft=false --latest --notes-file "$notes"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$RUNNER_TEMP"/assets/*
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$notes"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+              --title "Crafted Herdr $TAG" --notes-file "$notes" "$RUNNER_TEMP"/assets/*
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
 
       # A release published with GITHUB_TOKEN starts no other workflow, so ask for the site rebuild
       # (its Download buttons point at the latest public DMG). workflow_dispatch is allowed with it.
       - name: Refresh the site
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No checkout here, so gh needs to be told which repository.
+          GH_REPO: ${{ github.repository }}
         run: gh workflow run pages.yml --ref main || echo "::warning::Could not start the Pages workflow; run it by hand to refresh the site's Download link."
 
   # Keeps the Homebrew tap's cask on the latest release. It builds nothing and runs no dependency
@@ -86,7 +140,7 @@ jobs:
   # The tap token is read by the one step that commits, and nowhere else.
   # A download or render failure still fails this job even without a token (the release is public by then).
   tap:
-    needs: release
+    needs: publish
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -97,7 +151,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 

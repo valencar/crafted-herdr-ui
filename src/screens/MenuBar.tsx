@@ -4,7 +4,7 @@ import { HEALTH_LABEL, STATUS_LABEL, formatAge, plural } from "../lib/format";
 import { needsYou, projectNames, toRows, type Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { defaultOpenHow, openRow } from "../lib/openRow";
-import { useNow } from "../lib/uiHelpers";
+import { useNow } from "../lib/useNow";
 import { useAppStore } from "../store/appStore";
 
 type RowItemProps = {

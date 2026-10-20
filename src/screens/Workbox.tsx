@@ -13,7 +13,8 @@ import { isNeedsYou, toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { openFull, openRow } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
-import { isEditable, isInTerminal, useNow } from "../lib/uiHelpers";
+import { isEditable, isInTerminal } from "../lib/uiHelpers";
+import { useNow } from "../lib/useNow";
 import { useAppStore } from "../store/appStore";
 
 /** herdr's answer when a workspace has linked worktree workspaces (spec section 7). */
