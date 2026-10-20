@@ -280,7 +280,7 @@
   white-space: nowrap;
 }
 .pop-row-detail {
-  font-size: var(--fs-hint);
+  font-size: var(--fs-meta);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

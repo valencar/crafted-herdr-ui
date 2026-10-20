@@ -59,7 +59,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: var(--font-size);
+  font-size: var(--fs-body);
   line-height: var(--line-height);
   -webkit-font-smoothing: antialiased;
 }

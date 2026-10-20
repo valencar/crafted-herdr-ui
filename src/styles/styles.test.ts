@@ -181,9 +181,20 @@ describe("app.css", () => {
 describe("type tokens", () => {
   it("defines_the_type_scale_and_secondary_colors", () => {
     const tokens = stripComments(read("tokens.css"));
-    expect(tokens).toContain("--fs-body: 14px");
-    expect(tokens).toContain("--fs-small: 12.5px");
-    expect(tokens).toContain("--fs-hint: 12px");
+    const scale = {
+      hint: "12px",
+      small: "12.5px",
+      meta: "13px",
+      body: "14px",
+      lead: "16px",
+      title: "18px",
+      "display-1": "22px",
+      "display-2": "24px",
+      "display-3": "28px",
+    };
+    for (const [name, size] of Object.entries(scale)) {
+      expect(tokens).toContain(`--fs-${name}: ${size};`);
+    }
     expect(tokens).toContain("--font-size: var(--fs-body)");
     expect(tokens).toMatch(/--text-4:\s*#9a9da6/);
     expect(tokens).toMatch(/--muted:\s*#9a9da6/);
@@ -192,7 +203,7 @@ describe("type tokens", () => {
   it("sizes_all_text_through_type_tokens", () => {
     const allowed = /^(var\(--fs-[a-z0-9-]+\)|inherit|[\d.]+em)$/;
     const offenders: string[] = [];
-    for (const file of ["app.css", "windows.css"]) {
+    for (const file of ["app.css", "windows.css", "global.css"]) {
       for (const m of stripComments(read(file)).matchAll(
         /([^{}]+)\{([^}]*)\}/g,
       )) {

@@ -449,7 +449,7 @@ kbd {
   white-space: nowrap;
 }
 .nav-sub {
-  font-size: var(--fs-hint);
+  font-size: var(--fs-small);
   color: var(--muted);
 }
 .count {
@@ -572,7 +572,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: var(--fs-hint);
+  font-size: var(--fs-small);
   color: var(--muted);
 }
 .health .dot {
@@ -684,7 +684,7 @@ kbd {
   font-weight: 600;
 }
 .card-name {
-  font-size: var(--fs-small);
+  font-size: var(--fs-body);
   color: var(--text-3);
 }
 .card-chip {
@@ -785,10 +785,13 @@ kbd {
 }
 .row-name,
 .row-pane {
-  font-size: var(--fs-small);
   color: var(--muted);
 }
+.row-name {
+  font-size: var(--fs-body);
+}
 .row-pane {
+  font-size: var(--fs-small);
   min-width: 40px;
   text-align: right;
 }
@@ -806,7 +809,7 @@ kbd {
 
 .chip {
   font-family: var(--font-mono);
-  font-size: var(--fs-hint);
+  font-size: var(--fs-meta);
   color: var(--text-4);
   background: var(--chip);
   border-radius: 5px;
@@ -1115,7 +1118,7 @@ select.field {
   overflow-wrap: anywhere;
 }
 .opt-meta {
-  font-size: var(--fs-hint);
+  font-size: var(--fs-small);
 }
 .opt-line + .opt-meta {
   padding-left: 19px;
@@ -1393,7 +1396,7 @@ select.field {
   min-width: 0;
 }
 .pane-box-tail {
-  font-size: var(--fs-hint);
+  font-size: var(--fs-small);
   color: var(--muted);
   line-height: 1.5;
   max-width: 100%;
@@ -2472,7 +2475,7 @@ select.field {
   border-top: 1px solid var(--border);
 }
 .dash-name {
-  font-size: var(--fs-small);
+  font-size: var(--fs-body);
   color: var(--text-3);
 }
 .dash-age {
