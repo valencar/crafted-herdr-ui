@@ -6,7 +6,12 @@ import { describe, expect, it } from "vitest";
 
 const html = readFileSync(join(process.cwd(), "site", "index.html"), "utf8");
 const doc = new DOMParser().parseFromString(html, "text/html");
-const css = (doc.querySelector("style")?.textContent ?? "").replace(/\/\*[\s\S]*?\*\//g, "");
+const stripComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "");
+const css = stripComments(
+  Array.from(doc.querySelectorAll("style"))
+    .map((el) => el.textContent ?? "")
+    .join("\n"),
+);
 
 /** The declarations of the first rule whose selector list contains `selector` exactly. */
 function declarationsFor(selector: string): string {
@@ -20,15 +25,36 @@ function declarationsFor(selector: string): string {
 
 describe("project site", () => {
   it("has_no_text_smaller_than_13px", () => {
-    const sizes: number[] = [];
-    for (const [, value] of css.matchAll(/font-size:\s*([^;}]+)/g)) {
+    // Every font-size and font shorthand, in every <style> block and every [style] attribute.
+    const values: string[] = [];
+    const scan = (text: string) => {
+      for (const [, value] of text.matchAll(/(?:^|[;{\s])font-size:\s*([^;}]+)/g)) {
+        values.push(value.trim());
+      }
+      for (const [, value] of text.matchAll(/(?:^|[;{\s])font:\s*([^;}]+)/g)) {
+        // font shorthand: the size is the token before an optional /line-height
+        const size = value.match(/(?:^|\s)(-?\d*\.?\d+(?:px|rem|em|%)|[a-z-]+)(?:\/[^\s]+)?\s+\S/);
+        if (size) values.push(size[1]);
+      }
+    };
+    scan(css);
+    for (const el of Array.from(doc.querySelectorAll("[style]"))) {
+      scan(el.getAttribute("style") ?? "");
+    }
+    expect(values.length).toBeGreaterThan(10);
+
+    const keywords = /^(xx-small|x-small|small|smaller|medium|large|x-large|xx-large|larger)$/;
+    for (const value of values) {
+      expect(value, `keyword font size: ${value}`).not.toMatch(keywords);
       // clamp(min, preferred, max) and min()/max() are checked on every length they hold.
-      for (const [, num, unit] of value.matchAll(/(-?\d*\.?\d+)(px|rem)\b/g)) {
-        sizes.push(unit === "rem" ? Number(num) * 16 : Number(num));
+      for (const [, num, unit] of value.matchAll(/(-?\d*\.?\d+)(px|rem|em|%)(?![\w])/g)) {
+        const n = Number(num);
+        if (unit === "px") expect(n, value).toBeGreaterThanOrEqual(13);
+        else if (unit === "rem") expect(n * 16, value).toBeGreaterThanOrEqual(13);
+        else if (unit === "em") expect(n, `em below 1em: ${value}`).toBeGreaterThanOrEqual(1);
+        else expect(n, `% below 100%: ${value}`).toBeGreaterThanOrEqual(100);
       }
     }
-    expect(sizes.length).toBeGreaterThan(10);
-    for (const size of sizes) expect(size).toBeGreaterThanOrEqual(13);
   });
 
   it("keeps_the_personality_tokens", () => {
@@ -89,7 +115,9 @@ describe("project site", () => {
       const { host, pathname } = new URL(url);
       const ok = allowed.some((a) => {
         const [aHost, ...rest] = a.split("/");
-        return host === aHost && pathname.startsWith(`/${rest.join("/")}`);
+        const path = `/${rest.join("/")}`;
+        const trimmed = pathname.replace(/\/$/, "");
+        return host === aHost && (trimmed === path || pathname.startsWith(`${path}/`) || path === "/");
       });
       expect(ok, `unexpected link: ${url}`).toBe(true);
     }
