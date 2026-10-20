@@ -4,6 +4,8 @@ A desktop home for your Herdr agents: every workbox, every agent, grouped by pro
 
 Crafted Herdr is a macOS app (Tauri 2, React and TypeScript). It shows all your [herdr](https://herdr.dev) machines ("workboxes") and every agent on them in one window, opens any pane in the terminal you already use, and puts a menu bar item and notifications on top. It does everything by running your own installed `herdr` CLI.
 
+Website: **[valencar.github.io/crafted-herdr-ui](https://valencar.github.io/crafted-herdr-ui/)**
+
 > **Unofficial.** Crafted Herdr is an independent community project. It is not affiliated with, endorsed by, or part of herdr.dev or its authors.
 
 ## Screenshots

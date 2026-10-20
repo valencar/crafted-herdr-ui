@@ -1,0 +1,938 @@
+<!doctype html>
+<!-- The project site. scripts/build-site.sh copies this folder to _site/ and replaces
+     {{VERSION}} with the latest published release; the Pages workflow deploys _site/. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crafted Herdr — a desktop home for your herdr agents</title>
+    <meta
+      name="description"
+      content="Free, open source macOS app for herdr. Every workbox and every agent in one window, grouped by project, with the ones that need you first."
+    />
+    <link rel="canonical" href="https://valencar.github.io/crafted-herdr-ui/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Crafted Herdr — a desktop home for your herdr agents" />
+    <meta
+      property="og:description"
+      content="Every workbox, every agent, grouped by project — with what needs you first. Open source, for macOS."
+    />
+    <meta property="og:url" content="https://valencar.github.io/crafted-herdr-ui/" />
+    <meta
+      property="og:image"
+      content="https://valencar.github.io/crafted-herdr-ui/images/dashboard-1440.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0b0b0e" />
+    <link rel="icon" type="image/png" href="icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <style>
+      /* Tokens shared with the craftedai.co/herdr page. */
+      :root {
+        color-scheme: dark;
+        --ink: #0b0b0e;
+        --ink-2: #14141a;
+        --bone: #f2efe6;
+        --bone-dim: #b9b3a3;
+        --bone-faint: #6a6657;
+        --signal: #ffb23f;
+        --hairline: rgba(242, 239, 230, 0.1);
+        --font-display: 'Instrument Serif', 'Times New Roman', serif;
+        --font-sans:
+          'Bricolage Grotesque', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          sans-serif;
+        --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html {
+        font-family: var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background-color: var(--ink);
+        color: var(--bone);
+        background-image:
+          radial-gradient(1200px 600px at 85% -10%, rgba(255, 178, 63, 0.08), transparent 60%),
+          radial-gradient(900px 500px at -10% 30%, rgba(200, 74, 58, 0.05), transparent 60%);
+        background-attachment: fixed;
+      }
+
+      ::selection {
+        background: var(--signal);
+        color: var(--ink);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      h1,
+      h2,
+      h3,
+      p,
+      ol,
+      ul,
+      dl,
+      dd,
+      pre {
+        margin: 0;
+      }
+
+      img {
+        display: block;
+        max-width: 100%;
+        height: auto;
+      }
+
+      .wrap {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 0 16px;
+      }
+
+      .display {
+        font-family: var(--font-display);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 0.92;
+      }
+
+      .display em {
+        color: var(--signal);
+      }
+
+      .mono {
+        font-family: var(--font-mono);
+      }
+
+      .tag {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--bone-faint);
+      }
+
+      .tag.signal {
+        color: var(--signal);
+      }
+
+      .lead {
+        max-width: 56ch;
+        font-size: 1.05rem;
+        line-height: 1.55;
+        color: var(--bone-dim);
+      }
+
+      .grid-bg {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.7;
+        background-image:
+          linear-gradient(to right, rgba(242, 239, 230, 0.04) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(242, 239, 230, 0.04) 1px, transparent 1px);
+        background-size: 88px 88px;
+      }
+
+      /* Nav */
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        border-bottom: 1px solid var(--hairline);
+        background: rgba(11, 11, 14, 0.8);
+        backdrop-filter: blur(10px);
+      }
+
+      .nav .wrap {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        height: 56px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 500;
+      }
+
+      .brand img {
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 24px;
+      }
+
+      .nav-links a:hover {
+        color: var(--signal);
+      }
+
+      /* Buttons */
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 24px;
+        font-family: var(--font-mono);
+        font-size: 13px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        transition:
+          background-color 160ms ease,
+          border-color 160ms ease,
+          color 160ms ease;
+      }
+
+      .btn-primary {
+        background: var(--signal);
+        color: var(--ink);
+      }
+
+      .btn-primary:hover {
+        background: var(--bone);
+      }
+
+      .btn-primary .arrow {
+        transition: transform 160ms ease;
+      }
+
+      .btn-primary:hover .arrow {
+        transform: translateY(2px);
+      }
+
+      .btn-ghost {
+        border: 1px solid rgba(242, 239, 230, 0.2);
+        color: var(--bone);
+      }
+
+      .btn-ghost:hover {
+        border-color: var(--signal);
+        color: var(--signal);
+      }
+
+      /* Hero */
+      .hero {
+        position: relative;
+      }
+
+      .hero .wrap {
+        position: relative;
+        padding-top: 64px;
+        padding-bottom: 96px;
+      }
+
+      .hero h1 {
+        margin-top: 24px;
+        max-width: 900px;
+        font-size: clamp(2.8rem, 7.4vw, 6rem);
+      }
+
+      .hero .lead {
+        margin-top: 32px;
+        max-width: 52ch;
+      }
+
+      .hero .actions {
+        margin-top: 40px;
+      }
+
+      .hero .meta {
+        margin-top: 24px;
+      }
+
+      .hero .shot {
+        margin-top: 64px;
+      }
+
+      .kicker {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--signal);
+      }
+
+      .pulse {
+        display: inline-block;
+        margin-right: 10px;
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        50% {
+          opacity: 0.35;
+        }
+      }
+
+      .shot {
+        border: 1px solid var(--hairline);
+        box-shadow: 0 40px 120px -40px rgba(0, 0, 0, 0.8);
+      }
+
+      /* Sections */
+      section.block {
+        position: relative;
+        border-top: 1px solid var(--hairline);
+      }
+
+      section.block > .wrap {
+        padding-top: 96px;
+        padding-bottom: 96px;
+      }
+
+      .head {
+        display: grid;
+        gap: 24px;
+      }
+
+      .head h2 {
+        font-size: clamp(2.4rem, 5.4vw, 4.4rem);
+      }
+
+      .head .lead {
+        margin-top: 24px;
+      }
+
+      .body {
+        margin-top: 64px;
+      }
+
+      .col {
+        max-width: 720px;
+      }
+
+      /* Features */
+      .features {
+        display: grid;
+        gap: 48px;
+      }
+
+      .features ol {
+        list-style: none;
+        padding: 0;
+      }
+
+      .features li {
+        display: grid;
+        grid-template-columns: 3rem 1fr;
+        padding: 28px 0;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .features .num {
+        font-family: var(--font-display);
+        font-size: 1.6rem;
+        line-height: 1;
+        color: var(--signal);
+      }
+
+      .features h3 {
+        font-size: 1.15rem;
+        font-weight: 400;
+      }
+
+      .features p,
+      .points li {
+        margin-top: 8px;
+        font-size: 0.98rem;
+        line-height: 1.6;
+        color: var(--bone-dim);
+      }
+
+      /* Terminal block */
+      .term {
+        border: 1px solid var(--hairline);
+        background: var(--ink-2);
+      }
+
+      .term-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .term-title {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .dots {
+        display: flex;
+        gap: 6px;
+      }
+
+      .dots span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: rgba(242, 239, 230, 0.15);
+      }
+
+      .copy {
+        border: 0;
+        padding: 0;
+        background: none;
+        cursor: pointer;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--bone-dim);
+      }
+
+      .copy:hover {
+        color: var(--signal);
+      }
+
+      .term pre {
+        overflow-x: auto;
+        padding: 16px;
+        font-family: var(--font-mono);
+        font-size: 13px;
+        line-height: 1.8;
+      }
+
+      .term pre .p {
+        color: var(--signal);
+        user-select: none;
+      }
+
+      .points {
+        margin-top: 40px;
+        padding: 0;
+        list-style: none;
+      }
+
+      .points li {
+        display: flex;
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .points li::before {
+        content: '→';
+        font-family: var(--font-mono);
+        color: var(--signal);
+      }
+
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.92em;
+        color: var(--bone);
+      }
+
+      /* Shortcuts */
+      .keys {
+        display: grid;
+        grid-template-columns: 1fr;
+        border-top: 1px solid var(--hairline);
+        border-left: 1px solid var(--hairline);
+      }
+
+      .keys > div {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        padding: 24px;
+        border-right: 1px solid var(--hairline);
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      kbd {
+        display: inline-flex;
+        justify-content: center;
+        min-width: 3.5rem;
+        padding: 8px 12px;
+        border: 1px solid rgba(242, 239, 230, 0.2);
+        background: var(--ink-2);
+        font-family: var(--font-mono);
+        font-size: 15px;
+        color: var(--bone);
+      }
+
+      .keys dd {
+        font-size: 0.98rem;
+        color: var(--bone-dim);
+      }
+
+      /* Install note */
+      .note .wrap {
+        display: grid;
+        gap: 24px;
+        padding-top: 64px;
+        padding-bottom: 64px;
+      }
+
+      .note h2 {
+        font-size: 1.15rem;
+        font-weight: 400;
+      }
+
+      .note p {
+        margin-top: 12px;
+        max-width: 64ch;
+        font-size: 0.95rem;
+        line-height: 1.6;
+        color: var(--bone-dim);
+      }
+
+      .note .term {
+        margin-top: 24px;
+      }
+
+      /* Closing */
+      .closing {
+        position: relative;
+        border-top: 1px solid var(--hairline);
+        background: radial-gradient(700px 360px at 50% 100%, rgba(255, 178, 63, 0.08), transparent 70%);
+      }
+
+      .closing .wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-top: 96px;
+        padding-bottom: 96px;
+        text-align: center;
+      }
+
+      .closing h2 {
+        font-size: clamp(3rem, 8vw, 7rem);
+      }
+
+      .closing p.lead {
+        margin-top: 24px;
+      }
+
+      .closing .actions {
+        justify-content: center;
+        margin-top: 40px;
+      }
+
+      .closing .tag {
+        margin-top: 40px;
+      }
+
+      footer {
+        border-top: 1px solid var(--hairline);
+      }
+
+      footer .wrap {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 16px;
+        padding-top: 24px;
+        padding-bottom: 24px;
+      }
+
+      footer a:hover {
+        color: var(--signal);
+      }
+
+      @media (min-width: 640px) {
+        .keys {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (min-width: 768px) {
+        .wrap {
+          padding: 0 40px;
+        }
+
+        .hero .wrap {
+          padding-top: 96px;
+          padding-bottom: 128px;
+        }
+
+        .hero .shot {
+          margin-top: 96px;
+        }
+
+        section.block > .wrap,
+        .closing .wrap {
+          padding-top: 144px;
+          padding-bottom: 144px;
+        }
+
+        .head,
+        .note .wrap {
+          grid-template-columns: 3fr 9fr;
+        }
+
+        .body {
+          margin-top: 80px;
+        }
+
+        .indent {
+          margin-left: 25%;
+        }
+      }
+
+      @media (min-width: 1024px) {
+        .features {
+          grid-template-columns: 5fr 7fr;
+        }
+
+        .keys {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      @media (max-width: 520px) {
+        .nav-links .optional {
+          display: none;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        .pulse {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap">
+        <a class="brand" href="#top">
+          <img src="icon.png" alt="" width="24" height="24" />
+          Crafted Herdr
+        </a>
+        <nav class="nav-links tag" aria-label="Sections">
+          <a class="optional" href="#what-it-does">Features</a>
+          <a class="optional" href="#install">Install</a>
+          <a href="https://github.com/valencar/crafted-herdr-ui">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="grid-bg" aria-hidden="true"></div>
+        <div class="wrap">
+          <p class="kicker"><span class="pulse" aria-hidden="true">●</span>Open source · macOS · MIT</p>
+          <h1 class="display">A desktop <em>home</em> for your herdr agents.</h1>
+          <p class="lead">
+            Every workbox, every agent, grouped by project — with what needs you first. Crafted
+            Herdr runs your own <a href="https://herdr.dev"><u>herdr</u></a> CLI and opens any pane
+            in the terminal you already use.
+          </p>
+          <div class="actions">
+            <a
+              class="btn btn-primary"
+              href="https://github.com/valencar/crafted-herdr-ui/releases/download/v{{VERSION}}/Crafted.Herdr_{{VERSION}}_universal.dmg"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path
+                  d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
+                />
+              </svg>
+              Download for Mac
+              <span class="arrow" aria-hidden="true">↓</span>
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/valencar/crafted-herdr-ui">View on GitHub</a>
+          </div>
+          <p class="tag meta">v{{VERSION}} · macOS 13+ · Apple Silicon &amp; Intel · requires herdr ≥ 0.9</p>
+          <picture>
+            <source
+              type="image/webp"
+              srcset="images/dashboard-1440.webp 1440w, images/dashboard-2880.webp 2880w"
+              sizes="(min-width: 1280px) 1200px, 100vw"
+            />
+            <img
+              class="shot"
+              src="images/dashboard-1440.png"
+              width="1440"
+              height="900"
+              alt="Crafted Herdr Dashboard: agents that need input, live numbers, and every workbox in one window"
+            />
+          </picture>
+        </div>
+      </section>
+
+      <section class="block" id="what-it-does">
+        <div class="wrap">
+          <header class="head">
+            <p class="tag signal">H/01 — What it does</p>
+            <div>
+              <h2 class="display">Built for the moment <em>an agent needs you.</em></h2>
+            </div>
+          </header>
+          <div class="body features">
+            <ol>
+              <li>
+                <span class="num">01</span>
+                <div>
+                  <h3>Who needs you, first.</h3>
+                  <p>
+                    Blocked and finished agents sit at the top of the Dashboard, oldest first. ⌘J
+                    jumps straight to the next one.
+                  </p>
+                </div>
+              </li>
+              <li>
+                <span class="num">02</span>
+                <div>
+                  <h3>Terminals, in tabs.</h3>
+                  <p>
+                    Attach any pane in a tab inside the app, or in Ghostty, iTerm2, Warp, WezTerm,
+                    Kitty, Alacritty or Terminal. Closing a tab only detaches — the agent keeps
+                    running.
+                  </p>
+                </div>
+              </li>
+              <li>
+                <span class="num">03</span>
+                <div>
+                  <h3>Every workbox, one window.</h3>
+                  <p>
+                    Local and remote machines side by side, with their health in words, a status bar
+                    and a one-click reconnect.
+                  </p>
+                </div>
+              </li>
+              <li>
+                <span class="num">04</span>
+                <div>
+                  <h3>Menu bar and notifications.</h3>
+                  <p>
+                    A tray count and a compact “Needs you” popover, plus a notification the moment an
+                    agent blocks or finishes.
+                  </p>
+                </div>
+              </li>
+            </ol>
+            <picture>
+              <source
+                type="image/webp"
+                srcset="images/terminal-1440.webp 1440w, images/terminal-2880.webp 2880w"
+                sizes="(min-width: 1024px) 700px, 100vw"
+              />
+              <img
+                class="shot"
+                src="images/terminal-1440.png"
+                width="1440"
+                height="900"
+                loading="lazy"
+                alt="A terminal tab in Crafted Herdr: an agent asking for approval, with its workbox and folder above it"
+              />
+            </picture>
+          </div>
+        </div>
+      </section>
+
+      <section class="block" id="nothing-hidden">
+        <div class="wrap">
+          <header class="head">
+            <p class="tag signal">H/02 — Nothing hidden</p>
+            <div>
+              <h2 class="display">Just your <em>herdr CLI.</em></h2>
+              <p class="lead">
+                No private protocol, no socket access. Crafted Herdr drives the public herdr CLI you
+                already have installed, and passes <code>--machine</code> for remote workboxes.
+              </p>
+            </div>
+          </header>
+          <div class="body col indent">
+            <div class="term">
+              <div class="term-bar">
+                <div class="term-title">
+                  <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                  <span class="tag">Activity · commands run</span>
+                </div>
+              </div>
+              <pre><span class="p">$ </span>herdr api snapshot
+<span class="p">$ </span>herdr machine list --json
+<span class="p">$ </span>herdr terminal attach &lt;terminal_id&gt;
+<span class="p">$ </span>herdr agent prompt &lt;pane&gt; "&lt;text&gt;"</pre>
+            </div>
+            <ul class="points">
+              <li>Every command it runs is listed in the Activity drawer (⇧⌘A), with a Copy button.</li>
+              <li>
+                It never answers a blocked agent for you, and never passes <code>--takeover</code>
+                without your click.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="block" id="keyboard">
+        <div class="wrap">
+          <header class="head">
+            <p class="tag signal">H/03 — Keyboard-first</p>
+            <div>
+              <h2 class="display">Hands stay <em>on the keys.</em></h2>
+              <p class="lead">
+                The native menu bar owns every shortcut, so they work even while a terminal has the
+                keyboard.
+              </p>
+            </div>
+          </header>
+          <dl class="body keys">
+            <div><dt><kbd>⌘K</kbd></dt><dd>Command palette</dd></div>
+            <div><dt><kbd>⌘J</kbd></dt><dd>Next agent that needs you</dd></div>
+            <div><dt><kbd>⌘\</kbd></dt><dd>Dashboard beside terminal</dd></div>
+            <div><dt><kbd>⌘1</kbd></dt><dd>Dashboard</dd></div>
+            <div><dt><kbd>⌃`</kbd></dt><dd>Last terminal tab</dd></div>
+            <div><dt><kbd>⇧⌘A</kbd></dt><dd>Activity drawer</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="block" id="fork-it">
+        <div class="wrap">
+          <header class="head">
+            <p class="tag signal">H/04 — Fork it</p>
+            <div>
+              <h2 class="display">Don’t like something? <em>Fork it.</em></h2>
+              <p class="lead">
+                MIT licensed. Tauri 2, a Rust core and a React UI. Change what you want, and send it
+                back if you like.
+              </p>
+            </div>
+          </header>
+          <div class="body col indent">
+            <div class="term">
+              <div class="term-bar">
+                <div class="term-title">
+                  <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                  <span class="tag">zsh</span>
+                </div>
+                <button
+                  class="copy"
+                  type="button"
+                  data-copy="gh repo fork valencar/crafted-herdr-ui --clone&#10;cd crafted-herdr-ui&#10;pnpm install&#10;pnpm tauri dev"
+                >
+                  Copy
+                </button>
+              </div>
+              <pre><span class="p">$ </span>gh repo fork valencar/crafted-herdr-ui --clone
+<span class="p">$ </span>cd crafted-herdr-ui
+<span class="p">$ </span>pnpm install
+<span class="p">$ </span>pnpm tauri dev</pre>
+            </div>
+            <p class="tag" style="margin-top: 16px">
+              Needs macOS 13+, Node 24+, pnpm 10 and a stable Rust toolchain.
+            </p>
+            <div class="actions" style="margin-top: 32px">
+              <a class="btn btn-ghost" href="https://github.com/valencar/crafted-herdr-ui/fork">Fork on GitHub</a>
+              <a class="btn btn-ghost" href="https://github.com/valencar/crafted-herdr-ui">Browse source</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="block note" id="install">
+        <div class="wrap">
+          <p class="tag">Before first launch</p>
+          <div class="col">
+            <h2>Builds aren’t notarized yet.</h2>
+            <p>
+              macOS blocks the first launch. On macOS 15 and later, try to open the app once, then
+              choose Open Anyway in System Settings › Privacy &amp; Security. Or clear the
+              quarantine flag once:
+            </p>
+            <div class="term">
+              <div class="term-bar">
+                <div class="term-title">
+                  <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                  <span class="tag">zsh</span>
+                </div>
+                <button
+                  class="copy"
+                  type="button"
+                  data-copy='xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"'
+                >
+                  Copy
+                </button>
+              </div>
+              <pre><span class="p">$ </span>xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing">
+        <div class="wrap">
+          <h2 class="display">Herd them <em>all.</em></h2>
+          <p class="lead">Free and open source, for macOS 13 and later.</p>
+          <div class="actions">
+            <a
+              class="btn btn-primary"
+              href="https://github.com/valencar/crafted-herdr-ui/releases/download/v{{VERSION}}/Crafted.Herdr_{{VERSION}}_universal.dmg"
+            >
+              Download for Mac <span class="arrow" aria-hidden="true">↓</span>
+            </a>
+          </div>
+          <p class="tag">Unofficial community project · not affiliated with herdr.dev</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap tag">
+        <span>Crafted Herdr · MIT</span>
+        <span>
+          <a href="https://github.com/valencar/crafted-herdr-ui/releases">Releases</a> ·
+          <a href="https://craftedai.co/herdr/">craftedai.co</a>
+        </span>
+      </div>
+    </footer>
+
+    <script>
+      // Copy buttons: navigator.clipboard is missing outside secure contexts, and writes can be
+      // refused; stay silent then rather than claim a copy happened.
+      for (const button of document.querySelectorAll('[data-copy]')) {
+        let timer;
+        button.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(button.dataset.copy);
+            button.textContent = 'Copied';
+            clearTimeout(timer);
+            timer = setTimeout(() => (button.textContent = 'Copy'), 1500);
+          } catch {}
+        });
+      }
+    </script>
+  </body>
+</html>

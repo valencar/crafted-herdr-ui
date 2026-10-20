@@ -28,6 +28,7 @@ pnpm test           # Vitest
 pnpm lint && pnpm typecheck
 cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 scripts/check-no-personal-data.sh
+scripts/build-site.sh  # project site (site/) → _site/; deployed to GitHub Pages by .github/workflows/pages.yml
 ```
 
 ## herdr facts the code relies on (verified on 0.9.3 and 0.9.4)
