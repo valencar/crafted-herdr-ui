@@ -249,3 +249,15 @@ Two rows replace the grouped strip. Use generic data (buildbox, gpubox, staging;
 - [ ] Second line of every state: a tab shows its words under the title for Working, Idle, Needs input, Done, unseen, Unknown, Shell, "Opening…", "Detached", "Error" and a combined "Detached · Needs input". No state is shown by colour alone.
 - [ ] ⌘2–⌘9 tooltips on session tabs ("{status} (⌘n)") use the flat order across workboxes, not the position inside the row (e.g. the first `gpubox` tab says ⌘4 when `buildbox` has two tabs and comes before `gpubox` in the machine list, Home being ⌘1).
 - [ ] Copy through the clipboard plugin: ⌘-click on a URL in a terminal shows "Link copied" and pasting elsewhere gives that URL (the link is never opened); "Copy attach command" shows "Copied" and pastes the command; the other copy sites still copy: the Inspector's command box, the Activity drawer and the reconnect box in the Home notices. No permission prompt appears for the clipboard.
+
+## v0.5 readability
+
+Bigger type, brighter secondary text and roomier rows. Use generic data (buildbox, gpubox, staging; api-service, web-app, infra). These are the GUI-only checks no automated test covers. Text must fit by wrapping, ellipsis or a sensible minimum width, never by shrinking the type back.
+
+- [ ] The 900×600 window (the minimum size): the sidebar, the two tab rows, the Dashboard and All agents all lay out with no clipped text, no overlap and no horizontal page scroll.
+- [ ] The ⌘B rail: collapsing and expanding the sidebar keeps every label readable, and the rail's icons and badges are not cut off.
+- [ ] Workbox and session tabs at 160 px: with enough tabs open that each session tab sits at its 160 px minimum, titles and second lines ellipsize without moving the close button, and long workbox labels ellipsize with their count and needs badge still visible.
+- [ ] The 360 px split column (⌘\ beside a terminal): the narrow Dashboard's tiles, cards and rows wrap or ellipsize, and nothing is clipped at the column's edge.
+- [ ] The context bar (agent, status, Find, Open in {Terminal}, Detach, Close pane…), the ⌘K palette, the Activity drawer, the sheets and dialogs, the menu bar popover and Settings: all text is readable at the new sizes, buttons are 36 to 38 px tall in Comfortable, and long names ellipsize instead of overflowing.
+- [ ] Sidebar items and agent rows are at least 40 px tall in Comfortable (a sidebar item with a second line about 48 px), and group headers ("Workboxes", "Projects", the popover's "Needs you · n") read in sentence case, not capitals.
+- [ ] Compact vs Comfortable side by side: switch the density in Settings; Compact keeps today's tighter rows, Comfortable is visibly roomier, and neither shrinks the type.

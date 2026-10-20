@@ -209,7 +209,8 @@ kbd {
   opacity: 0.6;
 }
 .open-split.is-small .btn {
-  padding: 3px 8px;
+  padding: 3px 10px;
+  min-height: 30px;
   font-size: var(--fs-small);
 }
 .open-split.is-small .open-main {
@@ -359,7 +360,8 @@ kbd {
   color: var(--text-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-m);
-  padding: 6px 10px;
+  padding: 6px 12px;
+  min-height: 36px;
   font-size: var(--fs-meta);
   cursor: pointer;
 }
@@ -381,7 +383,8 @@ kbd {
 }
 .btn-small {
   border-radius: var(--radius-s);
-  padding: 3px 8px;
+  padding: 3px 10px;
+  min-height: 30px;
   font-size: var(--fs-small);
 }
 .btn-ghost {
@@ -422,7 +425,8 @@ kbd {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 6px 10px;
+  min-height: 40px;
+  padding: 8px 10px;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -449,6 +453,12 @@ kbd {
   white-space: nowrap;
 }
 .nav-sub {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--fs-small);
   color: var(--muted);
 }
@@ -515,9 +525,9 @@ kbd {
   justify-content: space-between;
   padding: 16px 10px 6px;
   font-size: var(--fs-small);
+  font-weight: 500;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 .nav-hint {
   margin: 4px 10px;
@@ -761,6 +771,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: 40px;
   padding: 9px 0 9px 14px;
   background: transparent;
   border: 0;
@@ -1952,7 +1963,9 @@ select.field {
 /* -- row 1: Home and the workboxes -- */
 
 .wb-tab {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 96px;
+  max-width: 220px;
   height: 36px;
   display: flex;
   align-items: center;
@@ -1990,11 +2003,15 @@ select.field {
   background: var(--border-strong);
 }
 .wb-tab-label {
+  min-width: 0;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .wb-tab-count,
 .wb-tab-needs {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -2404,6 +2421,7 @@ select.field {
 /* ---------- compact row density ---------- */
 
 .density-compact .row-main {
+  min-height: 0;
   padding-top: 4px;
   padding-bottom: 4px;
   gap: 8px;

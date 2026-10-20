@@ -218,4 +218,46 @@ describe("type tokens", () => {
     }
     expect(offenders).toEqual([]);
   });
+  it("comfortable_rows_and_sidebar_items_are_at_least_40px", () => {
+    expect(rule(".row-main")).toContain("min-height: 40px");
+    expect(rule(".nav-item")).toContain("min-height: 40px");
+    expect(rule(".btn")).toMatch(/min-height:\s*36px/);
+  });
+
+  it("compact_density_keeps_todays_tighter_rows", () => {
+    const compact = rule(".density-compact .row-main");
+    expect(compact).toContain("min-height: 0");
+    expect(compact).toContain("padding-top: 4px");
+  });
+
+  it("group_headers_are_sentence_case", () => {
+    const windows = stripComments(read("windows.css"));
+    const popTitle = [...windows.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(
+      (m) => m[1].trim() === ".pop-title",
+    )[0][2];
+    for (const body of [rule(".nav-heading"), popTitle]) {
+      expect(body).not.toContain("text-transform: uppercase");
+      expect(body).toContain("font-size: var(--fs-small)");
+      expect(body).toContain("font-weight: 500");
+      expect(body).toContain("letter-spacing: 0.04em");
+    }
+  });
+
+  it("ellipsizes_single_line_labels_in_tabs_and_sidebar", () => {
+    for (const selector of [
+      ".session-tab-title",
+      ".session-tab-sub",
+      ".wb-tab-label",
+      ".nav-label",
+      ".nav-sub",
+    ]) {
+      const body = rule(selector);
+      expect(body, selector).toContain("overflow: hidden");
+      expect(body, selector).toContain("text-overflow: ellipsis");
+      expect(body, selector).toContain("white-space: nowrap");
+    }
+    // The workbox tab shrinks (with a sensible floor) so its label can ellipsize.
+    expect(rule(".wb-tab")).toMatch(/min-width:\s*\d+px/);
+    expect(rule(".wb-tab")).toMatch(/max-width:\s*\d+px/);
+  });
 });
