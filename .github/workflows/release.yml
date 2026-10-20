@@ -79,16 +79,21 @@ jobs:
       - name: Refresh the site
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run pages.yml --ref main
+        run: gh workflow run pages.yml --ref main || echo "::warning::Could not start the Pages workflow; run it by hand to refresh the site's Download link."
 
   # Keeps the Homebrew tap's cask on the latest release. It builds nothing and runs no dependency
   # code: it downloads the published DMG, hashes it and renders the cask with a script of this repo.
   # The tap token is read by the one step that commits, and nowhere else.
+  # A download or render failure still fails this job even without a token (the release is public by then).
   tap:
     needs: release
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Two close releases must not race the tap commit.
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:

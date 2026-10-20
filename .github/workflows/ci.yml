@@ -64,7 +64,10 @@ jobs:
         run: scripts/check-no-personal-data.sh
 
       - name: Cask syntax
-        run: scripts/render-cask.sh 0.0.0 "$(printf '%064d' 0)" | ruby -c
+        run: |
+          # Render to a file first: a failing render must fail the step, not feed ruby empty input.
+          scripts/render-cask.sh 0.0.0 "$(printf '%064d' 0)" > "$RUNNER_TEMP/cask.rb"
+          ruby -c "$RUNNER_TEMP/cask.rb"
 
       - name: Build the app (debug, no DMG)
         run: pnpm tauri build --debug --bundles app

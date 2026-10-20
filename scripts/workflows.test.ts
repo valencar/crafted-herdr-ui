@@ -26,7 +26,8 @@ describe("release.yml", () => {
     const dispatch = release.indexOf("gh workflow run pages.yml");
     expect(edit).toBeGreaterThanOrEqual(0);
     expect(dispatch).toBeGreaterThan(edit);
-    expect(release).toContain("gh workflow run pages.yml --ref main");
+    expect(release).toContain("gh workflow run pages.yml --ref main ||");
+    expect(release).toContain("::warning::");
   });
 
   it("tap_job_skips_prereleases", () => {
@@ -44,6 +45,8 @@ describe("release.yml", () => {
     expect(tap).toContain("scripts/render-cask.sh");
     expect(tap).toMatch(/unchanged|nothing to commit/);
     expect(tap).toContain("crafted-herdr $version");
+    expect(tap).toMatch(/\(unchanged\)[^\n]*\n\s*exit 0/);
+    expect(tap).toMatch(/group: homebrew-tap\s*\n\s+cancel-in-progress: false/);
   });
 
   it("tap_job_is_isolated_from_dependency_code", () => {
@@ -69,7 +72,9 @@ describe("release.yml", () => {
 
 describe("ci.yml", () => {
   it("ci_checks_the_cask_syntax", () => {
-    expect(ci).toMatch(/scripts\/render-cask\.sh[^\n]*\|\s*ruby -c/);
+    // A pipe would pass on a failed render (no pipefail, and ruby -c accepts empty input).
+    expect(ci).not.toMatch(/render-cask\.sh[^\n]*\|/);
+    expect(ci).toMatch(/scripts\/render-cask\.sh[^\n]*>\s*"([^"]+)"\s*\n\s*ruby -c "\1"/);
   });
 });
 

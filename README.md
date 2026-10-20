@@ -52,7 +52,7 @@ brew upgrade --cask crafted-herdr
 
 Or by hand: download the latest `.dmg` from the [Releases](../../releases) page and drag **Crafted Herdr** to Applications.
 
-Builds are not notarized yet, so macOS blocks the first launch, however you installed it.
+Builds are not notarized yet, so macOS blocks the first launch, whichever way you installed it.
 
 - On macOS 15 and later: try to open the app once, then go to System Settings › Privacy & Security, scroll to the message about Crafted Herdr and choose **Open Anyway**.
 - On older versions: right-click the app and choose **Open**, then confirm.
