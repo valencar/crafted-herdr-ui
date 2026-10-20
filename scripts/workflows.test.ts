@@ -90,6 +90,29 @@ describe("release.yml", () => {
     expect(publish).toMatch(/actions: write/);
   });
 
+  it("build_checks_the_tag_against_the_versions_before_installing", () => {
+    const build = job(release, "build");
+    const check = build.indexOf("scripts/check-version.sh");
+    expect(check).toBeGreaterThanOrEqual(0);
+    // After the checkout (it reads the files) and before any dependency install or build.
+    expect(check).toBeGreaterThan(build.indexOf("actions/checkout"));
+    for (const later of ["pnpm/action-setup", "pnpm install", "pnpm tauri build"])
+      expect(check, later).toBeLessThan(build.indexOf(later));
+    // The tag reaches the shell only through env, never a ${{ }} inside run.
+    const step = build.slice(build.lastIndexOf("      - ", check), build.indexOf("\n      - ", check));
+    expect(step).toMatch(/TAG:\s*\$\{\{\s*github\.ref_name\s*\}\}/);
+    expect(step).toContain('run: scripts/check-version.sh "$TAG"');
+    expect(step.match(/\$\{\{/g)).toHaveLength(1);
+  });
+
+  it("tap_downloads_the_exact_dmg_asset", () => {
+    const tap = job(release, "tap");
+    expect(tap).toContain(
+      '--pattern "Crafted.Herdr_${version}_universal.dmg"',
+    );
+    expect(tap).not.toContain("*_universal.dmg");
+  });
+
   it("tap_needs_publish", () => {
     expect(job(release, "tap")).toMatch(/needs:\s*publish\b/);
   });
