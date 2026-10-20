@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // Vitest runs from the repo root; the stylesheet is read as text (it is not processed).
-const css = readFileSync(
-  join(process.cwd(), "src/styles/app.css"),
-  "utf8",
-).replace(/\/\*[\s\S]*?\*\//g, "");
+const read = (file: string) =>
+  readFileSync(join(process.cwd(), "src/styles", file), "utf8");
+const stripComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "");
+const css = stripComments(read("app.css"));
 
 /** The declarations of the last rule whose selector list is exactly `selector`. */
 function rule(selector: string): string {
@@ -175,5 +175,36 @@ describe("app.css", () => {
     expect(background('.home-view[data-active="true"]')).toBe(
       background(".workspace"),
     );
+  });
+});
+
+describe("type tokens", () => {
+  it("defines_the_type_scale_and_secondary_colors", () => {
+    const tokens = stripComments(read("tokens.css"));
+    expect(tokens).toContain("--fs-body: 14px");
+    expect(tokens).toContain("--fs-small: 12.5px");
+    expect(tokens).toContain("--fs-hint: 12px");
+    expect(tokens).toContain("--font-size: var(--fs-body)");
+    expect(tokens).toMatch(/--text-4:\s*#9a9da6/);
+    expect(tokens).toMatch(/--muted:\s*#9a9da6/);
+  });
+
+  it("sizes_all_text_through_type_tokens", () => {
+    const allowed = /^(var\(--fs-[a-z0-9-]+\)|inherit|[\d.]+em)$/;
+    const offenders: string[] = [];
+    for (const file of ["app.css", "windows.css"]) {
+      for (const m of stripComments(read(file)).matchAll(
+        /([^{}]+)\{([^}]*)\}/g,
+      )) {
+        for (const d of m[2].matchAll(/(?:^|[;\s])font-size\s*:\s*([^;]+)/g)) {
+          if (!allowed.test(d[1].trim())) {
+            offenders.push(
+              `${file}: ${m[1].trim()} { font-size: ${d[1].trim()} }`,
+            );
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
