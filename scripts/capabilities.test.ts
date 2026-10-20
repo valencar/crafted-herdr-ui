@@ -37,9 +37,18 @@ function resolveImport(from: string, spec: string): string | null {
 
 const IMPORT_RE =
   /(?:^|\n)\s*(?:import|export)\b[^"'`;]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']/g;
-const INVOKE_RE = /\binvokeTyped\(\s*["']([a-z_]+)["']/g;
+/** A call of a command by name: `invokeTyped("x"`, `invoke("x"` or `invoke<T>("x"`. */
+const INVOKE_RE = /\binvoke(?:Typed)?(?:<[^>]*>)?\(\s*["']([a-z_]+)["']/g;
+/** Only the typed calls: what `ipc.ts` itself uses for the helpers every window imports. */
+const INVOKE_TYPED_RE = /\binvokeTyped\(\s*["']([a-z_]+)["']/g;
+/** `openTerm(…)` (an `ipc.ts` wrapper) calls `term_open`. */
+const OPEN_TERM_RE = /\bopenTerm\(/;
 
-/** Every command name `invokeTyped("...")` calls in the files reachable from `entry`. */
+/**
+ * Every command the files reachable from `entry` call. `ipc.ts` is imported by every window and
+ * holds wrappers for several commands, so it counts only for its typed helpers (state and
+ * settings reads); a window that wants `term_open` has to call `openTerm(` itself.
+ */
 function commandsReachableFrom(entry: string): string[] {
   const seen = new Set<string>();
   const found = new Set<string>();
@@ -47,7 +56,12 @@ function commandsReachableFrom(entry: string): string[] {
     if (seen.has(file)) return;
     seen.add(file);
     const text = readFileSync(file, "utf8");
-    for (const m of text.matchAll(INVOKE_RE)) found.add(m[1]);
+    if (file === join(src, "lib", "ipc.ts")) {
+      for (const m of text.matchAll(INVOKE_TYPED_RE)) found.add(m[1]);
+    } else {
+      for (const m of text.matchAll(INVOKE_RE)) found.add(m[1]);
+      if (OPEN_TERM_RE.test(text)) found.add("term_open");
+    }
     for (const m of text.matchAll(IMPORT_RE)) {
       const next = resolveImport(file, m[1] ?? m[2]);
       if (next) visit(next);
@@ -73,24 +87,21 @@ describe("capabilities", () => {
     expect(p).toContain("allow-set-settings");
   });
 
-  it("main_window_opens_terminals", () => {
-    // term_open goes through invoke() with a Channel, so the walk above does not see it.
-    expect(permissions("default.json")).toContain("allow-term-open");
-  });
-
   const windows: Array<[string, string]> = [
     ["src/main.tsx", "default.json"],
     ["src/popover.tsx", "popover.json"],
     ["src/settings.tsx", "settings.json"],
   ];
+  // A window is granted exactly the app commands its code calls: nothing missing, nothing extra.
   it.each(windows)(
-    "every_invoked_command_is_granted_to_its_window (%s)",
+    "granted_commands_equal_invoked_commands (%s)",
     (entry, file) => {
       const commands = commandsReachableFrom(entry.replace(/^src\//, ""));
       expect(commands.length).toBeGreaterThan(0);
-      const granted = permissions(file);
-      const missing = commands.filter((c) => !granted.includes(kebab(c)));
-      expect(missing).toEqual([]);
+      const granted = permissions(file)
+        .filter((p) => p.startsWith("allow-"))
+        .sort();
+      expect(granted).toEqual(commands.map(kebab).sort());
     },
   );
 });

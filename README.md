@@ -64,7 +64,7 @@ Builds are not notarized yet, so macOS blocks the first launch, whichever way yo
 
 ### Optional: Developer ID signing and notarization
 
-Release builds are ad-hoc signed and not notarized. This is planned future work, and it needs no code change: `tauri-apps/tauri-action` signs and notarizes when it finds these environment variables (as repository secrets) in the release workflow:
+Release builds are ad-hoc signed and not notarized. This is planned future work. The tauri CLI signs and notarizes when it finds these environment variables, but the release workflow's `build` job is deliberately read-only and secret-free, because it runs the project's dependency code. Enabling Developer ID signing means adding a separate `sign` job between `build` and `publish`. That job receives these values as repository secrets and runs only Apple's own tools (`codesign`, `notarytool`, `stapler`) on the downloaded build artifact, never dependency code:
 
 - `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` (a base64 Developer ID Application certificate and its password)
 - `APPLE_SIGNING_IDENTITY`

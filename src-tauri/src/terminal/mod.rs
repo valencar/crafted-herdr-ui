@@ -313,7 +313,10 @@ fn launch_timeout(program: &str) -> Duration {
 /// Why a launch failed, with a pointer to the Automation setting for AppleScript launchers
 /// (`-1743` is macOS "not authorized to send Apple events").
 fn failure_message(program: &str, what: &str, stderr: &str) -> String {
-    let mut message = format!("{program} {what}");
+    let name = std::path::Path::new(program)
+        .file_name()
+        .map_or_else(|| program.to_owned(), |n| n.to_string_lossy().into_owned());
+    let mut message = format!("{name} {what}");
     if is_osascript(program) && (what == "did not finish in time" || stderr.contains("-1743")) {
         message.push_str(". ");
         message.push_str(AUTOMATION_HINT);
@@ -594,6 +597,11 @@ mod tests {
         );
         assert_eq!(launch_timeout("/usr/bin/open"), Duration::from_secs(10));
         let timed_out = failure_message("/usr/bin/osascript", "did not finish in time", "");
+        // User-facing text names the tool, not its path.
+        assert!(
+            timed_out.starts_with("osascript did not finish in time. "),
+            "{timed_out}"
+        );
         assert!(
             timed_out.contains("Privacy & Security → Automation"),
             "{timed_out}"
@@ -619,13 +627,13 @@ mod tests {
         };
         let timeout = Duration::from_secs(5);
         let exit = run_spec(&sh("exit 3"), &[], timeout).await.unwrap_err();
-        assert_eq!(exit, "/bin/sh failed (exit 3).");
+        assert_eq!(exit, "sh failed (exit 3).");
         let signal = run_spec(&sh("kill -9 $$"), &[], timeout).await.unwrap_err();
-        assert_eq!(signal, "/bin/sh was stopped by a signal.");
+        assert_eq!(signal, "sh was stopped by a signal.");
         let said = run_spec(&sh("echo nope >&2; exit 1"), &[], timeout)
             .await
             .unwrap_err();
-        assert_eq!(said, "/bin/sh failed: nope.");
+        assert_eq!(said, "sh failed: nope.");
     }
 
     #[tokio::test]
@@ -639,6 +647,6 @@ mod tests {
         let err = run_spec(&spec, &[], Duration::from_millis(100))
             .await
             .unwrap_err();
-        assert_eq!(err, "/bin/sleep did not finish in time.");
+        assert_eq!(err, "sleep did not finish in time.");
     }
 }
