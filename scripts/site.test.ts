@@ -142,6 +142,28 @@ describe("project site", () => {
     for (const panel of panels) expect(panel.hasAttribute("hidden")).toBe(false);
   });
 
+  it("js_class_is_set_by_a_head_script_so_panels_do_not_flash", () => {
+    // Static HTML (scripts not run): no class yet, so the no-JS page stacks the panels.
+    expect(doc.documentElement.classList.contains("js")).toBe(false);
+    const inline = Array.from(doc.querySelectorAll("script")).filter((s) => !s.src);
+    const head = inline.filter((s) => s.closest("head"));
+    expect(head).toHaveLength(1);
+    expect(head[0].textContent).toContain("classList.add('js')");
+    // The class is not added again by the script at the end of the body.
+    for (const s of inline.filter((s) => !s.closest("head")))
+      expect(s.textContent).not.toContain("classList.add('js')");
+    // It runs before the first paint: ahead of the style block that keys on html.js.
+    expect(
+      head[0].compareDocumentPosition(doc.querySelector("head style")!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // With scripts run, the class is on <html> and the panels are tabbed.
+    const dom = new JSDOM(html, { runScripts: "dangerously" });
+    expect(dom.window.document.documentElement.classList.contains("js")).toBe(true);
+    dom.window.close();
+  });
+
   it("install_tabs_switch_panels_and_arrow_keys_move_focus", () => {
     const dom = new JSDOM(html, { runScripts: "dangerously" });
     const { document: d, KeyboardEvent: Key } = dom.window;

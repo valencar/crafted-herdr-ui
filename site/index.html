@@ -24,6 +24,10 @@
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="theme-color" content="#0b0b0e" />
+    <!-- Before the first paint, so the tabbed layout never flashes as stacked panels. -->
+    <script>
+      document.documentElement.classList.add('js');
+    </script>
     <link rel="icon" type="image/png" href="icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1304,7 +1308,6 @@
     <script>
       // Install tabs. Without this script all three panels show, stacked.
       {
-        document.documentElement.classList.add('js');
         const tabs = Array.from(document.querySelectorAll('#install [role=tab]'));
         const note = document.getElementById('install-note');
         const select = (tab, focus) => {
