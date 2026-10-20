@@ -63,5 +63,8 @@ jobs:
       - name: Personal-data check
         run: scripts/check-no-personal-data.sh
 
+      - name: Cask syntax
+        run: scripts/render-cask.sh 0.0.0 "$(printf '%064d' 0)" | ruby -c
+
       - name: Build the app (debug, no DMG)
         run: pnpm tauri build --debug --bundles app

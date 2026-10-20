@@ -38,15 +38,29 @@ Website: **[valencar.github.io/crafted-herdr-ui](https://valencar.github.io/craf
 
 ## Install
 
-1. Download the latest `.dmg` from the [Releases](../../releases) page and drag **Crafted Herdr** to Applications.
-2. Builds are not notarized yet, so macOS blocks the first launch.
-   - On macOS 15 and later: try to open the app once, then go to System Settings › Privacy & Security, scroll to the message about Crafted Herdr and choose **Open Anyway**.
-   - On older versions: right-click the app and choose **Open**, then confirm.
-   - On any version, you can instead clear the quarantine flag once:
+With [Homebrew](https://brew.sh):
 
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"
-   ```
+```bash
+brew install --cask valencar/tap/crafted-herdr
+```
+
+To upgrade later:
+
+```bash
+brew upgrade --cask crafted-herdr
+```
+
+Or by hand: download the latest `.dmg` from the [Releases](../../releases) page and drag **Crafted Herdr** to Applications.
+
+Builds are not notarized yet, so macOS blocks the first launch, however you installed it.
+
+- On macOS 15 and later: try to open the app once, then go to System Settings › Privacy & Security, scroll to the message about Crafted Herdr and choose **Open Anyway**.
+- On older versions: right-click the app and choose **Open**, then confirm.
+- On any version, you can instead clear the quarantine flag once:
+
+  ```bash
+  xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"
+  ```
 
 ### Optional: Developer ID signing and notarization
 

@@ -4,8 +4,9 @@ on:
   push:
     tags: ["v*"]
 
+# Read-only by default; the release job asks for what it needs, and the tap job stays read-only.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
@@ -15,6 +16,10 @@ jobs:
     needs: check
     runs-on: macos-14
     timeout-minutes: 60
+    permissions:
+      contents: write
+      # Lets the last step start the Pages workflow (GITHUB_TOKEN-published releases start none).
+      actions: write
     steps:
       - uses: actions/checkout@v4
 
@@ -63,6 +68,77 @@ jobs:
 
           ## Install
 
-          Download the universal `.dmg` (Apple Silicon and Intel) and drag **Crafted Herdr** to Applications. This build is ad-hoc signed and not notarized, so macOS blocks the first launch; the [README](${{ github.server_url }}/${{ github.repository }}#install) has the steps to open it.
+          With Homebrew: `brew install --cask valencar/tap/crafted-herdr` (upgrade with `brew upgrade --cask crafted-herdr`).
+
+          Or download the universal `.dmg` (Apple Silicon and Intel) and drag **Crafted Herdr** to Applications. This build is ad-hoc signed and not notarized, so macOS blocks the first launch; the [README](${{ github.server_url }}/${{ github.repository }}#install) has the steps to open it.
           EOF
           gh release edit "$TAG" --draft=false --latest --notes-file "$notes"
+
+      # A release published with GITHUB_TOKEN starts no other workflow, so ask for the site rebuild
+      # (its Download buttons point at the latest public DMG). workflow_dispatch is allowed with it.
+      - name: Refresh the site
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run pages.yml --ref main
+
+  # Keeps the Homebrew tap's cask on the latest release. It builds nothing and runs no dependency
+  # code: it downloads the published DMG, hashes it and renders the cask with a script of this repo.
+  # The tap token is read by the one step that commits, and nowhere else.
+  tap:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Render the cask
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          dir="$RUNNER_TEMP/dmg"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*_universal.dmg' --dir "$dir"
+          sha=$(sha256sum "$dir"/*_universal.dmg | cut -d' ' -f1)
+          scripts/render-cask.sh "$version" "$sha" > "$RUNNER_TEMP/crafted-herdr.rb"
+          echo "Rendered the cask for $version ($sha)"
+
+      - name: Commit the cask to the tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set, so the Homebrew tap was not updated."
+            exit 0
+          fi
+          export GH_TOKEN="$HOMEBREW_TAP_TOKEN"
+          version="${TAG#v}"
+          tap="valencar/homebrew-tap"
+          path="Casks/crafted-herdr.rb"
+          cask="$RUNNER_TEMP/crafted-herdr.rb"
+
+          # The file's current blob, if there is one. Any failure other than "not found" stops the job.
+          err="$RUNNER_TEMP/gh-err.txt"
+          if current=$(gh api "repos/$tap/contents/$path" 2>"$err"); then
+            sha=$(jq -r .sha <<<"$current")
+            if [ "$(jq -r .content <<<"$current" | base64 --decode)" = "$(cat "$cask")" ]; then
+              echo "The tap already has this cask (unchanged), nothing to commit."
+              exit 0
+            fi
+          elif grep -q "HTTP 404" "$err"; then
+            sha=""
+          else
+            cat "$err" >&2
+            exit 1
+          fi
+
+          args=(-X PUT "repos/$tap/contents/$path" -f message="crafted-herdr $version" -f content="$(base64 < "$cask" | tr -d '\n')")
+          if [ -n "$sha" ]; then args+=(-f sha="$sha"); fi
+          gh api "${args[@]}" --silent
+          echo "Committed $path for $version to $tap"

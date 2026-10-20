@@ -8,7 +8,8 @@
 # argument or when any placeholder survives. The release workflow and the tap bootstrap call this.
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+# Locate the repo from this script's own path, so it runs from any directory.
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 if [ $# -ne 2 ]; then
   echo "render-cask: usage: render-cask.sh <version> <sha256>" >&2

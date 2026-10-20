@@ -1,5 +1,7 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { describe, expect, it } from "vitest";
@@ -18,7 +20,7 @@ describe("render-cask.sh", () => {
     expect(out).toContain('version "0.4.0"');
     expect(out).toContain(`sha256 "${sha}"`);
     expect(out).toContain(
-      'url "https://github.com/valencar/crafted-herdr-ui/releases/download/v#{version}/Crafted.Herdr_#{version}_universal.dmg"',
+      'url "https://github.com/valencar/crafted-herdr-ui/releases/download/v#{version}/Crafted.Herdr_#{version}_universal.dmg",\n      verified: "github.com/valencar/crafted-herdr-ui/"',
     );
     expect(out).toContain('app "Crafted Herdr.app"');
     expect(out).toContain('depends_on macos: ">= :ventura"');
@@ -29,6 +31,17 @@ describe("render-cask.sh", () => {
     const zap = out.slice(out.indexOf("zap trash:"));
     expect(zap).toContain("~/Library/Application Support/dev.crafted.herdr-ui");
     expect(out).not.toContain("{{");
+  });
+
+  it("works_from_any_directory", () => {
+    const dir = mkdtempSync(join(realpathSync(tmpdir()), "render-cask-"));
+    try {
+      const out = execFileSync(script, ["0.4.0", sha], { cwd: dir, encoding: "utf8" });
+      expect(out).toContain('version "0.4.0"');
+      expect(out).not.toContain("{{");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("never_touches_quarantine", () => {

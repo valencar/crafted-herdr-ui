@@ -2,7 +2,8 @@ cask "crafted-herdr" do
   version "{{VERSION}}"
   sha256 "{{SHA256}}"
 
-  url "https://github.com/valencar/crafted-herdr-ui/releases/download/v#{version}/Crafted.Herdr_#{version}_universal.dmg"
+  url "https://github.com/valencar/crafted-herdr-ui/releases/download/v#{version}/Crafted.Herdr_#{version}_universal.dmg",
+      verified: "github.com/valencar/crafted-herdr-ui/"
   name "Crafted Herdr"
   desc "Desktop home for herdr agents, grouped by project"
   homepage "https://valencar.github.io/crafted-herdr-ui/"
