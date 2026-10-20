@@ -203,7 +203,7 @@ cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo
 - **`.env.local`.** Copy `.env.local.example` to `.env.local` (gitignored) for anything personal: the opt-in live tests (`HERDR_UI_LIVE=1`, `HERDR_UI_TEST_MACHINE`) and private patterns for the data check. Real machine names, hosts and paths live only there.
 - **Personal-data check.** Run `scripts/check-no-personal-data.sh` before every commit. It fails if a home path, key or any of your private patterns is in the repo.
 
-Examples in the code, tests and docs use generic names only: workboxes `buildbox` and `gpubox`, project `api-service`. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLAUDE.md](CLAUDE.md). The design is in `docs/superpowers/specs/`.
+Examples in the code, tests and docs use generic names only: workboxes `buildbox` and `gpubox`, project `api-service`. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLAUDE.md](CLAUDE.md). The design specs are kept locally by the maintainer (`docs/superpowers/`, not in the repo).
 
 ## License
 
