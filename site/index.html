@@ -383,44 +383,165 @@
         max-width: 720px;
       }
 
-      /* Features */
-      .features {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 48px;
-      }
-
-      .features ol {
-        list-style: none;
-        padding: 0;
-      }
-
-      .features li {
-        display: grid;
-        grid-template-columns: 3rem 1fr;
-        padding: 28px 0;
+      /* Feature rows: text on the left, a picture on the right, hairline between rows. */
+      .rows article {
+        display: flex;
+        flex-direction: column;
+        gap: 32px;
+        padding: 48px 0;
         border-top: 1px solid var(--hairline);
       }
 
-      .features .num {
-        font-family: var(--font-display);
-        font-size: 1.6rem;
-        line-height: 1;
-        color: var(--signal);
+      .rows article:first-child {
+        padding-top: 0;
+        border-top: 0;
       }
 
-      .features h3 {
-        font-size: 1.35rem;
-        line-height: 1.3;
-        font-weight: 400;
+      .row-text {
+        max-width: 400px;
       }
 
-      .features p,
-      .points li {
-        margin-top: 8px;
+      .row-label {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        line-height: 1.4;
+        color: var(--bone-faint);
+      }
+
+      .rows h3 {
+        margin-top: 12px;
+        font-size: 26px;
+        font-weight: 600;
+        line-height: 1.2;
+      }
+
+      .rows p {
+        margin-top: 12px;
         font-size: 17px;
         line-height: 1.65;
         color: var(--bone-soft);
+      }
+
+      .rows .row-keys {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 20px;
+        font-size: 15px;
+        line-height: 1.4;
+        color: var(--bone-soft);
+      }
+
+      .rows kbd {
+        border-radius: 6px;
+        padding: 4px 10px;
+        min-width: 0;
+      }
+
+      .row-pic {
+        min-width: 0;
+        margin: 0;
+        overflow: hidden;
+        border: 1px solid var(--hairline);
+        border-radius: 12px;
+        background: var(--ink-2);
+        box-shadow: 0 30px 80px -40px rgba(0, 0, 0, 0.8);
+      }
+
+      /* Crops: the screenshot is enlarged inside its frame; percentage margins are of the width. */
+      .row-pic.crop-needs {
+        aspect-ratio: 750 / 340;
+      }
+
+      .row-pic.crop-workbox {
+        aspect-ratio: 755 / 205;
+      }
+
+      .crop-needs img {
+        width: 192%;
+        max-width: none;
+        margin: -21.3% 0 0 -35.3%;
+      }
+
+      .crop-workbox img {
+        width: 190.7%;
+        max-width: none;
+        margin: -92% 0 0 -35.1%;
+      }
+
+      .row-pic.crop-terminal {
+        aspect-ratio: 16 / 11;
+      }
+
+      .crop-terminal img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: top left;
+      }
+
+      /* The menu bar popover, drawn in HTML and CSS. */
+      .row-pic.pop-stage {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 16px;
+        background:
+          radial-gradient(420px 260px at 50% 0%, rgba(255, 178, 63, 0.1), transparent 70%),
+          var(--ink-2);
+      }
+
+      .pop {
+        width: 340px;
+        max-width: 100%;
+        border: 1px solid rgba(242, 239, 230, 0.2);
+        border-radius: 12px;
+        background: #1a1a21;
+        box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.9);
+      }
+
+      .pop-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--hairline);
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .pop-count {
+        min-width: 24px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        background: var(--signal);
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.5;
+        text-align: center;
+        color: var(--ink);
+      }
+
+      .pop-row {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .pop-row:last-child {
+        border-bottom: 0;
+      }
+
+      .pop-name {
+        font-family: var(--font-mono);
+        font-size: 15px;
+        line-height: 1.4;
+      }
+
+      .pop-sub {
+        margin-top: 2px;
+        font-size: 13px;
+        line-height: 1.4;
+        color: var(--bone-faint);
       }
 
       /* Terminal block */
@@ -495,6 +616,9 @@
         display: flex;
         gap: 12px;
         margin-top: 16px;
+        font-size: 17px;
+        line-height: 1.65;
+        color: var(--bone-soft);
       }
 
       .points li::before {
@@ -543,64 +667,130 @@
         color: var(--bone-soft);
       }
 
-      /* Install note */
-      .note .wrap {
+      /* Install card: the herdr note on the left, three tabs on the right. */
+      .install-card {
         display: grid;
         grid-template-columns: minmax(0, 1fr);
-        gap: 24px;
-        padding-top: 64px;
-        padding-bottom: 64px;
+        gap: 40px;
+        padding: 32px 20px;
+        border: 1px solid var(--hairline);
+        border-radius: 18px;
+        background: #121218;
       }
 
-      .note h2 {
-        font-size: 1.35rem;
-        line-height: 1.3;
-        font-weight: 400;
+      .install-card h2 {
+        margin-top: 16px;
+        font-size: clamp(2.6rem, 6vw, 3.5rem);
       }
 
-      .note p {
-        margin-top: 12px;
-        max-width: 64ch;
+      .install-card .lead {
+        margin-top: 24px;
+        font-size: 17px;
+        line-height: 1.65;
+      }
+
+      .install-card .lead a {
+        color: var(--bone);
+      }
+
+      .install-main {
+        min-width: 0;
+      }
+
+      .tabs {
+        display: none;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid var(--hairline);
+        border-radius: 12px;
+        background: var(--ink);
+      }
+
+      html.js .tabs {
+        display: flex;
+      }
+
+      .tabs button {
+        flex: 1 1 auto;
+        min-height: 40px;
+        padding: 0 8px;
+        border: 0;
+        border-radius: 8px;
+        background: none;
+        cursor: pointer;
+        font-family: var(--font-sans);
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--bone-soft);
+      }
+
+      .tabs button:hover {
+        color: var(--bone);
+      }
+
+      .tabs button[aria-selected='true'] {
+        background: var(--signal);
+        color: var(--ink);
+      }
+
+      .tabs button:focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 2px;
+      }
+
+      .tab-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+        max-width: 100%;
+        padding-top: 24px;
+      }
+
+      .tab-panel[hidden] {
+        display: none;
+      }
+
+      .tab-panel .cmd {
+        align-self: stretch;
+      }
+
+      .tab-panel .term {
+        align-self: stretch;
+      }
+
+      .tab-panel p {
         font-size: 17px;
         line-height: 1.65;
         color: var(--bone-soft);
       }
 
-      .note .term {
+      .panel-title {
+        font-size: 17px;
+        font-weight: 600;
+      }
+
+      html.js .panel-title {
+        display: none;
+      }
+
+      .install-note {
         margin-top: 24px;
+        padding: 16px 20px;
+        border: 1px solid rgba(255, 178, 63, 0.35);
+        border-radius: 12px;
+        background: rgba(255, 178, 63, 0.08);
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--bone);
       }
 
-      /* Closing */
-      .closing {
-        position: relative;
-        border-top: 1px solid var(--hairline);
-        background: radial-gradient(700px 360px at 50% 100%, rgba(255, 178, 63, 0.08), transparent 70%);
+      .install-note[hidden] {
+        display: none;
       }
 
-      .closing .wrap {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding-top: 96px;
-        padding-bottom: 96px;
-        text-align: center;
-      }
-
-      .closing h2 {
-        font-size: clamp(3rem, 8vw, 4rem);
-      }
-
-      .closing p.lead {
-        margin-top: 24px;
-      }
-
-      .closing .actions {
-        justify-content: center;
-        margin-top: 40px;
-      }
-
-      .closing .tag {
-        margin-top: 40px;
+      .install-note strong {
+        color: var(--signal);
       }
 
       footer {
@@ -640,15 +830,17 @@
           margin-top: 96px;
         }
 
-        section.block > .wrap,
-        .closing .wrap {
+        section.block > .wrap {
           padding-top: 144px;
           padding-bottom: 144px;
         }
 
-        .head,
-        .note .wrap {
+        .head {
           grid-template-columns: 3fr 9fr;
+        }
+
+        .install-card {
+          padding: 48px;
         }
 
         .body {
@@ -660,11 +852,28 @@
         }
       }
 
-      @media (min-width: 1024px) {
-        .features {
-          grid-template-columns: 5fr 7fr;
+      @media (min-width: 900px) {
+        .rows article {
+          flex-direction: row;
+          align-items: center;
+          gap: 64px;
         }
 
+        .row-text {
+          flex: 0 1 400px;
+        }
+
+        .row-pic {
+          flex: 1 1 0;
+        }
+
+        .install-card {
+          grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+          gap: 56px;
+        }
+      }
+
+      @media (min-width: 1024px) {
         .keys {
           grid-template-columns: repeat(3, 1fr);
         }
@@ -756,65 +965,111 @@
               <h2 class="display">Built for the moment <em>an agent needs you.</em></h2>
             </div>
           </header>
-          <div class="body features">
-            <ol>
-              <li>
-                <span class="num">01</span>
-                <div>
-                  <h3>Who needs you, first.</h3>
-                  <p>
-                    Blocked and finished agents sit at the top of the Dashboard, oldest first. ⌘J
-                    jumps straight to the next one.
-                  </p>
+          <div class="body rows">
+            <article>
+              <div class="row-text">
+                <p class="row-label">01 · Needs you</p>
+                <h3>Who needs you, first.</h3>
+                <p>
+                  Blocked and finished agents sit at the top of the Dashboard, oldest first, each with
+                  the project, the workbox and how long it has waited.
+                </p>
+                <div class="row-keys"><kbd>⌘J</kbd><span>Next agent that needs you</span></div>
+              </div>
+              <figure class="row-pic crop-needs">
+                <picture>
+                  <source
+                    type="image/webp"
+                    srcset="images/dashboard-1440.webp 1440w, images/dashboard-2880.webp 2880w"
+                    sizes="(min-width: 900px) 1300px, 192vw"
+                  />
+                  <img
+                    src="images/dashboard-1440.png"
+                    width="1440"
+                    height="900"
+                    loading="lazy"
+                    alt="The Dashboard's Needs you cards: two agents waiting for input, each with Open and Reply buttons"
+                  />
+                </picture>
+              </figure>
+            </article>
+            <article>
+              <div class="row-text">
+                <p class="row-label">02 · Terminals</p>
+                <h3>Terminals, in tabs.</h3>
+                <p>
+                  Attach any pane in a tab inside the app, or in Ghostty, iTerm2, Warp, WezTerm,
+                  Kitty, Alacritty or Terminal. Closing a tab only detaches — the agent keeps
+                  running.
+                </p>
+                <div class="row-keys"><kbd>⌃`</kbd><span>Back to the last terminal tab</span></div>
+              </div>
+              <figure class="row-pic crop-terminal">
+                <picture>
+                  <source
+                    type="image/webp"
+                    srcset="images/terminal-1440.webp 1440w, images/terminal-2880.webp 2880w"
+                    sizes="(min-width: 900px) 700px, 100vw"
+                  />
+                  <img
+                    src="images/terminal-1440.png"
+                    width="1440"
+                    height="900"
+                    loading="lazy"
+                    alt="A terminal tab in Crafted Herdr: an agent asking for approval, with its workbox and folder above it"
+                  />
+                </picture>
+              </figure>
+            </article>
+            <article>
+              <div class="row-text">
+                <p class="row-label">03 · Workboxes</p>
+                <h3>Every workbox, one window.</h3>
+                <p>
+                  Local and remote machines side by side, with their health in words, a status bar and
+                  a one-click reconnect.
+                </p>
+              </div>
+              <figure class="row-pic crop-workbox">
+                <picture>
+                  <source
+                    type="image/webp"
+                    srcset="images/dashboard-1440.webp 1440w, images/dashboard-2880.webp 2880w"
+                    sizes="(min-width: 900px) 1300px, 190vw"
+                  />
+                  <img
+                    src="images/dashboard-1440.png"
+                    width="1440"
+                    height="900"
+                    loading="lazy"
+                    alt="The Dashboard's workbox cards: This Mac and buildbox online, gpubox reconnecting"
+                  />
+                </picture>
+              </figure>
+            </article>
+            <article>
+              <div class="row-text">
+                <p class="row-label">04 · Menu bar</p>
+                <h3>Menu bar and notifications.</h3>
+                <p>
+                  A tray count and a compact “Needs you” popover, plus a notification the moment an
+                  agent blocks or finishes.
+                </p>
+              </div>
+              <figure class="row-pic pop-stage">
+                <div class="pop">
+                  <div class="pop-head"><span>Needs you</span><span class="pop-count">2</span></div>
+                  <div class="pop-row">
+                    <div class="pop-name">migrate-db</div>
+                    <div class="pop-sub">Needs input · api-service · buildbox · 12m</div>
+                  </div>
+                  <div class="pop-row">
+                    <div class="pop-name">checkout-flow</div>
+                    <div class="pop-sub">Needs input · web-app · This Mac · 4m</div>
+                  </div>
                 </div>
-              </li>
-              <li>
-                <span class="num">02</span>
-                <div>
-                  <h3>Terminals, in tabs.</h3>
-                  <p>
-                    Attach any pane in a tab inside the app, or in Ghostty, iTerm2, Warp, WezTerm,
-                    Kitty, Alacritty or Terminal. Closing a tab only detaches — the agent keeps
-                    running.
-                  </p>
-                </div>
-              </li>
-              <li>
-                <span class="num">03</span>
-                <div>
-                  <h3>Every workbox, one window.</h3>
-                  <p>
-                    Local and remote machines side by side, with their health in words, a status bar
-                    and a one-click reconnect.
-                  </p>
-                </div>
-              </li>
-              <li>
-                <span class="num">04</span>
-                <div>
-                  <h3>Menu bar and notifications.</h3>
-                  <p>
-                    A tray count and a compact “Needs you” popover, plus a notification the moment an
-                    agent blocks or finishes.
-                  </p>
-                </div>
-              </li>
-            </ol>
-            <picture>
-              <source
-                type="image/webp"
-                srcset="images/terminal-1440.webp 1440w, images/terminal-2880.webp 2880w"
-                sizes="(min-width: 1024px) 700px, 100vw"
-              />
-              <img
-                class="shot"
-                src="images/terminal-1440.png"
-                width="1440"
-                height="900"
-                loading="lazy"
-                alt="A terminal tab in Crafted Herdr: an agent asking for approval, with its workbox and folder above it"
-              />
-            </picture>
+              </figure>
+            </article>
           </div>
         </div>
       </section>
@@ -921,56 +1176,125 @@
         </div>
       </section>
 
-      <section class="block note" id="install">
+      <section class="block" id="install">
         <div class="wrap">
-          <p class="kicker">Before first launch</p>
-          <div class="col">
-            <h2>Builds aren’t notarized yet.</h2>
-            <p>
-              macOS blocks the first launch. On macOS 15 and later, try to open the app once, then
-              choose Open Anyway in System Settings › Privacy &amp; Security. Or clear the
-              quarantine flag once:
-            </p>
-            <div class="term">
-              <div class="term-bar">
-                <div class="term-title">
-                  <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
-                  <span class="tag mono">zsh</span>
-                </div>
+          <div class="install-card">
+            <div>
+              <p class="kicker">Install</p>
+              <h2 class="display">Herd them <em>all.</em></h2>
+              <p class="lead">
+                Crafted Herdr drives the <a href="https://herdr.dev"><u>herdr</u></a> you already
+                have. It never installs or upgrades herdr, so install herdr first.
+              </p>
+            </div>
+            <div class="install-main">
+              <div class="tabs" role="tablist" aria-label="Install method">
                 <button
-                  class="copy"
                   type="button"
-                  data-copy='xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"'
+                  role="tab"
+                  id="tab-brew"
+                  aria-selected="true"
+                  aria-controls="panel-brew"
                 >
-                  Copy
+                  Homebrew
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-dmg"
+                  aria-selected="false"
+                  aria-controls="panel-dmg"
+                  tabindex="-1"
+                >
+                  Download
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-source"
+                  aria-selected="false"
+                  aria-controls="panel-source"
+                  tabindex="-1"
+                >
+                  From source
                 </button>
               </div>
-              <pre><span class="p">$ </span>xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"</pre>
+
+              <div class="tab-panel" role="tabpanel" id="panel-brew" aria-labelledby="tab-brew">
+                <h3 class="panel-title">Homebrew</h3>
+                <div class="cmd">
+                  <span class="cmd-prompt" aria-hidden="true">$</span>
+                  <code class="cmd-text">brew install --cask valencar/tap/crafted-herdr</code>
+                  <button class="copy" type="button" data-copy="brew install --cask valencar/tap/crafted-herdr">
+                    Copy
+                  </button>
+                </div>
+                <p>
+                  Universal app for Apple Silicon and Intel, macOS 13 or later. Update with
+                  <code>brew upgrade --cask crafted-herdr</code>.
+                </p>
+              </div>
+
+              <div class="tab-panel" role="tabpanel" id="panel-dmg" aria-labelledby="tab-dmg">
+                <h3 class="panel-title">Download</h3>
+                <a
+                  class="btn btn-primary"
+                  href="https://github.com/valencar/crafted-herdr-ui/releases/download/v{{VERSION}}/Crafted.Herdr_{{VERSION}}_universal.dmg"
+                >
+                  Download the .dmg <span class="arrow" aria-hidden="true">↓</span>
+                </a>
+                <p>Open the .dmg and drag Crafted Herdr to Applications.</p>
+                <p>If you prefer the terminal, you can clear the quarantine flag yourself, once:</p>
+                <div class="cmd">
+                  <span class="cmd-prompt" aria-hidden="true">$</span>
+                  <code class="cmd-text">xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"</code>
+                  <button
+                    class="copy"
+                    type="button"
+                    data-copy='xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"'
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              <div class="tab-panel" role="tabpanel" id="panel-source" aria-labelledby="tab-source">
+                <h3 class="panel-title">From source</h3>
+                <div class="term">
+                  <div class="term-bar">
+                    <div class="term-title">
+                      <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                      <span class="tag mono">zsh</span>
+                    </div>
+                    <button
+                      class="copy"
+                      type="button"
+                      data-copy="gh repo fork valencar/crafted-herdr-ui --clone&#10;cd crafted-herdr-ui&#10;pnpm install&#10;pnpm tauri dev"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <pre><span class="p">$ </span>gh repo fork valencar/crafted-herdr-ui --clone
+<span class="p">$ </span>cd crafted-herdr-ui
+<span class="p">$ </span>pnpm install
+<span class="p">$ </span>pnpm tauri dev</pre>
+                </div>
+              </div>
+
+              <p class="install-note" id="install-note">
+                Builds aren’t notarized yet, so macOS blocks the first launch. Try to open the app
+                once, then choose <strong>Open Anyway</strong> in System Settings › Privacy &amp;
+                Security.
+              </p>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section class="closing">
-        <div class="wrap">
-          <h2 class="display">Herd them <em>all.</em></h2>
-          <p class="lead">Free and open source, for macOS 13 and later.</p>
-          <div class="actions">
-            <a
-              class="btn btn-primary"
-              href="https://github.com/valencar/crafted-herdr-ui/releases/download/v{{VERSION}}/Crafted.Herdr_{{VERSION}}_universal.dmg"
-            >
-              Download the .dmg <span class="arrow" aria-hidden="true">↓</span>
-            </a>
-          </div>
-          <p class="tag">Unofficial community project · not affiliated with herdr.dev</p>
         </div>
       </section>
     </main>
 
     <footer>
       <div class="wrap tag">
-        <span>Crafted Herdr · MIT</span>
+        <span>Crafted Herdr · MIT · Unofficial community project · not affiliated with herdr.dev</span>
         <span>
           <a href="https://github.com/valencar/crafted-herdr-ui/releases">Releases</a>
         </span>
@@ -978,6 +1302,41 @@
     </footer>
 
     <script>
+      // Install tabs. Without this script all three panels show, stacked.
+      {
+        document.documentElement.classList.add('js');
+        const tabs = Array.from(document.querySelectorAll('#install [role=tab]'));
+        const note = document.getElementById('install-note');
+        const select = (tab, focus) => {
+          for (const t of tabs) {
+            const on = t === tab;
+            t.setAttribute('aria-selected', String(on));
+            t.tabIndex = on ? 0 : -1;
+            document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+          }
+          // The first-launch note is about the built app, not a source build.
+          if (note) note.hidden = tab.id === 'tab-source';
+          if (focus) tab.focus();
+        };
+        tabs.forEach((tab, i) => {
+          tab.addEventListener('click', () => select(tab, false));
+          tab.addEventListener('keydown', (event) => {
+            const last = tabs.length - 1;
+            const next =
+              event.key === 'ArrowRight' ? (i === last ? 0 : i + 1)
+              : event.key === 'ArrowLeft' ? (i === 0 ? last : i - 1)
+              : event.key === 'Home' ? 0
+              : event.key === 'End' ? last
+              : -1;
+            if (next < 0) return;
+            event.preventDefault();
+            select(tabs[next], true);
+          });
+        });
+        const current = tabs.find((t) => t.getAttribute('aria-selected') === 'true') ?? tabs[0];
+        if (current) select(current, false);
+      }
+
       // Copy buttons: navigator.clipboard is missing outside secure contexts, and writes can be
       // refused; stay silent then rather than claim a copy happened.
       for (const button of document.querySelectorAll('[data-copy]')) {

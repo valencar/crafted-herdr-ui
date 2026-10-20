@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
+import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 
 const html = readFileSync(join(process.cwd(), "site", "index.html"), "utf8");
@@ -97,6 +98,93 @@ describe("project site", () => {
     expect(scrolling).toMatch(/overflow-x:\s*auto/);
     expect(scrolling).toMatch(/white-space:\s*nowrap/);
     expect(chip).toMatch(/max-width:\s*100%/);
+  });
+
+  it("features_are_four_rows_with_pictures", () => {
+    const rows = Array.from(doc.querySelectorAll("#what-it-does article"));
+    expect(rows).toHaveLength(4);
+    for (const row of rows) {
+      expect(row.querySelector("h3"), "row title").not.toBeNull();
+      expect(row.querySelector("img, figure"), "row picture").not.toBeNull();
+    }
+    expect(rows.map((r) => r.querySelector("h3")!.textContent?.trim())).toEqual([
+      "Who needs you, first.",
+      "Terminals, in tabs.",
+      "Every workbox, one window.",
+      "Menu bar and notifications.",
+    ]);
+    expect(rows[0].querySelector("kbd")?.textContent).toContain("⌘J");
+  });
+
+  it("install_card_has_three_tabs", () => {
+    const install = doc.querySelector("#install");
+    expect(install).not.toBeNull();
+    const tablist = install!.querySelector("[role=tablist]");
+    expect(tablist).not.toBeNull();
+    const tabs = Array.from(tablist!.querySelectorAll("[role=tab]"));
+    expect(tabs.map((t) => t.textContent?.trim())).toEqual(["Homebrew", "Download", "From source"]);
+    for (const tab of tabs) {
+      const panel = doc.getElementById(tab.getAttribute("aria-controls") ?? "");
+      expect(panel?.getAttribute("role"), `panel of ${tab.textContent}`).toBe("tabpanel");
+    }
+    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+
+    const brew = doc.getElementById(tabs[0].getAttribute("aria-controls")!)!;
+    const copy = brew.querySelector(".cmd button[data-copy]");
+    expect(copy?.getAttribute("data-copy")).toBe("brew install --cask valencar/tap/crafted-herdr");
+    expect(brew.textContent).toContain("brew upgrade --cask crafted-herdr");
+    expect(install!.textContent).toContain("Open Anyway");
+  });
+
+  it("install_panels_all_show_without_javascript", () => {
+    const panels = Array.from(doc.querySelectorAll("#install [role=tabpanel]"));
+    expect(panels).toHaveLength(3);
+    for (const panel of panels) expect(panel.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("install_tabs_switch_panels_and_arrow_keys_move_focus", () => {
+    const dom = new JSDOM(html, { runScripts: "dangerously" });
+    const { document: d, KeyboardEvent: Key } = dom.window;
+    const tabs = Array.from(d.querySelectorAll<HTMLElement>("#install [role=tab]"));
+    const panelOf = (tab: HTMLElement) => d.getElementById(tab.getAttribute("aria-controls")!)!;
+
+    const [brew, download, source] = tabs;
+    expect(panelOf(brew).hidden).toBe(false);
+    expect(panelOf(download).hidden).toBe(true);
+    expect(panelOf(source).hidden).toBe(true);
+    expect(brew.tabIndex).toBe(0);
+    expect(download.tabIndex).toBe(-1);
+
+    download.click();
+    expect(download.getAttribute("aria-selected")).toBe("true");
+    expect(brew.getAttribute("aria-selected")).toBe("false");
+    expect(panelOf(download).hidden).toBe(false);
+    expect(panelOf(brew).hidden).toBe(true);
+    expect(panelOf(source).hidden).toBe(true);
+
+    download.focus();
+    download.dispatchEvent(new Key("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(d.activeElement).toBe(source);
+    expect(source.getAttribute("aria-selected")).toBe("true");
+    expect(panelOf(source).hidden).toBe(false);
+
+    source.dispatchEvent(new Key("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(d.activeElement).toBe(brew);
+    brew.dispatchEvent(new Key("keydown", { key: "End", bubbles: true }));
+    expect(d.activeElement).toBe(source);
+    source.dispatchEvent(new Key("keydown", { key: "Home", bubbles: true }));
+    expect(d.activeElement).toBe(brew);
+    brew.dispatchEvent(new Key("keydown", { key: "ArrowLeft", bubbles: true }));
+    expect(d.activeElement).toBe(source);
+    dom.window.close();
+  });
+
+  it("the_page_never_offers_to_bypass_gatekeeper_for_brew", () => {
+    const brew = doc.getElementById(
+      doc.querySelector("#install [role=tab]")!.getAttribute("aria-controls")!,
+    )!;
+    expect(brew.textContent).not.toMatch(/xattr|quarantine/i);
+    expect(brew.innerHTML).not.toMatch(/xattr|quarantine/i);
   });
 
   it("links_only_to_the_project_and_herdr", () => {
