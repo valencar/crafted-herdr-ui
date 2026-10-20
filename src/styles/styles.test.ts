@@ -221,7 +221,21 @@ describe("type tokens", () => {
   it("comfortable_rows_and_sidebar_items_are_at_least_40px", () => {
     expect(rule(".row-main")).toContain("min-height: 40px");
     expect(rule(".nav-item")).toContain("min-height: 40px");
+    for (const selector of [".palette-option", ".dash-row", ".activity-row"]) {
+      expect(rule(selector), selector).toContain("min-height: 40px");
+    }
+    const windows = stripComments(read("windows.css"));
+    const popRow = [...windows.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+      (m) => m[1].trim() === ".pop-row",
+    );
+    expect(popRow, "no .pop-row rule in windows.css").toBeDefined();
+    expect(popRow![2]).toContain("min-height: 40px");
+  });
+
+  it("small_buttons_are_32px_and_regular_buttons_36px", () => {
     expect(rule(".btn")).toMatch(/min-height:\s*36px/);
+    expect(rule(".btn-small")).toMatch(/min-height:\s*32px/);
+    expect(rule(".open-split.is-small .btn")).toMatch(/min-height:\s*32px/);
   });
 
   it("compact_density_keeps_todays_tighter_rows", () => {
@@ -232,10 +246,11 @@ describe("type tokens", () => {
 
   it("group_headers_are_sentence_case", () => {
     const windows = stripComments(read("windows.css"));
-    const popTitle = [...windows.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(
+    const match = [...windows.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
       (m) => m[1].trim() === ".pop-title",
-    )[0][2];
-    for (const body of [rule(".nav-heading"), popTitle]) {
+    );
+    expect(match, "no .pop-title rule in windows.css").toBeDefined();
+    for (const body of [rule(".nav-heading"), match![2]]) {
       expect(body).not.toContain("text-transform: uppercase");
       expect(body).toContain("font-size: var(--fs-small)");
       expect(body).toContain("font-weight: 500");
@@ -257,7 +272,10 @@ describe("type tokens", () => {
       expect(body, selector).toContain("white-space: nowrap");
     }
     // The workbox tab shrinks (with a sensible floor) so its label can ellipsize.
-    expect(rule(".wb-tab")).toMatch(/min-width:\s*\d+px/);
+    // The floor fits dot + count + needs badge, so the badges never spill out.
+    expect(
+      Number(/min-width:\s*(\d+)px/.exec(rule(".wb-tab"))?.[1]),
+    ).toBeGreaterThanOrEqual(140);
     expect(rule(".wb-tab")).toMatch(/max-width:\s*\d+px/);
   });
 });

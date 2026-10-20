@@ -210,7 +210,7 @@ kbd {
 }
 .open-split.is-small .btn {
   padding: 3px 10px;
-  min-height: 30px;
+  min-height: 32px;
   font-size: var(--fs-small);
 }
 .open-split.is-small .open-main {
@@ -384,7 +384,7 @@ kbd {
 .btn-small {
   border-radius: var(--radius-s);
   padding: 3px 10px;
-  min-height: 30px;
+  min-height: 32px;
   font-size: var(--fs-small);
 }
 .btn-ghost {
@@ -1698,7 +1698,9 @@ select.field {
     "cmd cmd cmd cmd cmd cmd"
     "err err err err err err";
   align-items: center;
+  align-content: center;
   gap: 4px 8px;
+  min-height: 40px;
   padding: 8px 0;
   border-top: 1px solid var(--border);
 }
@@ -1964,7 +1966,8 @@ select.field {
 
 .wb-tab {
   flex: 0 1 auto;
-  min-width: 96px;
+  /* Fits the health dot, the count and the needs badge, so the badges never spill out. */
+  min-width: 140px;
   max-width: 220px;
   height: 36px;
   display: flex;
@@ -2321,8 +2324,9 @@ select.field {
 }
 .palette-option {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
+  min-height: 40px;
   padding: 8px 10px;
   border-radius: var(--radius-m);
   cursor: default;
@@ -2487,6 +2491,7 @@ select.field {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+  min-height: 40px;
   padding: 9px 14px;
 }
 .dash-row + .dash-row {
