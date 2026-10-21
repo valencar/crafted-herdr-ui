@@ -25,8 +25,8 @@
   --text: #ececef;
   --text-2: #c9cbd1;
   --text-3: #a3a5ad;
-  --text-4: #8b8e97;
-  --muted: #7c7f88;
+  --text-4: #9a9da6;
+  --muted: #9a9da6;
 
   /* status */
   --st-needs: #ffa94d;
@@ -72,6 +72,15 @@
   /* type */
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --font-size: 13px;
+  --fs-hint: 12px;
+  --fs-small: 12.5px;
+  --fs-meta: 13px;
+  --fs-body: 14px;
+  --fs-lead: 16px;
+  --fs-title: 18px;
+  --fs-display-1: 22px;
+  --fs-display-2: 24px;
+  --fs-display-3: 28px;
+  --font-size: var(--fs-body);
   --line-height: 1.45;
 }

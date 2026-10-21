@@ -1,7 +1,21 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "Capability for the Settings window: events, and the file dialog for Choose binary",
-  "windows": ["settings"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "description": "Capability for the Settings window: events, the commands Settings calls, and the file dialog for Choose binary. No terminal sessions",
+  "windows": [
+    "settings"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-get-settings",
+    "allow-get-state",
+    "allow-get-terminals",
+    "allow-herdr-status",
+    "allow-list-terminals",
+    "allow-machine-set-enabled",
+    "allow-preview-launch-template",
+    "allow-set-settings",
+    "allow-shortcut-status",
+    "dialog:allow-open"
+  ]
 }

@@ -306,7 +306,7 @@ mod tests {
 
         // Nothing chosen: the default of the installed ones, in a new window.
         let auto = launch_spec(&Settings::default(), &installed, home(), &argv, "t").unwrap();
-        assert_eq!(auto.program, "open");
+        assert_eq!(auto.program, "/usr/bin/open");
         assert!(auto.args.iter().any(|a| a.starts_with("warp://launch/")));
 
         // iTerm2 in tab mode adds a tab to the current window.
@@ -316,7 +316,7 @@ mod tests {
             ..Settings::default()
         };
         let spec = launch_spec(&tab, &installed, home(), &argv, "t").unwrap();
-        assert_eq!(spec.program, "osascript");
+        assert_eq!(spec.program, "/usr/bin/osascript");
         assert!(spec.args.iter().any(|a| a.contains("create tab")));
     }
 

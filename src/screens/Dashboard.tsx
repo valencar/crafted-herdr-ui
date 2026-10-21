@@ -29,9 +29,9 @@ import {
   showHome,
   showHomeView,
   terminalName as terminalLabel,
-  useNow,
   useTerminals,
 } from "../lib/uiHelpers";
+import { useNow } from "../lib/useNow";
 import { useCommandLog } from "../lib/useCommandLog";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import { useAppStore } from "../store/appStore";

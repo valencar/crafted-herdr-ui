@@ -181,7 +181,7 @@ Items marked "replaced by v0.3" describe the v0.2 bottom/right panel; the `## v0
 - [ ] ⌘C/⌘V work in text inputs (Edit menu).
 - [ ] Menu shortcuts fire while a terminal has focus.
 - [ ] ⌘, opens Settings from the menu; ⌘W with the Settings window focused closes it.
-- [ ] The menu bar shows App, Edit, View, Terminal and Window with the shortcuts of spec §2.4, and no Close Window item.
+- [ ] The menu bar shows App, Edit, View, Terminal and Window with the shortcuts shown in the menus (Dashboard ⌘1, Toggle Terminal ⌃`, Dashboard Beside Terminal ⌘\, Tab 1–8 on ⌘2–⌘9), and no Close Window item.
 - [ ] A terminal tab renders with the bundled Geist Mono at the right cell width on first open (no misaligned columns after the font loads) and honours the terminal font-size setting; the 16 ANSI colors read well on the dark background (`ls --color`, a TUI).
 - [ ] In a terminal tab, ⌘-click on a URL copies it and shows "Link copied"; a plain click does nothing and no browser opens.
 - [ ] An exited or detached tab shows "Detached" with Reattach focused (Enter reattaches); Retry works after a failed open; closing the tab leaves the herdr pane running.
@@ -249,3 +249,21 @@ Two rows replace the grouped strip. Use generic data (buildbox, gpubox, staging;
 - [ ] Second line of every state: a tab shows its words under the title for Working, Idle, Needs input, Done, unseen, Unknown, Shell, "Opening…", "Detached", "Error" and a combined "Detached · Needs input". No state is shown by colour alone.
 - [ ] ⌘2–⌘9 tooltips on session tabs ("{status} (⌘n)") use the flat order across workboxes, not the position inside the row (e.g. the first `gpubox` tab says ⌘4 when `buildbox` has two tabs and comes before `gpubox` in the machine list, Home being ⌘1).
 - [ ] Copy through the clipboard plugin: ⌘-click on a URL in a terminal shows "Link copied" and pasting elsewhere gives that URL (the link is never opened); "Copy attach command" shows "Copied" and pastes the command; the other copy sites still copy: the Inspector's command box, the Activity drawer and the reconnect box in the Home notices. No permission prompt appears for the clipboard.
+
+## v0.5
+
+Bigger type, brighter secondary text and roomier rows. Use generic data (buildbox, gpubox, staging; api-service, web-app, infra). These are the GUI-only checks no automated test covers. Text must fit by wrapping, ellipsis or a sensible minimum width, never by shrinking the type back.
+
+- [ ] The 900×600 window (the minimum size): the sidebar, the two tab rows, the Dashboard and All agents all lay out with no clipped text, no overlap and no horizontal page scroll.
+- [ ] The ⌘B rail: collapsing and expanding the sidebar keeps every label readable, and the rail's icons and badges are not cut off.
+- [ ] Workbox and session tabs at 160 px: with enough tabs open that each session tab sits at its 160 px minimum, titles and second lines ellipsize without moving the close button, and long workbox labels ellipsize with their count and needs badge still visible.
+- [ ] The 360 px split column (⌘\ beside a terminal): the narrow Dashboard's tiles, cards and rows wrap or ellipsize, and nothing is clipped at the column's edge.
+- [ ] The context bar (agent, status, Find, Open in {Terminal}, Detach, Close pane…), the ⌘K palette, the Activity drawer, the sheets and dialogs, the menu bar popover and Settings: all text is readable at the new sizes, regular buttons are 36 to 38 px tall in Comfortable and small in-row and context-bar buttons 32 px, and long names ellipsize instead of overflowing.
+- [ ] Sidebar items and agent rows are at least 40 px tall in Comfortable (a sidebar item with a second line about 48 px), and group headers ("Workboxes", "Projects", the popover's "Needs you · n") read in sentence case, not capitals.
+- [ ] Compact vs Comfortable side by side: switch the density in Settings; Compact keeps today's tighter rows, Comfortable is visibly roomier, and neither shrinks the type.
+- [ ] Project site: build it (`scripts/build-site.sh 0.4.0`), then open `_site/index.html` through `python3 -m http.server -d _site` at 1440 px and at 375 px. There is no sideways page scroll at either width, the feature rows stack text above picture at 375 px, and the Copy buttons copy their command.
+- [ ] Project site install card: the Homebrew, Download and From source tabs switch by mouse; with a tab focused, ArrowLeft, ArrowRight, Home and End move focus and selection; the "Open Anyway" note shows for Homebrew and Download and hides for From source.
+- [ ] Per-window commands: the popover, the Settings window and the main window each still do everything they did (rows open, Settings save and detect, every main-window action and terminal tab), and the devtools console of each shows no "not allowed" or "not permitted" errors.
+- [ ] Open in each terminal (Ghostty, iTerm2, Terminal, Warp, WezTerm, Kitty, and a Custom template) still launches, through `/usr/bin/open` and `/usr/bin/osascript`, and the first AppleScript launch still shows the Automation hint when permission is missing.
+- [ ] The next release run shows the `build` job without write permissions and `SHA256SUMS.txt` among the release assets next to the DMG and `.app.tar.gz`.
+- [ ] ⌘T (Terminal > New Session in Workbox) opens the New session sheet with a workbox filled in, and never creates a session on its own: with a terminal tab focused it picks that tab's workbox; on a Workbox screen, that workbox; on All agents with a row selected, that row's workbox; on the Dashboard (or All agents with nothing selected) it opens the plain sheet, like ⌘N; on a tab of a disabled or removed workbox it opens the plain sheet.

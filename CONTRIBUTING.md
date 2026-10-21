@@ -1,6 +1,6 @@
 # Contributing to Crafted Herdr
 
-Thanks for helping. This is a small macOS app (Tauri 2, Rust core, React UI) that drives the public `herdr` CLI. The design is in `docs/superpowers/specs/2026-10-16-crafted-herdr-ui-design.md`.
+Thanks for helping. This is a small macOS app (Tauri 2, Rust core, React UI) that drives the public `herdr` CLI. The design specs are kept locally by the maintainer (`docs/superpowers/`, not in the repo); ask in an issue if you need context on a design decision.
 
 ## Dev setup
 

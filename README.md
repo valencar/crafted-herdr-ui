@@ -38,19 +38,33 @@ Website: **[valencar.github.io/crafted-herdr-ui](https://valencar.github.io/craf
 
 ## Install
 
-1. Download the latest `.dmg` from the [Releases](../../releases) page and drag **Crafted Herdr** to Applications.
-2. Builds are not notarized yet, so macOS blocks the first launch.
-   - On macOS 15 and later: try to open the app once, then go to System Settings › Privacy & Security, scroll to the message about Crafted Herdr and choose **Open Anyway**.
-   - On older versions: right-click the app and choose **Open**, then confirm.
-   - On any version, you can instead clear the quarantine flag once:
+With [Homebrew](https://brew.sh):
 
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"
-   ```
+```bash
+brew install --cask valencar/tap/crafted-herdr
+```
+
+To upgrade later:
+
+```bash
+brew upgrade --cask crafted-herdr
+```
+
+Or by hand: download the latest `.dmg` from the [Releases](../../releases) page and drag **Crafted Herdr** to Applications.
+
+Builds are not notarized yet, so macOS blocks the first launch, whichever way you installed it.
+
+- On macOS 15 and later: try to open the app once, then go to System Settings › Privacy & Security, scroll to the message about Crafted Herdr and choose **Open Anyway**.
+- On older versions: right-click the app and choose **Open**, then confirm.
+- On any version, you can instead clear the quarantine flag once:
+
+  ```bash
+  xattr -dr com.apple.quarantine "/Applications/Crafted Herdr.app"
+  ```
 
 ### Optional: Developer ID signing and notarization
 
-Release builds are ad-hoc signed and not notarized. This is planned future work, and it needs no code change: `tauri-apps/tauri-action` signs and notarizes when it finds these environment variables (as repository secrets) in the release workflow:
+Release builds are ad-hoc signed and not notarized. This is planned future work. The tauri CLI signs and notarizes when it finds these environment variables, but the release workflow's `build` job is deliberately read-only and secret-free, because it runs the project's dependency code. Enabling Developer ID signing means adding a separate `sign` job between `build` and `publish`. That job receives these values as repository secrets and runs only Apple's own tools (`codesign`, `notarytool`, `stapler`) on the downloaded build artifact, never dependency code. Signing the `.app` inside the DMG also means rebuilding the DMG there (with `hdiutil`), because tauri produces the DMG's layout at build time and its contents would otherwise stay ad-hoc signed. The values are:
 
 - `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` (a base64 Developer ID Application certificate and its password)
 - `APPLE_SIGNING_IDENTITY`
@@ -189,7 +203,7 @@ cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo
 - **`.env.local`.** Copy `.env.local.example` to `.env.local` (gitignored) for anything personal: the opt-in live tests (`HERDR_UI_LIVE=1`, `HERDR_UI_TEST_MACHINE`) and private patterns for the data check. Real machine names, hosts and paths live only there.
 - **Personal-data check.** Run `scripts/check-no-personal-data.sh` before every commit. It fails if a home path, key or any of your private patterns is in the repo.
 
-Examples in the code, tests and docs use generic names only: workboxes `buildbox` and `gpubox`, project `api-service`. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLAUDE.md](CLAUDE.md). The design is in `docs/superpowers/specs/`.
+Examples in the code, tests and docs use generic names only: workboxes `buildbox` and `gpubox`, project `api-service`. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLAUDE.md](CLAUDE.md). The design specs are kept locally by the maintainer (`docs/superpowers/`, not in the repo).
 
 ## License
 

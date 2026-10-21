@@ -25,6 +25,17 @@ pub use quote::{join_quoted, shell_quote};
 use crate::state::{Health, MachineView};
 use launchers::{Alacritty, Custom, Ghostty, ITerm2, Kitty, TerminalApp, Warp, WezTerm};
 
+/// The macOS tools the app runs, always by absolute path: the login `PATH` it captures belongs
+/// to the user's shell setup, and a directory on it must not be able to stand in for these.
+pub(crate) const OPEN: &str = "/usr/bin/open";
+pub(crate) const OSASCRIPT: &str = "/usr/bin/osascript";
+pub(crate) const MDFIND: &str = "/usr/bin/mdfind";
+
+/// Whether `program` (a path or a bare name) is the `osascript` tool.
+fn is_osascript(program: &str) -> bool {
+    std::path::Path::new(program).file_name() == Some(std::ffi::OsStr::new("osascript"))
+}
+
 const DETECT_TIMEOUT: Duration = Duration::from_secs(5);
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// `osascript` waits while macOS asks the user to allow Automation the first time.
@@ -174,7 +185,7 @@ pub fn default_terminal(installed: &[TerminalId]) -> TerminalId {
 
 /// Whether Spotlight knows an app with this bundle id.
 async fn bundle_installed(bundle_id: &str) -> bool {
-    let run = tokio::process::Command::new("mdfind")
+    let run = tokio::process::Command::new(MDFIND)
         .arg(format!("kMDItemCFBundleIdentifier == '{bundle_id}'"))
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -292,7 +303,7 @@ pub fn custom_template_example(template: &str) -> String {
 }
 
 fn launch_timeout(program: &str) -> Duration {
-    if program == "osascript" {
+    if is_osascript(program) {
         OSASCRIPT_TIMEOUT
     } else {
         LAUNCH_TIMEOUT
@@ -302,8 +313,11 @@ fn launch_timeout(program: &str) -> Duration {
 /// Why a launch failed, with a pointer to the Automation setting for AppleScript launchers
 /// (`-1743` is macOS "not authorized to send Apple events").
 fn failure_message(program: &str, what: &str, stderr: &str) -> String {
-    let mut message = format!("{program} {what}");
-    if program == "osascript" && (what == "did not finish in time" || stderr.contains("-1743")) {
+    let name = std::path::Path::new(program)
+        .file_name()
+        .map_or_else(|| program.to_owned(), |n| n.to_string_lossy().into_owned());
+    let mut message = format!("{name} {what}");
+    if is_osascript(program) && (what == "did not finish in time" || stderr.contains("-1743")) {
         message.push_str(". ");
         message.push_str(AUTOMATION_HINT);
     } else {
@@ -559,21 +573,48 @@ mod tests {
     }
 
     #[test]
-    fn only_osascript_gets_the_long_timeout_and_the_automation_hint() {
+    fn launches_system_tools_by_absolute_path() {
+        // Never through the login PATH the app captured: a directory on it could shadow them.
+        let c = vec!["ssh".to_owned(), "buildbox".to_owned()];
+        assert_eq!(
+            Ghostty.spec(&c, OpenMode::Window, "t").program,
+            "/usr/bin/open"
+        );
+        assert_eq!(
+            ITerm2.spec(&c, OpenMode::Tab, "t").program,
+            "/usr/bin/osascript"
+        );
+        assert_eq!(MDFIND, "/usr/bin/mdfind");
+        // The name checks go by the program's file name.
         assert_eq!(launch_timeout("osascript"), Duration::from_secs(120));
-        assert_eq!(launch_timeout("open"), Duration::from_secs(10));
-        let timed_out = failure_message("osascript", "did not finish in time", "");
+    }
+
+    #[test]
+    fn only_osascript_gets_the_long_timeout_and_the_automation_hint() {
+        assert_eq!(
+            launch_timeout("/usr/bin/osascript"),
+            Duration::from_secs(120)
+        );
+        assert_eq!(launch_timeout("/usr/bin/open"), Duration::from_secs(10));
+        let timed_out = failure_message("/usr/bin/osascript", "did not finish in time", "");
+        // User-facing text names the tool, not its path.
+        assert!(
+            timed_out.starts_with("osascript did not finish in time. "),
+            "{timed_out}"
+        );
         assert!(
             timed_out.contains("Privacy & Security → Automation"),
             "{timed_out}"
         );
         let denied = failure_message(
-            "osascript",
+            "/usr/bin/osascript",
             "failed: …",
             "execution error: Not authorized (-1743)",
         );
         assert!(denied.contains("Automation"), "{denied}");
-        assert!(!failure_message("open", "did not finish in time", "").contains("Automation"));
+        assert!(
+            !failure_message("/usr/bin/open", "did not finish in time", "").contains("Automation")
+        );
     }
 
     #[tokio::test]
@@ -586,13 +627,13 @@ mod tests {
         };
         let timeout = Duration::from_secs(5);
         let exit = run_spec(&sh("exit 3"), &[], timeout).await.unwrap_err();
-        assert_eq!(exit, "/bin/sh failed (exit 3).");
+        assert_eq!(exit, "sh failed (exit 3).");
         let signal = run_spec(&sh("kill -9 $$"), &[], timeout).await.unwrap_err();
-        assert_eq!(signal, "/bin/sh was stopped by a signal.");
+        assert_eq!(signal, "sh was stopped by a signal.");
         let said = run_spec(&sh("echo nope >&2; exit 1"), &[], timeout)
             .await
             .unwrap_err();
-        assert_eq!(said, "/bin/sh failed: nope.");
+        assert_eq!(said, "sh failed: nope.");
     }
 
     #[tokio::test]
@@ -606,6 +647,6 @@ mod tests {
         let err = run_spec(&spec, &[], Duration::from_millis(100))
             .await
             .unwrap_err();
-        assert_eq!(err, "/bin/sleep did not finish in time.");
+        assert_eq!(err, "sleep did not finish in time.");
     }
 }

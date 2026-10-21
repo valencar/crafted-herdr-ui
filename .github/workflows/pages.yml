@@ -13,10 +13,9 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Read-only by default; only the deploy job gets the Pages permissions.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -26,8 +25,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # configure-pages reads the site's settings; it writes nothing.
+      pages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Latest published release
         id: release
@@ -35,12 +38,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: echo "tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)" >> "$GITHUB_OUTPUT"
 
+      # The tag reaches the script through the environment, never pasted into the shell line.
       - name: Build
-        run: scripts/build-site.sh "${{ steps.release.outputs.tag }}"
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: scripts/build-site.sh "$TAG"
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: _site
 
@@ -48,9 +54,12 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

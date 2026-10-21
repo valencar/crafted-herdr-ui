@@ -1,16 +1,67 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window: the file dialog for Choose binary, writing text to the clipboard, and the browser for exactly one URL (herdr.dev)",
-  "windows": ["main"],
+  "description": "Capability for the main window: its app commands (including the terminal sessions), the file dialog for Choose binary, writing text to the clipboard, and the browser for exactly one URL (herdr.dev)",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
+    "allow-answer-machine-setup",
+    "allow-cancel-machine-setup",
+    "allow-close-pane",
+    "allow-close-tab",
+    "allow-close-workspace",
+    "allow-copy-attach-command",
+    "allow-create-session",
+    "allow-create-tab",
+    "allow-create-workspace",
+    "allow-get-command-log",
+    "allow-get-settings",
+    "allow-get-state",
+    "allow-get-terminals",
+    "allow-list-agent-kinds",
+    "allow-list-ssh-hosts",
+    "allow-machine-add-argv",
+    "allow-machine-remove",
+    "allow-machine-rename",
+    "allow-machine-set-enabled",
+    "allow-machine-status",
+    "allow-mark-seen",
+    "allow-open-full-herdr",
+    "allow-open-in-terminal",
+    "allow-open-session",
+    "allow-open-settings",
+    "allow-preview-machine-add",
+    "allow-preview-new-session",
+    "allow-preview-reconnect",
+    "allow-read-pane-tail",
+    "allow-refresh-now",
+    "allow-rename-session",
+    "allow-rename-tab",
+    "allow-rename-workspace",
+    "allow-reply-to-agent",
+    "allow-set-settings",
+    "allow-start-machine-add",
+    "allow-start-preview",
+    "allow-stop-preview",
+    "allow-term-close",
+    "allow-term-open",
+    "allow-term-resize",
+    "allow-term-write",
     "core:window:allow-start-dragging",
     "dialog:allow-open",
     "clipboard-manager:allow-write-text",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://herdr.dev" }, { "url": "https://herdr.dev/" }]
+      "allow": [
+        {
+          "url": "https://herdr.dev"
+        },
+        {
+          "url": "https://herdr.dev/"
+        }
+      ]
     }
   ]
 }

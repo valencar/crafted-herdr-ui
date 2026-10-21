@@ -29,6 +29,7 @@ pub enum MenuId {
     FontSmaller,
     FontReset,
     Activity,
+    NewInWorkbox,
     CloseTab,
     NextTab,
     PrevTab,
@@ -58,6 +59,7 @@ impl MenuId {
             MenuId::FontSmaller => "font-smaller",
             MenuId::FontReset => "font-reset",
             MenuId::Activity => "activity",
+            MenuId::NewInWorkbox => "new-in-workbox",
             MenuId::CloseTab => "close-tab",
             MenuId::NextTab => "next-tab",
             MenuId::PrevTab => "prev-tab",
@@ -76,7 +78,8 @@ impl MenuId {
     fn in_terminal_menu(self) -> bool {
         matches!(
             self,
-            MenuId::CloseTab
+            MenuId::NewInWorkbox
+                | MenuId::CloseTab
                 | MenuId::NextTab
                 | MenuId::PrevTab
                 | MenuId::Tab1
@@ -110,6 +113,7 @@ pub fn items() -> Vec<(MenuId, &'static str, &'static str)> {
         (FontSmaller, "Smaller Font", "CmdOrCtrl+Minus"),
         (FontReset, "Reset Font", "CmdOrCtrl+0"),
         (Activity, "Activity", "CmdOrCtrl+Shift+A"),
+        (NewInWorkbox, "New Session in Workbox", "CmdOrCtrl+T"),
         (CloseTab, "Close Tab", "CmdOrCtrl+W"),
         (NextTab, "Next Tab", "Ctrl+Tab"),
         (PrevTab, "Previous Tab", "Ctrl+Shift+Tab"),
@@ -214,7 +218,7 @@ mod tests {
     #[test]
     fn menu_ids_and_accelerators_are_unique() {
         let all = items();
-        assert_eq!(all.len(), 22, "one entry per MenuId");
+        assert_eq!(all.len(), 23, "one entry per MenuId");
         let ids: HashSet<_> = all.iter().map(|(id, ..)| id.key()).collect();
         let keys: HashSet<_> = all.iter().map(|(.., accel)| *accel).collect();
         assert_eq!(ids.len(), all.len(), "duplicate menu id");
@@ -272,6 +276,29 @@ mod tests {
         assert!(!MenuId::Dashboard.in_terminal_menu());
         assert_eq!(find(MenuId::ToggleSplit).1, "Dashboard Beside Terminal");
         assert_eq!(find(MenuId::ToggleSplit).2, "CmdOrCtrl+Backslash");
+    }
+
+    #[test]
+    fn new_session_in_workbox_is_cmd_t_right_before_close_tab() {
+        let all = items();
+        let at = all
+            .iter()
+            .position(|(id, ..)| *id == MenuId::NewInWorkbox)
+            .unwrap();
+        assert_eq!(
+            all[at],
+            (
+                MenuId::NewInWorkbox,
+                "New Session in Workbox",
+                "CmdOrCtrl+T"
+            )
+        );
+        assert_eq!(all[at + 1].0, MenuId::CloseTab);
+        assert!(
+            MenuId::NewInWorkbox.in_terminal_menu(),
+            "same menu as Close Tab"
+        );
+        assert_eq!(MenuId::NewInWorkbox.key(), "new-in-workbox");
     }
 
     #[test]

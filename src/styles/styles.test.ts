@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // Vitest runs from the repo root; the stylesheet is read as text (it is not processed).
-const css = readFileSync(
-  join(process.cwd(), "src/styles/app.css"),
-  "utf8",
-).replace(/\/\*[\s\S]*?\*\//g, "");
+const read = (file: string) =>
+  readFileSync(join(process.cwd(), "src/styles", file), "utf8");
+const stripComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "");
+const css = stripComments(read("app.css"));
 
 /** The declarations of the last rule whose selector list is exactly `selector`. */
 function rule(selector: string): string {
@@ -175,5 +175,107 @@ describe("app.css", () => {
     expect(background('.home-view[data-active="true"]')).toBe(
       background(".workspace"),
     );
+  });
+});
+
+describe("type tokens", () => {
+  it("defines_the_type_scale_and_secondary_colors", () => {
+    const tokens = stripComments(read("tokens.css"));
+    const scale = {
+      hint: "12px",
+      small: "12.5px",
+      meta: "13px",
+      body: "14px",
+      lead: "16px",
+      title: "18px",
+      "display-1": "22px",
+      "display-2": "24px",
+      "display-3": "28px",
+    };
+    for (const [name, size] of Object.entries(scale)) {
+      expect(tokens).toContain(`--fs-${name}: ${size};`);
+    }
+    expect(tokens).toContain("--font-size: var(--fs-body)");
+    expect(tokens).toMatch(/--text-4:\s*#9a9da6/);
+    expect(tokens).toMatch(/--muted:\s*#9a9da6/);
+  });
+
+  it("sizes_all_text_through_type_tokens", () => {
+    const allowed = /^(var\(--fs-[a-z0-9-]+\)|inherit|[\d.]+em)$/;
+    const offenders: string[] = [];
+    for (const file of ["app.css", "windows.css", "global.css"]) {
+      for (const m of stripComments(read(file)).matchAll(
+        /([^{}]+)\{([^}]*)\}/g,
+      )) {
+        for (const d of m[2].matchAll(/(?:^|[;\s])font-size\s*:\s*([^;]+)/g)) {
+          if (!allowed.test(d[1].trim())) {
+            offenders.push(
+              `${file}: ${m[1].trim()} { font-size: ${d[1].trim()} }`,
+            );
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+  it("comfortable_rows_and_sidebar_items_are_at_least_40px", () => {
+    expect(rule(".row-main")).toContain("min-height: 40px");
+    expect(rule(".nav-item")).toContain("min-height: 40px");
+    for (const selector of [".palette-option", ".dash-row", ".activity-row"]) {
+      expect(rule(selector), selector).toContain("min-height: 40px");
+    }
+    const windows = stripComments(read("windows.css"));
+    const popRow = [...windows.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+      (m) => m[1].trim() === ".pop-row",
+    );
+    expect(popRow, "no .pop-row rule in windows.css").toBeDefined();
+    expect(popRow![2]).toContain("min-height: 40px");
+  });
+
+  it("small_buttons_are_32px_and_regular_buttons_36px", () => {
+    expect(rule(".btn")).toMatch(/min-height:\s*36px/);
+    expect(rule(".btn-small")).toMatch(/min-height:\s*32px/);
+    expect(rule(".open-split.is-small .btn")).toMatch(/min-height:\s*32px/);
+  });
+
+  it("compact_density_keeps_todays_tighter_rows", () => {
+    const compact = rule(".density-compact .row-main");
+    expect(compact).toContain("min-height: 0");
+    expect(compact).toContain("padding-top: 4px");
+  });
+
+  it("group_headers_are_sentence_case", () => {
+    const windows = stripComments(read("windows.css"));
+    const match = [...windows.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+      (m) => m[1].trim() === ".pop-title",
+    );
+    expect(match, "no .pop-title rule in windows.css").toBeDefined();
+    for (const body of [rule(".nav-heading"), match![2]]) {
+      expect(body).not.toContain("text-transform: uppercase");
+      expect(body).toContain("font-size: var(--fs-small)");
+      expect(body).toContain("font-weight: 500");
+      expect(body).toContain("letter-spacing: 0.04em");
+    }
+  });
+
+  it("ellipsizes_single_line_labels_in_tabs_and_sidebar", () => {
+    for (const selector of [
+      ".session-tab-title",
+      ".session-tab-sub",
+      ".wb-tab-label",
+      ".nav-label",
+      ".nav-sub",
+    ]) {
+      const body = rule(selector);
+      expect(body, selector).toContain("overflow: hidden");
+      expect(body, selector).toContain("text-overflow: ellipsis");
+      expect(body, selector).toContain("white-space: nowrap");
+    }
+    // The workbox tab shrinks (with a sensible floor) so its label can ellipsize.
+    // The floor fits dot + count + needs badge, so the badges never spill out.
+    expect(
+      Number(/min-width:\s*(\d+)px/.exec(rule(".wb-tab"))?.[1]),
+    ).toBeGreaterThanOrEqual(140);
+    expect(rule(".wb-tab")).toMatch(/max-width:\s*\d+px/);
   });
 });

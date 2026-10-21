@@ -50,13 +50,13 @@ fn open_new(app: &str, leading: &[&str], cmd: &[String]) -> LaunchSpec {
         .map(str::to_owned)
         .collect();
     args.extend(cmd.iter().cloned());
-    spec("open", args)
+    spec(super::OPEN, args)
 }
 
 /// `osascript -e <line> -e <line> …`
 fn osascript(lines: &[String]) -> LaunchSpec {
     spec(
-        "osascript",
+        super::OSASCRIPT,
         lines
             .iter()
             .flat_map(|l| ["-e".to_owned(), l.clone()])
@@ -176,7 +176,7 @@ impl Launcher for Warp {
                     .join(&file_name),
                 contents,
             }],
-            ..spec("open", vec![format!("warp://launch/{file_name}")])
+            ..spec(super::OPEN, vec![format!("warp://launch/{file_name}")])
         }
     }
 }
@@ -205,7 +205,7 @@ mod tests {
     }
 
     fn arg_pairs(spec: &LaunchSpec) -> Vec<String> {
-        assert_eq!(spec.program, "osascript");
+        assert_eq!(spec.program, "/usr/bin/osascript");
         spec.args
             .chunks(2)
             .map(|pair| {
@@ -267,7 +267,7 @@ mod tests {
     fn open_based_launchers_pass_the_argv_through() {
         let c = cmd(&["ssh", "-t", "buildbox", "sh -c 'x'"]);
         let s = Ghostty.spec(&c, OpenMode::Window, "t");
-        assert_eq!(s.program, "open");
+        assert_eq!(s.program, "/usr/bin/open");
         assert_eq!(
             s.args,
             [
@@ -365,7 +365,7 @@ mod tests {
             file.path.parent().unwrap(),
             Path::new("/Users/dev/.warp/launch_configurations")
         );
-        assert_eq!(a.program, "open");
+        assert_eq!(a.program, "/usr/bin/open");
         assert_eq!(a.args, [format!("warp://launch/{name}")]);
 
         // The YAML is one window with one tab and one command, the command a valid
