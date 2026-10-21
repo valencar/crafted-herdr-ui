@@ -20,10 +20,12 @@ describe("render-cask.sh", () => {
     expect(out).toContain('version "0.4.0"');
     expect(out).toContain(`sha256 "${sha}"`);
     expect(out).toContain(
-      'url "https://github.com/valencar/crafted-herdr-ui/releases/download/v#{version}/Crafted.Herdr_#{version}_universal.dmg",\n      verified: "github.com/valencar/crafted-herdr-ui/"',
+      'url "https://github.com/valencar/crafted-herdr-ui/releases/download/v#{version}/Crafted.Herdr_#{version}_universal.dmg"',
     );
+    expect(out).not.toContain("verified:");
     expect(out).toContain('app "Crafted Herdr.app"');
-    expect(out).toContain('depends_on macos: ">= :ventura"');
+    expect(out).toContain("depends_on macos: :ventura");
+    expect(out).not.toContain('">=');
     expect(out).toContain("livecheck");
     const caveats = out.slice(out.indexOf("caveats"));
     expect(caveats).toContain("Open Anyway");

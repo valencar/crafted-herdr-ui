@@ -2,8 +2,7 @@ cask "crafted-herdr" do
   version "{{VERSION}}"
   sha256 "{{SHA256}}"
 
-  url "https://github.com/valencar/crafted-herdr-ui/releases/download/v#{version}/Crafted.Herdr_#{version}_universal.dmg",
-      verified: "github.com/valencar/crafted-herdr-ui/"
+  url "https://github.com/valencar/crafted-herdr-ui/releases/download/v#{version}/Crafted.Herdr_#{version}_universal.dmg"
   name "Crafted Herdr"
   desc "Desktop home for herdr agents, grouped by project"
   homepage "https://valencar.github.io/crafted-herdr-ui/"
@@ -13,7 +12,7 @@ cask "crafted-herdr" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Crafted Herdr.app"
 
