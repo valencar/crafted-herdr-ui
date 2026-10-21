@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { projectNames, type Row } from "../lib/grouping";
+import { canOpenNewSession } from "../lib/newSessionTarget";
 import { useAppStore } from "../store/appStore";
 import { AllTabsMenu } from "./AllTabsMenu";
 import {
@@ -121,7 +122,7 @@ export function SessionRow({
         })}
         {/* The sheet lists only machines that are present and not disabled, so a stray or
             disabled workbox would silently get another one. */}
-        {group.machine && group.machine.health.kind !== "disabled" && (
+        {canOpenNewSession(group.machine) && (
           <button
             type="button"
             className="session-new"

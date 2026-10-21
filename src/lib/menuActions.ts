@@ -10,6 +10,7 @@ import {
 import type { MenuId } from "./bindings/MenuId";
 import { toRows } from "./grouping";
 import { nextNeedsYou } from "./nextNeedsYou";
+import { canOpenNewSession, newSessionTarget } from "./newSessionTarget";
 import { defaultOpenHow, openRow } from "./openRow";
 import {
   focusSearch,
@@ -73,6 +74,28 @@ export function runMenuAction(id: MenuId): void {
         }
       }
       break;
+    // Opens the New session sheet for the workbox in front (the sheet itself creates nothing).
+    case "new-in-workbox": {
+      const {
+        state: current,
+        view,
+        selectedKey,
+        openNewSession,
+      } = useAppStore.getState();
+      const { tabs, activeKey } = useTerminalStore.getState();
+      const machines = current?.machines ?? [];
+      openNewSession(
+        newSessionTarget({
+          activeKey,
+          tabs,
+          view,
+          selectedKey,
+          canOpenOn: (id) =>
+            canOpenNewSession(machines.find((m) => m.id === id)),
+        }),
+      );
+      break;
+    }
     // Home is never closed.
     case "close-tab": {
       const { activeKey, closeTab } = useTerminalStore.getState();
