@@ -72,6 +72,26 @@ describe("release.yml", () => {
     expect(step).not.toMatch(/\n {6}- name:[\s\S]*\n {6}- name:/);
   });
 
+  it("tap_does_not_downgrade_to_an_older_release", () => {
+    const tap = job(release, "tap");
+    const put = tap.indexOf("-X PUT");
+    expect(put).toBeGreaterThanOrEqual(0);
+    // The existing cask's version is read from its decoded content, then compared numerically.
+    const read = tap.indexOf("version \"");
+    expect(read).toBeGreaterThanOrEqual(0);
+    const gt = tap.indexOf('scripts/version-gt.sh "$existing" "$version"');
+    expect(gt).toBeGreaterThan(read);
+    // A newer existing version is skipped with a notice and a clean exit, before the PUT.
+    const skip = tap.match(
+      /::notice::The tap already has crafted-herdr \$existing, newer than \$version; not downgrading\.[^\n]*\n\s*exit 0/,
+    );
+    expect(skip).not.toBeNull();
+    expect(skip!.index).toBeGreaterThan(gt);
+    expect(skip!.index).toBeLessThan(put);
+    // Same version with different content still commits: only strictly newer is skipped.
+    expect(tap).not.toMatch(/version-gt\.sh "\$version" "\$existing"/);
+  });
+
   it("build_job_has_no_write_token", () => {
     const build = job(release, "build");
     expect(build).toMatch(/permissions:\s*\n\s+contents: read\s*\n/);

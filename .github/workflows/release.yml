@@ -194,8 +194,16 @@ jobs:
           err="$RUNNER_TEMP/gh-err.txt"
           if current=$(gh api "repos/$tap/contents/$path" 2>"$err"); then
             sha=$(jq -r .sha <<<"$current")
-            if [ "$(jq -r .content <<<"$current" | base64 --decode)" = "$(cat "$cask")" ]; then
+            existing_cask=$(jq -r .content <<<"$current" | base64 --decode)
+            if [ "$existing_cask" = "$(cat "$cask")" ]; then
               echo "The tap already has this cask (unchanged), nothing to commit."
+              exit 0
+            fi
+            # An older release that finishes late, or is rerun, must not move the tap back.
+            # Only a strictly newer version is skipped; the same version is a re-release and commits.
+            existing=$(sed -n 's/^  version "\([0-9][0-9.]*\)"$/\1/p' <<<"$existing_cask" | head -n 1)
+            if [ -n "$existing" ] && scripts/version-gt.sh "$existing" "$version"; then
+              echo "::notice::The tap already has crafted-herdr $existing, newer than $version; not downgrading."
               exit 0
             fi
           elif grep -q "HTTP 404" "$err"; then
