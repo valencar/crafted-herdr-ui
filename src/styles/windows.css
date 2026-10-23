@@ -128,6 +128,11 @@
   flex-direction: column;
   gap: 6px;
 }
+.settings-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .settings-fieldset {
   border: 0;
   margin: 0;

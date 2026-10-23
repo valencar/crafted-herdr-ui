@@ -156,9 +156,10 @@ export function NewSession({ terminalName }: Props) {
     if (!hideShell) shown.push(null);
     return shown.length > 0 ? shown : [null];
   }, [kinds, hiddenKinds, hideShell]);
-  // Without a click: the saved choice if it is offered, else Plain shell, else the first option.
+  // A click wins while its option is still offered. Otherwise: the saved choice if it is offered,
+  // else Plain shell, else the first option.
   const kind: string | null =
-    kindChoice !== undefined
+    kindChoice !== undefined && runOptions.includes(kindChoice)
       ? kindChoice
       : runOptions.includes(savedKind)
         ? savedKind

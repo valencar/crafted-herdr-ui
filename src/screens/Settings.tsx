@@ -2,7 +2,14 @@ import { Kbd } from "../components/Kbd";
 import { HealthDot } from "../components/StatusDot";
 import { formatShortcut, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { KindBadge } from "../components/KindBadge";
 import { StoreToast } from "../components/Toast";
 import type { GroupBy } from "../lib/bindings/GroupBy";
@@ -236,23 +243,57 @@ function NewSessionOptions({
     };
   }, []);
 
-  const hidden = settings.new_session_hidden_kinds;
+  // What the boxes show while saves are in flight: the saved value is stale until the last one
+  // comes back, and a quick second click must build on the first.
+  const [optimistic, setOptimistic] = useState<{
+    hidden: string[];
+    hideShell: boolean;
+  } | null>(null);
+  const latest = useRef(optimistic);
+  const inFlight = useRef(0);
+  const hidden = optimistic?.hidden ?? settings.new_session_hidden_kinds;
+  const hideShell = optimistic?.hideShell ?? settings.new_session_hide_shell;
+
   const noKinds = kinds !== null && kinds.length === 0;
+  const installed = (kinds ?? []).map((k) => ({
+    kind: k,
+    on: !hidden.includes(k),
+  }));
+  // With no installed kind shown, the sheet offers Plain shell whatever is saved.
+  const shellOn = !installed.some((o) => o.on) || !hideShell;
   const options: { kind: string | null; on: boolean }[] = [
-    ...(kinds ?? []).map((k) => ({ kind: k, on: !hidden.includes(k) })),
-    // With no agent kinds the sheet offers Plain shell whatever is saved.
-    { kind: null, on: noKinds || !settings.new_session_hide_shell },
+    ...installed,
+    { kind: null, on: shellOn },
   ];
   const onCount = options.filter((o) => o.on).length;
   const lastOne = kinds !== null && onCount === 1;
 
   const toggle = (kind: string | null, on: boolean) => {
-    if (kind === null) return void update({ new_session_hide_shell: !on });
-    // Kinds that are no longer installed stay in the list.
-    void update({
-      new_session_hidden_kinds: on
-        ? hidden.filter((k) => k !== kind)
-        : [...hidden, kind],
+    const base = latest.current ?? { hidden, hideShell };
+    const next =
+      kind === null
+        ? { ...base, hideShell: !on }
+        : {
+            ...base,
+            // Kinds that are no longer installed stay in the list.
+            hidden: on
+              ? base.hidden.filter((k) => k !== kind)
+              : [...base.hidden, kind],
+          };
+    latest.current = next;
+    setOptimistic(next);
+    inFlight.current += 1;
+    void update(
+      kind === null
+        ? { new_session_hide_shell: next.hideShell }
+        : { new_session_hidden_kinds: next.hidden },
+    ).finally(() => {
+      inFlight.current -= 1;
+      if (inFlight.current === 0) {
+        // The last save is back (or failed): the boxes follow the saved settings again.
+        latest.current = null;
+        setOptimistic(null);
+      }
     });
   };
 
@@ -268,17 +309,19 @@ function NewSessionOptions({
         <p className="muted settings-hint">Loading agent kinds…</p>
       ) : (
         <>
-          {options.map(({ kind, on }) => (
-            <Check
-              key={kind ?? "shell"}
-              label={kind ?? "Plain shell"}
-              badge={{ kind }}
-              checked={on}
-              disabled={lastOne && on}
-              describedBy={lastOne && on ? stayId : undefined}
-              onChange={(next) => toggle(kind, next)}
-            />
-          ))}
+          <div className="settings-options">
+            {options.map(({ kind, on }) => (
+              <Check
+                key={kind ?? "shell"}
+                label={kind ?? "Plain shell"}
+                badge={{ kind }}
+                checked={on}
+                disabled={lastOne && on}
+                describedBy={lastOne && on ? stayId : undefined}
+                onChange={(next) => toggle(kind, next)}
+              />
+            ))}
+          </div>
           {noKinds && (
             <p className="muted settings-hint">herdr listed no agent kinds.</p>
           )}

@@ -618,4 +618,116 @@ describe("Settings › New session options", () => {
       expect(useAppStore.getState().toast).toBeNull();
     },
   );
+
+  /** Makes every `set_settings` wait; the returned list resolves them in call order. */
+  function deferSaves() {
+    const waiting: Array<{ patch: object; done: () => void }> = [];
+    const base = invoke.getMockImplementation() as (
+      name: string,
+      args?: unknown,
+    ) => Promise<unknown>;
+    invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name !== "set_settings") return base(name, args);
+      const patch = (args as { patch: object }).patch;
+      await new Promise<void>((done) => waiting.push({ patch, done }));
+      return { ...useAppStore.getState().settings, ...patch };
+    });
+    return waiting;
+  }
+
+  it("quick_clicks_cannot_uncheck_every_option", async () => {
+    kinds = ["claude"];
+    const user = await setup();
+    const g = await group();
+    const claude = await within(g).findByRole("checkbox", { name: "claude" });
+    const waiting = deferSaves();
+    await user.click(claude);
+    await user.click(within(g).getByRole("checkbox", { name: "Plain shell" }));
+    // Plain shell is now the last option: its click did nothing.
+    expect(waiting.map((w) => w.patch)).toEqual([
+      { new_session_hidden_kinds: ["claude"] },
+    ]);
+    expect(
+      within(g).getByRole("checkbox", { name: "Plain shell" }),
+    ).toBeChecked();
+    expect(
+      within(g).getByRole("checkbox", { name: "Plain shell" }),
+    ).toBeDisabled();
+    await act(async () => waiting.forEach((w) => w.done()));
+  });
+
+  it("quick_clicks_on_two_kinds_both_stick", async () => {
+    kinds = ["claude", "codex"];
+    const user = await setup();
+    const g = await group();
+    const claude = await within(g).findByRole("checkbox", { name: "claude" });
+    const waiting = deferSaves();
+    await user.click(claude);
+    await user.click(within(g).getByRole("checkbox", { name: "codex" }));
+    expect(waiting.map((w) => w.patch)).toEqual([
+      { new_session_hidden_kinds: ["claude"] },
+      { new_session_hidden_kinds: ["claude", "codex"] },
+    ]);
+    // Both show unchecked straight away, before any save came back.
+    expect(
+      within(g).getByRole("checkbox", { name: "claude" }),
+    ).not.toBeChecked();
+    expect(
+      within(g).getByRole("checkbox", { name: "codex" }),
+    ).not.toBeChecked();
+    await act(async () => waiting.forEach((w) => w.done()));
+    expect(
+      within(g).getByRole("checkbox", { name: "claude" }),
+    ).not.toBeChecked();
+    expect(
+      within(g).getByRole("checkbox", { name: "codex" }),
+    ).not.toBeChecked();
+    expect(useAppStore.getState().settings?.new_session_hidden_kinds).toEqual([
+      "claude",
+      "codex",
+    ]);
+  });
+
+  it("a_failed_save_reverts_the_checkbox", async () => {
+    const user = await setup();
+    const g = await group();
+    const codex = await within(g).findByRole("checkbox", { name: "codex" });
+    const base = invoke.getMockImplementation() as (
+      name: string,
+      args?: unknown,
+    ) => Promise<unknown>;
+    invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "set_settings") throw { kind: "invalid", message: "Nope." };
+      return base(name, args);
+    });
+    await user.click(codex);
+    await waitFor(() =>
+      expect(within(g).getByRole("checkbox", { name: "codex" })).toBeChecked(),
+    );
+  });
+
+  it("with_every_installed_kind_hidden_plain_shell_shows_checked_and_locked", async () => {
+    await setup({
+      new_session_hidden_kinds: ["claude", "codex"],
+      new_session_hide_shell: true,
+    });
+    const g = await group();
+    const shell = await within(g).findByRole("checkbox", {
+      name: "Plain shell",
+    });
+    expect(shell).toBeChecked();
+    expect(shell).toBeDisabled();
+    expect(shell).toHaveAccessibleDescription("At least one option stays.");
+    expect(
+      within(g).getByRole("checkbox", { name: "claude" }),
+    ).not.toBeChecked();
+    expect(within(g).getByRole("checkbox", { name: "claude" })).toBeEnabled();
+  });
+
+  it("the_options_sit_in_a_spaced_column", async () => {
+    await setup();
+    const g = await group();
+    const first = await within(g).findByRole("checkbox", { name: "claude" });
+    expect(first.closest(".settings-options")).not.toBeNull();
+  });
 });

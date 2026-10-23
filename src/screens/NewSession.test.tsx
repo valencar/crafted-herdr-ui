@@ -421,6 +421,26 @@ describe("NewSession remembers the Run choice", () => {
     expect(runRadios()).toEqual(["Plain shell"]);
   });
 
+  it("a_clicked_kind_that_gets_hidden_meanwhile_is_not_sent", async () => {
+    const user = setup(undefined, savedKind(null));
+    await user.click(await radio("codex"));
+    act(() => {
+      useAppStore.setState({
+        settings: {
+          ...DEFAULT_SETTINGS,
+          new_session_hidden_kinds: ["codex"],
+        },
+      });
+    });
+    expect(runRadios()).toEqual(["claude", "Plain shell"]);
+    expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    await user.click(createButton());
+    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
+    expect(lastRequest("create_session").kind).toBeNull();
+  });
+
   it("defaults_to_the_saved_kind", async () => {
     setup(undefined, savedKind("codex"));
     expect(await radio("codex")).toBeChecked();
