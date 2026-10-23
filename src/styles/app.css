@@ -2063,6 +2063,15 @@ select.field {
 .session-row-scroll::-webkit-scrollbar {
   display: none;
 }
+/* When the tabs outgrow the row, the trailing edge fades; the All tabs menu stays beside it. */
+.session-row[data-overflowing="true"] .session-row-scroll {
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 24px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+}
 .home-views {
   flex: 0 0 auto;
   display: flex;
@@ -2147,6 +2156,8 @@ select.field {
 }
 .wb-tab[data-active="true"] {
   background: var(--selected);
+  /* The corners switch at once, so the tab must not fade in beside them. */
+  transition: none;
 }
 .wb-tab[data-active="true"]::before {
   background: radial-gradient(
@@ -2225,6 +2236,20 @@ select.field {
 .session-tab:hover {
   background: var(--nav-hover);
 }
+/* The close mark keeps its space and its focus, and shows on the active tab, on hover and when
+   anything inside the tab has focus. */
+.session-tab .icon-btn {
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast),
+    color var(--dur-fast);
+}
+.session-tab:hover .icon-btn,
+.session-tab:focus-within .icon-btn,
+.session-tab[data-active="true"] .icon-btn {
+  opacity: 1;
+}
 .session-tab[data-needs="true"] {
   background: color-mix(in srgb, var(--st-needs) 7%, transparent);
 }
@@ -2235,6 +2260,7 @@ select.field {
 }
 .session-tab[data-active="true"] {
   background: var(--panel);
+  transition: none;
 }
 /* Active, the tab shows an orange top edge instead of the tint. */
 .session-tab[data-active="true"][data-needs="true"] {
@@ -2352,6 +2378,7 @@ select.field {
 }
 .home-view[data-active="true"] {
   background: var(--bg);
+  transition: none;
 }
 .home-view[data-active="true"]::before {
   background: radial-gradient(

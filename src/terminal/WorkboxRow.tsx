@@ -1,5 +1,5 @@
-import { formatShortcut } from "../lib/shortcuts";
 import { HealthDot, StatusDot } from "../components/StatusDot";
+import { Tooltip } from "../components/Tooltip";
 import { useEffect, useRef } from "react";
 import { HEALTH_LABEL, plural } from "../lib/format";
 import type { Row } from "../lib/grouping";
@@ -57,17 +57,18 @@ export function WorkboxRow({
   return (
     <nav className="wb-row" aria-label="Workboxes">
       <div className="wb-row-scroll" ref={scrollRef}>
-        <button
-          type="button"
-          className="wb-tab wb-tab-home"
-          data-active={activeKey === HOME}
-          aria-current={activeKey === HOME ? "page" : undefined}
-          title={`Home (${formatShortcut("dashboard")})`}
-          onClick={() => activate(HOME)}
-        >
-          <HomeIcon />
-          <span>Home</span>
-        </button>
+        <Tooltip label="Home" shortcut="dashboard">
+          <button
+            type="button"
+            className="wb-tab wb-tab-home"
+            data-active={activeKey === HOME}
+            aria-current={activeKey === HOME ? "page" : undefined}
+            onClick={() => activate(HOME)}
+          >
+            <HomeIcon />
+            <span>Home</span>
+          </button>
+        </Tooltip>
         <span className="wb-divider" aria-hidden="true" />
         {groups.map((group) => {
           const health = group.machine?.health.kind;
@@ -92,18 +93,20 @@ export function WorkboxRow({
                 aria-hidden="true"
               >
                 {group.machine ? (
-                  <HealthDot health={group.machine.health} />
+                  <HealthDot health={group.machine.health} live />
                 ) : (
-                  <StatusDot status="unknown" />
+                  <StatusDot status="unknown" live />
                 )}
               </span>
               <span className="mono wb-tab-label">{group.label}</span>
               <span className="wb-tab-count">{group.tabs.length}</span>
               {needs > 0 && (
-                <span className="wb-tab-needs" title="Needs input">
-                  <NeedsIcon />
-                  {needs}
-                </span>
+                <Tooltip label="Needs input">
+                  <span className="wb-tab-needs">
+                    <NeedsIcon />
+                    {needs}
+                  </span>
+                </Tooltip>
               )}
             </button>
           );

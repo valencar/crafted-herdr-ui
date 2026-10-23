@@ -41,7 +41,14 @@ export function formatShortcut(
   return [...glyphs, label].join("");
 }
 
-/** The label of ⌘2 to ⌘9, the number a tab shows (`tabShortcut` in `terminal/tabOrder.ts`). */
+/** The shortcut id of ⌘2 to ⌘9, the number a tab shows (`tabShortcut` in `terminal/tabOrder.ts`); `null` for any other number. */
+export function tabShortcutId(n: number): ShortcutId | null {
+  if (!Number.isInteger(n) || n < 2 || n > 9) return null;
+  return `tab${n - 1}` as ShortcutId;
+}
+
+/** The label of ⌘2 to ⌘9; empty for any other number. */
 export function formatTabShortcut(n: number): string {
-  return formatShortcut(`tab${n - 1}` as ShortcutId);
+  const id = tabShortcutId(n);
+  return id === null ? "" : formatShortcut(id);
 }

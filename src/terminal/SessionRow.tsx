@@ -1,5 +1,6 @@
-import { formatTabShortcut } from "../lib/shortcuts";
+import { tabShortcutId } from "../lib/shortcuts";
 import { StatusDot } from "../components/StatusDot";
+import { Tooltip } from "../components/Tooltip";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { projectNames, type Row } from "../lib/grouping";
 import { canOpenNewSession } from "../lib/newSessionTarget";
@@ -63,14 +64,19 @@ export function SessionRow({
   }, [activeKey, group.machineId]);
 
   return (
-    <nav className="session-row" aria-label="Tabs">
+    <nav
+      className="session-row"
+      aria-label="Tabs"
+      data-overflowing={overflowing ? "true" : undefined}
+    >
       <div className="session-row-scroll" ref={scrollRef}>
         {group.tabs.map((tab) => {
           const row = rows.get(tab.tabKey);
           const active = tab.tabKey === activeKey;
           // Only a tab blocked on the user is tinted; a finished one is not (spec 2.2).
           const needs = row?.status === "blocked";
-          const shortcut = tabShortcut(tab.tabKey, allTabs, machines);
+          const n = tabShortcut(tab.tabKey, allTabs, machines);
+          const shortcut = n === null ? null : tabShortcutId(n);
           const sub = tabSubline(tab, row, projects.get(tab.tabKey) ?? null);
           const status = row?.status;
           return (
@@ -79,34 +85,43 @@ export function SessionRow({
               className="session-tab"
               data-active={active}
               data-needs={needs ? "true" : undefined}
+              // A middle press would start the browser's autoscroll; the release closes the tab.
+              onMouseDown={(e) => {
+                if (e.button === 1) e.preventDefault();
+              }}
+              onAuxClick={(e) => {
+                if (e.button === 1) closeTab(tab.tabKey);
+              }}
             >
-              <button
-                type="button"
-                className="session-tab-main"
-                aria-current={active ? "page" : undefined}
-                aria-label={tabName(tab, row)}
-                title={`${tabStatus(tab, row) ?? tabName(tab, row)}${
-                  shortcut !== null ? ` (${formatTabShortcut(shortcut)})` : ""
-                }`}
-                onClick={() => activate(tab.tabKey)}
+              <Tooltip
+                label={tabStatus(tab, row) ?? tabName(tab, row)}
+                shortcut={shortcut ?? undefined}
               >
-                <StatusDot status={tabDotStatus(tab, row)} />
-                <span className="mono session-tab-title">{tab.title}</span>
-                {sub && (
-                  <span
-                    className="session-tab-sub"
-                    data-tone={
-                      status === "blocked"
-                        ? "needs"
-                        : status === "done"
-                          ? "done"
-                          : undefined
-                    }
-                  >
-                    {sub}
-                  </span>
-                )}
-              </button>
+                <button
+                  type="button"
+                  className="session-tab-main"
+                  aria-current={active ? "page" : undefined}
+                  aria-label={tabName(tab, row)}
+                  onClick={() => activate(tab.tabKey)}
+                >
+                  <StatusDot status={tabDotStatus(tab, row)} live />
+                  <span className="mono session-tab-title">{tab.title}</span>
+                  {sub && (
+                    <span
+                      className="session-tab-sub"
+                      data-tone={
+                        status === "blocked"
+                          ? "needs"
+                          : status === "done"
+                            ? "done"
+                            : undefined
+                      }
+                    >
+                      {sub}
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
               <button
                 type="button"
                 className="icon-btn"

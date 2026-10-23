@@ -324,6 +324,79 @@ describe("sidebar hint slot", () => {
   });
 });
 
+describe("tabs", () => {
+  /** The declarations of the last rule whose selector list contains `selector`. */
+  const ruleWith = (selector: string): string => {
+    const found = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((m) =>
+      m[1].split(",").some((s) => s.trim() === selector),
+    );
+    if (found.length === 0) throw new Error(`no rule for ${selector}`);
+    return found[found.length - 1][2];
+  };
+
+  // Every control that is transparent at rest and shown on hover or focus: it stays focusable,
+  // so each reveal needs its focus twin. Later tasks add their entries here.
+  const hoverRevealed: { rest: string; reveals: string[] }[] = [
+    {
+      rest: ".session-tab .icon-btn",
+      reveals: [
+        ".session-tab:hover .icon-btn",
+        ".session-tab:focus-within .icon-btn",
+        '.session-tab[data-active="true"] .icon-btn',
+      ],
+    },
+    {
+      rest: ".nav-slot-hint",
+      reveals: [
+        ".nav-item:hover .nav-slot-hint",
+        ".nav-item:focus-visible .nav-slot-hint",
+        ".nav-term:hover .nav-slot-hint",
+        ".nav-term:focus-visible .nav-slot-hint",
+        ".nav-link:hover .nav-slot-hint",
+        ".nav-link:focus-visible .nav-slot-hint",
+      ],
+    },
+  ];
+
+  it("hover_revealed_controls_show_on_focus", () => {
+    for (const { rest, reveals } of hoverRevealed) {
+      expect(ruleWith(rest), rest).toMatch(/opacity:\s*0\b/);
+      for (const reveal of reveals) {
+        expect(ruleWith(reveal), reveal).toMatch(/opacity:\s*1\b/);
+      }
+    }
+    // Hover alone is never enough: every entry has a focus-driven reveal too.
+    for (const { rest, reveals } of hoverRevealed) {
+      expect(
+        reveals.some((r) => /:focus-within|:focus-visible/.test(r)),
+        rest,
+      ).toBe(true);
+    }
+  });
+
+  it("session_row_fades_when_overflowing", () => {
+    const body = rule(
+      '.session-row[data-overflowing="true"] .session-row-scroll',
+    );
+    expect(body).toMatch(/mask-image:\s*linear-gradient\(/);
+    expect(body).toMatch(/-webkit-mask-image:\s*linear-gradient\(/);
+  });
+
+  it("an_activated_tab_does_not_fade_in_so_its_corners_never_seam", () => {
+    // The inverse corners switch colour at once, so the tab's own fill must as well.
+    const body = ruleWith('.session-tab[data-active="true"]');
+    expect(body).toContain("transition: none");
+    for (const selector of [
+      '.wb-tab[data-active="true"]',
+      '.home-view[data-active="true"]',
+    ]) {
+      expect(ruleWith(selector), selector).toContain("transition: none");
+    }
+    // The hover fade on the others stays.
+    expect(rule(".session-tab")).toContain("transition:");
+  });
+});
+
 describe("status shapes", () => {
   const selectors = new Set(
     [...css.matchAll(/([^{}]+)\{[^}]*\}/g)].flatMap((m) =>

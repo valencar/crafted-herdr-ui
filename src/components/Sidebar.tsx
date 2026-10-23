@@ -1,7 +1,7 @@
 import { Kbd } from "./Kbd";
 import { HealthDot, StatusDot } from "./StatusDot";
 import { Tooltip } from "./Tooltip";
-import type { ShortcutId } from "../lib/shortcuts";
+import { tabShortcutId, type ShortcutId } from "../lib/shortcuts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -286,6 +286,7 @@ export function Sidebar({
           {(tabsByMachine.get(m.id) ?? []).map((tab) => {
             const row = rows.get(tab.tabKey);
             const n = tabShortcut(tab.tabKey, tabs, machines);
+            const shortcut = n === null ? null : tabShortcutId(n);
             return (
               <Tooltip key={tab.tabKey} label={tabName(tab, row)}>
                 <button
@@ -297,9 +298,7 @@ export function Sidebar({
                 >
                   <StatusDot status={tabDotStatus(tab, row)} live />
                   <span className="mono">{tab.title}</span>
-                  {n !== null && (
-                    <HintSlot shortcut={`tab${n - 1}` as ShortcutId} />
-                  )}
+                  {shortcut !== null && <HintSlot shortcut={shortcut} />}
                 </button>
               </Tooltip>
             );
