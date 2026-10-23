@@ -2495,6 +2495,18 @@ select.field {
   white-space: nowrap;
 }
 
+.context-actions .icon-btn {
+  min-width: 32px;
+  min-height: 32px;
+}
+/* Position is pinned inline (PaneMenu): `.menu` in windows.css loads later and would win. */
+.menu.pane-menu {
+  min-width: 200px;
+}
+.menu-item.is-danger {
+  color: var(--danger);
+}
+
 .term-find {
   flex: 0 0 auto;
   display: flex;

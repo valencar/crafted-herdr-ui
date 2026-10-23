@@ -14,7 +14,10 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
 import { invokeTyped } from "../lib/ipc";
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
-vi.mock("../lib/openRow", () => ({ openRow: vi.fn() }));
+vi.mock("../lib/openRow", () => ({
+  openRow: vi.fn(),
+  markSeen: vi.fn(),
+}));
 import { openRow } from "../lib/openRow";
 
 const row: Row = {
@@ -79,6 +82,12 @@ afterEach(() => {
 const terminalButton = () =>
   screen.findByRole("button", { name: "Open in Ghostty" });
 
+/** Close pane… lives in the ⋯ menu. */
+async function openClosePane(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "More actions" }));
+  await user.click(screen.getByRole("menuitem", { name: "Close pane…" }));
+}
+
 describe("ContextBar", () => {
   it("pane_tab_shows_name_status_and_actions", async () => {
     const { container } = render(
@@ -103,7 +112,7 @@ describe("ContextBar", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Detach" })).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Close pane…" }),
+      screen.getByRole("button", { name: "More actions" }),
     ).toBeInTheDocument();
   });
 
@@ -141,7 +150,7 @@ describe("ContextBar", () => {
     const user = userEvent.setup();
     render(<ContextBar tab={paneTab} row={row} onFind={() => {}} />);
     await terminalButton();
-    await user.click(screen.getByRole("button", { name: "Close pane…" }));
+    await openClosePane(user);
     const dialog = screen.getByRole("dialog", { name: "Close planner?" });
     expect(dialog).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
@@ -172,7 +181,7 @@ describe("ContextBar", () => {
       <ContextBar tab={paneTab} row={row} onFind={() => {}} />,
     );
     await terminalButton();
-    await user.click(screen.getByRole("button", { name: "Close pane…" }));
+    await openClosePane(user);
     expect(
       screen.getByRole("dialog", { name: "Close planner?" }),
     ).toBeInTheDocument();
@@ -193,7 +202,7 @@ describe("ContextBar", () => {
       </div>,
     );
     await terminalButton();
-    await user.click(screen.getByRole("button", { name: "Close pane…" }));
+    await openClosePane(user);
     const dialog = screen.getByRole("dialog", { name: "Close planner?" });
     expect(container.querySelector(".terminal-panel")!.contains(dialog)).toBe(
       false,
@@ -205,6 +214,60 @@ describe("ContextBar", () => {
     );
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("action_order", async () => {
+    const { container } = render(
+      <ContextBar tab={paneTab} row={row} onFind={() => {}} />,
+    );
+    await terminalButton();
+    const actions = container.querySelector(".context-actions")!;
+    expect(
+      [...actions.querySelectorAll("button")].map(
+        (b) => b.getAttribute("aria-label") ?? b.textContent,
+      ),
+    ).toEqual([
+      "Find in terminal (⌘F)",
+      "Detach",
+      "Open in Ghostty",
+      "More actions",
+    ]);
+    // Close pane… is in the menu, not in the bar.
+    expect(screen.queryByRole("button", { name: "Close pane…" })).toBeNull();
+  });
+
+  it("open_in_terminal_is_outlined_and_find_and_detach_are_ghost", async () => {
+    render(<ContextBar tab={paneTab} row={row} onFind={() => {}} />);
+    expect(await terminalButton()).not.toHaveClass("btn-ghost");
+    expect(await terminalButton()).toHaveClass("btn", "btn-small");
+    expect(screen.getByRole("button", { name: "Detach" })).toHaveClass(
+      "btn-ghost",
+    );
+    expect(
+      screen.getByRole("button", { name: "Find in terminal (⌘F)" }),
+    ).toHaveClass("btn-ghost");
+  });
+
+  it("no_menu_without_a_row", () => {
+    render(<ContextBar tab={paneTab} row={null} onFind={() => {}} />);
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+  });
+
+  it("the_status_pill_in_the_bar_is_live", () => {
+    const { container } = render(
+      <ContextBar tab={paneTab} row={row} onFind={() => {}} />,
+    );
+    expect(container.querySelector(".context-bar .pill .live")).not.toBeNull();
+  });
+
+  it("detach_has_a_tooltip", async () => {
+    const user = userEvent.setup();
+    render(<ContextBar tab={paneTab} row={row} onFind={() => {}} />);
+    await terminalButton();
+    await user.hover(screen.getByRole("button", { name: "Detach" }));
+    expect(
+      await screen.findByText("Close this view. The agent keeps running."),
+    ).toBeInTheDocument();
   });
 
   it("full_ui_tab_has_only_find_and_detach", () => {
