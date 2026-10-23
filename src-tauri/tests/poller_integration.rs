@@ -2,6 +2,8 @@
 //! states in memory instead of going through Tauri. Polls are triggered with `refresh_now`
 //! so the tests do not wait for the 2 s cadence.
 
+#![cfg(unix)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

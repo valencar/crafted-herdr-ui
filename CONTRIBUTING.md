@@ -16,7 +16,7 @@ Machine names, hosts and test settings that are personal to you go in `.env.loca
 
 ## Tests
 
-Run all of these before opening a pull request. CI runs the same.
+Run all of these before opening a pull request. CI runs the same on macOS, plus a Windows job (lint, typecheck, the Vitest tests without `scripts/**`, clippy, `cargo test`, an NSIS debug build).
 
 ```bash
 pnpm lint && pnpm typecheck && pnpm test
@@ -26,6 +26,7 @@ scripts/check-no-personal-data.sh
 
 - Write the failing test first, then make it pass. Keep test output clean (no warnings).
 - Tests never run a real `herdr` that mutates state. Use `scripts/fake-herdr`.
+- `scripts/fake-herdr` is a bash script, so the tests that need it (and any that write `#!/bin/sh` fakes or run `/bin/sh`) are Unix-only: gate them with `#[cfg(unix)]` (`#![cfg(unix)]` for a whole file in `src-tauri/tests/`). You can't run the Windows job locally; the PR's Windows check is where its failures show.
 - Live tests are opt-in (`HERDR_UI_LIVE=1`) and may touch only the machine named in `HERDR_UI_TEST_MACHINE`, inside a workspace or session named `herdr-ui-qa`.
 - Rust types shared with the UI are exported with `ts-rs` into `src/lib/bindings/` (generated, committed).
 

@@ -40,6 +40,7 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 ## Testing
 
 - **Unit tests** live next to the code in `#[cfg(test)]`. **Integration tests** in `tests/` run the real runner against `../scripts/fake-herdr` with a temp `FAKE_HERDR_DIR`.
+- **Unix-only tests are gated, not skipped at run time.** The four fake-herdr suites in `tests/` start with `#![cfg(unix)]`; unit tests that write `#!/bin/sh` fakes, run `/bin/sh` or use `PermissionsExt` carry `#[cfg(unix)]`, as do the helpers and `use` lines only they need (clippy `-D warnings` on Windows rejects them otherwise). CI's `windows` job compiles and runs the rest. Gating never edits an assertion, and the Mac's `cargo test -- --list` must not change. The WSL hop has its own test (it doesn't need bash).
 - **fake-herdr protocol:** argv after an optional `--machine <id>` is joined with `_` to form `<joined>.json` (stdout), `.stderr`, `.exit` and `.sleep`. Calls are appended to `$FAKE_HERDR_DIR/calls.log`. Files named `<id>@<joined>.*` override the generic ones for that machine.
 - **Fixtures** in `tests/fixtures/` are synthetic and generic (`buildbox`, `api-service`, `/home/dev`). Real captures go only to `../fixtures-raw/` (gitignored).
 - **Before committing:** `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`.

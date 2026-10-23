@@ -246,7 +246,9 @@ pub fn term_env(base: &[(String, String)]) -> Vec<(String, String)> {
 mod tests {
     use super::*;
     use crate::platform::runner::Launch;
-    use crate::pty::{PortablePty, SpawnedPty};
+    #[cfg(unix)]
+    use crate::pty::PortablePty;
+    use crate::pty::SpawnedPty;
     use std::io;
     use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;

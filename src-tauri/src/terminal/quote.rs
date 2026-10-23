@@ -29,8 +29,10 @@ pub fn join_quoted(argv: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::process::Command;
 
+    #[cfg(unix)]
     const HOSTILE: &[&str] = &[
         "plain",
         "",
@@ -47,6 +49,7 @@ mod tests {
         "''",
     ];
 
+    #[cfg(unix)]
     fn sh_printf(quoted: &str) -> String {
         let out = Command::new("/bin/sh")
             .arg("-c")
@@ -57,6 +60,7 @@ mod tests {
         String::from_utf8(out.stdout).unwrap()
     }
 
+    #[cfg(unix)]
     #[test]
     fn quoting_survives_hostile_strings() {
         for s in HOSTILE {
@@ -64,6 +68,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn quoting_survives_two_layers_of_shell() {
         // The remote attach string is quoted, then quoted again inside `sh -c`.
@@ -82,6 +87,7 @@ mod tests {
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
     }
 
+    #[cfg(unix)]
     #[test]
     fn join_quoted_round_trips_through_a_shell() {
         let argv: Vec<String> = ["printf", "%s|", "a b", "it's", ""]

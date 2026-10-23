@@ -143,21 +143,19 @@ impl PtySpawner for PortablePty {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::{Duration, Instant};
 
     /// What `Runner::Direct` makes of `argv`, with the PATH these tests have always used.
-    #[cfg(unix)]
     fn direct(argv: &[String]) -> Launch {
         crate::platform::runner::Runner::Direct
             .wrap(argv, &[("PATH".to_owned(), "/usr/bin:/bin".to_owned())])
             .expect("wrap")
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_real_pty_carries_output_and_keystrokes() {
         // A shell stands in for herdr: no herdr, no network.
@@ -197,7 +195,6 @@ mod tests {
         assert_eq!(pty.control.wait(), 0);
     }
 
-    #[cfg(unix)]
     #[test]
     fn resize_reaches_the_child() {
         let argv: Vec<String> = ["/bin/sh", "-c", "read a; stty size"]

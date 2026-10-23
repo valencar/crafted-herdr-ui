@@ -1,5 +1,7 @@
 //! Runs the real `HerdrCli` against `scripts/fake-herdr` with a temp `FAKE_HERDR_DIR`.
 
+#![cfg(unix)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -760,6 +760,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     fn fake_herdr(dir: &Path, name: &str, version: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let bin = dir.join(name);
@@ -768,6 +769,7 @@ mod tests {
         bin
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn locating_points_the_runner_at_the_binary_and_reads_its_version() {
         let dir = tempfile::tempdir().unwrap();

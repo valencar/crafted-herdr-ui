@@ -31,6 +31,13 @@ scripts/check-no-personal-data.sh
 scripts/build-site.sh  # project site (site/) → _site/; deployed to GitHub Pages by .github/workflows/pages.yml
 ```
 
+CI (`.github/workflows/ci.yml`) has two required jobs. `check` runs everything above on macOS. `windows` runs on `windows-latest`: `pnpm lint`, `pnpm typecheck`, `pnpm vitest run --exclude "scripts/**"` (the `scripts/*.test.ts` files drive bash scripts), then in `src-tauri` `cargo clippy --all-targets -- -D warnings` and `cargo test`, and last `pnpm tauri build --debug --bundles nsis`. There is no Windows machine locally, so Windows-only breakage shows up only on the PR.
+
+## Testing
+
+- The integration suites in `src-tauri/tests/` run `scripts/fake-herdr` (bash), and some unit tests write `#!/bin/sh` fakes or run `/bin/sh`. They are Unix-only: gate a whole file with `#![cfg(unix)]`, a single test (and the helpers and imports only it uses) with `#[cfg(unix)]`. Don't use `#[allow]` to hide what the gate leaves unused, and never change an assertion to gate it.
+- The WSL hop (the Windows app running herdr inside WSL) has its own test, added with the Windows runner work; it doesn't use `scripts/fake-herdr`.
+
 ## herdr facts the code relies on (verified on 0.9.3 and 0.9.4)
 
 - Hierarchy: machine → session → workspace `w1` → tab `w1:t1` → pane `w1:p1`. An agent lives inside a pane. IDs are scoped to one server, so always key by (machine id, pane id).

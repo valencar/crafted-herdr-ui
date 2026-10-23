@@ -3,6 +3,8 @@
 //!
 //! fake-herdr names its files after the joined argv, so the folders used here have no `/`.
 
+#![cfg(unix)]
+
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};

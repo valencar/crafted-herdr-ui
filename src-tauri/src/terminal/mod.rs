@@ -505,6 +505,7 @@ mod tests {
         assert_eq!(json, r#"["iTerm2","terminalApp","wezTerm"]"#);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn launch_writes_support_files_once_and_reports_failures() {
         let dir = tempfile::tempdir().unwrap();
@@ -544,6 +545,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_detached_launch_returns_at_once_and_keeps_running() {
         let dir = tempfile::tempdir().unwrap();
@@ -623,6 +625,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_failure_without_stderr_says_how_it_ended() {
         let sh = |script: &str| LaunchSpec {
@@ -642,6 +645,7 @@ mod tests {
         assert_eq!(said, "sh failed: nope.");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_slow_launcher_is_killed_at_the_timeout() {
         let spec = LaunchSpec {

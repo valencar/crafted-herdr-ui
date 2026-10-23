@@ -247,8 +247,10 @@ pub async fn herdr_agent_kinds(
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+    #[cfg(unix)]
     use std::time::Duration;
 
     fn existing(paths: &[&str]) -> impl Fn(&Path) -> bool {
@@ -364,6 +366,7 @@ mod tests {
         assert_eq!(parse_version("herdr 0.x.1"), None);
     }
 
+    #[cfg(unix)]
     /// Writes an executable script that ignores its arguments.
     fn fake_shell(dir: &Path, name: &str, body: &str) -> String {
         let path = dir.join(name);
@@ -372,6 +375,7 @@ mod tests {
         path.to_str().unwrap().to_string()
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_reads_nul_separated_env_from_the_shell() {
         let dir = tempfile::tempdir().unwrap();
@@ -391,18 +395,21 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_runs_real_sh_with_login_and_command_flags() {
         let login = capture_login_env_with("/bin/sh", Duration::from_secs(5)).await;
         assert!(login.vars.contains_key("PATH"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_falls_back_to_process_env_when_shell_is_missing() {
         let login = capture_login_env_with("/nonexistent/shell", Duration::from_secs(5)).await;
         assert_eq!(login.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_falls_back_on_timeout() {
         let dir = tempfile::tempdir().unwrap();
@@ -413,6 +420,7 @@ mod tests {
         assert_eq!(login.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_falls_back_when_shell_fails() {
         let dir = tempfile::tempdir().unwrap();
@@ -421,6 +429,7 @@ mod tests {
         assert_eq!(login.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn which_returns_absolute_existing_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -437,6 +446,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn which_rejects_relative_alias_and_missing_paths() {
         let dir = tempfile::tempdir().unwrap();
@@ -455,6 +465,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn which_is_none_when_shell_times_out_or_is_missing() {
         let dir = tempfile::tempdir().unwrap();
@@ -466,6 +477,7 @@ mod tests {
         assert_eq!(login_which_herdr("/nonexistent/shell").await, None);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn herdr_version_runs_the_binary_with_the_given_env() {
         let dir = tempfile::tempdir().unwrap();
@@ -485,6 +497,7 @@ mod tests {
         assert_eq!(v.as_deref(), Some("0.9.4"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn herdr_version_is_none_on_failure_garbage_timeout_or_missing_binary() {
         let dir = tempfile::tempdir().unwrap();
@@ -521,6 +534,7 @@ mod tests {
         assert!(parse_agent_kinds("--kind <KIND>\n[possible values: ]").is_empty());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn herdr_status_runs_status_and_returns_its_text() {
         let dir = tempfile::tempdir().unwrap();
@@ -545,6 +559,7 @@ mod tests {
         assert_eq!(missing.await, None);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn herdr_agent_kinds_runs_agent_start_help() {
         let dir = tempfile::tempdir().unwrap();

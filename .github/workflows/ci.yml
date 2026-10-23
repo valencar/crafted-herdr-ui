@@ -73,6 +73,60 @@ jobs:
       - name: Build the app (debug, no DMG)
         run: pnpm tauri build --debug --bundles app
 
+  # What exists of the Windows port, compiled and tested on a Windows runner. The Unix-only tests
+  # (bash fakes, /bin/sh, scripts/fake-herdr) are gated out with #[cfg(unix)], and the bash-driven
+  # tests in scripts/ are skipped. The build checks that the NSIS installer bundles; nothing is
+  # uploaded.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      # The runner checks out with CRLF line endings by default; the tests read files byte for byte.
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Frontend tests (not the bash script tests)
+        run: pnpm vitest run --exclude "scripts/**"
+
+      - name: Rust clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Build the app (debug, NSIS installer)
+        run: pnpm tauri build --debug --bundles nsis
+
   # A test build for every pull request: the same universal, ad-hoc signed DMG a release ships,
   # attached to the run as an artifact so a branch can be installed and tried before it merges.
   # Read-only, like the release build: it runs the project's dependencies and holds no write token.
