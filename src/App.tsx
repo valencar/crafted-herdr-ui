@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { AppSidebar } from "./components/AppSidebar";
+import { ClosePaneHost } from "./components/ClosePaneHost";
 import { CommandPalette } from "./components/CommandPalette";
 import { Header } from "./components/Header";
 import { VersionBanner } from "./components/HomeNotices";
@@ -158,6 +159,7 @@ function App() {
       )}
       {sheet === "add-workbox" && <AddWorkbox />}
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
+      <ClosePaneHost />
       {activityOpen && (
         <ActivityDrawer
           machines={machines ?? []}

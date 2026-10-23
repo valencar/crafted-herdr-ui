@@ -4,6 +4,7 @@ import type { AppState } from "../lib/bindings/AppState";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
 import type { Settings } from "../lib/bindings/Settings";
 import { actionErrorMessage } from "../lib/format";
+import type { Row } from "../lib/grouping";
 import { toActionError } from "../lib/ipc";
 
 export type GroupBy = "project" | "workbox" | "status";
@@ -43,6 +44,11 @@ type AppStore = {
   /** The ⌘K command palette is showing. */
   paletteOpen: boolean;
   /**
+   * A pane the user asked to close from somewhere that unmounts as it asks (the palette). `App`
+   * renders the confirmation for it (`ClosePaneHost`), so the dialog outlives the asker.
+   */
+  closeRow: Row | null;
+  /**
    * The herdr version whose "older than supported" banner was dismissed (`""` for an unreadable
    * one). Kept here so it survives going between Home and a Workbox screen.
    */
@@ -76,6 +82,7 @@ type AppStore = {
   setView: (view: View) => void;
   setActivityOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
+  setCloseRow: (row: Row | null) => void;
   dismissVersionBanner: (version: string) => void;
   /** Shows an action error. Every report restarts the auto-dismiss timer. */
   reportError: (e: unknown) => void;
@@ -132,6 +139,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   view: { kind: "dashboard" },
   activityOpen: false,
   paletteOpen: false,
+  closeRow: null,
   dismissedVersion: null,
   toast: null,
   toastTone: "error",
@@ -153,6 +161,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setView: (view) => set({ view }),
   setActivityOpen: (activityOpen) => set({ activityOpen }),
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  setCloseRow: (closeRow) => set({ closeRow }),
   dismissVersionBanner: (dismissedVersion) => set({ dismissedVersion }),
   reportError: (e) => {
     get().showToast(actionErrorMessage(toActionError(e)), "error");

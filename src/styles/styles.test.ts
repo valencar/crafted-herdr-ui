@@ -589,6 +589,24 @@ describe("motion tokens", () => {
     }
   });
 
+  it("palette_marks_are_an_underline_in_the_needs_colour", () => {
+    const mark = rule(".palette-mark");
+    expect(mark).toContain("text-decoration: underline");
+    expect(mark).toContain("var(--st-needs)");
+    expect(mark).toContain("color: var(--text)");
+    expect(mark).toContain("background: transparent");
+    expect(mark).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+
+  it("the_palette_chevron_shows_on_hover_and_on_the_active_option_only", () => {
+    expect(rule(".palette-chev")).toContain("opacity: 0");
+    expect(
+      rule(
+        ".palette-option:hover .palette-chev,\n.palette-option.is-active .palette-chev",
+      ),
+    ).toContain("opacity: 1");
+  });
+
   it("figures_are_tabular", () => {
     const body = rulesOf("global.css").find((r) => r.selector === "body");
     expect(body?.body).toContain("font-variant-numeric: tabular-nums");

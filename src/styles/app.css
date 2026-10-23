@@ -2657,6 +2657,76 @@ select.field {
   color: var(--text-4);
   font-size: var(--fs-small);
 }
+/* The letters the query matched: underlined in the needs-you colour, never a fill. */
+.palette-mark {
+  background: transparent;
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--st-needs);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+/* What the selected option does on ↵ and ⇥. */
+.palette-keys {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.palette-option > .kbd {
+  flex: none;
+}
+.palette-grow {
+  flex: 1;
+}
+/* The mouse's way into an agent's actions. It is not focusable (the keyboard has ⇥) and is
+   drawn only on the hovered or selected option. */
+.palette-chev {
+  flex: none;
+  padding: 0 6px;
+  color: var(--text-3);
+  font-size: var(--fs-lead);
+  line-height: 1;
+  border-radius: var(--radius-s);
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    opacity var(--dur-fast),
+    background-color var(--dur-fast),
+    color var(--dur-fast);
+}
+.palette-option:hover .palette-chev,
+.palette-option.is-active .palette-chev {
+  opacity: 1;
+}
+.palette-chev:hover {
+  background: var(--chip);
+  color: var(--text);
+}
+/* The agent whose actions are listed. */
+.palette-crumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+.palette-crumb-name {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 600;
+}
+.palette-option.is-danger .palette-label {
+  color: var(--danger);
+}
 .palette-empty {
   margin: 0;
   padding: 16px;

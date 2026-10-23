@@ -5,6 +5,7 @@ import { HEALTH_LABEL, agentNameProblem, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { markSeen } from "../lib/openRow";
+import { REPLY_BOX_ID } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 import { CommandBox, CopyButton } from "./CommandBox";
 import { CloseConfirm } from "./CloseConfirm";
@@ -79,7 +80,6 @@ export function Inspector({
   }, [machineId, paneId, row.terminalId, attachMode]);
 
   // Reply
-  const replyId = useId();
   const hintId = useId();
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
@@ -187,12 +187,12 @@ export function Inspector({
             void send();
           }}
         >
-          <label htmlFor={replyId} className="inspector-label">
+          <label htmlFor={REPLY_BOX_ID} className="inspector-label">
             Reply without opening a terminal
           </label>
           <div className="reply-line">
             <input
-              id={replyId}
+              id={REPLY_BOX_ID}
               type="text"
               className="field"
               placeholder={`Send to ${row.name}…`}

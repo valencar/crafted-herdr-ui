@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyScore } from "./fuzzy";
+import { fuzzyMatch, fuzzyScore } from "./fuzzy";
 
 describe("fuzzyScore", () => {
   it("matches_a_subsequence_across_words", () => {
@@ -45,5 +45,20 @@ describe("fuzzyScore", () => {
 
   it("matches_everything_for_an_empty_query", () => {
     expect(fuzzyScore("", "anything")).not.toBeNull();
+  });
+});
+
+describe("fuzzyMatch", () => {
+  it("match_positions", () => {
+    expect(fuzzyMatch("mig", "migrate-db")?.positions).toEqual([0, 1, 2]);
+    expect(fuzzyMatch("md", "migrate-db")?.positions).toEqual([0, 8]);
+  });
+
+  it("is_null_when_nothing_matches_and_scores_like_fuzzy_score", () => {
+    expect(fuzzyMatch("xb", "buildbox")).toBeNull();
+    expect(fuzzyMatch("wa", "web-app")?.score).toBe(
+      fuzzyScore("wa", "web-app"),
+    );
+    expect(fuzzyMatch("", "anything")?.positions).toEqual([]);
   });
 });
