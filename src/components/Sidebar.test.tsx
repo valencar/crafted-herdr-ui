@@ -511,4 +511,60 @@ describe("Sidebar", () => {
       HTMLElement.prototype.scrollIntoView = original;
     }
   });
+
+  describe("faded names stay in tooltips", () => {
+    function hover(el: Element): string | null {
+      fireEvent.pointerEnter(el);
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      const text = document.querySelector(".tooltip")?.textContent ?? null;
+      fireEvent.pointerLeave(el);
+      return text;
+    }
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("a_terminal_row_tooltip_has_its_title_and_status", () => {
+      const machines = [withSnapshot("buildbox")];
+      useAppStore.setState({
+        state: {
+          machines,
+          herdr_version: "0.9.4",
+          herdr_path: null,
+          generated_at_ms: 1,
+        },
+      });
+      openTab("w1:p1", "a-very-long-agent-title-that-fades-at-the-edge");
+      act(() =>
+        useTerminalStore
+          .getState()
+          .updateTab("buildbox::w1:p1", { state: "live" }),
+      );
+      renderSidebar(false, { machines });
+      const term = document.querySelector("button.nav-term");
+      const text = hover(term!);
+      expect(text).toContain("a-very-long-agent-title-that-fades-at-the-edge");
+      expect(text).toContain("Needs input");
+    });
+
+    it("a_project_row_tooltip_has_name_workbox_and_status", () => {
+      renderSidebar(false, { projects: [project("api-service")] });
+      const row = screen.getByRole("button", { name: /api-service/ });
+      const text = hover(row);
+      expect(text).toContain("api-service");
+      expect(text).toContain("buildbox");
+      expect(text).toContain("Shell");
+    });
+
+    it("a_workbox_row_has_a_tooltip_with_its_label", () => {
+      renderSidebar(false);
+      const row = screen.getByRole("button", { name: /^gpubox/ });
+      expect(hover(row)).toBe("gpubox: Attention");
+    });
+  });
 });

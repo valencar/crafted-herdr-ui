@@ -567,10 +567,6 @@ kbd {
 .nav-link:focus-visible .nav-slot-rest:not(:last-child) {
   opacity: 0;
 }
-.nav-dot {
-  display: inline-flex;
-  flex: none;
-}
 .nav-box {
   display: flex;
   flex-direction: column;

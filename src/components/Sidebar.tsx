@@ -11,7 +11,7 @@ import { useAppStore } from "../store/appStore";
 import { HomeIcon } from "../terminal/HomeIcon";
 import {
   tabDotStatus,
-  tabStatus,
+  tabName,
   tabTreeName,
   useRowsByKey,
 } from "../terminal/tabInfo";
@@ -268,27 +268,26 @@ export function Sidebar({
       </div>
       {machines.map((m) => (
         <div className="nav-box" key={m.id}>
-          <button
-            type="button"
-            className={`nav-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
-            aria-current={m.id === activeWorkbox ? "page" : undefined}
-            onClick={() => onWorkbox(m.id)}
-          >
-            <span className="nav-label">{m.label}</span>
-            <span className="health" data-health={m.health.kind}>
-              <HealthDot health={m.health} />
-              {HEALTH_LABEL[m.health.kind]}
-            </span>
-            <span className="count">{agentsByMachine.get(m.id) ?? 0}</span>
-          </button>
+          <Tooltip label={`${m.label}: ${HEALTH_LABEL[m.health.kind]}`}>
+            <button
+              type="button"
+              className={`nav-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
+              aria-current={m.id === activeWorkbox ? "page" : undefined}
+              onClick={() => onWorkbox(m.id)}
+            >
+              <span className="nav-label">{m.label}</span>
+              <span className="health" data-health={m.health.kind}>
+                <HealthDot health={m.health} />
+                {HEALTH_LABEL[m.health.kind]}
+              </span>
+              <span className="count">{agentsByMachine.get(m.id) ?? 0}</span>
+            </button>
+          </Tooltip>
           {(tabsByMachine.get(m.id) ?? []).map((tab) => {
             const row = rows.get(tab.tabKey);
             const n = tabShortcut(tab.tabKey, tabs, machines);
             return (
-              <Tooltip
-                key={tab.tabKey}
-                label={tabStatus(tab, row) ?? tab.title}
-              >
+              <Tooltip key={tab.tabKey} label={tabName(tab, row)}>
                 <button
                   type="button"
                   className="nav-term"
@@ -318,21 +317,21 @@ export function Sidebar({
       {shownProjects.map((g) => {
         const status = worstStatus(g);
         return (
-          <button
+          <Tooltip
             key={g.key}
-            type="button"
-            className="nav-item"
-            onClick={() => onProject(g)}
+            label={`${g.name} on ${g.machineLabel} · ${STATUS_LABEL[status]}`}
           >
-            <Tooltip label={STATUS_LABEL[status]}>
-              <span className="nav-dot">
-                <StatusDot status={status} />
-              </span>
-            </Tooltip>
-            <span className="sr-only">{STATUS_LABEL[status]}: </span>
-            <span className="nav-label">{g.name}</span>
-            <span className="mono nav-sub">{g.machineLabel}</span>
-          </button>
+            <button
+              type="button"
+              className="nav-item"
+              onClick={() => onProject(g)}
+            >
+              <StatusDot status={status} />
+              <span className="sr-only">{STATUS_LABEL[status]}: </span>
+              <span className="nav-label">{g.name}</span>
+              <span className="mono nav-sub">{g.machineLabel}</span>
+            </button>
+          </Tooltip>
         );
       })}
       {hidden > 0 && (
