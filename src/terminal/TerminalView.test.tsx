@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TermEvent } from "../lib/bindings/TermEvent";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
+import type { AppState } from "../lib/bindings/AppState";
+import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
 
 type FakeTerm = {
@@ -114,6 +117,7 @@ import { copyText, invokeTyped, openTerm } from "../lib/ipc";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
 import { HOME, useTerminalStore } from "./terminalStore";
 import { xtermTheme } from "./xtermTheme";
+import { useResolvedTheme } from "../lib/theme";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const open = vi.mocked(openTerm);
@@ -185,6 +189,39 @@ afterEach(() => {
 });
 
 describe("TerminalView", () => {
+  it("terminal_recolors_without_recreating", async () => {
+    useResolvedTheme.setState({ resolved: "dark" });
+    render(<Harness />);
+    await flush();
+    expect(h.terms).toHaveLength(1);
+    // Count every assignment of `options.theme` from here on.
+    const sets: unknown[] = [];
+    let current = term().options.theme;
+    Object.defineProperty(term().options, "theme", {
+      get: () => current,
+      set: (value) => {
+        sets.push(value);
+        current = value;
+      },
+    });
+    const root = document.documentElement;
+    const token = vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (name: string) =>
+        name === "--bg" ? "#f7f7f8" : "#17181b",
+    } as unknown as CSSStyleDeclaration);
+    root.dataset.theme = "light";
+    act(() => useResolvedTheme.setState({ resolved: "light" }));
+    token.mockRestore();
+    expect(sets).toHaveLength(1);
+    expect(sets[0]).toMatchObject({ background: "#f7f7f8" });
+    // The same terminal, scrollback and session intact.
+    expect(h.terms).toHaveLength(1);
+    expect(term().dispose).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledTimes(1);
+    delete root.dataset.theme;
+    useResolvedTheme.setState({ resolved: "dark" });
+  });
+
   it("opens_the_session_at_the_fitted_size_with_the_theme_and_options", async () => {
     render(<Harness />);
     await flush();
@@ -295,13 +332,13 @@ describe("TerminalView", () => {
     render(<Harness />);
     await flush();
     emit({ kind: "exit", code: 0 });
-    expect(screen.getByText("Detached")).toBeInTheDocument();
+    expect(screen.getByText("Detached. The attach ended.")).toBeInTheDocument();
     expect(tabState()).toMatchObject({ state: "detached", termId: null });
     await user.click(screen.getByRole("button", { name: "Reattach" }));
     await flush();
     expect(open).toHaveBeenCalledTimes(2);
     expect(tabState()).toMatchObject({ state: "live", termId: 8 });
-    expect(screen.queryByText("Detached")).toBeNull();
+    expect(screen.queryByText("Detached. The attach ended.")).toBeNull();
     // Both sessions stream into the one terminal.
     expect(h.terms).toHaveLength(1);
     emit({ kind: "data", data: "again" });
@@ -337,6 +374,371 @@ describe("TerminalView", () => {
     await flush();
     expect(tabState()).toMatchObject({ state: "live", termId: 21 });
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  describe("the bar under a session that ended", () => {
+    const snapshot = raw.result.snapshot as unknown as Snapshot;
+    /** The app state with buildbox listed (remote unless `local`), optionally without this tab's pane. */
+    const listed = (opts: { local?: boolean; gone?: boolean } = {}) => {
+      const snap = structuredClone(snapshot);
+      if (opts.gone) {
+        snap.agents = snap.agents.filter((a) => a.pane_id !== "w1:p1");
+        snap.panes = snap.panes.filter((p) => p.pane_id !== "w1:p1");
+      }
+      const state: AppState = {
+        machines: [
+          {
+            id: "buildbox",
+            label: "buildbox",
+            target: opts.local ? null : "buildbox",
+            session: "default",
+            is_local: opts.local ?? false,
+            health: { kind: "online" },
+            snapshot: snap,
+            last_ok_ms: 1,
+            ages: {},
+          },
+        ],
+        herdr_version: "0.9.4",
+        herdr_path: "/home/dev/.local/bin/herdr",
+        generated_at_ms: 1,
+      };
+      act(() => useAppStore.setState({ state }));
+    };
+    /** Every open from now on ends at once with `code`. */
+    const failWith = (code: number | null) =>
+      open.mockImplementation(async (_t, _c, _r, onEvent) => {
+        emitters.push(onEvent);
+        queueMicrotask(() => onEvent({ kind: "exit", code }));
+        return 50;
+      });
+
+    afterEach(() => act(() => useAppStore.setState({ state: null })));
+
+    it("an_exit_with_code_1_says_so_and_the_output_stays_uncovered", async () => {
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(
+        screen.getByText("The attach command stopped with exit 1."),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Its output is above.")).toBeInTheDocument();
+      expect(tabState()).toMatchObject({ state: "detached", exitCode: 1 });
+      // The host (xterm) is a sibling of the bar, and still there.
+      const host = document.querySelector(".term-host");
+      expect(host).not.toBeNull();
+      expect(host?.contains(document.querySelector(".term-bar"))).toBe(false);
+    });
+
+    it("a_remote_255_names_the_workbox", async () => {
+      listed();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 255 });
+      expect(
+        screen.getByText("Couldn’t reach buildbox over ssh."),
+      ).toBeInTheDocument();
+    });
+
+    it("a_local_255_is_a_plain_non_zero_exit", async () => {
+      listed({ local: true });
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 255 });
+      expect(
+        screen.getByText("The attach command stopped with exit 255."),
+      ).toBeInTheDocument();
+    });
+
+    it("going_live_again_clears_the_exit_code", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(tabState().exitCode).toBe(1);
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(tabState()).toMatchObject({ state: "live", exitCode: null });
+    });
+
+    it("a_session_that_goes_live_and_dies_at_once_still_counts_as_a_failed_attempt", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      // The pty starts (the tab is live), then the attach command inside fails.
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(tabState().state).toBe("live");
+      emit({ kind: "exit", code: 1 });
+      expect(screen.getByText("Reattach failed (attempt 1).")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(screen.getByText("Reattach failed (attempt 2).")).toBeVisible();
+    });
+
+    it("a_session_that_waits_on_a_human_before_failing_still_counts", async () => {
+      // The attach script prints "herdr not found … Press Enter to close" and waits: the session
+      // stays live for a long time, then exits 127. That is a failed attempt, not a working one.
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 127 });
+      const now = vi.spyOn(Date, "now");
+      const start = Date.now();
+      try {
+        for (const n of [1, 2]) {
+          await user.click(screen.getByRole("button", { name: "Reattach" }));
+          await flush();
+          expect(tabState().state).toBe("live");
+          now.mockReturnValue(start + n * 30_000);
+          emit({ kind: "exit", code: 127 });
+          expect(
+            screen.getByText(`Reattach failed (attempt ${n}).`),
+          ).toBeVisible();
+        }
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it("a_normal_end_resets_the_count", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(tabState().attempts).toBe(1);
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      expect(tabState().attempts).toBe(0);
+      expect(screen.queryByText(/Reattach failed/)).toBeNull();
+    });
+
+    it("a_failed_open_after_Reattach_is_still_called_Reattach_failed", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      open.mockRejectedValueOnce({ kind: "invalid", message: "No can do." });
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(tabState().state).toBe("error");
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Reattach failed (attempt 1).",
+      );
+      expect(screen.getByRole("alert")).not.toHaveTextContent("Retry failed");
+      // The button says Retry now, and a click on it renames the line.
+      open.mockRejectedValueOnce({ kind: "invalid", message: "No can do." });
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      await flush();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Retry failed (attempt 2).",
+      );
+    });
+
+    it("the_output_is_lifted_above_the_bar_when_a_session_ends_and_not_before", async () => {
+      render(<Harness />);
+      await flush();
+      expect(term().write).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^\r\n/),
+      );
+      // 40 px of bar over 20 px rows (600 px / 30 rows): two rows.
+      const height = vi
+        .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+        .mockReturnValue(40);
+      const host = vi
+        .spyOn(HTMLElement.prototype, "clientHeight", "get")
+        .mockReturnValue(600);
+      term().rows = 30;
+      try {
+        emit({ kind: "exit", code: 1 });
+        expect(term().write).toHaveBeenCalledWith("\r\n\r\n");
+      } finally {
+        height.mockRestore();
+        host.mockRestore();
+      }
+    });
+
+    it("an_unmeasurable_bar_still_lifts_the_output", async () => {
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(term().write).toHaveBeenCalledWith("\r\n\r\n\r\n\r\n");
+    });
+
+    it("a_reattach_that_fails_again_says_so_and_counts_up", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      // Plain detach: no failure to report yet.
+      expect(screen.queryByText(/Reattach failed/)).toBeNull();
+      failWith(1);
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(screen.getByText("Reattach failed (attempt 1).")).toBeVisible();
+      expect(tabState()).toMatchObject({ state: "detached", attempts: 1 });
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(screen.getByText("Reattach failed (attempt 2).")).toBeVisible();
+      expect(screen.queryByText("Reattach failed (attempt 1).")).toBeNull();
+      // The reason is still there under the count.
+      expect(
+        screen.getByText("The attach command stopped with exit 1."),
+      ).toBeVisible();
+    });
+
+    it("while_reattaching_the_bar_says_so_and_its_buttons_are_disabled", async () => {
+      listed();
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      let finish: (id: number) => void = () => {};
+      open.mockImplementationOnce(
+        () =>
+          new Promise<number>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      expect(screen.getByText("Reattaching…")).toBeInTheDocument();
+      for (const name of ["Reattach", "Copy attach command", /^Open in /]) {
+        expect(screen.getByRole("button", { name })).toBeDisabled();
+      }
+      // A hung open always has a way out.
+      expect(screen.getByRole("button", { name: "Close tab" })).toBeEnabled();
+      await act(async () => finish(60));
+      expect(screen.queryByText("Reattaching…")).toBeNull();
+    });
+
+    it("a_failed_open_keeps_its_message_in_the_bar_with_Retry_and_an_attempt_count", async () => {
+      const user = userEvent.setup();
+      open.mockReset().mockRejectedValue({
+        kind: "invalid",
+        message: "Close a terminal tab first (16 open).",
+      });
+      render(<Harness />);
+      await flush();
+      const bar = screen.getByRole("alert");
+      expect(bar).toHaveTextContent("Close a terminal tab first (16 open).");
+      expect(bar).not.toHaveTextContent("failed (attempt");
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      await flush();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Retry failed (attempt 1).",
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Close a terminal tab first (16 open).",
+      );
+      expect(screen.getByRole("button", { name: "Retry" })).toHaveFocus();
+    });
+
+    it("a_gone_pane_offers_only_Close_tab", async () => {
+      listed({ gone: true });
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      expect(
+        screen.getByText("This pane no longer exists on buildbox."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Copy attach command" }),
+      ).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
+    });
+
+    it("Close_tab_takes_focus_when_the_pane_disappears_after_the_session_ended", async () => {
+      listed();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      expect(screen.getByRole("button", { name: "Reattach" })).toHaveFocus();
+      listed({ gone: true });
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
+    });
+
+    it("a_workbox_without_a_snapshot_does_not_make_the_pane_look_gone", async () => {
+      listed();
+      act(() =>
+        useAppStore.setState((s) => ({
+          state: s.state && {
+            ...s.state,
+            machines: s.state.machines.map((m) => ({ ...m, snapshot: null })),
+          },
+        })),
+      );
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      expect(screen.queryByText(/no longer exists/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Reattach" })).toBeVisible();
+    });
+
+    it("Copy_attach_command_copies_the_text_from_Rust", async () => {
+      listed();
+      const user = userEvent.setup();
+      invoke.mockImplementation(async (name: string) =>
+        name === "copy_attach_command" ? "ssh -t buildbox herdr attach" : null,
+      );
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      await user.click(
+        screen.getByRole("button", { name: "Copy attach command" }),
+      );
+      expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+        machineId: "buildbox",
+        paneId: "w1:p1",
+      });
+      expect(copy).toHaveBeenCalledWith("ssh -t buildbox herdr attach");
+    });
+
+    it("Open_in_the_terminal_opens_the_row_outside_the_app", async () => {
+      listed();
+      const user = userEvent.setup();
+      invoke.mockImplementation(async (name: string) =>
+        name === "get_terminals"
+          ? { installed: ["ghostty"], default: "ghostty" }
+          : null,
+      );
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      await flush(); // the terminal list arrives
+      await user.click(screen.getByRole("button", { name: "Open in Ghostty" }));
+      expect(invoke).toHaveBeenCalledWith("open_session", {
+        machineId: "buildbox",
+        paneId: "w1:p1",
+      });
+    });
+
+    it("the_default_button_takes_focus_and_Escape_is_left_alone", async () => {
+      const user = userEvent.setup();
+      const onKey = vi.fn();
+      document.addEventListener("keydown", onKey);
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(screen.getByRole("button", { name: "Reattach" })).toHaveFocus();
+      await user.keyboard("{Escape}");
+      expect(onKey).toHaveBeenCalledTimes(1);
+      expect(onKey.mock.calls[0][0].defaultPrevented).toBe(false);
+      document.removeEventListener("keydown", onKey);
+      // And Enter reattaches.
+      await user.keyboard("{Enter}");
+      await flush();
+      expect(open).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("unmount_closes_the_session_and_disposes_the_terminal", async () => {

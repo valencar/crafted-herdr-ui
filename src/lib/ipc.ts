@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { AppState } from "./bindings/AppState";
 import type { ActionError } from "./bindings/ActionError";
@@ -70,6 +71,7 @@ export type CommandResults = {
   term_resize: null;
   term_close: null;
   show_main_open_row: null;
+  set_visible_row: null;
 };
 export type CommandName = keyof CommandResults;
 
@@ -147,6 +149,8 @@ export type CommandArgs = {
   /** Kills the attach client; the herdr pane keeps running. */
   term_close: { id: number };
   show_main_open_row: { machineId: string; paneId: string };
+  /** The pane tab the main window is showing (`${machineId}::${paneId}`), or `null`; Rust skips notifications for it. */
+  set_visible_row: { key: string | null };
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([
@@ -202,6 +206,21 @@ export async function invokeTyped<K extends CommandName>(
  */
 export function copyText(text: string): Promise<void> {
   return writeText(text);
+}
+
+/**
+ * Tells the OS the theme, so native pieces (context menus, the title bar) match the page.
+ * `null` follows the system. On macOS the theme is app-wide, and an explicit one pins the
+ * appearance of every window. Failures are ignored: the page itself is already drawn.
+ */
+export async function setWindowTheme(
+  theme: "dark" | "light" | null,
+): Promise<void> {
+  try {
+    await getCurrentWindow().setTheme(theme);
+  } catch {
+    // No window API (a test, a browser) or the grant is missing.
+  }
 }
 
 /** The current state, for a UI that started after the first `"state"` event. */

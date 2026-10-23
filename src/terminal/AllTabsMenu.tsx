@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { StatusDot } from "../components/StatusDot";
 import type { Row } from "../lib/grouping";
-import { isKeyForMenu } from "../lib/uiHelpers";
+import { useMenuBehavior } from "../lib/useMenuBehavior";
 import { HomeIcon } from "./HomeIcon";
 import { tabDotStatus, tabName, tabStatus } from "./tabInfo";
 import type { TabGroup } from "./tabOrder";
@@ -34,47 +35,13 @@ export function AllTabsMenu({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const needsId = useId();
 
-  useEffect(() => {
-    if (!open) return;
-    const items = () => [
-      ...(rootRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ??
-        []),
-    ];
-    (
-      items().find((i) => i.getAttribute("aria-current") === "true") ??
-      items()[0]
-    )?.focus();
-    const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      // Not this menu's key: something else already handled it, or it was typed in another
-      // control (the palette's input).
-      if (!isKeyForMenu(rootRef.current, e)) return;
-      if (e.key === "Escape") {
-        setOpen(false);
-        buttonRef.current?.focus();
-      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        const all = items();
-        const at = all.indexOf(document.activeElement as HTMLElement);
-        const step = e.key === "ArrowDown" ? 1 : -1;
-        all[(at + step + all.length) % all.length]?.focus();
-      }
-    };
-    // Focus moving to another control (the palette opening) leaves the menu behind: close it.
-    const onFocusIn = (e: FocusEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("focusin", onFocusIn);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("focusin", onFocusIn);
-    };
-  }, [open]);
+  useMenuBehavior(open, setOpen, {
+    items: rootRef,
+    contains: (t) => rootRef.current?.contains(t) === true,
+    returnFocus: () => buttonRef.current?.focus(),
+    initialFocus: (items) =>
+      items.find((i) => i.getAttribute("aria-current") === "true"),
+  });
 
   const choose = (key: string) => {
     setOpen(false);
@@ -133,11 +100,7 @@ export function AllTabsMenu({
                     aria-current={tab.tabKey === activeKey ? "true" : undefined}
                     onClick={() => choose(tab.tabKey)}
                   >
-                    <span
-                      className="dot"
-                      aria-hidden="true"
-                      data-status={tabDotStatus(tab, row)}
-                    />
+                    <StatusDot status={tabDotStatus(tab, row)} />
                     <span className="mono menu-tab-title">{tab.title}</span>
                     {words && <span className="muted">{words}</span>}
                   </button>

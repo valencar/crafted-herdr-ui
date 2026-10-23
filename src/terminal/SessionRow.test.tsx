@@ -1,7 +1,7 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useMemo } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -168,14 +168,87 @@ describe("SessionRow", () => {
     );
   });
 
+  it("tab_tooltip_has_status_and_shortcut", () => {
+    vi.useFakeTimers();
+    try {
+      open("buildbox", "w1:p1", "planner");
+      open("buildbox", "w1:p2", "infra");
+      render(<Harness machineId="buildbox" />);
+      const second = screen.getByRole("button", { name: /^infra/ });
+      expect(second).not.toHaveAttribute("title");
+      fireEvent.pointerEnter(second);
+      act(() => {
+        vi.advanceTimersByTime(350);
+      });
+      // Home is ⌘1, so the second tab is ⌘3.
+      expect(document.querySelector(".tooltip")).toHaveTextContent("Working⌘3");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("session_tab_tooltip_uses_the_flat_shortcut", () => {
+    vi.useFakeTimers();
+    try {
+      open("buildbox", "w1:p1", "planner");
+      open("buildbox", "w1:p2", "infra");
+      open("gpubox", "w1:p1", "tester");
+      render(<Harness machineId="gpubox" />);
+      // Home is ⌘1, buildbox's two tabs ⌘2 and ⌘3, so this is the strip's fourth.
+      fireEvent.pointerEnter(screen.getByRole("button", { name: /^tester/ }));
+      act(() => {
+        vi.advanceTimersByTime(350);
+      });
+      expect(document.querySelector(".tooltip")).toHaveTextContent(/⌘4$/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("middle_click_closes_a_tab", () => {
     open("buildbox", "w1:p1", "planner");
     open("buildbox", "w1:p2", "infra");
-    open("gpubox", "w1:p1", "tester");
-    render(<Harness machineId="gpubox" />);
-    // Home is ⌘1, buildbox's two tabs ⌘2 and ⌘3, so this is the strip's fourth.
-    const tab = screen.getByRole("button", { name: /^tester/ });
-    expect(tab.getAttribute("title")).toMatch(/\(⌘4\)$/);
+    render(<Harness machineId="buildbox" />);
+    const tab = screen
+      .getByRole("button", { name: /^planner/ })
+      .closest(".session-tab")!;
+    fireEvent(tab, new MouseEvent("auxclick", { button: 2, bubbles: true }));
+    expect(useTerminalStore.getState().tabs).toHaveLength(2);
+    fireEvent(tab, new MouseEvent("auxclick", { button: 1, bubbles: true }));
+    expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+      "buildbox::w1:p2",
+    ]);
+  });
+
+  it("a_middle_press_does_not_start_autoscroll", () => {
+    open("buildbox", "w1:p1", "planner");
+    render(<Harness machineId="buildbox" />);
+    const tab = screen
+      .getByRole("button", { name: /^planner/ })
+      .closest(".session-tab")!;
+    const middle = new MouseEvent("mousedown", {
+      button: 1,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(tab, middle);
+    expect(middle.defaultPrevented).toBe(true);
+    const left = new MouseEvent("mousedown", {
+      button: 0,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(tab, left);
+    expect(left.defaultPrevented).toBe(false);
+  });
+
+  it("active_and_needs_dots_are_live", () => {
+    open("buildbox", "w1:p1", "planner");
+    open("buildbox", "w1:p2", "infra");
+    render(<Harness machineId="buildbox" />);
+    const dots = document.querySelectorAll(".session-tab .sdot");
+    expect(dots).toHaveLength(2);
+    for (const dot of dots) expect(dot).toHaveClass("live");
   });
 
   it("close_button_detaches_that_tab_only", async () => {
@@ -299,6 +372,17 @@ describe("SessionRow", () => {
       expect(screen.queryByRole("button", { name: "All tabs" })).toBeNull();
     });
 
+    it("marks_overflow", () => {
+      open("buildbox", "w1:p1", "planner");
+      render(<Harness machineId="buildbox" />);
+      const row = nav();
+      expect(row).not.toHaveAttribute("data-overflowing");
+      sizes.scroll = 900;
+      sizes.client = 300;
+      act(() => open("buildbox", "w1:p2", "infra"));
+      expect(row).toHaveAttribute("data-overflowing", "true");
+    });
+
     it("the_menu_closes_on_escape_or_an_outside_press_and_arrows_move", async () => {
       const user = userEvent.setup();
       open("buildbox", "w1:p1", "planner");
@@ -335,6 +419,79 @@ describe("SessionRow", () => {
       render(<Harness machineId="buildbox" />);
       const button = screen.getByRole("button", { name: "All tabs" });
       expect(within(button).getByText("1 needs input")).toBeInTheDocument();
+    });
+  });
+
+  describe("dragging", () => {
+    /** Each tab 100 px wide, side by side from x = 0; the row is 400 x 44. */
+    function layout() {
+      vi.spyOn(
+        HTMLElement.prototype,
+        "getBoundingClientRect",
+      ).mockImplementation(function (this: HTMLElement) {
+        const tabs = Array.from(document.querySelectorAll(".session-tab"));
+        const i = tabs.indexOf(this);
+        const left = this.classList.contains("session-row-scroll")
+          ? 0
+          : i * 100;
+        const width = this.classList.contains("session-row-scroll") ? 400 : 100;
+        return {
+          left,
+          right: left + width,
+          top: 0,
+          bottom: 44,
+          width,
+          height: 44,
+          x: left,
+          y: 0,
+          toJSON: () => ({}),
+        };
+      });
+    }
+    afterEach(() => vi.restoreAllMocks());
+    const order = () => useTerminalStore.getState().tabs.map((t) => t.title);
+
+    it("dragging_a_tab_shows_a_drop_line_and_reorders_without_activating", () => {
+      open("buildbox", "w1:p1", "planner");
+      open("buildbox", "w1:p2", "infra");
+      open("buildbox", "w2:p1", "tester");
+      act(() => useTerminalStore.getState().activate(HOME));
+      layout();
+      render(<Harness machineId="buildbox" />);
+      const main = screen.getByRole("button", { name: /^tester/ });
+      fireEvent.pointerDown(main, { button: 0, clientX: 250, clientY: 20 });
+      fireEvent.pointerMove(window, { clientX: 120, clientY: 20 });
+      expect(main.closest(".session-tab")).toHaveAttribute(
+        "data-dragging",
+        "true",
+      );
+      const line = nav().querySelector(".tab-drop");
+      expect(line).not.toBeNull();
+      expect(line?.nextElementSibling).toBe(
+        screen.getByRole("button", { name: /^infra/ }).closest(".session-tab"),
+      );
+      fireEvent.pointerUp(window, { clientX: 120, clientY: 20 });
+      fireEvent.click(main);
+      expect(order()).toEqual(["planner", "tester", "infra"]);
+      expect(useTerminalStore.getState().activeKey).toBe(HOME);
+      expect(nav().querySelector(".tab-drop")).toBeNull();
+    });
+
+    it("the_close_mark_and_other_buttons_start_no_drag", () => {
+      open("buildbox", "w1:p1", "planner");
+      open("buildbox", "w1:p2", "infra");
+      layout();
+      render(<Harness machineId="buildbox" />);
+      const main = screen.getByRole("button", { name: /^planner/ });
+      fireEvent.pointerDown(main, { button: 1, clientX: 50, clientY: 20 });
+      fireEvent.pointerMove(window, { clientX: 250, clientY: 20 });
+      fireEvent.pointerUp(window, { clientX: 250, clientY: 20 });
+      const close = screen.getByRole("button", { name: "Close tab planner" });
+      fireEvent.pointerDown(close, { button: 0, clientX: 90, clientY: 20 });
+      fireEvent.pointerMove(window, { clientX: 250, clientY: 20 });
+      fireEvent.pointerUp(window, { clientX: 250, clientY: 20 });
+      expect(nav().querySelector(".tab-drop")).toBeNull();
+      expect(order()).toEqual(["planner", "infra"]);
     });
   });
 });

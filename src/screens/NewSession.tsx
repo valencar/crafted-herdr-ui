@@ -1,13 +1,16 @@
+import { Kbd } from "../components/Kbd";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { KindBadge } from "../components/KindBadge";
 import { Sheet } from "../components/Sheet";
+import { Tooltip } from "../components/Tooltip";
 import type { ActionError } from "../lib/bindings/ActionError";
 import type { NewSessionRequest } from "../lib/bindings/NewSessionRequest";
 import type { Placement } from "../lib/bindings/Placement";
 import { actionErrorMessage, agentNameProblem, plural } from "../lib/format";
 import { toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
+import { saveSettings } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 
 const PREVIEW_DEBOUNCE_MS = 150;
@@ -60,6 +63,9 @@ export function NewSession({ terminalName }: Props) {
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
   const setPendingOpen = useAppStore((s) => s.setPendingOpen);
   const openTarget = useAppStore((s) => s.settings?.open_target ?? "app");
+  const savedKind = useAppStore((s) => s.settings?.new_session_kind ?? null);
+  const hiddenKinds = useAppStore((s) => s.settings?.new_session_hidden_kinds);
+  const hideShell = useAppStore((s) => s.settings?.new_session_hide_shell);
   // Read once: the prefill only seeds the form.
   const [prefill] = useState(() => useAppStore.getState().sheetPrefill);
 
@@ -78,7 +84,7 @@ export function NewSession({ terminalName }: Props) {
   const [worktree, setWorktree] = useState(false);
   const [branch, setBranch] = useState("");
   const [kinds, setKinds] = useState<string[] | null>(null);
-  // `undefined` = the default (the first agent kind).
+  // `undefined` = the default (the saved Run choice, else a plain shell).
   const [kindChoice, setKindChoice] = useState<string | null | undefined>();
   const [name, setName] = useState("");
   const [placementChoice, setPlacementChoice] = useState<string | null>(null);
@@ -141,8 +147,25 @@ export function NewSession({ terminalName }: Props) {
     };
   }, [reportError]);
 
+  // The Run options: the listed kinds minus the hidden ones, then Plain shell (`null`) unless
+  // hidden. Never empty: with nothing left, Plain shell is offered anyway.
+  const runOptions = useMemo<(string | null)[]>(() => {
+    const shown: (string | null)[] = (kinds ?? []).filter(
+      (k) => !hiddenKinds?.includes(k),
+    );
+    if (!hideShell) shown.push(null);
+    return shown.length > 0 ? shown : [null];
+  }, [kinds, hiddenKinds, hideShell]);
+  // A click wins while its option is still offered. Otherwise: the saved choice if it is offered,
+  // else Plain shell, else the first option.
   const kind: string | null =
-    kindChoice !== undefined ? kindChoice : (kinds?.[0] ?? null);
+    kindChoice !== undefined && runOptions.includes(kindChoice)
+      ? kindChoice
+      : runOptions.includes(savedKind)
+        ? savedKind
+        : runOptions.includes(null)
+          ? null
+          : runOptions[0];
 
   const recentFolders = useMemo(() => {
     const seen = new Set<string>();
@@ -262,6 +285,12 @@ export function NewSession({ terminalName }: Props) {
           paneId: created.paneId,
         });
       }
+      // Remember the Run choice only now that it made a session.
+      const rememberedKind =
+        useAppStore.getState().settings?.new_session_kind ?? null;
+      if (sent.kind !== rememberedKind) {
+        saveSettings({ new_session_kind: sent.kind });
+      }
       // Closing a sheet the user already left could close the next one they opened.
       if (mounted.current) close();
     } catch (e) {
@@ -333,7 +362,7 @@ export function NewSession({ terminalName }: Props) {
             disabled={!canCreate}
             onClick={() => void submit(false)}
           >
-            Create session <kbd>⌘↩</kbd>
+            Create session <Kbd id="create-session" />
           </button>
         </>
       }
@@ -396,15 +425,15 @@ export function NewSession({ terminalName }: Props) {
           <div className="sheet-line sheet-wrap">
             <span className="muted sheet-note">Recent:</span>
             {recentFolders.map((f) => (
-              <button
-                key={f}
-                type="button"
-                className="btn btn-small mono"
-                title={f}
-                onClick={() => setFolder(f)}
-              >
-                {baseName(f)}
-              </button>
+              <Tooltip key={f} label={f}>
+                <button
+                  type="button"
+                  className="btn btn-small mono"
+                  onClick={() => setFolder(f)}
+                >
+                  {baseName(f)}
+                </button>
+              </Tooltip>
             ))}
           </div>
         )}
@@ -439,7 +468,7 @@ export function NewSession({ terminalName }: Props) {
           <p className="muted">Loading agent kinds…</p>
         ) : (
           <div className="opt-grid opt-grid-3">
-            {[...kinds, null].map((k) => (
+            {runOptions.map((k) => (
               <label
                 key={k ?? "shell"}
                 className="opt opt-row"

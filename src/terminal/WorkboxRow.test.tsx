@@ -1,7 +1,7 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useMemo } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -92,7 +92,7 @@ describe("WorkboxRow", () => {
     const home = within(nav()).getAllByRole("button")[0];
     expect(home).toHaveTextContent("Home");
     expect(home).toHaveClass("wb-tab", "wb-tab-home");
-    expect(home).toHaveAttribute("title", "Home (⌘1)");
+    expect(home).not.toHaveAttribute("title");
     expect(home).toHaveAttribute("aria-current", "page");
     expect(home).toHaveAttribute("data-active", "true");
 
@@ -150,7 +150,7 @@ describe("WorkboxRow", () => {
     });
     const badge = tab.querySelector(".wb-tab-needs");
     expect(badge).toHaveTextContent("1");
-    expect(badge).toHaveAttribute("title", "Needs input");
+    expect(badge).not.toHaveAttribute("title");
     expect(badge?.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
 
@@ -200,5 +200,38 @@ describe("WorkboxRow", () => {
     );
     await user.click(tab);
     expect(useTerminalStore.getState().activeKey).toBe("staging::w1:p1");
+  });
+
+  it("home_and_badge_use_tooltips_and_the_dots_are_live", () => {
+    vi.useFakeTimers();
+    try {
+      open("buildbox", "w1:p1", "planner");
+      act(() => {
+        const state = appState();
+        state.machines[0].snapshot!.panes.find(
+          (p) => p.pane_id === "w1:p1",
+        )!.agent_status = "blocked";
+        useAppStore.setState({ state });
+      });
+      render(<Harness />);
+      expect(nav().querySelector("[title]")).toBeNull();
+      const tip = (el: Element) => {
+        fireEvent.pointerEnter(el);
+        act(() => {
+          vi.advanceTimersByTime(350);
+        });
+        const text = document.querySelector(".tooltip")?.textContent;
+        fireEvent.pointerLeave(el);
+        return text;
+      };
+      expect(tip(within(nav()).getByRole("button", { name: "Home" }))).toBe(
+        "Home⌘1",
+      );
+      expect(tip(nav().querySelector(".wb-tab-needs")!)).toBe("Needs input");
+      const dot = nav().querySelector(".wb-tab:not(.wb-tab-home) .sdot");
+      expect(dot).toHaveClass("live");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

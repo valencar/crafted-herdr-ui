@@ -81,6 +81,8 @@ function tab(paneId: string): TermTab {
     state: "live",
     error: null,
     termId: null,
+    exitCode: null,
+    attempts: 0,
   };
 }
 

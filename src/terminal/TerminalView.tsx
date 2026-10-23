@@ -3,6 +3,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
   type Ref,
 } from "react";
 import { Terminal } from "@xterm/xterm";
@@ -12,12 +13,17 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { copyText } from "../lib/ipc";
+import { useResolvedTheme } from "../lib/theme";
 import { useAppStore } from "../store/appStore";
 import { useTerminalStore, type TermTab } from "./terminalStore";
+import { TermBar } from "./TermBar";
+import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
 import { xtermTheme } from "./xtermTheme";
 
 const RESIZE_DEBOUNCE_MS = 50;
+/** Rows to lift the output by when the bar's height can't be measured (a hidden tab). */
+const FALLBACK_LIFT_ROWS = 4;
 
 /**
  * What a click on a terminal link does: ⌘-click copies it and says so; a plain click does
@@ -110,6 +116,18 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     };
   }, []);
 
+  // The terminal follows the theme. `useTheme` writes `data-theme` before it publishes the
+  // resolved theme, so the tokens read here are already the new ones. Only the colors change:
+  // the terminal, its scrollback and its session are kept.
+  const resolved = useResolvedTheme((s) => s.resolved);
+  const paintedAs = useRef(resolved);
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || paintedAs.current === resolved) return;
+    paintedAs.current = resolved;
+    term.options.theme = xtermTheme(getComputedStyle(document.documentElement));
+  }, [resolved]);
+
   const { reattach, resize } = useTermSession(tab, termRef);
 
   /** Fits the terminal to its box and tells the session. Skipped while there is no real size. */
@@ -194,11 +212,22 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
       termRef.current?.focus();
   }, [active, modal]);
 
-  // The overlay's default button takes focus, so Enter reattaches or retries.
-  const overlay = tab.state === "detached" || tab.state === "error";
+  const ended = tab.state === "detached" || tab.state === "error";
+
+  // When a session ends, push its last output up past the bar, so the newest line (usually the
+  // error) is not under it. Only on the end, never while a session is live.
   useEffect(() => {
-    if (active && overlay && !modalOpen()) overlayButtonRef.current?.focus();
-  }, [active, overlay]);
+    const term = termRef.current;
+    if (!ended || !term) return;
+    const bar =
+      hostRef.current?.parentElement?.querySelector<HTMLElement>(".term-bar");
+    const rowHeight = (hostRef.current?.clientHeight ?? 0) / term.rows;
+    const lines =
+      bar && bar.offsetHeight > 0 && rowHeight > 0
+        ? Math.ceil(bar.offsetHeight / rowHeight)
+        : FALLBACK_LIFT_ROWS;
+    term.write("\r\n".repeat(lines));
+  }, [ended]);
 
   useImperativeHandle(
     ref,
@@ -213,46 +242,51 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     [],
   );
 
+  const [clicked, setClicked] = useState<"Reattach" | "Retry">("Reattach");
   const closeTab = () => useTerminalStore.getState().closeTab(tab.tabKey);
+
+  // The bar needs the pane's row (to copy or open its attach command) and its workbox (ssh or
+  // not). The pane is "gone" only when its workbox has a list to look in and it is not on it.
+  const rows = useRowsByKey();
+  const row = tab.target.kind === "pane" ? rows.get(tab.tabKey) : undefined;
+  const machine = useAppStore((s) =>
+    s.state?.machines.find((m) => m.id === tab.target.machineId),
+  );
+  const gone =
+    tab.state === "detached" &&
+    tab.target.kind === "pane" &&
+    !row &&
+    !!machine?.snapshot &&
+    machine.health.kind !== "disabled";
+  // The bar's default button takes focus, so Enter reattaches or retries. It is disabled while a
+  // reattach is opening, so focus comes back each time the session ends again, and when the pane
+  // disappears after the end (the default button becomes Close tab).
+  useEffect(() => {
+    if (active && ended && !modalOpen()) overlayButtonRef.current?.focus();
+  }, [active, ended, gone, tab.attempts]);
+  // Silent on the first open: there is nothing to say until a reattach is under way or it ended.
+  const bar =
+    tab.state === "detached" ||
+    tab.state === "error" ||
+    (tab.state === "opening" && tab.attempts > 0);
 
   return (
     <div className="term-view" hidden={!active}>
       <div className="term-host" ref={hostRef} />
-      {tab.state === "detached" && (
-        <div className="term-overlay" role="group" aria-label="Detached">
-          <p className="term-overlay-title">Detached</p>
-          <div className="term-overlay-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              ref={overlayButtonRef}
-              onClick={() => void reattach()}
-            >
-              Reattach
-            </button>
-            <button type="button" className="btn" onClick={closeTab}>
-              Close tab
-            </button>
-          </div>
-        </div>
-      )}
-      {tab.state === "error" && (
-        <div className="term-overlay" role="alert">
-          <p className="term-overlay-title">{tab.error}</p>
-          <div className="term-overlay-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              ref={overlayButtonRef}
-              onClick={() => void reattach()}
-            >
-              Retry
-            </button>
-            <button type="button" className="btn" onClick={closeTab}>
-              Close tab
-            </button>
-          </div>
-        </div>
+      {bar && (
+        <TermBar
+          tab={tab}
+          row={row ?? null}
+          remote={machine?.is_local === false}
+          gone={gone}
+          clicked={clicked}
+          onReattach={() => {
+            setClicked(tab.state === "error" ? "Retry" : "Reattach");
+            void reattach();
+          }}
+          onClose={closeTab}
+          buttonRef={overlayButtonRef}
+        />
       )}
     </div>
   );

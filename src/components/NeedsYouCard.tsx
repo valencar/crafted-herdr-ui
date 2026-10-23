@@ -17,6 +17,8 @@ type Props = {
   previewLines: readonly string[];
   onSelect: (key: string) => void;
   onMarkSeen: (row: Row) => void;
+  /** Whether the status pill loops. Only the Dashboard's short list sets it. */
+  live?: boolean;
 };
 
 export const NeedsYouCard = memo(function NeedsYouCard({
@@ -30,6 +32,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
   previewLines,
   onSelect,
   onMarkSeen,
+  live = false,
 }: Props) {
   const age = formatAge(row.sinceMs, nowMs);
   const since = row.status === "blocked" ? "blocked" : "finished";
@@ -41,7 +44,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
       onClick={() => onSelect(row.key)}
     >
       <div className="card-head">
-        <StatusPill status={row.status} />
+        <StatusPill status={row.status} live={live} />
         {project && <span className="card-project">{project}</span>}
         {project && <span className="muted">·</span>}
         <span className="mono card-name">{row.name}</span>
@@ -68,7 +71,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
             className="btn"
             onClick={() => onSelect(row.key)}
           >
-            Reply…
+            Details…
           </button>
         )}
         {age && (

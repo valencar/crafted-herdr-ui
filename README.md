@@ -28,6 +28,7 @@ Website: **[valencar.github.io/crafted-herdr-ui](https://valencar.github.io/craf
 - **New session.** Start a shell or an agent in a new tab, a split, a new workspace or a worktree, with the exact commands shown before you run them.
 - **Workbox management.** Check, reconnect, rename, enable, disable and remove workboxes. Add one through a guided sheet around `herdr machine add`.
 - **Menu bar and notifications.** A tray icon with a count, a compact "Needs you" popover, and a notification when an agent becomes blocked or done.
+- **Light, Dark or System theme.** Chosen in Settings; System follows macOS live, in the main window, the popover and Settings. Status is always shown as a shape plus words, never by color alone.
 - **Activity drawer.** The `herdr` commands the app runs are listed, with a Copy button. That includes the attach commands it runs in a tab of its own window ("opened in Crafted Herdr") and the ones it hands to your terminal. Quiet probes (`herdr --version` and `agent start --help`) are not logged.
 
 ## Requirements
@@ -103,7 +104,7 @@ The middle of the window is a two-row tab strip with the active tab under it, at
 
 The **Dashboard** reads top to bottom:
 
-- **Needs you.** Cards for agents waiting on you, blocked first, then oldest, each with its status and age and an Open button. A list of finished, not looked at yet agents follows. With nobody waiting it says "Nobody needs you right now." Cards show no terminal preview; click one (or Reply…) to open All agents on that row, where the preview and reply live.
+- **Needs you.** Cards for agents waiting on you, blocked first, then oldest, each with its status and age and an Open button. A list of finished, not looked at yet agents follows. With nobody waiting it says "Nobody needs you right now." Cards show no terminal preview; click one (or its Details…) to open All agents on that row, where the preview and reply live.
 - **Right now.** Five tiles: Agents (a bar by status, with its text legend), Blocked the longest, Workboxes online, herdr response (the median time of herdr calls over the last 5 minutes, and how many failed) and Terminal tabs ("{n} of 16", by workbox).
 - **Workboxes.** A card per workbox with its health in words, a status bar, "Up to date" (or, when it isn't online, "Last updated 2m ago"), its open tabs, and **Open herdr** (online) or **Retry now** (reconnecting or needing attention). A workbox that isn't online shows its last data dimmed, marked "as of {age} ago".
 - **Working now.** Working agents, longest-running first, each with an Open button, and a link to All agents.
@@ -152,6 +153,7 @@ The native menu bar owns these, so they work while a terminal has the keyboard, 
 
 | Shortcut | Menu | Action |
 |---|---|---|
+| ⌘/ | View | Keyboard shortcuts sheet |
 | ⌘K | View | Command palette (also "Go to Dashboard", "All agents" and "Dashboard beside terminal") |
 | ⌘1 | View | Dashboard (the Home tab) |
 | ⌃` | View | Switch between Home and the last terminal tab |
@@ -202,6 +204,7 @@ cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo
 - **fake-herdr.** `scripts/fake-herdr` is a test double for the herdr CLI. Unit and integration tests run against it, so no test ever touches real herdr state.
 - **`.env.local`.** Copy `.env.local.example` to `.env.local` (gitignored) for anything personal: the opt-in live tests (`HERDR_UI_LIVE=1`, `HERDR_UI_TEST_MACHINE`) and private patterns for the data check. Real machine names, hosts and paths live only there.
 - **Personal-data check.** Run `scripts/check-no-personal-data.sh` before every commit. It fails if a home path, key or any of your private patterns is in the repo.
+- **Test builds.** Every pull request's CI run attaches a test DMG (the `preview` job's summary links it; ad-hoc signed like a release, kept 14 days) so a change can be tried without building it.
 
 Examples in the code, tests and docs use generic names only: workboxes `buildbox` and `gpubox`, project `api-service`. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLAUDE.md](CLAUDE.md). The design specs are kept locally by the maintainer (`docs/superpowers/`, not in the repo).
 

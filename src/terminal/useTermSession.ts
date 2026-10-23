@@ -32,6 +32,8 @@ export function useTermSession(
   // Bumped by every open and by unmount; callbacks of an older session check it and stand down.
   const generation = useRef(0);
   const sentSize = useRef<Size | null>(null);
+  // Set by `reattach`, read and cleared by the open it starts: the user asked, not the tab itself.
+  const asked = useRef(false);
   // The live session's writer; null when there is no session. Dropping it drops what is pending.
   const writer = useRef<Writer | null>(null);
 
@@ -51,7 +53,17 @@ export function useTermSession(
     const target = JSON.parse(targetJson) as TermTarget;
     const mine = ++generation.current;
     const { updateTab } = useTerminalStore.getState();
-    updateTab(tabKey, { state: "opening", error: null });
+    const again = asked.current;
+    asked.current = false;
+    const attempts =
+      useTerminalStore.getState().tabs.find((t) => t.tabKey === tabKey)
+        ?.attempts ?? 0;
+    updateTab(tabKey, {
+      state: "opening",
+      error: null,
+      exitCode: null,
+      attempts: again ? attempts + 1 : attempts,
+    });
     sentSize.current = { cols: term.cols, rows: term.rows };
     let exited = false;
     try {
@@ -64,9 +76,16 @@ export function useTermSession(
         exited = true;
         idRef.current = null;
         writer.current = null;
-        useTerminalStore
-          .getState()
-          .updateTab(tabKey, { state: "detached", termId: null });
+        // Only a normal end (exit 0) clears the count. A session is "live" from the moment its
+        // pty runs, and the attach script's own failures (herdr missing, a declined takeover, a
+        // slow ssh timeout) wait on a human or the network, so how long it lived says nothing.
+        const worked = !e.code;
+        useTerminalStore.getState().updateTab(tabKey, {
+          state: "detached",
+          termId: null,
+          exitCode: e.code,
+          ...(worked && { attempts: 0 }),
+        });
       });
       if (mine !== generation.current) {
         // Unmounted, or replaced by a newer open, while this one was starting.
@@ -135,5 +154,9 @@ export function useTermSession(
     return () => sub.dispose();
   }, [termRef]);
 
-  return { reattach: open, resize };
+  const reattach = useCallback(() => {
+    asked.current = true;
+    return open();
+  }, [open]);
+  return { reattach, resize };
 }

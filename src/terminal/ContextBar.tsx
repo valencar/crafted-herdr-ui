@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { CloseConfirm } from "../components/CloseConfirm";
+import { formatShortcut } from "../lib/shortcuts";
 import { KindBadge } from "../components/KindBadge";
 import { StatusPill } from "../components/StatusPill";
+import { Tooltip } from "../components/Tooltip";
 import { shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { openRow } from "../lib/openRow";
 import { terminalName, useTerminals } from "../lib/uiHelpers";
+import { PaneMenu } from "./PaneMenu";
 import { useTerminalStore, type TermTab } from "./terminalStore";
 
 type Props = {
@@ -15,37 +16,23 @@ type Props = {
   onFind: () => void;
 };
 
-/** The pane actions: Open in your terminal, and Close pane… (with its confirmation). */
-function PaneActions({ row }: { row: Row }) {
+/** The one main action: the pane in the user's own terminal. */
+function OpenInTerminal({ row }: { row: Row }) {
   const { current } = useTerminals();
-  const [closing, setClosing] = useState(false);
   return (
-    <>
-      <button
-        type="button"
-        className="btn btn-small"
-        onClick={() => void openRow(row, "external")}
-      >
-        Open in {terminalName(current)}
-      </button>
-      <button
-        type="button"
-        className="btn btn-small btn-danger"
-        onClick={() => setClosing(true)}
-      >
-        Close pane…
-      </button>
-      {/* The dialog renders on the body (`ConfirmDialog`), not in `.terminal-panel`: the panel
-          is its own stacking context, which would leave the dialog under the Dashboard column
-          beside it, and a key typed in the dialog is not the terminal's. */}
-      {closing && <CloseConfirm row={row} onDone={() => setClosing(false)} />}
-    </>
+    <button
+      type="button"
+      className="btn btn-small"
+      onClick={() => void openRow(row, "external")}
+    >
+      Open in {terminalName(current)}
+    </button>
   );
 }
 
 /**
  * The bar above the active terminal: which agent it is, how it is doing, and what can be done
- * with it. Detach ends only the app's attach client, as closing the tab does.
+ * with it: Open in your terminal as the one main action, the rest in the ⋯ menu. Detach ends only the app's attach client, as closing the tab does.
  */
 export function ContextBar({ tab, row, onFind }: Props) {
   const closeTab = useTerminalStore((s) => s.closeTab);
@@ -53,7 +40,7 @@ export function ContextBar({ tab, row, onFind }: Props) {
     <div className="context-bar">
       <div className="context-id">
         <span className="mono context-title">{row ? row.name : tab.title}</span>
-        {row && <StatusPill status={row.status} />}
+        {row && <StatusPill status={row.status} live />}
         {row && <KindBadge kind={row.kind} />}
         <span className="mono muted context-where">
           {row?.folder
@@ -62,25 +49,29 @@ export function ContextBar({ tab, row, onFind }: Props) {
         </span>
       </div>
       <div className="context-actions">
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="Find in terminal (⌘F)"
-          title="Find in terminal (⌘F)"
-          onClick={onFind}
-        >
-          <span aria-hidden="true">⌕</span>
-        </button>
+        <Tooltip label="Find in terminal" shortcut="find">
+          <button
+            type="button"
+            className="btn btn-small btn-ghost"
+            aria-label={`Find in terminal (${formatShortcut("find")})`}
+            onClick={onFind}
+          >
+            <span aria-hidden="true">⌕</span>
+          </button>
+        </Tooltip>
+        <Tooltip label="Close this view. The agent keeps running.">
+          <button
+            type="button"
+            className="btn btn-small btn-ghost"
+            onClick={() => closeTab(tab.tabKey)}
+          >
+            Detach
+          </button>
+        </Tooltip>
+        {row && <OpenInTerminal row={row} />}
         {/* Keyed by the pane, so a confirmation opened for one pane ends when another becomes
             active, instead of closing the new one. */}
-        {row && <PaneActions key={row.key} row={row} />}
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() => closeTab(tab.tabKey)}
-        >
-          Detach
-        </button>
+        {row && <PaneMenu key={row.key} row={row} />}
       </div>
     </div>
   );

@@ -62,6 +62,8 @@ body {
   font-size: var(--fs-body);
   line-height: var(--line-height);
   -webkit-font-smoothing: antialiased;
+  /* Counts, ages and sizes line up and don't jitter as they change. */
+  font-variant-numeric: tabular-nums;
 }
 
 code,
@@ -82,4 +84,88 @@ textarea {
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+/* ---------- motion ---------- */
+
+/* Loops: only an element with `.live` (or the skeleton) may repeat. Transform, opacity and
+   colors are the only things that animate; nothing that resizes the terminal does. */
+@keyframes st-pulse {
+  75%,
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+@keyframes st-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes st-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes skel-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Entrances */
+@keyframes enter-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes enter-dialog {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes enter-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes enter-frame {
+  from {
+    transform: translateX(8px);
+    opacity: 0;
+  }
+}
+@keyframes enter-slide {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+
+/* Everything that loops or enters stops; each element simply appears in its final state.
+   Keep this list in step with every selector that uses an `enter-*` or `st-*` keyframe.
+   `!important`: global.css loads before app.css and windows.css, whose rules would win. */
+@media (prefers-reduced-motion: reduce) {
+  .live,
+  .live::after,
+  .sdot[data-status="blocked"].live::after,
+  .sdot[data-status="working"].live,
+  .sdot[data-status="opening"].live,
+  .sdot[data-health="pending"].live,
+  .sdot[data-health="reconnecting"].live,
+  .skel,
+  .menu,
+  .palette,
+  .shortcuts,
+  .palette-frame.is-switched,
+  .dialog,
+  .sheet,
+  .toast,
+  .term-bar,
+  .activity {
+    animation: none !important;
+  }
 }

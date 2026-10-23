@@ -156,6 +156,25 @@ afterEach(() => {
 });
 
 describe("AllAgents", () => {
+  it("needs_cards_are_static_here", () => {
+    setup();
+    const cards = document.querySelectorAll("article.card");
+    expect(cards.length).toBeGreaterThan(0);
+    for (const card of cards) {
+      const dot = card.querySelector(".pill .sdot");
+      expect(dot).not.toBeNull();
+      expect(dot).not.toHaveClass("live");
+    }
+  });
+
+  it("first_load_shows_a_skeleton", () => {
+    setup(null);
+    const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;
+    expect(busy).not.toBeNull();
+    expect(busy).toHaveTextContent("Connecting to herdr…");
+    expect(busy.querySelector(".skel")).not.toBeNull();
+  });
+
   it("renders_only_its_main_content_and_the_inspector", () => {
     setup();
     expect(screen.getByRole("main")).toBeInTheDocument();
@@ -538,7 +557,7 @@ describe("AllAgents", () => {
   });
 
   it("focusing_a_row_shows_it_even_when_the_saved_search_filtered_it_out", async () => {
-    // Reply, a card click and a notification all go through `focusRow`.
+    // A card click and a notification all go through `focusRow`.
     setup();
     act(() => useAppStore.getState().setQuery("no such agent"));
     expect(
@@ -601,6 +620,8 @@ describe("AllAgents", () => {
           state: "live",
           error: null,
           termId: 1,
+          exitCode: null,
+          attempts: 0,
         },
       ],
       activeKey: "buildbox::w1:p1",

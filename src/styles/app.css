@@ -20,6 +20,37 @@ kbd {
   font-size: var(--fs-hint);
   color: var(--text-4);
 }
+/* The chip every shortcut is drawn in (`components/Kbd.tsx`). */
+.kbd {
+  display: inline-block;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-hint);
+  line-height: 1.5;
+  background: var(--chip);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+}
+
+/* The hover and focus hint (`components/Tooltip.tsx`), portalled to the body. Above the toast (40),
+   so it also reads on a trigger inside a dialog. It never takes the pointer from its trigger. */
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: var(--fs-small);
+  line-height: 1.4;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  box-shadow: 0 6px 16px var(--shadow);
+  pointer-events: none;
+}
 
 /* ---------- shell ---------- */
 
@@ -207,6 +238,8 @@ kbd {
 .open-split kbd {
   color: inherit;
   opacity: 0.6;
+  background: transparent;
+  border-color: currentColor;
 }
 .open-split.is-small .btn {
   padding: 3px 10px;
@@ -364,6 +397,10 @@ kbd {
   min-height: 36px;
   font-size: var(--fs-meta);
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .btn:hover {
   background: var(--border-strong);
@@ -380,6 +417,8 @@ kbd {
 .btn-primary kbd {
   color: inherit;
   opacity: 0.6;
+  background: transparent;
+  border-color: currentColor;
 }
 .btn-small {
   border-radius: var(--radius-s);
@@ -403,6 +442,10 @@ kbd {
   font-size: var(--fs-lead);
   line-height: 1;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .icon-btn:hover {
   background: var(--border-strong);
@@ -433,6 +476,10 @@ kbd {
   color: var(--text-2);
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .nav-item[aria-current="page"] {
   background: var(--selected);
@@ -449,16 +496,29 @@ kbd {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .nav-sub {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 45%;
+  /* The label shrink-wraps its text, so the fade gets its own 16px: text that fits never meets it. */
+  padding-right: 16px;
+  margin-right: -16px;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
   font-size: var(--fs-small);
   color: var(--muted);
 }
@@ -474,10 +534,38 @@ kbd {
   border-radius: 9px;
   padding: 0 7px;
 }
-.nav-kbd {
-  font-family: var(--font-mono);
-  font-size: var(--fs-hint);
-  color: var(--muted);
+/* A row's trailing cell: the rest value and the shortcut share one grid cell, so a row never
+   changes width when they swap. */
+.nav-slot {
+  display: inline-grid;
+  flex: none;
+  align-items: center;
+  justify-items: end;
+}
+.nav-slot-rest,
+.nav-slot-hint {
+  grid-area: 1 / 1;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.nav-slot-hint {
+  opacity: 0;
+}
+.nav-item:hover .nav-slot-hint,
+.nav-item:focus-visible .nav-slot-hint,
+.nav-term:hover .nav-slot-hint,
+.nav-term:focus-visible .nav-slot-hint,
+.nav-link:hover .nav-slot-hint,
+.nav-link:focus-visible .nav-slot-hint {
+  opacity: 1;
+}
+/* Only a rest value that has a hint to make way for fades out. */
+.nav-item:hover .nav-slot-rest:not(:last-child),
+.nav-item:focus-visible .nav-slot-rest:not(:last-child),
+.nav-term:hover .nav-slot-rest:not(:last-child),
+.nav-term:focus-visible .nav-slot-rest:not(:last-child),
+.nav-link:hover .nav-slot-rest:not(:last-child),
+.nav-link:focus-visible .nav-slot-rest:not(:last-child) {
+  opacity: 0;
 }
 .nav-box {
   display: flex;
@@ -497,6 +585,10 @@ kbd {
   font-size: var(--fs-meta);
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .nav-term:hover {
   background: var(--nav-hover);
@@ -505,15 +597,17 @@ kbd {
   background: var(--selected);
   color: var(--text);
 }
-.nav-term-icon {
-  flex-shrink: 0;
-}
 .nav-term .mono {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .nav-more {
   color: var(--text-4);
@@ -544,6 +638,9 @@ kbd {
   font-size: var(--fs-small);
 }
 .nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   align-self: flex-start;
   background: transparent;
   border: 0;
@@ -554,29 +651,98 @@ kbd {
   cursor: default;
 }
 
-.dot {
+/* Status and health indicators (`StatusDot` / `HealthDot`). Each shape differs from the others
+   without color; loops (spec 3.3) run only on `.live`, which the mount site sets. */
+.sdot {
+  position: relative;
+  box-sizing: border-box;
+  display: inline-block;
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  flex-shrink: 0;
   background: transparent;
   border: 1.5px solid var(--muted);
 }
-.dot[data-status="blocked"] {
+.sdot[data-status="blocked"] {
   background: var(--st-needs);
   border-color: var(--st-needs);
+  /* Static, so reduced motion keeps blocked and done apart by shape. */
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-needs) 35%, transparent);
 }
-.dot[data-status="done"] {
+.sdot[data-status="blocked"].live::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  background: var(--st-needs);
+  opacity: 0.6;
+  animation: st-pulse 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.sdot[data-status="working"] {
+  width: 9px;
+  height: 9px;
+  border-color: color-mix(in srgb, var(--st-working) 28%, transparent);
+  border-top-color: var(--st-working);
+}
+.sdot[data-status="working"].live {
+  animation: st-spin 0.9s linear infinite;
+}
+.sdot[data-status="done"] {
   background: var(--st-done);
   border-color: var(--st-done);
 }
-.dot[data-status="working"] {
-  background: var(--st-working);
-  border-color: var(--st-working);
-}
-.dot[data-status="idle"] {
-  background: var(--st-idle);
+.sdot[data-status="idle"] {
   border-color: var(--st-idle);
+}
+.sdot[data-status="unknown"] {
+  border-style: dashed;
+}
+.sdot[data-status="shell"] {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--text-4);
+  border-color: var(--text-4);
+}
+/* Terminal tabs with no live session (`TabState`): error reads as attention, opening as the
+   first connect, detached as a dim dashed ring. */
+.sdot[data-status="error"] {
+  border-color: var(--danger);
+}
+.sdot[data-status="opening"] {
+  border-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  border-top-color: var(--text-2);
+}
+.sdot[data-status="opening"].live {
+  animation: st-spin 0.9s linear infinite;
+}
+.sdot[data-status="detached"] {
+  border-style: dashed;
+  opacity: 0.45;
+}
+.sdot[data-health="online"] {
+  background: var(--online);
+  border-color: var(--online);
+}
+.sdot[data-health="pending"] {
+  border-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  border-top-color: var(--text-2);
+}
+.sdot[data-health="pending"].live {
+  animation: st-spin 0.9s linear infinite;
+}
+.sdot[data-health="reconnecting"] {
+  border-color: var(--st-needs);
+}
+.sdot[data-health="reconnecting"].live {
+  animation: st-breathe 1.8s ease-in-out infinite;
+}
+.sdot[data-health="attention"] {
+  border-color: var(--danger);
+}
+.sdot[data-health="disabled"] {
+  opacity: 0.45;
 }
 .health {
   display: flex;
@@ -585,25 +751,11 @@ kbd {
   font-size: var(--fs-small);
   color: var(--muted);
 }
-.health .dot {
-  width: 6px;
-  height: 6px;
-  background: var(--muted);
-  border-color: var(--muted);
-}
 .health[data-health="online"] {
   color: var(--online);
 }
-.health[data-health="online"] .dot {
-  background: var(--online);
-  border-color: var(--online);
-}
 .health[data-health="attention"] {
   color: var(--st-needs);
-}
-.health[data-health="attention"] .dot {
-  background: var(--st-needs);
-  border-color: var(--st-needs);
 }
 
 /* ---------- sections ---------- */
@@ -674,12 +826,22 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  transition: border-color var(--dur-base) var(--ease-out);
 }
 .card[data-status="blocked"] {
   border-color: color-mix(in srgb, var(--st-needs) 22%, var(--border));
 }
 .card[data-status="done"] {
   border-color: color-mix(in srgb, var(--st-done) 18%, var(--border));
+}
+.card:hover {
+  border-color: var(--border-strong);
+}
+.card[data-status="blocked"]:hover {
+  border-color: color-mix(in srgb, var(--st-needs) 45%, var(--border));
+}
+.card[data-status="done"]:hover {
+  border-color: color-mix(in srgb, var(--st-done) 40%, var(--border));
 }
 .card.is-selected {
   border-color: var(--text-4);
@@ -828,6 +990,10 @@ kbd {
 }
 .pill {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-width: 92px;
   text-align: center;
   font-size: var(--fs-small);
@@ -911,6 +1077,7 @@ kbd {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl);
   padding: 20px;
+  animation: enter-dialog var(--dur-slow) var(--ease-out);
 }
 .dialog-title {
   margin: 0 0 8px;
@@ -954,10 +1121,26 @@ kbd {
   border-radius: var(--radius-m);
   padding: 10px 12px;
   color: var(--danger);
+  animation: enter-rise var(--dur-slow) var(--ease-out);
 }
 
 .toast-info {
   color: var(--text);
+}
+.toast-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+.toast-info .toast-icon {
+  color: var(--online);
+  background: color-mix(in srgb, var(--online) 16%, transparent);
 }
 
 .card-preview {
@@ -983,6 +1166,7 @@ kbd {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl);
   overflow: hidden;
+  animation: enter-dialog var(--dur-slow) var(--ease-out);
 }
 .sheet-head {
   display: flex;
@@ -1572,8 +1756,18 @@ select.field {
   max-width: 560px;
   padding: 16px 18px;
   background: var(--card);
-  border: 1px solid var(--border);
+  border: 1px dashed var(--border-strong);
   border-radius: var(--radius-l);
+}
+.empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-m);
+  background: var(--chip);
+  color: var(--text-3);
 }
 .empty-card .cmdbox {
   align-self: stretch;
@@ -1655,7 +1849,8 @@ select.field {
   overflow: hidden;
   background: var(--panel-2);
   border-left: 1px solid var(--border-strong);
-  box-shadow: -12px 0 32px color-mix(in srgb, var(--bg) 70%, transparent);
+  box-shadow: -12px 0 32px var(--shadow);
+  animation: enter-slide var(--dur-slow) var(--ease-out);
 }
 .activity-head {
   display: flex;
@@ -1756,23 +1951,46 @@ select.field {
 .term-host .xterm {
   padding: 6px 0 0 8px;
 }
-.term-overlay {
+/* Under a session that ended: docked at the bottom, over the last rows only, so what the attach
+   command printed stays readable above it. */
+.term-bar {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border-strong);
+  color: var(--text-2);
+  animation: enter-rise var(--dur-base) var(--ease-out);
+}
+.term-bar-text {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: var(--bg);
-  color: var(--text-2);
-}
-.term-overlay-title {
-  margin: 0;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 320px;
   font-size: var(--fs-body);
 }
-.term-overlay-actions {
+.term-bar-attempt {
+  color: var(--text);
+  font-weight: 600;
+}
+.term-bar-title {
+  color: var(--text);
+}
+.term-bar-hint {
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.term-bar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1903,6 +2121,19 @@ select.field {
 .session-row-scroll::-webkit-scrollbar {
   display: none;
 }
+/* When the tabs outgrow the row, the trailing edge fades; the All tabs menu stays beside it. */
+.session-row[data-overflowing="true"] .session-row-scroll {
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 24px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+  /* The fade is 24px wide. Scrolling a tab into view stops short of it, and the end of the row
+     leaves the same room, so neither a tab's close mark nor "New on" ever sits in the fade. */
+  scroll-padding-inline-end: 24px;
+  padding-inline-end: 24px;
+}
 .home-views {
   flex: 0 0 auto;
   display: flex;
@@ -1977,12 +2208,18 @@ select.field {
   background: transparent;
   border: 0;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .wb-tab:hover {
   background: var(--segment);
 }
 .wb-tab[data-active="true"] {
   background: var(--selected);
+  /* The corners switch at once, so the tab must not fade in beside them. */
+  transition: none;
 }
 .wb-tab[data-active="true"]::before {
   background: radial-gradient(
@@ -2008,9 +2245,17 @@ select.field {
 .wb-tab-label {
   min-width: 0;
   font-weight: 600;
+  /* Shrink-wraps its text: the fade gets its own 16px, so text that fits never meets it. */
+  padding-right: 16px;
+  margin-right: -16px;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .wb-tab-count,
 .wb-tab-needs {
@@ -2045,9 +2290,27 @@ select.field {
   display: flex;
   align-items: center;
   padding-right: 6px;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .session-tab:hover {
   background: var(--nav-hover);
+}
+/* The close mark keeps its space and its focus, and shows on the active tab, on hover and when
+   anything inside the tab has focus. */
+.session-tab .icon-btn {
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast),
+    color var(--dur-fast);
+}
+.session-tab:hover .icon-btn,
+.session-tab:focus-within .icon-btn,
+.session-tab[data-active="true"] .icon-btn {
+  opacity: 1;
 }
 .session-tab[data-needs="true"] {
   background: color-mix(in srgb, var(--st-needs) 7%, transparent);
@@ -2059,6 +2322,7 @@ select.field {
 }
 .session-tab[data-active="true"] {
   background: var(--panel);
+  transition: none;
 }
 /* Active, the tab shows an orange top edge instead of the tint. */
 .session-tab[data-active="true"][data-needs="true"] {
@@ -2077,6 +2341,28 @@ select.field {
     transparent 10px,
     var(--panel) 10.5px
   );
+}
+/* Dragging reorders: the lifted tab dims, the drop line marks where it lands. */
+.session-tab[data-dragging="true"] {
+  opacity: 0.5;
+}
+.session-row[data-dragging="true"] {
+  cursor: grabbing;
+  user-select: none;
+}
+.session-row[data-dragging="true"] .session-tab-main {
+  cursor: grabbing;
+}
+/* Takes no net room, so no tab shifts while dragging: the line's 2px plus the extra 2px flex gap
+   it brings on each side are cancelled by -2px margins (the row's gap is 2px). */
+.tab-drop {
+  flex: 0 0 2px;
+  align-self: center;
+  height: 28px;
+  margin: 0 -2px;
+  border-radius: 1px;
+  background: var(--focus);
+  pointer-events: none;
 }
 .session-tab-main {
   flex: 1 1 auto;
@@ -2102,8 +2388,13 @@ select.field {
   font-size: var(--fs-body);
   font-weight: 500;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .session-tab-sub {
   grid-column: 2;
@@ -2111,8 +2402,13 @@ select.field {
   color: var(--text-4);
   font-size: var(--fs-small);
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .session-tab-sub[data-tone="needs"] {
   color: var(--st-needs);
@@ -2137,6 +2433,10 @@ select.field {
   font-size: var(--fs-body);
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .session-new:hover {
   background: var(--nav-hover);
@@ -2152,12 +2452,17 @@ select.field {
   background: transparent;
   border: 0;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .home-view:hover {
   background: var(--nav-hover);
 }
 .home-view[data-active="true"] {
   background: var(--bg);
+  transition: none;
 }
 .home-view[data-active="true"]::before {
   background: radial-gradient(
@@ -2248,6 +2553,18 @@ select.field {
   white-space: nowrap;
 }
 
+.context-actions .icon-btn {
+  min-width: 32px;
+  min-height: 32px;
+}
+/* Position is pinned inline (PaneMenu): `.menu` in windows.css loads later and would win. */
+.menu.pane-menu {
+  min-width: 200px;
+}
+.menu-item.is-danger {
+  color: var(--danger);
+}
+
 .term-find {
   flex: 0 0 auto;
   display: flex;
@@ -2302,6 +2619,7 @@ select.field {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl);
   overflow: hidden;
+  animation: enter-dialog var(--dur-slow) var(--ease-out);
 }
 .palette-input {
   background: transparent;
@@ -2330,6 +2648,10 @@ select.field {
   padding: 8px 10px;
   border-radius: var(--radius-m);
   cursor: default;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .palette-option.is-active {
   background: var(--raised);
@@ -2358,6 +2680,110 @@ select.field {
   color: var(--text-4);
   font-size: var(--fs-small);
 }
+/* The letters the query matched: underlined in the needs-you colour, never a fill. */
+.palette-mark {
+  background: transparent;
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--st-needs);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+/* What the selected option does on ↵ and ⇥. */
+.palette-keys {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.palette-option > .kbd {
+  flex: none;
+}
+.palette-grow {
+  flex: 1;
+}
+/* The mouse's way into an agent's actions. It is not focusable (the keyboard has ⇥) and is
+   drawn only on the hovered or selected option. */
+.palette-chev {
+  flex: none;
+  padding: 0 6px;
+  color: var(--text-3);
+  font-size: var(--fs-lead);
+  line-height: 1;
+  border-radius: var(--radius-s);
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    opacity var(--dur-fast),
+    background-color var(--dur-fast),
+    color var(--dur-fast);
+}
+.palette-option:hover .palette-chev,
+.palette-option.is-active .palette-chev {
+  opacity: 1;
+}
+.palette-chev:hover {
+  background: var(--chip);
+  color: var(--text);
+}
+/* The agent whose actions are listed. */
+.palette-crumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+.palette-crumb-name {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 600;
+}
+.palette-option.is-danger .palette-label {
+  color: var(--danger);
+}
+/* A divider above Close pane…: drawn, not an element, so the listbox keeps only its options. */
+.palette-option.is-danger:not(:first-child) {
+  position: relative;
+  margin-top: 9px;
+}
+.palette-option.is-danger:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  inset: -5px 0 auto;
+  height: 1px;
+  background: var(--border);
+}
+/* The list (or an agent's actions) slides in when the palette switches between them. */
+.palette-frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.palette-frame.is-switched {
+  animation: enter-frame var(--dur-base) var(--ease-out);
+}
+.palette-crumb {
+  cursor: pointer;
+}
+.palette-crumb-back {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-lead);
+  line-height: 1;
+}
+.palette-crumb:hover .palette-crumb-back {
+  color: var(--text);
+}
 .palette-empty {
   margin: 0;
   padding: 16px;
@@ -2366,6 +2792,111 @@ select.field {
 .palette-hint {
   margin: 0;
   padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-4);
+  font-size: var(--fs-small);
+}
+
+/* The ⌘/ keyboard shortcuts sheet (`components/ShortcutsSheet.tsx`). It sits on `.scrim`, the
+   palette's layer: above the terminal panel, below the Activity drawer and the toast. */
+.shortcuts-scrim {
+  align-items: flex-start;
+  padding-top: 10vh;
+}
+.shortcuts {
+  width: min(860px, calc(100vw - 32px));
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  animation: enter-dialog var(--dur-slow) var(--ease-out);
+}
+.shortcuts:focus {
+  outline: none;
+}
+.shortcuts-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.shortcuts-title {
+  margin: 0;
+  flex: none;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.shortcuts-filter {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-m);
+  font: inherit;
+  font-size: var(--fs-meta);
+}
+.shortcuts-filter:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+.shortcuts-close {
+  display: flex;
+  flex: none;
+  padding: 4px;
+  color: var(--text-4);
+}
+.shortcuts-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+.shortcuts-section + .shortcuts-section {
+  margin-top: 20px;
+}
+.shortcuts-heading {
+  margin: 0 0 6px;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+}
+.shortcuts-heading.is-sub {
+  font-size: var(--fs-small);
+}
+.shortcuts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+}
+.shortcuts-row > .kbd {
+  flex: none;
+}
+.shortcuts-empty {
+  margin: 0;
+  padding: 24px 20px;
+  color: var(--text-3);
+}
+.shortcuts-note {
+  margin: 0;
+  padding: 10px 20px;
   border-top: 1px solid var(--border);
   color: var(--text-4);
   font-size: var(--fs-small);
@@ -2507,6 +3038,56 @@ select.field {
 .dash-row .btn {
   flex-shrink: 0;
 }
+/* Mark seen is quiet until the row is pointed at or focused; it stays in the tab order. */
+.dash-row .row-reveal {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.dash-row:hover .row-reveal,
+.dash-row:focus-within .row-reveal {
+  opacity: 1;
+}
+
+/* ---------- skeletons ---------- */
+
+.skel {
+  display: block;
+  flex-shrink: 0;
+  height: 12px;
+  border-radius: var(--radius-s);
+  background: linear-gradient(
+    90deg,
+    var(--chip) 25%,
+    var(--border-strong) 50%,
+    var(--chip) 75%
+  );
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.6s linear infinite;
+}
+.skel-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--card);
+}
+.skel-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 56px;
+  padding: 10px 14px;
+}
+.skel-row + .skel-row {
+  border-top: 1px solid var(--border);
+}
+.skel-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .link-btn {
   align-self: flex-start;
   background: transparent;
@@ -2571,6 +3152,7 @@ select.field {
 .status-bar-seg {
   flex-basis: 0;
   min-width: 4px;
+  border-radius: 2px;
 }
 .status-bar-seg[data-status="blocked"] {
   background: var(--st-needs);

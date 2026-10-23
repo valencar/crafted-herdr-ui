@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MachineView } from "./bindings/MachineView";
 import type { Row } from "./grouping";
-import { buildItems, rankItems } from "./palette";
+import { agentActions, buildItems, labelPositions, rankItems } from "./palette";
 
 function row(over: Partial<Row>): Row {
   return {
@@ -57,7 +57,30 @@ const machines = [
   { id: "m-2", label: "gpubox", target: "gpubox", is_local: false },
 ] as MachineView[];
 
-function setup(openTarget: "app" | "external" = "app") {
+const tabRun = vi.fn();
+const openTabs = [
+  {
+    key: "gpubox::w1:p1",
+    title: "reviewer",
+    detail: "gpubox · Needs input",
+    shortcut: "tab1" as const,
+    row: rows[2],
+    run: tabRun,
+  },
+  {
+    key: "full::m-1",
+    title: "herdr",
+    detail: "buildbox · Full herdr UI",
+    shortcut: "tab2" as const,
+    row: null,
+    run: vi.fn(),
+  },
+];
+
+function setup(
+  openTarget: "app" | "external" = "app",
+  tabs: typeof openTabs = [],
+) {
   const open = vi.fn();
   const goToProject = vi.fn();
   const goToWorkbox = vi.fn();
@@ -73,6 +96,7 @@ function setup(openTarget: "app" | "external" = "app") {
     goToProject,
     goToWorkbox,
     openTarget,
+    openTabs: tabs,
   });
   return { items, open, goToProject, goToWorkbox, commands };
 }
@@ -110,6 +134,37 @@ describe("rankItems", () => {
     const ext = setup("external");
     ext.items.find((i) => i.label === "builder")?.run("alt");
     expect(ext.open).toHaveBeenCalledWith(expect.anything(), "app");
+  });
+
+  it("goes_to_the_open_tab_by_default_and_opens_external_with_alt_whatever_the_setting", () => {
+    for (const target of ["app", "external"] as const) {
+      const { items, open } = setup(target, openTabs);
+      const reviewer = items.find(
+        (i) => i.id === "agent:gpubox::w1:p1" && i.group === "Needs you",
+      );
+      expect(reviewer?.alt).toBe("external");
+      reviewer?.run("default");
+      reviewer?.run("alt");
+      expect(open).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ name: "reviewer" }),
+        "app",
+      );
+      expect(open).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ name: "reviewer" }),
+        "external",
+      );
+    }
+  });
+
+  it("names_the_alt_target_of_an_agent_without_a_tab_from_the_setting", () => {
+    expect(setup("app").items.find((i) => i.label === "builder")?.alt).toBe(
+      "external",
+    );
+    expect(
+      setup("external").items.find((i) => i.label === "builder")?.alt,
+    ).toBe("app");
   });
 
   it("describes_an_agent_by_workbox_folder_and_status", () => {
@@ -162,5 +217,144 @@ describe("rankItems", () => {
     }));
     expect(rankItems(many, "", 50)).toHaveLength(50);
     expect(rankItems(many, "r", 10)).toHaveLength(10);
+  });
+});
+
+describe("open tabs", () => {
+  it("empty_query_order", () => {
+    const { items } = setup("app", openTabs);
+    expect(rankItems(items, "").map((i) => i.group)).toEqual([
+      "Needs you",
+      "Needs you",
+      "Open tabs",
+      "Open tabs",
+      "Commands",
+      "Commands",
+      "Agents",
+      "Agents",
+    ]);
+  });
+
+  it("open_tabs_match_title_and_workbox", () => {
+    const { items } = setup("app", openTabs);
+    const tab = (q: string) =>
+      rankItems(items, q).find((i) => i.group === "Open tabs");
+    expect(tab("herdr")).toMatchObject({ id: "tab:full::m-1" });
+    // "full" is only in the second tab's detail; the workbox name is in both details.
+    expect(tab("full")?.id).toBe("tab:full::m-1");
+    expect(tab("gpubox")?.id).toBe("tab:gpubox::w1:p1");
+    expect(tab("gpubox")).toMatchObject({
+      label: "reviewer",
+      shortcut: "tab1",
+      row: rows[2],
+    });
+    tab("gpubox")?.run("default");
+    expect(tabRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("agent_items_carry_their_row", () => {
+    const { items } = setup();
+    expect(items.find((i) => i.label === "builder")?.row?.name).toBe("builder");
+    expect(items.find((i) => i.group === "Commands")?.row).toBeUndefined();
+  });
+});
+
+describe("labelPositions", () => {
+  it("gives_the_matched_label_positions", () => {
+    const { items } = setup();
+    const item = items.find((i) => i.label === "builder")!;
+    expect(labelPositions(item, "bld")).toEqual([0, 3, 4]);
+    expect(labelPositions(item, "zzz")).toEqual([]);
+    expect(labelPositions(item, "")).toEqual([]);
+  });
+});
+
+describe("agentActions", () => {
+  const ctx: Parameters<typeof agentActions>[1] = {
+    hasTab: false,
+    openTarget: "app",
+    terminal: "Ghostty",
+  };
+  const ids = (r: Row, c = ctx) => agentActions(r, c).map((a) => a.id);
+
+  it("agent_actions_never_reply_to_blocked", () => {
+    expect(ids(row({ status: "blocked" }))).not.toContain("reply");
+    expect(ids(row({ status: "unknown" }))).not.toContain("reply");
+  });
+
+  it("agent_actions_by_status", () => {
+    expect(ids(row({ status: "done" }))).toEqual(
+      expect.arrayContaining(["reply", "mark-seen"]),
+    );
+    expect(ids(row({ status: "idle" }))).toContain("reply");
+    expect(ids(row({ status: "idle" }))).not.toContain("mark-seen");
+    for (const status of ["working", "blocked"] as const) {
+      expect(ids(row({ status }))).not.toContain("reply");
+      expect(ids(row({ status }))).not.toContain("mark-seen");
+    }
+    for (const status of ["done", "idle", "working", "blocked"] as const) {
+      const list = agentActions(row({ status }), ctx);
+      expect(list[list.length - 1]).toMatchObject({
+        id: "close-pane",
+        label: "Close pane…",
+        danger: true,
+      });
+      expect(list.slice(0, -1).some((a) => a.danger)).toBe(false);
+    }
+  });
+
+  it("open_label_follows_tab_and_target", () => {
+    const find = (c: typeof ctx, id: string) =>
+      agentActions(row({}), c).find((a) => a.id === id);
+    expect(find({ ...ctx, hasTab: true }, "open")).toMatchObject({
+      label: "Go to tab",
+      keys: "↵",
+    });
+    expect(find(ctx, "open")?.label).toBe("Open in a tab here");
+    expect(find(ctx, "open-alt")).toMatchObject({
+      label: "Open in Ghostty",
+      keys: "⌘↩",
+    });
+    const external: typeof ctx = { ...ctx, openTarget: "external" };
+    expect(find(external, "open")?.label).toBe("Open in Ghostty");
+    expect(find(external, "open-alt")?.label).toBe("Open in a tab here");
+  });
+
+  it("with_a_tab_the_other_way_is_always_the_terminal_app", () => {
+    for (const openTarget of ["app", "external"] as const) {
+      const list = agentActions(row({}), { ...ctx, hasTab: true, openTarget });
+      expect(list.find((a) => a.id === "open")).toMatchObject({
+        label: "Go to tab",
+        how: "app",
+      });
+      expect(list.find((a) => a.id === "open-alt")).toMatchObject({
+        label: "Open in Ghostty",
+        how: "external",
+      });
+    }
+  });
+
+  it("the_two_open_actions_never_share_a_target", () => {
+    for (const hasTab of [true, false]) {
+      for (const openTarget of ["app", "external"] as const) {
+        const list = agentActions(row({}), { ...ctx, hasTab, openTarget });
+        const how = (id: string) => list.find((a) => a.id === id)?.how;
+        expect(how("open")).toBeDefined();
+        expect(how("open-alt")).toBeDefined();
+        expect(how("open")).not.toBe(how("open-alt"));
+      }
+    }
+  });
+
+  it("lists_the_rest_in_order", () => {
+    expect(ids(row({ status: "done" }))).toEqual([
+      "open",
+      "open-alt",
+      "reply",
+      "copy-attach",
+      "mark-seen",
+      "show-in-all",
+      "close-pane",
+    ]);
   });
 });

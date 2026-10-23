@@ -1,3 +1,5 @@
+import { Tooltip } from "./Tooltip";
+
 const MONOGRAM: Record<string, string> = {
   claude: "CC",
   codex: "CX",
@@ -23,9 +25,11 @@ export function KindBadge({
   named?: boolean;
 }) {
   return (
-    <span className="kind" title={kind ?? "shell"}>
-      <span aria-hidden="true">{monogram(kind)}</span>
-      {!named && <span className="sr-only">{kind ?? "shell"}</span>}
-    </span>
+    <Tooltip label={kind ?? "shell"}>
+      <span className="kind">
+        <span aria-hidden="true">{monogram(kind)}</span>
+        {!named && <span className="sr-only">{kind ?? "shell"}</span>}
+      </span>
+    </Tooltip>
   );
 }

@@ -29,6 +29,7 @@ pub enum MenuId {
     FontSmaller,
     FontReset,
     Activity,
+    Shortcuts,
     NewInWorkbox,
     CloseTab,
     NextTab,
@@ -59,6 +60,7 @@ impl MenuId {
             MenuId::FontSmaller => "font-smaller",
             MenuId::FontReset => "font-reset",
             MenuId::Activity => "activity",
+            MenuId::Shortcuts => "shortcuts",
             MenuId::NewInWorkbox => "new-in-workbox",
             MenuId::CloseTab => "close-tab",
             MenuId::NextTab => "next-tab",
@@ -94,38 +96,49 @@ impl MenuId {
     }
 }
 
-/// Every forwarded menu item, in menu order: its id, label and accelerator.
-pub fn items() -> Vec<(MenuId, &'static str, &'static str)> {
+/// The shortcut table the UI draws its labels from, so the menu and the labels can't drift.
+const SHORTCUTS_JSON: &str = include_str!("../../src/lib/shortcuts.json");
+
+/// The macOS accelerator of a shortcut id in `src/lib/shortcuts.json` (muda grammar), or
+/// `None` for an id the table doesn't have.
+pub fn accelerator(id: &str) -> Option<String> {
+    let table: serde_json::Value = serde_json::from_str(SHORTCUTS_JSON).ok()?;
+    Some(table.get(id)?.get("mac")?.as_str()?.to_string())
+}
+
+/// Every forwarded menu item, in menu order: its id, label and accelerator (from the table).
+pub fn items() -> Vec<(MenuId, &'static str, String)> {
     use MenuId::*;
-    vec![
-        (Palette, "Command Palette", "CmdOrCtrl+K"),
-        (Dashboard, "Dashboard", "CmdOrCtrl+1"),
-        (ToggleTerminal, "Toggle Terminal", "Ctrl+Backquote"),
-        (
-            ToggleSplit,
-            "Dashboard Beside Terminal",
-            "CmdOrCtrl+Backslash",
-        ),
-        (ToggleSidebar, "Toggle Sidebar", "CmdOrCtrl+B"),
-        (NextNeedsYou, "Next Needs-You", "CmdOrCtrl+J"),
-        (Find, "Find", "CmdOrCtrl+F"),
-        (FontBigger, "Bigger Font", "CmdOrCtrl+Equal"),
-        (FontSmaller, "Smaller Font", "CmdOrCtrl+Minus"),
-        (FontReset, "Reset Font", "CmdOrCtrl+0"),
-        (Activity, "Activity", "CmdOrCtrl+Shift+A"),
-        (NewInWorkbox, "New Session in Workbox", "CmdOrCtrl+T"),
-        (CloseTab, "Close Tab", "CmdOrCtrl+W"),
-        (NextTab, "Next Tab", "Ctrl+Tab"),
-        (PrevTab, "Previous Tab", "Ctrl+Shift+Tab"),
-        (Tab1, "Tab 1", "CmdOrCtrl+2"),
-        (Tab2, "Tab 2", "CmdOrCtrl+3"),
-        (Tab3, "Tab 3", "CmdOrCtrl+4"),
-        (Tab4, "Tab 4", "CmdOrCtrl+5"),
-        (Tab5, "Tab 5", "CmdOrCtrl+6"),
-        (Tab6, "Tab 6", "CmdOrCtrl+7"),
-        (Tab7, "Tab 7", "CmdOrCtrl+8"),
-        (Tab8, "Tab 8", "CmdOrCtrl+9"),
-    ]
+    let labelled = [
+        (Palette, "Command Palette"),
+        (Dashboard, "Dashboard"),
+        (ToggleTerminal, "Toggle Terminal"),
+        (ToggleSplit, "Dashboard Beside Terminal"),
+        (ToggleSidebar, "Toggle Sidebar"),
+        (NextNeedsYou, "Next Needs-You"),
+        (Find, "Find"),
+        (FontBigger, "Bigger Font"),
+        (FontSmaller, "Smaller Font"),
+        (FontReset, "Reset Font"),
+        (Activity, "Activity"),
+        (Shortcuts, "Keyboard Shortcuts"),
+        (NewInWorkbox, "New Session in Workbox"),
+        (CloseTab, "Close Tab"),
+        (NextTab, "Next Tab"),
+        (PrevTab, "Previous Tab"),
+        (Tab1, "Tab 1"),
+        (Tab2, "Tab 2"),
+        (Tab3, "Tab 3"),
+        (Tab4, "Tab 4"),
+        (Tab5, "Tab 5"),
+        (Tab6, "Tab 6"),
+        (Tab7, "Tab 7"),
+        (Tab8, "Tab 8"),
+    ];
+    labelled
+        .into_iter()
+        .map(|(id, label)| (id, label, accelerator(id.key()).unwrap_or_default()))
+        .collect()
 }
 
 /// A submenu with the forwarded items for which `pick` is true, in `items()` order.
@@ -137,7 +150,7 @@ fn forwarded_submenu<R: Runtime>(
     let mut menu = SubmenuBuilder::new(app, title);
     for (id, label, accelerator) in items().into_iter().filter(|(id, ..)| pick(*id)) {
         let item = MenuItemBuilder::with_id(id.key(), label)
-            .accelerator(accelerator)
+            .accelerator(&accelerator)
             .build(app)?;
         menu = menu.item(&item);
     }
@@ -147,9 +160,11 @@ fn forwarded_submenu<R: Runtime>(
 /// The app's menu bar: App, Edit, View, Terminal and Window. There is no Close Window item,
 /// so ⌘W belongs to Close Tab. The red button still hides the main window.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let settings = MenuItemBuilder::with_id(SETTINGS_ITEM, "Settings…")
-        .accelerator("CmdOrCtrl+Comma")
-        .build(app)?;
+    let mut settings = MenuItemBuilder::with_id(SETTINGS_ITEM, "Settings…");
+    if let Some(accelerator) = accelerator(SETTINGS_ITEM) {
+        settings = settings.accelerator(accelerator);
+    }
+    let settings = settings.build(app)?;
     let app_menu = SubmenuBuilder::new(app, "Crafted Herdr")
         .about(None)
         .separator()
@@ -215,12 +230,69 @@ mod tests {
 
     use super::*;
 
+    /// The table as v0.5 shipped it, plus v0.7's Keyboard Shortcuts item; the JSON must keep
+    /// giving exactly these.
+    const V0_5: [(MenuId, &str, &str); 24] = [
+        (MenuId::Palette, "Command Palette", "CmdOrCtrl+K"),
+        (MenuId::Dashboard, "Dashboard", "CmdOrCtrl+1"),
+        (MenuId::ToggleTerminal, "Toggle Terminal", "Ctrl+Backquote"),
+        (
+            MenuId::ToggleSplit,
+            "Dashboard Beside Terminal",
+            "CmdOrCtrl+Backslash",
+        ),
+        (MenuId::ToggleSidebar, "Toggle Sidebar", "CmdOrCtrl+B"),
+        (MenuId::NextNeedsYou, "Next Needs-You", "CmdOrCtrl+J"),
+        (MenuId::Find, "Find", "CmdOrCtrl+F"),
+        (MenuId::FontBigger, "Bigger Font", "CmdOrCtrl+Equal"),
+        (MenuId::FontSmaller, "Smaller Font", "CmdOrCtrl+Minus"),
+        (MenuId::FontReset, "Reset Font", "CmdOrCtrl+0"),
+        (MenuId::Activity, "Activity", "CmdOrCtrl+Shift+A"),
+        (MenuId::Shortcuts, "Keyboard Shortcuts", "CmdOrCtrl+Slash"),
+        (
+            MenuId::NewInWorkbox,
+            "New Session in Workbox",
+            "CmdOrCtrl+T",
+        ),
+        (MenuId::CloseTab, "Close Tab", "CmdOrCtrl+W"),
+        (MenuId::NextTab, "Next Tab", "Ctrl+Tab"),
+        (MenuId::PrevTab, "Previous Tab", "Ctrl+Shift+Tab"),
+        (MenuId::Tab1, "Tab 1", "CmdOrCtrl+2"),
+        (MenuId::Tab2, "Tab 2", "CmdOrCtrl+3"),
+        (MenuId::Tab3, "Tab 3", "CmdOrCtrl+4"),
+        (MenuId::Tab4, "Tab 4", "CmdOrCtrl+5"),
+        (MenuId::Tab5, "Tab 5", "CmdOrCtrl+6"),
+        (MenuId::Tab6, "Tab 6", "CmdOrCtrl+7"),
+        (MenuId::Tab7, "Tab 7", "CmdOrCtrl+8"),
+        (MenuId::Tab8, "Tab 8", "CmdOrCtrl+9"),
+    ];
+
+    #[test]
+    fn accelerators_unchanged_from_v0_5() {
+        let now: Vec<_> = items()
+            .into_iter()
+            .map(|(id, label, accel)| (id, label.to_string(), accel.to_string()))
+            .collect();
+        let before: Vec<_> = V0_5
+            .iter()
+            .map(|(id, label, accel)| (*id, label.to_string(), accel.to_string()))
+            .collect();
+        assert_eq!(now, before);
+    }
+
+    #[test]
+    fn accelerator_reads_the_json() {
+        assert_eq!(accelerator("palette"), Some("CmdOrCtrl+K".to_string()));
+        assert_eq!(accelerator("settings"), Some("CmdOrCtrl+Comma".to_string()));
+        assert_eq!(accelerator("nope"), None);
+    }
+
     #[test]
     fn menu_ids_and_accelerators_are_unique() {
         let all = items();
-        assert_eq!(all.len(), 23, "one entry per MenuId");
+        assert_eq!(all.len(), 24, "one entry per MenuId");
         let ids: HashSet<_> = all.iter().map(|(id, ..)| id.key()).collect();
-        let keys: HashSet<_> = all.iter().map(|(.., accel)| *accel).collect();
+        let keys: HashSet<_> = all.iter().map(|(.., accel)| accel.clone()).collect();
         assert_eq!(ids.len(), all.len(), "duplicate menu id");
         assert_eq!(keys.len(), all.len(), "duplicate accelerator");
     }
@@ -233,7 +305,7 @@ mod tests {
         );
         for (id, _, accel) in items() {
             assert!(
-                Accelerator::from_str(accel).is_ok(),
+                Accelerator::from_str(&accel).is_ok(),
                 "{id:?}: {accel:?} does not parse"
             );
         }
@@ -251,10 +323,10 @@ mod tests {
     #[test]
     fn dashboard_is_cmd_1_and_tabs_are_cmd_2_to_9() {
         let all = items();
-        let find = |id: MenuId| all.iter().find(|(i, ..)| *i == id).copied().unwrap();
+        let find = |id: MenuId| all.iter().find(|(i, ..)| *i == id).cloned().unwrap();
         assert_eq!(
             find(MenuId::Dashboard),
-            (MenuId::Dashboard, "Dashboard", "CmdOrCtrl+1")
+            (MenuId::Dashboard, "Dashboard", "CmdOrCtrl+1".to_string())
         );
         let tabs = [
             MenuId::Tab1,
@@ -290,7 +362,7 @@ mod tests {
             (
                 MenuId::NewInWorkbox,
                 "New Session in Workbox",
-                "CmdOrCtrl+T"
+                "CmdOrCtrl+T".to_string()
             )
         );
         assert_eq!(all[at + 1].0, MenuId::CloseTab);
@@ -299,6 +371,17 @@ mod tests {
             "same menu as Close Tab"
         );
         assert_eq!(MenuId::NewInWorkbox.key(), "new-in-workbox");
+    }
+
+    #[test]
+    fn shortcuts_item_in_view_menu() {
+        assert!(items().contains(&(
+            MenuId::Shortcuts,
+            "Keyboard Shortcuts",
+            "CmdOrCtrl+Slash".to_string()
+        )));
+        assert!(!MenuId::Shortcuts.in_terminal_menu());
+        assert_eq!(MenuId::Shortcuts.key(), "shortcuts");
     }
 
     #[test]

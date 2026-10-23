@@ -86,6 +86,17 @@ export function focusSearch(): boolean {
   return true;
 }
 
+/** The id of the Inspector's reply box, so the palette can focus it. */
+export const REPLY_BOX_ID = "inspector-reply";
+
+/** Focuses the Inspector's reply box. False if no row is selected, or its agent can't be replied to. */
+export function focusReplyBox(): boolean {
+  const input = document.getElementById(REPLY_BOX_ID);
+  if (!(input instanceof HTMLInputElement) || input.disabled) return false;
+  input.focus();
+  return true;
+}
+
 /** Focuses a row's button and scrolls it into view. False if no such row is on screen. */
 export function focusRowButton(key: string): boolean {
   const li = [...document.querySelectorAll<HTMLElement>("[data-row-key]")].find(
