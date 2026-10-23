@@ -20,7 +20,7 @@
   background: var(--raised);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-m);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 32px var(--shadow-pop);
   animation: enter-pop var(--dur-base) var(--ease-out);
 }
 .menu-item {

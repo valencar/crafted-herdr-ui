@@ -35,6 +35,7 @@ const SETTINGS: Settings = {
   terminal_font_size: 13,
   sidebar_collapsed: false,
   row_density: "comfortable",
+  theme: "dark",
 };
 const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();

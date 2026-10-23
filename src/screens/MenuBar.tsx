@@ -7,6 +7,7 @@ import { needsYou, projectNames, toRows, type Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { defaultOpenHow, openRow } from "../lib/openRow";
 import { useNow } from "../lib/useNow";
+import { useTheme } from "../lib/useTheme";
 import { useAppStore } from "../store/appStore";
 
 type RowItemProps = {
@@ -59,6 +60,7 @@ function RowItem({ row, project, nowMs, primary }: RowItemProps) {
  * the workboxes' health, and the two ways back into the app.
  */
 export function MenuBar() {
+  useTheme();
   const state = useAppStore((s) => s.state);
   const report = useAppStore((s) => s.reportError);
   const shortcutOn = useAppStore((s) => s.settings?.global_shortcut_enabled);

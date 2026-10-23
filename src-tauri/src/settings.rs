@@ -64,6 +64,18 @@ pub enum RowDensity {
     Compact,
 }
 
+/// Which color theme the windows use. `System` follows the Mac's appearance; the default is
+/// `Dark`, so nobody's app changes look on upgrade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum Theme {
+    System,
+    #[default]
+    Dark,
+    Light,
+}
+
 /// The Dashboard column's width in points when it sits beside a terminal.
 pub const SPLIT_WIDTH_RANGE: std::ops::RangeInclusive<u32> = 360..=1200;
 pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=24;
@@ -99,6 +111,9 @@ pub struct Settings {
     pub terminal_font_size: u8,
     pub sidebar_collapsed: bool,
     pub row_density: RowDensity,
+    /// An old settings file has no `theme`; it loads as dark.
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 impl Default for Settings {
@@ -122,6 +137,7 @@ impl Default for Settings {
             terminal_font_size: 13,
             sidebar_collapsed: false,
             row_density: RowDensity::default(),
+            theme: Theme::default(),
         }
     }
 }
@@ -426,6 +442,7 @@ mod tests {
         assert_eq!(s.terminal_font_size, 13);
         assert!(!s.sidebar_collapsed);
         assert_eq!(s.row_density, RowDensity::Comfortable);
+        assert_eq!(s.theme, Theme::Dark);
         // The keys are exactly the spec's (section 8.8) plus `open_after_create` and the v0.2
         // terminal and layout keys.
         let keys: std::collections::BTreeSet<_> = serde_json::to_value(&s)
@@ -454,6 +471,7 @@ mod tests {
             "terminal_font_size",
             "sidebar_collapsed",
             "row_density",
+            "theme",
         ]
         .map(String::from)
         .into();
@@ -504,6 +522,45 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(read, expected);
+    }
+
+    #[test]
+    fn theme_defaults_to_dark() {
+        assert_eq!(Theme::default(), Theme::Dark);
+        assert_eq!(Settings::default().theme, Theme::Dark);
+    }
+
+    #[test]
+    fn settings_without_theme_load_as_dark() {
+        // A settings file written before v0.7 has no `theme` key at all.
+        let read = Settings::from_entries([
+            ("row_density".to_owned(), json!("compact")),
+            ("notify_done".to_owned(), json!(false)),
+        ]);
+        assert_eq!(read.theme, Theme::Dark);
+        let mut all = match serde_json::to_value(Settings::default()).unwrap() {
+            Value::Object(all) => all,
+            _ => unreachable!(),
+        };
+        all.remove("theme");
+        let parsed: Settings = serde_json::from_value(Value::Object(all)).unwrap();
+        assert_eq!(parsed.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn theme_round_trips_lowercase() {
+        let light: Theme = serde_json::from_value(json!("light")).unwrap();
+        assert_eq!(light, Theme::Light);
+        assert_eq!(serde_json::to_value(light).unwrap(), json!("light"));
+        let s = Settings::default()
+            .merged(&json!({"theme": "system"}))
+            .unwrap();
+        assert_eq!(s.theme, Theme::System);
+        assert!(
+            Settings::default()
+                .merged(&json!({"theme": "blue"}))
+                .is_err()
+        );
     }
 
     #[test]

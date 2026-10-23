@@ -622,3 +622,168 @@ describe("motion tokens", () => {
     expect(body?.body).toContain("font-variant-numeric: tabular-nums");
   });
 });
+
+// ---------- light theme ----------
+
+const tokensCss = stripComments(read("tokens.css"));
+const blockOf = (selector: string): Record<string, string> => {
+  const found = [...tokensCss.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+    (m) => m[1].trim() === selector,
+  );
+  if (!found) return {};
+  return Object.fromEntries(
+    [...found[2].matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map((m) => [
+      m[1],
+      m[2].trim().replace(/\s+/g, " "),
+    ]),
+  );
+};
+const dark = blockOf(":root");
+const light = blockOf(':root[data-theme="light"]');
+const isColor = (value: string) =>
+  /^(#[0-9a-f]{3,8}|rgba?\(|color-mix\()/i.test(value);
+
+type Rgb = [number, number, number];
+function parseHex(hex: string): Rgb {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error(`not #rrggbb: ${hex}`);
+  return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as Rgb;
+}
+/** WCAG relative luminance of a `#rrggbb` colour. */
+function luminance([r, g, b]: Rgb): number {
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+function ratio(a: Rgb, b: Rgb): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+/** CIE lightness (0-100): how far apart two colours look regardless of hue. */
+function lightness(c: Rgb): number {
+  const y = luminance(c);
+  return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+}
+/** `fg` at `percent` over an opaque `bg`: what `color-mix(in srgb, fg N%, transparent)` draws. */
+function tint(fg: Rgb, bg: Rgb, percent: number): Rgb {
+  return fg.map((c, i) => (c * percent + bg[i] * (100 - percent)) / 100) as Rgb;
+}
+const appRules = [...css.matchAll(/([^{}@]+)\{([^{}]*)\}/g)].map((m) => ({
+  selector: m[1].trim(),
+  body: m[2],
+}));
+const lc = (name: string) => parseHex(light[name]);
+
+describe("light theme", () => {
+  it("light_theme_defines_every_color_token", () => {
+    const colorTokens = Object.entries(dark)
+      .filter(([, value]) => isColor(value))
+      .map(([name]) => name);
+    expect(colorTokens.length).toBeGreaterThan(40);
+    expect(colorTokens.filter((name) => !(name in light))).toEqual([]);
+    expect(tokensCss).toMatch(
+      /:root\[data-theme="light"\]\s*\{\s*color-scheme:\s*light;/,
+    );
+  });
+
+  it("light_theme_meets_contrast", () => {
+    const surfaces = ["--bg", "--panel"];
+    for (const token of [
+      "--text",
+      "--text-2",
+      "--text-3",
+      "--text-4",
+      "--muted",
+      "--st-needs",
+      "--st-done",
+      "--st-working",
+      "--st-idle",
+      "--online",
+      "--danger",
+    ]) {
+      for (const surface of surfaces) {
+        expect(
+          ratio(lc(token), lc(surface)),
+          `${token} on ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    const strong = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14];
+    for (const i of strong) {
+      expect(
+        ratio(lc(`--ansi-${i}`), lc("--bg")),
+        `--ansi-${i} on --bg`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const i of [7, 8, 15]) {
+      expect(
+        ratio(lc(`--ansi-${i}`), lc("--bg")),
+        `--ansi-${i} on --bg`,
+      ).toBeGreaterThanOrEqual(3);
+    }
+    // The text on the solid "needs" fills (Open, the counts, the workbox tab badge).
+    expect(ratio(lc("--on-needs"), lc("--st-needs"))).toBeGreaterThanOrEqual(
+      4.5,
+    );
+    expect(
+      ratio(lc("--primary-text"), lc("--primary-bg")),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("light_pills_keep_their_words_readable_on_their_own_tint", () => {
+    // Every rule that draws a token colour over a tint of a token colour.
+    const pairs: Array<[string, string, number, string]> = [];
+    for (const { selector, body } of appRules) {
+      const text = /(?:^|[\s;])color:\s*var\((--[\w-]+)\)/.exec(body)?.[1];
+      const fill =
+        /background:\s*color-mix\(in srgb,\s*var\((--[\w-]+)\)\s*(\d+)%,\s*transparent\)/.exec(
+          body,
+        );
+      if (text && fill) pairs.push([text, fill[1], Number(fill[2]), selector]);
+    }
+    // `.pill[data-status="unknown"]` keeps the default pill's tint.
+    pairs.push(["--muted", "--text-3", 10, '.pill[data-status="unknown"]']);
+    expect(pairs.length).toBeGreaterThanOrEqual(10);
+    const surfaces = ["--bg", "--panel", "--panel-2", "--card"];
+    for (const [text, fill, percent, selector] of pairs) {
+      for (const surface of surfaces) {
+        const under = tint(lc(fill), lc(surface), percent);
+        expect(
+          ratio(lc(text), under),
+          `${selector}: ${text} on ${percent}% ${fill} over ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("light_status_colors_differ_in_lightness_not_hue_alone", () => {
+    const l = (name: string) => lightness(lc(name));
+    // Needs you is the signal colour: it stands apart from every other status.
+    for (const other of ["--st-done", "--st-working", "--online", "--danger"]) {
+      expect(
+        Math.abs(l("--st-needs") - l(other)),
+        `--st-needs vs ${other}`,
+      ).toBeGreaterThanOrEqual(3);
+    }
+    expect(Math.abs(l("--st-needs") - l("--danger"))).toBeGreaterThanOrEqual(6);
+    // The three cool/green statuses are told apart by lightness as well as hue.
+    for (const [a, b] of [
+      ["--st-done", "--st-working"],
+      ["--st-done", "--online"],
+      ["--st-working", "--online"],
+    ]) {
+      expect(Math.abs(l(a) - l(b)), `${a} vs ${b}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("light_needs_colour_stays_amber_orange", () => {
+    const [r, g, b] = lc("--st-needs");
+    expect(r).toBeGreaterThan(g);
+    expect(g).toBeGreaterThan(b);
+    expect(r - b).toBeGreaterThan(100);
+    // Orange, not red or yellow: green is a fraction of red.
+    expect(g / r).toBeGreaterThan(0.3);
+    expect(g / r).toBeLessThan(0.65);
+  });
+});

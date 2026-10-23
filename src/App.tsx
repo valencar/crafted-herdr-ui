@@ -17,6 +17,7 @@ import {
   useTerminals,
 } from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
+import { useTheme } from "./lib/useTheme";
 import { AddWorkbox } from "./screens/AddWorkbox";
 import { AllAgents } from "./screens/AllAgents";
 import { Dashboard } from "./screens/Dashboard";
@@ -49,6 +50,7 @@ function App() {
 
   useStateSync();
   useSettingsSync();
+  useTheme();
 
   // A just-created session is selected and opened once the state lists it, from here so it
   // works on every Home screen and under a terminal tab.

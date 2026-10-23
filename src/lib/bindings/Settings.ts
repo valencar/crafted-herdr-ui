@@ -5,6 +5,7 @@ import type { OpenMode } from "./OpenMode";
 import type { OpenTarget } from "./OpenTarget";
 import type { RowDensity } from "./RowDensity";
 import type { TerminalId } from "./TerminalId";
+import type { Theme } from "./Theme";
 
 export type Settings = { 
 /**
@@ -34,4 +35,8 @@ dashboard_split: boolean,
 /**
  * The width of that column, in points.
  */
-dashboard_split_width: number, terminal_font_size: number, sidebar_collapsed: boolean, row_density: RowDensity, };
+dashboard_split_width: number, terminal_font_size: number, sidebar_collapsed: boolean, row_density: RowDensity, 
+/**
+ * An old settings file has no `theme`; it loads as dark.
+ */
+theme: Theme, };

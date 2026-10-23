@@ -7,6 +7,7 @@
   ],
   "permissions": [
     "core:default",
+    "core:window:allow-set-theme",
     "allow-get-settings",
     "allow-get-state",
     "allow-get-terminals",

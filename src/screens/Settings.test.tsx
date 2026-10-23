@@ -39,6 +39,7 @@ const DEFAULTS: SettingsData = {
   terminal_font_size: 13,
   sidebar_collapsed: false,
   row_density: "comfortable",
+  theme: "dark",
 };
 
 const HERDR: HerdrStatus = {
@@ -318,6 +319,33 @@ describe("Settings", () => {
         "Saved herdr binary not found; using /home/dev/.local/bin/herdr",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("theme_control_saves", async () => {
+    const user = await setup({ theme: "dark" }, "Appearance");
+    const group = await screen.findByRole("group", { name: "Theme" });
+    // It sits before Row density.
+    const density = screen.getByRole("group", { name: "Row density" });
+    expect(
+      group.compareDocumentPosition(density) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["System", "Dark", "Light"]);
+    expect(within(group).getByRole("button", { name: "Dark" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.getByText("System follows your Mac’s appearance."),
+    ).toBeInTheDocument();
+
+    await user.click(within(group).getByRole("button", { name: "Light" }));
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { theme: "light" },
+    });
   });
 
   it("Row density saves row_density", async () => {

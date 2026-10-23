@@ -262,6 +262,7 @@ describe("appStore", () => {
       terminal_font_size: 13,
       sidebar_collapsed: false,
       row_density: "comfortable",
+      theme: "dark",
     } as const;
     useAppStore.getState().setSettings(settings);
     expect(useAppStore.getState().settings).toEqual(settings);

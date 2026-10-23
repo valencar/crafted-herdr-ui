@@ -12,6 +12,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { copyText } from "../lib/ipc";
+import { useResolvedTheme } from "../lib/theme";
 import { useAppStore } from "../store/appStore";
 import { useTerminalStore, type TermTab } from "./terminalStore";
 import { useTermSession } from "./useTermSession";
@@ -109,6 +110,18 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
       searchRef.current = null;
     };
   }, []);
+
+  // The terminal follows the theme. `useTheme` writes `data-theme` before it publishes the
+  // resolved theme, so the tokens read here are already the new ones. Only the colors change:
+  // the terminal, its scrollback and its session are kept.
+  const resolved = useResolvedTheme((s) => s.resolved);
+  const paintedAs = useRef(resolved);
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || paintedAs.current === resolved) return;
+    paintedAs.current = resolved;
+    term.options.theme = xtermTheme(getComputedStyle(document.documentElement));
+  }, [resolved]);
 
   const { reattach, resize } = useTermSession(tab, termRef);
 

@@ -114,6 +114,7 @@ import { copyText, invokeTyped, openTerm } from "../lib/ipc";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
 import { HOME, useTerminalStore } from "./terminalStore";
 import { xtermTheme } from "./xtermTheme";
+import { useResolvedTheme } from "../lib/theme";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const open = vi.mocked(openTerm);
@@ -185,6 +186,39 @@ afterEach(() => {
 });
 
 describe("TerminalView", () => {
+  it("terminal_recolors_without_recreating", async () => {
+    useResolvedTheme.setState({ resolved: "dark" });
+    render(<Harness />);
+    await flush();
+    expect(h.terms).toHaveLength(1);
+    // Count every assignment of `options.theme` from here on.
+    const sets: unknown[] = [];
+    let current = term().options.theme;
+    Object.defineProperty(term().options, "theme", {
+      get: () => current,
+      set: (value) => {
+        sets.push(value);
+        current = value;
+      },
+    });
+    const root = document.documentElement;
+    const token = vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (name: string) =>
+        name === "--bg" ? "#f7f7f8" : "#17181b",
+    } as unknown as CSSStyleDeclaration);
+    root.dataset.theme = "light";
+    act(() => useResolvedTheme.setState({ resolved: "light" }));
+    token.mockRestore();
+    expect(sets).toHaveLength(1);
+    expect(sets[0]).toMatchObject({ background: "#f7f7f8" });
+    // The same terminal, scrollback and session intact.
+    expect(h.terms).toHaveLength(1);
+    expect(term().dispose).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledTimes(1);
+    delete root.dataset.theme;
+    useResolvedTheme.setState({ resolved: "dark" });
+  });
+
   it("opens_the_session_at_the_fitted_size_with_the_theme_and_options", async () => {
     render(<Harness />);
     await flush();

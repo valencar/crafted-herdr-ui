@@ -42,6 +42,7 @@ const ipc = vi.hoisted(() => ({
   onNewSession: vi.fn(),
   onMenu: vi.fn(),
   invokeTyped: vi.fn(),
+  setWindowTheme: vi.fn(),
   toActionError: (e: unknown) => e,
 }));
 vi.mock("./lib/ipc", () => ipc);

@@ -8,6 +8,7 @@ import type { GroupBy } from "../lib/bindings/GroupBy";
 import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
 import type { OpenMode } from "../lib/bindings/OpenMode";
 import type { RowDensity } from "../lib/bindings/RowDensity";
+import type { Theme } from "../lib/bindings/Theme";
 import type { AttachMode } from "../lib/bindings/AttachMode";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
@@ -19,6 +20,7 @@ import {
   actionErrorMessage,
 } from "../lib/format";
 import { invokeTyped, toActionError } from "../lib/ipc";
+import { useTheme } from "../lib/useTheme";
 import { useAppStore } from "../store/appStore";
 
 type SectionId =
@@ -472,9 +474,36 @@ function Appearance({
   settings: SettingsData;
   update: Update;
 }) {
+  const themeId = useId();
   const densityId = useId();
   return (
     <div className="settings-stack">
+      <div role="group" aria-labelledby={themeId} className="settings-fieldset">
+        <div id={themeId} className="settings-label">
+          Theme
+        </div>
+        <div className="segmented settings-segmented">
+          {(
+            [
+              ["system", "System"],
+              ["dark", "Dark"],
+              ["light", "Light"],
+            ] as [Theme, string][]
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={settings.theme === value}
+              onClick={() => void update({ theme: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="muted settings-hint">
+          System follows your Mac’s appearance.
+        </p>
+      </div>
       <div
         role="group"
         aria-labelledby={densityId}
@@ -712,6 +741,7 @@ function Shortcuts({
 
 /** The Settings window (spec section 9.5): six sections, each change saved as it is made. */
 export function Settings() {
+  useTheme();
   const settings = useAppStore((s) => s.settings);
   const setSettings = useAppStore((s) => s.setSettings);
   const [section, setSection] = useState<SectionId>("general");

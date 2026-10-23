@@ -48,7 +48,7 @@ kbd {
   background: var(--raised);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-s);
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--bg) 70%, transparent);
+  box-shadow: 0 6px 16px var(--shadow);
   pointer-events: none;
 }
 
@@ -1849,7 +1849,7 @@ select.field {
   overflow: hidden;
   background: var(--panel-2);
   border-left: 1px solid var(--border-strong);
-  box-shadow: -12px 0 32px color-mix(in srgb, var(--bg) 70%, transparent);
+  box-shadow: -12px 0 32px var(--shadow);
   animation: enter-slide var(--dur-slow) var(--ease-out);
 }
 .activity-head {

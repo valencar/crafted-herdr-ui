@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { AppState } from "./bindings/AppState";
 import type { ActionError } from "./bindings/ActionError";
@@ -202,6 +203,18 @@ export async function invokeTyped<K extends CommandName>(
  */
 export function copyText(text: string): Promise<void> {
   return writeText(text);
+}
+
+/**
+ * Tells the OS the window's theme, so native pieces (context menus, the title bar) match the
+ * page. Failures are ignored: the page itself is already drawn in the theme.
+ */
+export async function setWindowTheme(theme: "dark" | "light"): Promise<void> {
+  try {
+    await getCurrentWindow().setTheme(theme);
+  } catch {
+    // No window API (a test, a browser) or the grant is missing.
+  }
 }
 
 /** The current state, for a UI that started after the first `"state"` event. */

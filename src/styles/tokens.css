@@ -1,5 +1,6 @@
-/* Design tokens (spec section 9). Every color is a variable so a light theme only has to
-   override this block; v1 ships dark only. Components use these, never hex literals. */
+/* Design tokens (spec section 9). Every color is a variable. `:root` holds the dark values
+   (the default); the `[data-theme="light"]` block at the end redefines every color token.
+   Components use these, never hex literals. */
 :root {
   color-scheme: dark;
 
@@ -49,6 +50,10 @@
   /* focus ring */
   --focus: #8fd3ff;
 
+  /* shadows under floating things (tooltip and drawer, menus) */
+  --shadow: color-mix(in srgb, var(--bg) 70%, transparent);
+  --shadow-pop: rgb(0 0 0 / 45%);
+
   /* terminal: the 16 ANSI colors (xterm theme), dark values */
   --ansi-0: #2a2d33;
   --ansi-1: #ff8b84;
@@ -94,4 +99,76 @@
   --dur-slow: 220ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --tooltip-delay: 350ms;
+}
+
+/* The light theme redefines every color token above (shape, type and motion are shared).
+   Contrast is checked by styles.test.ts: text and status words are at least 4.5:1 on --bg and
+   --panel, and the status words stay at 4.5:1 inside their own tinted pills. The statuses
+   differ in lightness as well as hue; --st-needs stays the amber-orange signal colour. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* surfaces */
+  --bg: #f7f7f8;
+  --bg-sidebar: #f0f0f2;
+  --panel: #ffffff;
+  --panel-2: #fcfcfd;
+  --raised: #ffffff;
+  --border: #e3e3e7;
+  --border-strong: #d0d0d6;
+  --card: #ffffff;
+  --chip: #ececef;
+  --input: #ffffff;
+  --input-border: #d4d4da;
+  --fill-hover: color-mix(in oklab, var(--text) 4%, transparent);
+  --fill-selected: color-mix(in oklab, var(--text) 7%, transparent);
+  --segment: #ececef;
+  --segment-on: #ffffff;
+
+  /* text */
+  --text: #17181b;
+  --text-2: #33353b;
+  --text-3: #5c5f67;
+  --text-4: #62666e;
+  --muted: #62666e;
+
+  /* status */
+  --st-needs: #a34a05;
+  --st-done: #04506f;
+  --st-working: #3049b8;
+  --st-idle: #5c5f67;
+  --online: #16693a;
+  --danger: #a1180e;
+
+  /* primary button: dark fill, light text */
+  --primary-bg: #17181b;
+  --primary-text: #ffffff;
+  --primary-hover: #33353b;
+  --on-needs: #ffffff;
+
+  /* focus ring */
+  --focus: #0a64a0;
+
+  /* shadows */
+  --shadow: rgb(23 24 27 / 16%);
+  --shadow-pop: rgb(23 24 27 / 18%);
+
+  /* terminal: the 16 ANSI colors on the light background. 1-6 and 9-14 are at least 4.5:1,
+     7, 8 and 15 at least 3:1; the bright ones are the livelier of each pair. */
+  --ansi-0: #2a2d33;
+  --ansi-1: #b3261e;
+  --ansi-2: #1a6b3a;
+  --ansi-3: #8a5a00;
+  --ansi-4: #2f48b8;
+  --ansi-5: #8e3fb5;
+  --ansi-6: #0a6b80;
+  --ansi-7: #5c5f67;
+  --ansi-8: #7a7e88;
+  --ansi-9: #c9372c;
+  --ansi-10: #1d7d43;
+  --ansi-11: #9a6500;
+  --ansi-12: #4560d0;
+  --ansi-13: #9c47c4;
+  --ansi-14: #117a97;
+  --ansi-15: #17181b;
 }

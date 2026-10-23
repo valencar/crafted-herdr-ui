@@ -47,6 +47,7 @@ const SETTINGS: Settings = {
   terminal_font_size: 13,
   sidebar_collapsed: false,
   row_density: "comfortable",
+  theme: "dark",
 };
 
 function setup(template = "") {
