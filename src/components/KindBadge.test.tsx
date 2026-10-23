@@ -22,4 +22,9 @@ describe("KindBadge", () => {
     render(<KindBadge kind="claude" named />);
     expect(screen.queryByText("claude")).toBeNull();
   });
+
+  it("uses_the_app_tooltip_not_a_native_title", () => {
+    const { container } = render(<KindBadge kind="claude" />);
+    expect(container.querySelector("[title]")).toBeNull();
+  });
 });

@@ -453,24 +453,21 @@ describe("NewSession form", () => {
     const user = setup(
       appState(machine("buildbox", { snapshot: snap }), machine("gpubox")),
     );
-    const recent = screen
-      .getAllByRole("button")
-      .filter((b) =>
-        b.getAttribute("title")?.startsWith("/home/dev/projects/"),
-      );
-    const titles = recent.map((b) => b.getAttribute("title"));
-    expect(titles).toEqual(
-      [0, 1, 2, 3, 4, 5].map((n) => `/home/dev/projects/p${n}`),
+    // The buttons show the folder's name; the app tooltip (not a native title) has the path.
+    const recentButtons = () =>
+      screen.getAllByRole("button").filter((b) => /^p\d$/.test(b.textContent!));
+    const recent = recentButtons();
+    expect(recent.map((b) => b.textContent)).toEqual(
+      [0, 1, 2, 3, 4, 5].map((n) => `p${n}`),
     );
+    expect(recent.every((b) => !b.hasAttribute("title"))).toBe(true);
     await user.click(recent[0]);
-    expect(screen.getByLabelText("Project folder")).toHaveValue(titles[0]);
+    expect(screen.getByLabelText("Project folder")).toHaveValue(
+      "/home/dev/projects/p0",
+    );
     // The other machine's folders are its own.
     await user.click(screen.getByRole("radio", { name: /gpubox/ }));
-    expect(
-      screen
-        .getAllByRole("button")
-        .some((b) => b.getAttribute("title") === titles[0]),
-    ).toBe(false);
+    expect(recentButtons()).toHaveLength(0);
   });
 
   it("requires a branch for a worktree and sends it with trust off", async () => {

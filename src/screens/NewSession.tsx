@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { KindBadge } from "../components/KindBadge";
 import { Sheet } from "../components/Sheet";
+import { Tooltip } from "../components/Tooltip";
 import type { ActionError } from "../lib/bindings/ActionError";
 import type { NewSessionRequest } from "../lib/bindings/NewSessionRequest";
 import type { Placement } from "../lib/bindings/Placement";
@@ -397,15 +398,15 @@ export function NewSession({ terminalName }: Props) {
           <div className="sheet-line sheet-wrap">
             <span className="muted sheet-note">Recent:</span>
             {recentFolders.map((f) => (
-              <button
-                key={f}
-                type="button"
-                className="btn btn-small mono"
-                title={f}
-                onClick={() => setFolder(f)}
-              >
-                {baseName(f)}
-              </button>
+              <Tooltip key={f} label={f}>
+                <button
+                  type="button"
+                  className="btn btn-small mono"
+                  onClick={() => setFolder(f)}
+                >
+                  {baseName(f)}
+                </button>
+              </Tooltip>
             ))}
           </div>
         )}
