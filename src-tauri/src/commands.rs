@@ -52,7 +52,7 @@ impl AgentKindsCache {
         if let Some(kinds) = cached.as_ref() {
             return kinds.clone();
         }
-        match herdr_agent_kinds(&cli.bin(), cli.env(), HELP_TIMEOUT).await {
+        match herdr_agent_kinds(cli.runner(), &cli.bin(), cli.env(), HELP_TIMEOUT).await {
             Some(kinds) => {
                 *cached = Some(kinds.clone());
                 kinds
@@ -411,8 +411,9 @@ pub async fn term_open(
     let started = crate::now_ms();
     let sink: TermSink = Arc::new(move |event| on_event.send(event).is_ok());
     let sessions = Arc::clone(&sessions);
+    let runner = cli.runner().clone();
     let id = tauri::async_runtime::spawn_blocking(move || {
-        sessions.open(&argv, &env, TermSize { cols, rows }, sink)
+        sessions.open(&runner, &argv, &env, TermSize { cols, rows }, sink)
     })
     .await
     .map_err(|e| ActionError::invalid(e.to_string()))?
@@ -550,7 +551,7 @@ pub fn start_machine_add(
         let _ = app.emit(SETUP_EVENT, event);
     });
     setup
-        .start(&argv, cli.env(), emit, on_exit)
+        .start(cli.runner(), &argv, cli.env(), emit, on_exit)
         .map_err(ActionError::invalid)
 }
 

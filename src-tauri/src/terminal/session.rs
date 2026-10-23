@@ -12,6 +12,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::lock;
+use crate::platform::runner::Runner;
 use crate::pty::{PtyControl, PtySpawner, TermSize};
 
 pub type TermId = u32;
@@ -64,9 +65,11 @@ impl TermSessions {
         }
     }
 
-    /// Starts `argv` on a pty and streams its output to `sink` until it ends.
+    /// Starts `argv` on a pty (as `runner` runs it) and streams its output to `sink` until it
+    /// ends.
     pub fn open(
         &self,
+        runner: &Runner,
         argv: &[String],
         env: &[(String, String)],
         size: TermSize,
@@ -77,9 +80,12 @@ impl TermSessions {
         if sessions.len() >= MAX_SESSIONS {
             return Err(format!("Close a terminal tab first ({MAX_SESSIONS} open)."));
         }
+        let launch = runner
+            .wrap(argv, &term_env(env))
+            .map_err(|e| format!("Could not start the terminal: {e}"))?;
         let spawned = self
             .spawner
-            .spawn(argv, &term_env(env), clamped(size))
+            .spawn(&launch, clamped(size))
             .map_err(|e| format!("Could not start the terminal: {e}"))?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let control = spawned.control.clone();
@@ -239,6 +245,7 @@ pub fn term_env(base: &[(String, String)]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::runner::Launch;
     use crate::pty::{PortablePty, SpawnedPty};
     use std::io;
     use std::sync::atomic::AtomicUsize;
@@ -300,12 +307,7 @@ mod tests {
     }
 
     impl PtySpawner for FakeSpawner {
-        fn spawn(
-            &self,
-            _argv: &[String],
-            _env: &[(String, String)],
-            size: TermSize,
-        ) -> io::Result<SpawnedPty> {
+        fn spawn(&self, _launch: &Launch, size: TermSize) -> io::Result<SpawnedPty> {
             lock(&self.spawned_sizes).push(size);
             let (tx, output) = mpsc::channel();
             for chunk in &self.chunks {
@@ -395,11 +397,11 @@ mod tests {
         let sink: TermSink = Arc::new(|_| true);
         for _ in 0..MAX_SESSIONS {
             sessions
-                .open(&argv(), &[], size(80, 24), sink.clone())
+                .open(&Runner::Direct, &argv(), &[], size(80, 24), sink.clone())
                 .expect("open");
         }
         assert_eq!(sessions.len(), MAX_SESSIONS);
-        let refused = sessions.open(&argv(), &[], size(80, 24), sink.clone());
+        let refused = sessions.open(&Runner::Direct, &argv(), &[], size(80, 24), sink.clone());
         assert_eq!(
             refused,
             Err("Close a terminal tab first (16 open).".to_owned())
@@ -407,7 +409,7 @@ mod tests {
         sessions.close_all();
         assert_eq!(sessions.len(), 0);
         sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("room again");
     }
 
@@ -416,7 +418,7 @@ mod tests {
         let sessions = TermSessions::new(FakeSpawner::new(Vec::new(), false));
         let (sink, rx) = recording_sink();
         let id = sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("open");
         assert_eq!(until_exit(&rx), [TermEvent::Exit { code: Some(0) }]);
         let gone = Err("That terminal is no longer open.".to_owned());
@@ -434,7 +436,7 @@ mod tests {
         let sessions = TermSessions::new(spawner.clone());
         let sink: TermSink = Arc::new(|_| false);
         sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("open");
         wait_until("the child to be killed", || {
             spawner.control.kills.load(Ordering::SeqCst) == 1
@@ -448,7 +450,7 @@ mod tests {
         let sessions = TermSessions::new(spawner.clone());
         let (sink, rx) = recording_sink();
         let id = sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("open");
         sessions.close(id);
         assert_eq!(spawner.control.kills.load(Ordering::SeqCst), 1);
@@ -467,7 +469,7 @@ mod tests {
         let sessions = TermSessions::new(FakeSpawner::new(chunks, false));
         let (sink, rx) = recording_sink();
         sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("open");
         let mut text = String::new();
         let mut messages = 0;
@@ -487,7 +489,9 @@ mod tests {
         let spawner = FakeSpawner::new(Vec::new(), true);
         let sessions = TermSessions::new(spawner.clone());
         let sink: TermSink = Arc::new(|_| true);
-        let id = sessions.open(&argv(), &[], size(0, 0), sink).expect("open");
+        let id = sessions
+            .open(&Runner::Direct, &argv(), &[], size(0, 0), sink)
+            .expect("open");
         sessions.resize(id, size(0, 5)).expect("resize");
         sessions.resize(id, size(7, 0)).expect("resize");
         sessions.resize(id, size(100, 30)).expect("resize");
@@ -512,7 +516,7 @@ mod tests {
         .to_vec();
         let env = vec![("PATH".to_owned(), "/usr/bin:/bin".to_owned())];
         let id = sessions
-            .open(&argv, &env, size(80, 24), sink)
+            .open(&Runner::Direct, &argv, &env, size(80, 24), sink)
             .expect("open");
         let mut seen = String::new();
         let mut exit = None;

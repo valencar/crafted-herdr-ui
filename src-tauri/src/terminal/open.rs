@@ -13,7 +13,7 @@ use crate::state::{AppState, MachineView};
 
 use super::{
     InstalledCache, LaunchSpec, TerminalId, attach_argv, check_bin, check_openable,
-    check_terminal_id, default_terminal, full_ui_argv, launch, launcher_for,
+    check_terminal_id, full_ui_argv, launch, launcher_for,
 };
 
 fn find_machine<'a>(state: &'a AppState, machine_id: &str) -> Result<&'a MachineView, ActionError> {
@@ -98,7 +98,7 @@ pub(crate) fn attach_for_pane(
 fn chosen_terminal(settings: &Settings, installed: &[TerminalId]) -> TerminalId {
     settings
         .terminal
-        .unwrap_or_else(|| default_terminal(installed))
+        .unwrap_or_else(|| crate::platform::default_terminal(installed))
 }
 
 /// The process that opens `argv` in the terminal the settings ask for.

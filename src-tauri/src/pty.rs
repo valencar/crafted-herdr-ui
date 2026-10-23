@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
 use crate::lock;
+use crate::platform::runner::Launch;
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 /// A terminal's size in character cells.
@@ -52,15 +53,11 @@ pub struct SpawnedPty {
 
 /// Starts a process on a pseudo-terminal. A trait so tests can replay a transcript instead.
 pub trait PtySpawner: Send + Sync {
-    fn spawn(
-        &self,
-        argv: &[String],
-        env: &[(String, String)],
-        size: TermSize,
-    ) -> io::Result<SpawnedPty>;
+    fn spawn(&self, launch: &Launch, size: TermSize) -> io::Result<SpawnedPty>;
 }
 
-/// The real thing, with `portable-pty`: the given size, exactly the given environment.
+/// The real thing, with `portable-pty`: the given size, and exactly the launch's environment
+/// (it clears the inherited one when `clear_env` is set). Exempt from `platform::background`.
 pub struct PortablePty;
 
 struct PortableControl {
@@ -104,22 +101,19 @@ fn pty_error(e: impl std::fmt::Display) -> io::Error {
 }
 
 impl PtySpawner for PortablePty {
-    fn spawn(
-        &self,
-        argv: &[String],
-        env: &[(String, String)],
-        size: TermSize,
-    ) -> io::Result<SpawnedPty> {
-        let (program, args) = argv
-            .split_first()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty command"))?;
+    fn spawn(&self, launch: &Launch, size: TermSize) -> io::Result<SpawnedPty> {
+        if launch.program.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty command"));
+        }
         let pair = native_pty_system()
             .openpty(size.pty_size())
             .map_err(pty_error)?;
-        let mut command = CommandBuilder::new(program);
-        command.args(args);
-        command.env_clear();
-        for (key, value) in env {
+        let mut command = CommandBuilder::new(&launch.program);
+        command.args(&launch.args);
+        if launch.clear_env {
+            command.env_clear();
+        }
+        for (key, value) in &launch.env {
             command.env(key, value);
         }
         let child = pair.slave.spawn_command(command).map_err(pty_error)?;
@@ -155,6 +149,14 @@ mod tests {
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::{Duration, Instant};
 
+    /// What `Runner::Direct` makes of `argv`, with the PATH these tests have always used.
+    #[cfg(unix)]
+    fn direct(argv: &[String]) -> Launch {
+        crate::platform::runner::Runner::Direct
+            .wrap(argv, &[("PATH".to_owned(), "/usr/bin:/bin".to_owned())])
+            .expect("wrap")
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_real_pty_carries_output_and_keystrokes() {
@@ -168,8 +170,7 @@ mod tests {
         .to_vec();
         let pty = PortablePty
             .spawn(
-                &argv,
-                &[("PATH".to_owned(), "/usr/bin:/bin".to_owned())],
+                &direct(&argv),
                 TermSize {
                     cols: 120,
                     rows: 40,
@@ -203,11 +204,7 @@ mod tests {
             .map(str::to_owned)
             .to_vec();
         let pty = PortablePty
-            .spawn(
-                &argv,
-                &[("PATH".to_owned(), "/usr/bin:/bin".to_owned())],
-                TermSize { cols: 80, rows: 24 },
-            )
+            .spawn(&direct(&argv), TermSize { cols: 80, rows: 24 })
             .expect("spawn");
         pty.control
             .resize(TermSize {

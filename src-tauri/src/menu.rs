@@ -154,7 +154,7 @@ fn forwarded_submenu<R: Runtime>(
     pick: impl Fn(MenuId) -> bool,
 ) -> tauri::Result<Submenu<R>> {
     let mut menu = SubmenuBuilder::new(app, title);
-    for (id, label, accelerator) in items_for(platform::OS)
+    for (id, label, accelerator) in platform::menu_items()
         .into_iter()
         .filter(|(id, ..)| pick(*id))
     {
@@ -170,7 +170,7 @@ fn forwarded_submenu<R: Runtime>(
 /// so ⌘W belongs to Close Tab. The red button still hides the main window.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let mut settings = MenuItemBuilder::with_id(SETTINGS_ITEM, "Settings…");
-    if let Some(accelerator) = accelerator(SETTINGS_ITEM, platform::OS) {
+    if let Some(accelerator) = platform::accelerator(SETTINGS_ITEM) {
         settings = settings.accelerator(accelerator);
     }
     let settings = settings.build(app)?;
@@ -215,7 +215,7 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
         }
         return;
     }
-    let Some((id, ..)) = items_for(platform::OS)
+    let Some((id, ..)) = platform::menu_items()
         .into_iter()
         .find(|(id, ..)| id.key() == chosen)
     else {

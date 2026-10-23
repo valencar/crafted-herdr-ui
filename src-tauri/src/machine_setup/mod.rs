@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::lock;
+use crate::platform::runner::Runner;
 use crate::pty::{PtyControl, PtySpawner, TermSize};
 
 /// The event the UI listens to.
@@ -79,10 +80,11 @@ impl MachineSetup {
         }
     }
 
-    /// Starts `argv` (the herdr binary first) and streams its events to `emit`; `on_exit` hears
-    /// how it ended. Refused while another setup is running.
+    /// Starts `argv` (the herdr binary first, run as `runner` runs it) and streams its events to
+    /// `emit`; `on_exit` hears how it ended. Refused while another setup is running.
     pub fn start(
         &self,
+        runner: &Runner,
         argv: &[String],
         env: &[(String, String)],
         emit: Emit,
@@ -92,9 +94,12 @@ impl MachineSetup {
         if slot.is_some() {
             return Err("A workbox setup is already running.".to_owned());
         }
+        let launch = runner
+            .wrap(argv, env)
+            .map_err(|e| format!("Couldn't start herdr: {e}"))?;
         let spawned = self
             .spawner
-            .spawn(argv, env, SIZE)
+            .spawn(&launch, SIZE)
             .map_err(|e| format!("Couldn't start herdr: {e}"))?;
         let (run, first) = SetupRun::start();
         for event in first {

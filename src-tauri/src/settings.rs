@@ -392,7 +392,9 @@ impl HerdrLocator {
         let resolved = resolve_with_saved(saved, login_hit, &self.home, &|p| p.is_file());
         cli.set_bin(resolved.path.clone().unwrap_or_default());
         let version = match &resolved.path {
-            Some(bin) => crate::env::herdr_version(bin, cli.env(), VERSION_TIMEOUT).await,
+            Some(bin) => {
+                crate::env::herdr_version(cli.runner(), bin, cli.env(), VERSION_TIMEOUT).await
+            }
             None => None,
         };
         let status = HerdrStatus {

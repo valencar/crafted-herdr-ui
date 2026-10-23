@@ -11,6 +11,7 @@ use tokio::sync::Semaphore;
 use ts_rs::TS;
 
 use super::errors::HerdrError;
+use crate::platform::runner::{self, Runner};
 use crate::{LOCAL, lock, now_ms, platform};
 
 pub const T_DEFAULT: Duration = Duration::from_secs(10);
@@ -70,6 +71,9 @@ pub struct HerdrCli {
     env: Arc<OnceLock<Vec<(String, String)>>>,
     log: Arc<Mutex<CommandLog>>,
     limits: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
+    /// How every herdr command reaches the OS (`Direct` on the Mac). Set by `with_runner`;
+    /// every clone has its own copy of it.
+    runner: Runner,
 }
 
 impl HerdrCli {
@@ -81,7 +85,21 @@ impl HerdrCli {
             env: Arc::default(),
             log: Arc::default(),
             limits: Arc::default(),
+            runner: Runner::Direct,
         }
+    }
+
+    /// The same runner, with every command going through `runner` instead of `Direct`. Call it
+    /// right after construction, before the first clone.
+    pub fn with_runner(mut self, runner: Runner) -> Self {
+        self.runner = runner;
+        self
+    }
+
+    /// How this runner's commands reach the OS. The terminal and the `machine add` pty use it
+    /// too, so there is one source of truth.
+    pub fn runner(&self) -> &Runner {
+        &self.runner
     }
 
     /// Sets the environment of a runner made with `without_env`. Only the first call counts.
@@ -97,6 +115,7 @@ impl HerdrCli {
             env: Arc::new(cell),
             log: Arc::default(),
             limits: Arc::default(),
+            runner: Runner::Direct,
         }
     }
 
@@ -234,15 +253,19 @@ impl HerdrCli {
         args: &[String],
         timeout: Duration,
     ) -> Result<(Option<i32>, String, String), HerdrError> {
-        let mut cmd = Command::new(self.bin());
-        platform::background(&mut cmd);
+        let mut argv = vec![self.bin().to_string_lossy().into_owned()];
         if let Some(id) = remote {
-            cmd.arg("--machine").arg(id);
+            argv.extend(["--machine".to_owned(), id.to_owned()]);
         }
-        cmd.args(args)
-            .env_clear()
-            .envs(self.env().iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::null())
+        argv.extend_from_slice(args);
+        let launch = self
+            .runner
+            .wrap(&argv, self.env())
+            .map_err(|message| HerdrError::Spawn { message })?;
+        let mut cmd = Command::new(&launch.program);
+        platform::background(&mut cmd);
+        runner::apply(&launch, &mut cmd);
+        cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);

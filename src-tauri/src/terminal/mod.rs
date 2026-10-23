@@ -158,7 +158,7 @@ pub fn launcher_for(id: TerminalId, home: PathBuf, template: &str) -> Box<dyn La
 }
 
 /// Every terminal with a bundle id, in the order they are offered.
-const DETECTABLE: [TerminalId; 7] = [
+pub(crate) const DETECTABLE: [TerminalId; 7] = [
     TerminalId::Ghostty,
     TerminalId::ITerm2,
     TerminalId::Warp,
@@ -170,13 +170,15 @@ const DETECTABLE: [TerminalId; 7] = [
 
 /// The detected terminals in offer order, with Terminal added if detection missed it.
 fn with_terminal_app(found: &[TerminalId]) -> Vec<TerminalId> {
-    DETECTABLE
-        .into_iter()
+    platform::terminal_catalog()
+        .iter()
+        .copied()
         .filter(|t| *t == TerminalId::TerminalApp || found.contains(t))
         .collect()
 }
 
-/// The first installed of Ghostty, iTerm2, Warp, Terminal.
+/// The Mac preference: the first installed of Ghostty, iTerm2, Warp, Terminal. Callers go
+/// through `platform::default_terminal`.
 pub fn default_terminal(installed: &[TerminalId]) -> TerminalId {
     [TerminalId::Ghostty, TerminalId::ITerm2, TerminalId::Warp]
         .into_iter()
@@ -227,7 +229,7 @@ fn app_dirs() -> Vec<PathBuf> {
 pub async fn detect_installed() -> Vec<TerminalId> {
     let dirs = app_dirs();
     let mut checks = tokio::task::JoinSet::new();
-    for id in DETECTABLE {
+    for &id in platform::terminal_catalog() {
         let dirs = dirs.clone();
         checks.spawn(async move {
             let known = match id.bundle_id() {
@@ -255,14 +257,14 @@ impl InstalledCache {
         let mut cached = self.0.lock().await;
         match cached.as_ref() {
             Some(installed) => installed.clone(),
-            None => cached.insert(detect_installed().await).clone(),
+            None => cached.insert(platform::detect_terminals().await).clone(),
         }
     }
 
     /// Detects again, for when the user installed a terminal while the app was running.
     pub async fn refresh(&self) -> Vec<TerminalId> {
         let mut cached = self.0.lock().await;
-        cached.insert(detect_installed().await).clone()
+        cached.insert(platform::detect_terminals().await).clone()
     }
 }
 
@@ -276,7 +278,7 @@ pub struct TerminalList {
 
 impl TerminalList {
     pub fn new(installed: Vec<TerminalId>) -> Self {
-        let default = default_terminal(&installed);
+        let default = platform::default_terminal(&installed);
         Self { installed, default }
     }
 }
@@ -352,8 +354,7 @@ async fn run_spec(
     let run = cmd
         .args(&spec.args)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-        .envs(env.iter().map(|(k, v)| (k, v)))
+        .envs(platform::launch_env(env))
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true)
         .output();
@@ -384,8 +385,7 @@ fn spawn_detached(spec: &LaunchSpec, env: &[(String, String)]) -> Result<(), Str
     platform::background(&mut cmd);
     cmd.args(&spec.args)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-        .envs(env.iter().map(|(k, v)| (k, v)))
+        .envs(platform::launch_env(env))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
