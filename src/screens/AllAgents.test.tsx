@@ -156,6 +156,14 @@ afterEach(() => {
 });
 
 describe("AllAgents", () => {
+  it("first_load_shows_a_skeleton", () => {
+    setup(null);
+    const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;
+    expect(busy).not.toBeNull();
+    expect(busy).toHaveTextContent("Connecting to herdr…");
+    expect(busy.querySelector(".skel")).not.toBeNull();
+  });
+
   it("renders_only_its_main_content_and_the_inspector", () => {
     setup();
     expect(screen.getByRole("main")).toBeInTheDocument();
@@ -538,7 +546,7 @@ describe("AllAgents", () => {
   });
 
   it("focusing_a_row_shows_it_even_when_the_saved_search_filtered_it_out", async () => {
-    // Reply, a card click and a notification all go through `focusRow`.
+    // A card click and a notification all go through `focusRow`.
     setup();
     act(() => useAppStore.getState().setQuery("no such agent"));
     expect(

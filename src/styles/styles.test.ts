@@ -324,6 +324,36 @@ describe("sidebar hint slot", () => {
   });
 });
 
+describe("home screens", () => {
+  it("status_bar_segments_have_gaps", () => {
+    expect(rule(".status-bar")).toMatch(/gap:\s*2px/);
+    expect(rule(".status-bar-seg")).toMatch(/border-radius:\s*\S+/);
+  });
+
+  it("skeleton_shimmers", () => {
+    expect(rule(".skel")).toMatch(/animation:\s*skel-shimmer 1\.6s/);
+    // Colors only from tokens.
+    expect(rule(".skel")).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+
+  it("a_needs_card_strengthens_its_border_on_hover_over_the_base_duration", () => {
+    expect(rule(".card")).toMatch(
+      /transition:\s*border-color var\(--dur-base\) var\(--ease-out\)/,
+    );
+    expect(rule(".card:hover")).toMatch(/border-color:/);
+  });
+
+  it("the_empty_state_frame_is_dashed_and_its_icon_sits_in_a_chip_tile", () => {
+    expect(rule(".empty-card")).toMatch(
+      /border:\s*1px dashed var\(--border-strong\)/,
+    );
+    const icon = rule(".empty-icon");
+    expect(icon).toMatch(/width:\s*40px/);
+    expect(icon).toMatch(/height:\s*40px/);
+    expect(icon).toMatch(/background:\s*var\(--chip\)/);
+  });
+});
+
 describe("tabs", () => {
   /** The declarations of the last rule whose selector list contains `selector`. */
   const ruleWith = (selector: string): string => {
@@ -354,6 +384,13 @@ describe("tabs", () => {
         ".nav-term:focus-visible .nav-slot-hint",
         ".nav-link:hover .nav-slot-hint",
         ".nav-link:focus-visible .nav-slot-hint",
+      ],
+    },
+    {
+      rest: ".dash-row .row-reveal",
+      reveals: [
+        ".dash-row:hover .row-reveal",
+        ".dash-row:focus-within .row-reveal",
       ],
     },
   ];

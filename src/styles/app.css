@@ -826,12 +826,22 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  transition: border-color var(--dur-base) var(--ease-out);
 }
 .card[data-status="blocked"] {
   border-color: color-mix(in srgb, var(--st-needs) 22%, var(--border));
 }
 .card[data-status="done"] {
   border-color: color-mix(in srgb, var(--st-done) 18%, var(--border));
+}
+.card:hover {
+  border-color: var(--border-strong);
+}
+.card[data-status="blocked"]:hover {
+  border-color: color-mix(in srgb, var(--st-needs) 45%, var(--border));
+}
+.card[data-status="done"]:hover {
+  border-color: color-mix(in srgb, var(--st-done) 40%, var(--border));
 }
 .card.is-selected {
   border-color: var(--text-4);
@@ -1116,6 +1126,21 @@ kbd {
 
 .toast-info {
   color: var(--text);
+}
+.toast-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+.toast-info .toast-icon {
+  color: var(--online);
+  background: color-mix(in srgb, var(--online) 16%, transparent);
 }
 
 .card-preview {
@@ -1731,8 +1756,18 @@ select.field {
   max-width: 560px;
   padding: 16px 18px;
   background: var(--card);
-  border: 1px solid var(--border);
+  border: 1px dashed var(--border-strong);
   border-radius: var(--radius-l);
+}
+.empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-m);
+  background: var(--chip);
+  color: var(--text-3);
 }
 .empty-card .cmdbox {
   align-self: stretch;
@@ -2771,6 +2806,56 @@ select.field {
 .dash-row .btn {
   flex-shrink: 0;
 }
+/* Mark seen is quiet until the row is pointed at or focused; it stays in the tab order. */
+.dash-row .row-reveal {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.dash-row:hover .row-reveal,
+.dash-row:focus-within .row-reveal {
+  opacity: 1;
+}
+
+/* ---------- skeletons ---------- */
+
+.skel {
+  display: block;
+  flex-shrink: 0;
+  height: 12px;
+  border-radius: var(--radius-s);
+  background: linear-gradient(
+    90deg,
+    var(--chip) 25%,
+    var(--border-strong) 50%,
+    var(--chip) 75%
+  );
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.6s linear infinite;
+}
+.skel-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--card);
+}
+.skel-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 56px;
+  padding: 10px 14px;
+}
+.skel-row + .skel-row {
+  border-top: 1px solid var(--border);
+}
+.skel-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .link-btn {
   align-self: flex-start;
   background: transparent;
@@ -2835,6 +2920,7 @@ select.field {
 .status-bar-seg {
   flex-basis: 0;
   min-width: 4px;
+  border-radius: 2px;
 }
 .status-bar-seg[data-status="blocked"] {
   background: var(--st-needs);

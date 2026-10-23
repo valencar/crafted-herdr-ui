@@ -41,7 +41,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
       onClick={() => onSelect(row.key)}
     >
       <div className="card-head">
-        <StatusPill status={row.status} />
+        <StatusPill status={row.status} live />
         {project && <span className="card-project">{project}</span>}
         {project && <span className="muted">·</span>}
         <span className="mono card-name">{row.name}</span>
@@ -58,17 +58,10 @@ export const NeedsYouCard = memo(function NeedsYouCard({
       )}
       <div className="card-actions">
         <OpenButton row={row} terminalName={terminalName} tone="needs" />
-        {row.status === "done" ? (
+        {/* A blocked agent is answered in its own terminal, never from a card. */}
+        {row.status === "done" && (
           <button type="button" className="btn" onClick={() => onMarkSeen(row)}>
             Mark seen
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => onSelect(row.key)}
-          >
-            Reply…
           </button>
         )}
         {age && (

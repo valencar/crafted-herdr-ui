@@ -1,3 +1,4 @@
+import { EmptyState } from "../components/EmptyState";
 import { Kbd } from "../components/Kbd";
 import { StatusDot } from "../components/StatusDot";
 import { useId, useMemo, type ReactNode } from "react";
@@ -5,6 +6,7 @@ import { MachineNotices, NoAgentsYet } from "../components/HomeNotices";
 import { MetricTile } from "../components/MetricTile";
 import { NeedsYouCard } from "../components/NeedsYouCard";
 import { OpenButton } from "../components/OpenButton";
+import { SkeletonList } from "../components/Skeleton";
 import { legendText, StatusBar } from "../components/StatusBar";
 import { StatusPill } from "../components/StatusPill";
 import { WorkboxCard } from "../components/WorkboxCard";
@@ -57,6 +59,15 @@ type Props = {
    */
   visible?: boolean;
 };
+
+const AGE_UNIT: Record<string, string> = { m: "min", h: "h", d: "d" };
+
+/** "2m" becomes the number 2 and the unit "min"; "now" and a missing age have no unit. */
+function splitAge(age: string | null): { value: string; unit?: string } {
+  if (age === null) return { value: "None" };
+  const m = /^(\d+)([mhd])$/.exec(age);
+  return m ? { value: m[1], unit: AGE_UNIT[m[2]] } : { value: age };
+}
 
 function Section({
   title,
@@ -114,6 +125,9 @@ export function Dashboard({ narrow = false, visible }: Props) {
   const working = useMemo(() => workingNow(rows), [rows]);
   const longest = oldestBlocked(rows);
   const online = onlineSummary(machines);
+  const longestAge = splitAge(
+    longest ? formatAge(longest.sinceMs, nowMs) : null,
+  );
   const response = responseStats(log ?? [], nowMs);
   const tabGroups = groupTabs(tabs, machines);
   const machineById = new Map(machines.map((m) => [m.id, m]));
@@ -157,7 +171,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
       </div>
 
       {state === null ? (
-        <p className="empty">Connecting to herdr…</p>
+        <SkeletonList />
       ) : (
         <>
           {/* With no agents at all the empty states take the Needs you section's place. */}
@@ -165,7 +179,11 @@ export function Dashboard({ narrow = false, visible }: Props) {
             <NoAgentsYet machines={machines} />
           ) : (
             <Section title="Needs you" chip={`${needs.length} waiting`}>
-              {needs.length === 0 && <p>Nobody needs you right now.</p>}
+              {needs.length === 0 && (
+                <EmptyState title="All clear" icon="check">
+                  <p>Nobody needs you right now.</p>
+                </EmptyState>
+              )}
               {blocked.length > 0 && (
                 <div className="cards">
                   {blocked.map((r) => (
@@ -207,6 +225,13 @@ export function Dashboard({ narrow = false, visible }: Props) {
                               {agoText(age)}
                             </span>
                           )}
+                          <button
+                            type="button"
+                            className="btn btn-small btn-ghost row-reveal"
+                            onClick={() => markSeen(r)}
+                          >
+                            Mark seen
+                          </button>
                           <OpenButton
                             row={r}
                             terminalName={terminalName}
@@ -232,9 +257,8 @@ export function Dashboard({ narrow = false, visible }: Props) {
               </MetricTile>
               <MetricTile
                 label="Blocked the longest"
-                value={
-                  longest ? (formatAge(longest.sinceMs, nowMs) ?? "—") : "None"
-                }
+                value={longestAge.value}
+                unit={longestAge.unit}
                 foot={
                   longest ? `${longest.name} on ${longest.machineLabel}` : null
                 }

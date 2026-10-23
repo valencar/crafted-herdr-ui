@@ -34,3 +34,18 @@ it("the store toast shows the app store message and clears it on dismiss", async
   await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   expect(useAppStore.getState().toast).toBeNull();
 });
+
+it("toast_has_an_icon_per_tone", () => {
+  const { container, rerender } = render(
+    <Toast message="Added buildbox" tone="info" onDismiss={() => {}} />,
+  );
+  expect(container.querySelector(".toast-icon svg")).not.toBeNull();
+  expect(container.querySelector(".toast-icon")).toHaveAttribute(
+    "aria-hidden",
+    "true",
+  );
+  expect(screen.getByRole("status")).toBeInTheDocument();
+  rerender(<Toast message="Failed" tone="error" onDismiss={() => {}} />);
+  expect(container.querySelector(".toast-icon svg")).not.toBeNull();
+  expect(screen.getByRole("alert")).toBeInTheDocument();
+});
