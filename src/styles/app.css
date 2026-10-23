@@ -496,16 +496,29 @@ kbd {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .nav-sub {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 45%;
+  /* The label shrink-wraps its text, so the fade gets its own 16px: text that fits never meets it. */
+  padding-right: 16px;
+  margin-right: -16px;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
   font-size: var(--fs-small);
   color: var(--muted);
 }
@@ -521,10 +534,42 @@ kbd {
   border-radius: 9px;
   padding: 0 7px;
 }
-.nav-kbd {
-  font-family: var(--font-mono);
-  font-size: var(--fs-hint);
-  color: var(--muted);
+/* A row's trailing cell: the rest value and the shortcut share one grid cell, so a row never
+   changes width when they swap. */
+.nav-slot {
+  display: inline-grid;
+  flex: none;
+  align-items: center;
+  justify-items: end;
+}
+.nav-slot-rest,
+.nav-slot-hint {
+  grid-area: 1 / 1;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.nav-slot-hint {
+  opacity: 0;
+}
+.nav-item:hover .nav-slot-hint,
+.nav-item:focus-visible .nav-slot-hint,
+.nav-term:hover .nav-slot-hint,
+.nav-term:focus-visible .nav-slot-hint,
+.nav-link:hover .nav-slot-hint,
+.nav-link:focus-visible .nav-slot-hint {
+  opacity: 1;
+}
+/* Only a rest value that has a hint to make way for fades out. */
+.nav-item:hover .nav-slot-rest:not(:last-child),
+.nav-item:focus-visible .nav-slot-rest:not(:last-child),
+.nav-term:hover .nav-slot-rest:not(:last-child),
+.nav-term:focus-visible .nav-slot-rest:not(:last-child),
+.nav-link:hover .nav-slot-rest:not(:last-child),
+.nav-link:focus-visible .nav-slot-rest:not(:last-child) {
+  opacity: 0;
+}
+.nav-dot {
+  display: inline-flex;
+  flex: none;
 }
 .nav-box {
   display: flex;
@@ -556,15 +601,17 @@ kbd {
   background: var(--selected);
   color: var(--text);
 }
-.nav-term-icon {
-  flex-shrink: 0;
-}
 .nav-term .mono {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .nav-more {
   color: var(--text-4);
@@ -595,6 +642,9 @@ kbd {
   font-size: var(--fs-small);
 }
 .nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   align-self: flex-start;
   background: transparent;
   border: 0;
@@ -2126,9 +2176,17 @@ select.field {
 .wb-tab-label {
   min-width: 0;
   font-weight: 600;
+  /* Shrink-wraps its text: the fade gets its own 16px, so text that fits never meets it. */
+  padding-right: 16px;
+  margin-right: -16px;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .wb-tab-count,
 .wb-tab-needs {
@@ -2224,8 +2282,13 @@ select.field {
   font-size: var(--fs-body);
   font-weight: 500;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .session-tab-sub {
   grid-column: 2;
@@ -2233,8 +2296,13 @@ select.field {
   color: var(--text-4);
   font-size: var(--fs-small);
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 calc(100% - 16px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
 }
 .session-tab-sub[data-tone="needs"] {
   color: var(--st-needs);

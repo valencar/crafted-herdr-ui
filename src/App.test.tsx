@@ -1633,7 +1633,7 @@ describe("the window chrome", () => {
       ).not.toHaveClass("is-dim");
     });
 
-    it("gives_each_project_dot_its_status_as_a_title", async () => {
+    it("gives_each_project_dot_its_status_in_words", async () => {
       listBoxes();
       render(<App />);
       const sidebar = await screen.findByRole("navigation", {
@@ -1644,8 +1644,16 @@ describe("the window chrome", () => {
       ];
       expect(dots.length).toBeGreaterThan(0);
       for (const dot of dots) {
-        expect(dot.title).toMatch(
-          /^(Needs input|Done, unseen|Working|Idle|Unknown|Shell)$/,
+        expect(dot).not.toHaveAttribute("title");
+      }
+      // The words stay in the row's text (hidden visually), so a status is never color-only.
+      const words = [
+        ...sidebar.querySelectorAll<HTMLElement>(".nav-item .sr-only"),
+      ];
+      expect(words.length).toBeGreaterThan(0);
+      for (const w of words) {
+        expect(w.textContent).toMatch(
+          /^(Needs input|Done, unseen|Working|Idle|Unknown|Shell): $/,
         );
       }
     });

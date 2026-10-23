@@ -16,18 +16,14 @@ export type DotStatus = RowStatus | TabState;
 export function StatusDot({
   status,
   live = false,
-  title,
 }: {
   status?: DotStatus;
   live?: boolean;
-  /** A hover hint only; the words still have to be beside it. */
-  title?: string;
 }) {
   return (
     <span
       className={"sdot" + (live ? " live" : "")}
       data-status={status}
-      title={title}
       aria-hidden="true"
     />
   );

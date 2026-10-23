@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -132,15 +132,13 @@ describe("Sidebar", () => {
     const rail = screen.getByRole("navigation", { name: "Sidebar" });
     expect(rail).toHaveClass("is-collapsed");
 
-    // Each workbox keeps its name and its health in words, as a name and a tooltip.
+    // Each workbox keeps its name and its health in words, as its accessible name.
     const buildbox = within(rail).getByRole("button", {
       name: "buildbox: Online",
     });
-    expect(buildbox).toHaveAttribute("title", "buildbox: Online");
-    const gpubox = within(rail).getByRole("button", {
-      name: "gpubox: Attention",
-    });
-    expect(gpubox).toHaveAttribute("title", "gpubox: Attention");
+    expect(
+      within(rail).getByRole("button", { name: "gpubox: Attention" }),
+    ).toBeInTheDocument();
     expect(
       within(rail).getByRole("button", { name: "Needs you: 2 waiting" }),
     ).toBeInTheDocument();
@@ -173,15 +171,20 @@ describe("Sidebar", () => {
     });
   });
 
-  it("footer_links_show_their_shortcuts_in_apple_order", () => {
+  it("footer_hints_move_into_the_slot", () => {
     renderSidebar(false);
     const nav = screen.getByRole("navigation", { name: "Sidebar" });
+    const slotOf = (name: RegExp) => {
+      const button = within(nav).getByRole("button", { name });
+      expect(button.querySelector(".nav-slot-rest")).toBeEmptyDOMElement();
+      return button.querySelector<HTMLElement>(".nav-slot");
+    };
     expect(
       within(nav).getByRole("button", { name: /^Activity/ }),
-    ).toHaveTextContent("Activity ⇧⌘A");
-    expect(
-      within(nav).getByRole("button", { name: /^Settings/ }),
-    ).toHaveTextContent("Settings ⌘,");
+    ).toHaveTextContent(/^Activity/);
+    expect(slotOf(/^Activity/)).toHaveTextContent("⇧⌘A");
+    expect(slotOf(/^Settings/)).toHaveTextContent("⌘,");
+    expect(slotOf(/^Collapse sidebar/)).toHaveTextContent("⌘B");
   });
 
   it("dashboard_item_is_first_and_current_when_active", async () => {
@@ -197,7 +200,7 @@ describe("Sidebar", () => {
       .getAllByRole("button")
       .slice(1, 3)
       .map((b) => b.textContent);
-    expect(names).toEqual(["Needs you2", "All agents5"]);
+    expect(names).toEqual(["Needs you2⌘J", "All agents5"]);
     await userEvent.setup().click(first);
     expect(onDashboard).toHaveBeenCalledTimes(1);
   });
@@ -281,6 +284,7 @@ describe("Sidebar", () => {
       "data-status",
       "blocked",
     );
+    expect(terms[0]).not.toHaveAttribute("title");
     // Each one sits after its own workbox row and before the next workbox.
     const all = [...nav.querySelectorAll<HTMLElement>("button")];
     const at = (el: Element) => all.indexOf(el as HTMLElement);
@@ -409,5 +413,102 @@ describe("Sidebar", () => {
         .getByRole("navigation", { name: "Sidebar" })
         .querySelector(".nav-term"),
     ).toBeNull();
+  });
+
+  it("dashboard_and_needs_rows_carry_their_hint", () => {
+    renderSidebar(false);
+    const nav = screen.getByRole("navigation", { name: "Sidebar" });
+    const dashboard = within(nav).getByRole("button", { name: /^Dashboard/ });
+    expect(dashboard.querySelector(".nav-slot-hint")).toHaveTextContent("⌘1");
+    const needs = within(nav).getByRole("button", { name: /^Needs you/ });
+    expect(needs.querySelector(".nav-slot-rest")).toHaveTextContent("2");
+    expect(needs.querySelector(".nav-slot-hint")).toHaveTextContent("⌘J");
+  });
+
+  it("terminal_rows_lead_with_a_live_dot_and_hint_their_tab", () => {
+    const machines = [withSnapshot("buildbox")];
+    useAppStore.setState({
+      state: {
+        machines,
+        herdr_version: "0.9.4",
+        herdr_path: null,
+        generated_at_ms: 1,
+      },
+    });
+    openTab("w1:p1", "agent w1:p1");
+    openTab("w2:p1", "agent w2:p1");
+    renderSidebar(false, { machines });
+    const nav = screen.getByRole("navigation", { name: "Sidebar" });
+    const terms = [...nav.querySelectorAll<HTMLElement>("button.nav-term")];
+    expect(terms).toHaveLength(2);
+    expect(terms[0].firstElementChild).toHaveClass("sdot", "live");
+    expect(terms[0]).toHaveTextContent("⌘2");
+    expect(terms[1]).toHaveTextContent("⌘3");
+    expect(terms[0].querySelector(".nav-term-icon")).toBeNull();
+  });
+
+  it("no_title_attributes", () => {
+    const machines = [withSnapshot("buildbox")];
+    useAppStore.setState({
+      state: {
+        machines,
+        herdr_version: "0.9.4",
+        herdr_path: null,
+        generated_at_ms: 1,
+      },
+    });
+    openTab("w1:p1", "agent w1:p1");
+    const projects = [project("api-service")];
+    const { unmount } = renderSidebar(false, { machines, projects });
+    expect(document.querySelectorAll("[title]")).toHaveLength(0);
+    unmount();
+    renderSidebar(true, { machines, projects });
+    expect(document.querySelectorAll("[title]")).toHaveLength(0);
+  });
+
+  it("rail_items_show_a_tooltip_with_the_old_title_text", () => {
+    vi.useFakeTimers();
+    try {
+      renderSidebar(true);
+      const dashboard = screen.getByRole("button", { name: "Dashboard" });
+      fireEvent.pointerEnter(dashboard);
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(document.querySelector(".tooltip")).toHaveTextContent(
+        "Dashboard⌘1",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("scrolls_the_active_row_into_view", () => {
+    const scroll = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scroll;
+    try {
+      const machines = [withSnapshot("buildbox")];
+      useAppStore.setState({
+        state: {
+          machines,
+          herdr_version: "0.9.4",
+          herdr_path: null,
+          generated_at_ms: 1,
+        },
+      });
+      openTab("w1:p1", "agent w1:p1");
+      openTab("w2:p1", "agent w2:p1");
+      act(() => useTerminalStore.getState().activate(HOME));
+      renderSidebar(false, { machines });
+      scroll.mockClear();
+      act(() => useTerminalStore.getState().activate("buildbox::w1:p1"));
+      expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+      const row = screen.getByRole("button", { name: /^agent w1:p1,/ });
+      expect(row).toHaveAttribute("aria-current", "page");
+      expect(scroll.mock.contexts[scroll.mock.contexts.length - 1]).toBe(row);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
   });
 });

@@ -274,7 +274,7 @@ describe("type tokens", () => {
     }
   });
 
-  it("ellipsizes_single_line_labels_in_tabs_and_sidebar", () => {
+  it("fades_single_line_labels_in_tabs_and_sidebar", () => {
     for (const selector of [
       ".session-tab-title",
       ".session-tab-sub",
@@ -284,15 +284,43 @@ describe("type tokens", () => {
     ]) {
       const body = rule(selector);
       expect(body, selector).toContain("overflow: hidden");
-      expect(body, selector).toContain("text-overflow: ellipsis");
       expect(body, selector).toContain("white-space: nowrap");
+      expect(body, selector).toMatch(/mask-image:\s*linear-gradient\(/);
+      expect(body, selector).not.toContain("text-overflow: ellipsis");
     }
-    // The workbox tab shrinks (with a sensible floor) so its label can ellipsize.
+    // The workbox tab shrinks (with a sensible floor) so its label can fade.
     // The floor fits dot + count + needs badge, so the badges never spill out.
     expect(
       Number(/min-width:\s*(\d+)px/.exec(rule(".wb-tab"))?.[1]),
     ).toBeGreaterThanOrEqual(140);
     expect(rule(".wb-tab")).toMatch(/max-width:\s*\d+px/);
+  });
+});
+
+describe("sidebar hint slot", () => {
+  /** The declarations of the last rule whose selector list contains `selector`. */
+  const ruleWith = (selector: string): string => {
+    const found = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((m) =>
+      m[1].split(",").some((s) => s.trim() === selector),
+    );
+    if (found.length === 0) throw new Error(`no rule for ${selector}`);
+    return found[found.length - 1][2];
+  };
+
+  it("sidebar_hint_slot_swaps_on_hover_and_focus", () => {
+    expect(rule(".nav-slot-hint")).toMatch(/opacity:\s*0\b/);
+    for (const row of [".nav-item", ".nav-term", ".nav-link"]) {
+      for (const state of [":hover", ":focus-visible"]) {
+        const body = ruleWith(`${row}${state} .nav-slot-hint`);
+        expect(body, row + state).toMatch(/opacity:\s*1\b/);
+      }
+    }
+    expect(ruleWith(".nav-item:focus-visible .nav-slot-hint")).toMatch(
+      /opacity:\s*1\b/,
+    );
+    expect(rule(".nav-slot")).toContain("display: inline-grid");
+    expect(ruleWith(".nav-slot-rest")).toContain("transition: opacity");
+    expect(ruleWith(".nav-slot-rest")).toContain("var(--dur-fast)");
   });
 });
 
