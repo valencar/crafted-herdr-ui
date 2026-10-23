@@ -237,7 +237,7 @@ describe("NewSession", () => {
   });
 
   it("trust_retry_flow", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(
@@ -265,10 +265,11 @@ describe("NewSession", () => {
       branch: "feat/x",
       trust: true,
     });
+    expect(lastRequest("create_session").kind).toBe("claude");
   });
 
   it("recognises a trust refusal by message alone and shows other errors inline", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(
@@ -406,6 +407,34 @@ describe("NewSession remembers the Run choice", () => {
     await createValid(user);
     await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
     expect(callsTo("set_settings")).toHaveLength(0);
+  });
+
+  it("a create that finishes after the sheet was closed still saves the kind", async () => {
+    const user = setup();
+    await user.click(await radio("claude"));
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    let finish: (v: unknown) => void = () => {};
+    const base = invoke.getMockImplementation() as (
+      name: string,
+      args?: unknown,
+    ) => Promise<unknown>;
+    invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "create_session") {
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      }
+      return base(name, args);
+    });
+    await user.click(createButton());
+    await user.keyboard("{Escape}");
+    cleanup();
+    finish(CREATED);
+    await vi.waitFor(() => expect(callsTo("set_settings")).toHaveLength(1));
+    expect(callsTo("set_settings")[0][1]).toEqual({
+      patch: { new_session_kind: "claude" },
+    });
   });
 
   it("failed_create_or_cancel_saves_nothing", async () => {
@@ -578,7 +607,7 @@ describe("NewSession form", () => {
   });
 
   it("requires a branch for a worktree and sends it with trust off", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(
