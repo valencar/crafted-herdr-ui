@@ -1,3 +1,4 @@
+import { Kbd } from "../components/Kbd";
 import { useEffect, useMemo, useState } from "react";
 import { PaneBox } from "../components/PaneBox";
 import { TabCard } from "../components/TabCard";
@@ -338,7 +339,7 @@ export function Workbox({ machineId }: { machineId: string }) {
               className="btn btn-primary"
               onClick={() => openNewSession({ machineId })}
             >
-              + New session <kbd>⌘N</kbd>
+              + New session <Kbd id="new-session" />
             </button>
           </div>
         </div>

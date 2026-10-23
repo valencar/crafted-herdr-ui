@@ -1,0 +1,122 @@
+{
+  "palette": {
+    "mac": "CmdOrCtrl+K",
+    "windows": null
+  },
+  "dashboard": {
+    "mac": "CmdOrCtrl+1",
+    "windows": null
+  },
+  "toggle-terminal": {
+    "mac": "Ctrl+Backquote",
+    "windows": null
+  },
+  "toggle-split": {
+    "mac": "CmdOrCtrl+Backslash",
+    "windows": null
+  },
+  "toggle-sidebar": {
+    "mac": "CmdOrCtrl+B",
+    "windows": null
+  },
+  "next-needs-you": {
+    "mac": "CmdOrCtrl+J",
+    "windows": null
+  },
+  "find": {
+    "mac": "CmdOrCtrl+F",
+    "windows": null
+  },
+  "font-bigger": {
+    "mac": "CmdOrCtrl+Equal",
+    "windows": null
+  },
+  "font-smaller": {
+    "mac": "CmdOrCtrl+Minus",
+    "windows": null
+  },
+  "font-reset": {
+    "mac": "CmdOrCtrl+0",
+    "windows": null
+  },
+  "activity": {
+    "mac": "CmdOrCtrl+Shift+A",
+    "windows": null
+  },
+  "new-in-workbox": {
+    "mac": "CmdOrCtrl+T",
+    "windows": null
+  },
+  "close-tab": {
+    "mac": "CmdOrCtrl+W",
+    "windows": null
+  },
+  "next-tab": {
+    "mac": "Ctrl+Tab",
+    "windows": null
+  },
+  "prev-tab": {
+    "mac": "Ctrl+Shift+Tab",
+    "windows": null
+  },
+  "tab1": {
+    "mac": "CmdOrCtrl+2",
+    "windows": null
+  },
+  "tab2": {
+    "mac": "CmdOrCtrl+3",
+    "windows": null
+  },
+  "tab3": {
+    "mac": "CmdOrCtrl+4",
+    "windows": null
+  },
+  "tab4": {
+    "mac": "CmdOrCtrl+5",
+    "windows": null
+  },
+  "tab5": {
+    "mac": "CmdOrCtrl+6",
+    "windows": null
+  },
+  "tab6": {
+    "mac": "CmdOrCtrl+7",
+    "windows": null
+  },
+  "tab7": {
+    "mac": "CmdOrCtrl+8",
+    "windows": null
+  },
+  "tab8": {
+    "mac": "CmdOrCtrl+9",
+    "windows": null
+  },
+  "settings": {
+    "mac": "CmdOrCtrl+Comma",
+    "windows": null
+  },
+  "new-session": {
+    "mac": "CmdOrCtrl+N",
+    "windows": null
+  },
+  "refresh": {
+    "mac": "CmdOrCtrl+R",
+    "windows": null
+  },
+  "open-selected": {
+    "mac": "CmdOrCtrl+Enter",
+    "windows": null
+  },
+  "palette-open-alt": {
+    "mac": "CmdOrCtrl+Enter",
+    "windows": null
+  },
+  "create-session": {
+    "mac": "CmdOrCtrl+Enter",
+    "windows": null
+  },
+  "global-show": {
+    "mac": "Ctrl+Alt+Super+H",
+    "windows": null
+  }
+}

@@ -1,3 +1,4 @@
+import { formatShortcut } from "../lib/shortcuts";
 import { useEffect, useRef } from "react";
 import { HEALTH_LABEL, plural } from "../lib/format";
 import type { Row } from "../lib/grouping";
@@ -60,7 +61,7 @@ export function WorkboxRow({
           className="wb-tab wb-tab-home"
           data-active={activeKey === HOME}
           aria-current={activeKey === HOME ? "page" : undefined}
-          title="Home (⌘1)"
+          title={`Home (${formatShortcut("dashboard")})`}
           onClick={() => activate(HOME)}
         >
           <HomeIcon />

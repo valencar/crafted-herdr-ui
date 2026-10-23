@@ -20,6 +20,17 @@ kbd {
   font-size: var(--fs-hint);
   color: var(--text-4);
 }
+/* The chip every shortcut is drawn in (`components/Kbd.tsx`). */
+.kbd {
+  display: inline-block;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-hint);
+  line-height: 1.5;
+  background: var(--chip);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+}
 
 /* ---------- shell ---------- */
 
@@ -207,6 +218,8 @@ kbd {
 .open-split kbd {
   color: inherit;
   opacity: 0.6;
+  background: transparent;
+  border-color: currentColor;
 }
 .open-split.is-small .btn {
   padding: 3px 10px;
@@ -384,6 +397,8 @@ kbd {
 .btn-primary kbd {
   color: inherit;
   opacity: 0.6;
+  background: transparent;
+  border-color: currentColor;
 }
 .btn-small {
   border-radius: var(--radius-s);

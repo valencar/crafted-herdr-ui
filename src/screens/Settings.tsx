@@ -1,3 +1,5 @@
+import { Kbd } from "../components/Kbd";
+import { formatShortcut, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { StoreToast } from "../components/Toast";
@@ -85,17 +87,17 @@ const TERMINALS: TerminalId[] = [
 const MIN_INTERVAL_SECONDS = 1;
 const TEMPLATE_EXAMPLE = "open -na Ghostty --args -e {attach}";
 
-const SHORTCUTS: [keys: string, what: string][] = [
-  ["⌘K", "Search and jump"],
-  ["⌘N", "New session"],
-  ["⌘J", "Next agent that needs you"],
-  ["⌘\\", "Move the terminal panel between the bottom and the right"],
-  ["⌘B", "Collapse or expand the sidebar"],
-  ["⌘↩", "Open the selected session"],
-  ["⌘,", "Settings"],
-  ["⌘R", "Refresh now"],
-  ["↑ ↓", "Move the selection"],
-  ["⌫", "Close the selected session (asks first)"],
+const SHORTCUTS: [keys: ShortcutId | { keys: string }, what: string][] = [
+  ["palette", "Search and jump"],
+  ["new-session", "New session"],
+  ["next-needs-you", "Next agent that needs you"],
+  ["toggle-split", "Move the terminal panel between the bottom and the right"],
+  ["toggle-sidebar", "Collapse or expand the sidebar"],
+  ["open-selected", "Open the selected session"],
+  ["settings", "Settings"],
+  ["refresh", "Refresh now"],
+  [{ keys: "↑ ↓" }, "Move the selection"],
+  [{ keys: "⌫" }, "Close the selected session (asks first)"],
 ];
 
 type Update = (patch: Partial<SettingsData>) => Promise<void>;
@@ -678,15 +680,15 @@ function Shortcuts({
     <div className="settings-stack">
       <ul className="settings-list">
         {SHORTCUTS.map(([keys, what]) => (
-          <li key={keys} className="settings-list-row">
+          <li key={what} className="settings-list-row">
             <span className="settings-list-text">{what}</span>
-            <kbd>{keys}</kbd>
+            {typeof keys === "string" ? <Kbd id={keys} /> : <Kbd {...keys} />}
           </li>
         ))}
       </ul>
       <Check
         label="Show or hide Crafted Herdr from anywhere"
-        hint="⌃⌥⌘H, even when another app is in front."
+        hint={`${formatShortcut("global-show")}, even when another app is in front.`}
         checked={settings.global_shortcut_enabled}
         onChange={(global_shortcut_enabled) =>
           void update({ global_shortcut_enabled }).then(refresh)
@@ -694,7 +696,7 @@ function Shortcuts({
       />
       {settings.global_shortcut_enabled && status?.error && (
         <p className="settings-warn" role="status">
-          Couldn’t register ⌃⌥⌘H (another app may be using it)
+          {`Couldn’t register ${formatShortcut("global-show")} (another app may be using it)`}
         </p>
       )}
     </div>

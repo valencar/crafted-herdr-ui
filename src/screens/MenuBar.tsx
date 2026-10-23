@@ -1,3 +1,4 @@
+import { Kbd } from "../components/Kbd";
 import { useMemo } from "react";
 import { StoreToast } from "../components/Toast";
 import { HEALTH_LABEL, STATUS_LABEL, formatAge, plural } from "../lib/format";
@@ -173,7 +174,7 @@ export function MenuBar() {
 
       <div className="pop-foot">
         <button type="button" className="btn" onClick={() => void showApp()}>
-          Open app {shortcutOn && <kbd>⌃⌥⌘H</kbd>}
+          Open app {shortcutOn && <Kbd id="global-show" />}
         </button>
         <button type="button" className="btn" onClick={() => void newSession()}>
           New session

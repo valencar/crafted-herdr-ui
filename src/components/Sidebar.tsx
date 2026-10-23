@@ -1,3 +1,5 @@
+import { Kbd } from "./Kbd";
+import { formatShortcut } from "../lib/shortcuts";
 import { useMemo, useState } from "react";
 import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -125,7 +127,7 @@ export function Sidebar({
           className="rail-item"
           aria-label="Dashboard"
           aria-current={dashboardActive ? "page" : undefined}
-          title="Dashboard ⌘1"
+          title={`Dashboard ${formatShortcut("dashboard")}`}
           onClick={onDashboard}
         >
           <HomeIcon />
@@ -185,7 +187,7 @@ export function Sidebar({
             type="button"
             className="rail-item"
             aria-label="Expand sidebar"
-            title="Expand sidebar ⌘B"
+            title={`Expand sidebar ${formatShortcut("toggle-sidebar")}`}
             onClick={toggleSidebar}
           >
             <span className="rail-icon" aria-hidden="true">
@@ -206,7 +208,7 @@ export function Sidebar({
       >
         <HomeIcon />
         <span className="nav-label">Dashboard</span>
-        <kbd className="nav-kbd">⌘1</kbd>
+        <Kbd id="dashboard" className="nav-kbd" />
       </button>
       <button
         type="button"
@@ -330,13 +332,13 @@ export function Sidebar({
           aria-pressed={activityOpen}
           onClick={onActivity}
         >
-          Activity ⌘⇧A
+          Activity <Kbd id="activity" />
         </button>
         <button type="button" className="nav-link" onClick={onSettings}>
-          Settings ⌘,
+          Settings <Kbd id="settings" />
         </button>
         <button type="button" className="nav-link" onClick={toggleSidebar}>
-          Collapse sidebar ⌘B
+          Collapse sidebar <Kbd id="toggle-sidebar" />
         </button>
       </div>
     </nav>

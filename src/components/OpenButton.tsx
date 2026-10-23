@@ -1,3 +1,5 @@
+import { Kbd } from "./Kbd";
+import { formatTabShortcut } from "../lib/shortcuts";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Row } from "../lib/grouping";
 import { copyText, invokeTyped } from "../lib/ipc";
@@ -60,8 +62,12 @@ export function OpenButton({
   const shortcut = hasTab ? tabShortcut(row.key, tabs, machines) : null;
   const label = hasTab ? "Go to tab" : "Open";
   // "Go to tab" shows its own ⌘ number or nothing; the `kbd` hint belongs to "Open".
-  const hint = hasTab ? (shortcut === null ? null : `⌘${shortcut}`) : kbd;
-  const name = `${label} ${row.name}${shortcut === null ? "" : ` (⌘${shortcut})`}`;
+  const hint = hasTab
+    ? shortcut === null
+      ? null
+      : formatTabShortcut(shortcut)
+    : kbd;
+  const name = `${label} ${row.name}${shortcut === null ? "" : ` (${formatTabShortcut(shortcut)})`}`;
 
   useEffect(() => {
     if (!open) return;
@@ -199,7 +205,7 @@ export function OpenButton({
         onClick={() => void (hasTab ? openRow(row, "app") : openRow(row))}
       >
         {label}
-        {hint && <kbd className="mono">{hint}</kbd>}
+        {hint && <Kbd keys={hint} className="mono" />}
       </button>
       <button
         ref={chevronRef}

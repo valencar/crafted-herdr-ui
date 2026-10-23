@@ -1,3 +1,4 @@
+import { Kbd } from "./Kbd";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { invokeTyped } from "../lib/ipc";
 import { toRows } from "../lib/grouping";
@@ -249,8 +250,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           <p className="palette-empty">Nothing matches.</p>
         )}
         <p className="palette-hint">
-          <kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>↵</kbd> run · <kbd>⌘↵</kbd> open
-          the other way · <kbd>esc</kbd> close
+          <Kbd keys="↑" /> <Kbd keys="↓" /> move · <Kbd keys="↵" /> run ·{" "}
+          <Kbd id="palette-open-alt" enter="↵" /> open the other way ·{" "}
+          <Kbd keys="esc" /> close
         </p>
       </div>
     </div>

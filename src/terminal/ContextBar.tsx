@@ -1,3 +1,4 @@
+import { formatShortcut } from "../lib/shortcuts";
 import { useState } from "react";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { KindBadge } from "../components/KindBadge";
@@ -65,8 +66,8 @@ export function ContextBar({ tab, row, onFind }: Props) {
         <button
           type="button"
           className="icon-btn"
-          aria-label="Find in terminal (⌘F)"
-          title="Find in terminal (⌘F)"
+          aria-label={`Find in terminal (${formatShortcut("find")})`}
+          title={`Find in terminal (${formatShortcut("find")})`}
           onClick={onFind}
         >
           <span aria-hidden="true">⌕</span>

@@ -173,6 +173,17 @@ describe("Sidebar", () => {
     });
   });
 
+  it("footer_links_show_their_shortcuts_in_apple_order", () => {
+    renderSidebar(false);
+    const nav = screen.getByRole("navigation", { name: "Sidebar" });
+    expect(
+      within(nav).getByRole("button", { name: /^Activity/ }),
+    ).toHaveTextContent("Activity ⇧⌘A");
+    expect(
+      within(nav).getByRole("button", { name: /^Settings/ }),
+    ).toHaveTextContent("Settings ⌘,");
+  });
+
   it("dashboard_item_is_first_and_current_when_active", async () => {
     const onDashboard = vi.fn();
     renderSidebar(false, { dashboardActive: true, onDashboard });

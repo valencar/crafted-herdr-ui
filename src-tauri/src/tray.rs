@@ -5,6 +5,7 @@
 //! its own reads it, so nothing here ever calls back into the `Poller` from inside its emit
 //! (which runs under the poller's core lock).
 
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tauri::image::Image;
@@ -17,6 +18,7 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
 use crate::herdr::model::AgentStatus;
+use crate::menu;
 use crate::now_ms;
 use crate::poller::Poller;
 use crate::state::{AppState, Health};
@@ -326,12 +328,16 @@ pub fn start_badge<R: Runtime>(tray: TrayIcon<R>, state: watch::Receiver<AppStat
 
 // ---------- the global shortcut ----------
 
-/// ⌃⌥⌘H.
+/// ⌃⌥⌘H: the `global-show` entry of the shortcut table.
 pub fn global_shortcut() -> Shortcut {
-    Shortcut::new(
-        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
-        Code::KeyH,
-    )
+    menu::accelerator("global-show")
+        .and_then(|accelerator| Shortcut::from_str(&accelerator).ok())
+        .unwrap_or_else(|| {
+            Shortcut::new(
+                Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
+                Code::KeyH,
+            )
+        })
 }
 
 /// Registers or releases ⌃⌥⌘H. Registering twice, or releasing what was never registered, is
@@ -353,6 +359,29 @@ pub fn set_global_shortcut<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn global_show_parses_without_the_fallback() {
+        let accelerator = menu::accelerator("global-show").expect("in the table");
+        assert_eq!(
+            Shortcut::from_str(&accelerator).expect("parses"),
+            Shortcut::new(
+                Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
+                Code::KeyH,
+            )
+        );
+    }
+
+    #[test]
+    fn global_shortcut_unchanged() {
+        assert_eq!(
+            global_shortcut(),
+            Shortcut::new(
+                Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
+                Code::KeyH,
+            )
+        );
+    }
     use crate::herdr::model::{Snapshot, parse_snapshot};
     use crate::state::MachineView;
     use std::collections::HashMap;

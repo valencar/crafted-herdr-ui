@@ -1,3 +1,4 @@
+import { Kbd } from "../components/Kbd";
 import { useId, useMemo, type ReactNode } from "react";
 import { MachineNotices, NoAgentsYet } from "../components/HomeNotices";
 import { MetricTile } from "../components/MetricTile";
@@ -150,7 +151,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
           className="btn"
           onClick={() => runMenuAction("next-needs-you")}
         >
-          Next needs-you <kbd>⌘J</kbd>
+          Next needs-you <Kbd id="next-needs-you" />
         </button>
       </div>
 

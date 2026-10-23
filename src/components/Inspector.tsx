@@ -1,3 +1,4 @@
+import { formatShortcut } from "../lib/shortcuts";
 import { useEffect, useId, useRef, useState } from "react";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { HEALTH_LABEL, agentNameProblem, shortPath } from "../lib/format";
@@ -217,7 +218,12 @@ export function Inspector({
       )}
 
       <div className="inspector-actions">
-        <OpenButton row={row} terminalName={terminalName} wide kbd="⌘↩" />
+        <OpenButton
+          row={row}
+          terminalName={terminalName}
+          wide
+          kbd={formatShortcut("open-selected")}
+        />
         {row.status === "done" && (
           <button type="button" className="btn" onClick={() => markSeen(row)}>
             Mark seen

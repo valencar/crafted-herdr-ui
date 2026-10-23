@@ -1,3 +1,4 @@
+import { Kbd } from "../components/Kbd";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { KindBadge } from "../components/KindBadge";
@@ -333,7 +334,7 @@ export function NewSession({ terminalName }: Props) {
             disabled={!canCreate}
             onClick={() => void submit(false)}
           >
-            Create session <kbd>⌘↩</kbd>
+            Create session <Kbd id="create-session" />
           </button>
         </>
       }

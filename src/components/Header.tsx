@@ -1,3 +1,4 @@
+import { Kbd } from "./Kbd";
 import type { TerminalId } from "../lib/bindings/TerminalId";
 import { useAppStore } from "../store/appStore";
 import { TerminalMenu } from "./TerminalMenu";
@@ -36,7 +37,7 @@ export function Header({
         onClick={() => setPaletteOpen(true)}
       >
         <span>Search agents, workboxes, commands</span>
-        <kbd>⌘K</kbd>
+        <Kbd id="palette" />
       </button>
       <div className="header-actions">
         <TerminalMenu terminal={terminal} installed={installed} />
@@ -45,7 +46,7 @@ export function Header({
           className="btn btn-primary"
           onClick={onNewSession}
         >
-          + New session <kbd>⌘N</kbd>
+          + New session <Kbd id="new-session" />
         </button>
       </div>
     </header>

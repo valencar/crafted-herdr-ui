@@ -1,3 +1,4 @@
+import { formatShortcut } from "../lib/shortcuts";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { formatStaleness, isPending, isSupportedVersion } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
@@ -107,7 +108,7 @@ export function NoAgentsYet({ machines }: { machines: MachineView[] }) {
   return (
     <>
       <EmptyState title="No agents yet">
-        <p>Start one with ⌘N.</p>
+        <p>{`Start one with ${formatShortcut("new-session")}.`}</p>
       </EmptyState>
       {machines.every((m) => m.is_local) && (
         <EmptyState

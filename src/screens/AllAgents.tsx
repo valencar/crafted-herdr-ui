@@ -1,3 +1,4 @@
+import { Kbd } from "../components/Kbd";
 import { useEffect, useMemo, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
@@ -146,7 +147,7 @@ export function AllAgents() {
               }
             }}
           />
-          <kbd>⌘F</kbd>
+          <Kbd id="find" />
         </label>
         <MachineNotices machines={state?.machines ?? []} nowMs={nowMs} />
         {state === null ? (

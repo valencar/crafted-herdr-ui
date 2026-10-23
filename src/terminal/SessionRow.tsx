@@ -1,3 +1,4 @@
+import { formatTabShortcut } from "../lib/shortcuts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { projectNames, type Row } from "../lib/grouping";
 import { canOpenNewSession } from "../lib/newSessionTarget";
@@ -84,7 +85,7 @@ export function SessionRow({
                 aria-current={active ? "page" : undefined}
                 aria-label={tabName(tab, row)}
                 title={`${tabStatus(tab, row) ?? tabName(tab, row)}${
-                  shortcut !== null ? ` (⌘${shortcut})` : ""
+                  shortcut !== null ? ` (${formatTabShortcut(shortcut)})` : ""
                 }`}
                 onClick={() => activate(tab.tabKey)}
               >
