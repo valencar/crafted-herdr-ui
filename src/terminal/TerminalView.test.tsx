@@ -656,6 +656,17 @@ describe("TerminalView", () => {
       expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
     });
 
+    it("Close_tab_takes_focus_when_the_pane_disappears_after_the_session_ended", async () => {
+      listed();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      expect(screen.getByRole("button", { name: "Reattach" })).toHaveFocus();
+      listed({ gone: true });
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
+    });
+
     it("a_workbox_without_a_snapshot_does_not_make_the_pane_look_gone", async () => {
       listed();
       act(() =>
