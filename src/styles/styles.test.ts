@@ -305,7 +305,7 @@ describe("motion tokens", () => {
       "--dur-fast: 120ms;",
       "--dur-base: 160ms;",
       "--dur-slow: 220ms;",
-      "--ease-out: cubic-bezier(.22, 1, .36, 1);",
+      "--ease-out: cubic-bezier(0.22, 1, 0.36, 1);",
       "--tooltip-delay: 350ms;",
       "--fill-hover: color-mix(in oklab, var(--text) 6%, transparent);",
       "--fill-selected: color-mix(in oklab, var(--text) 10%, transparent);",
@@ -334,7 +334,9 @@ describe("motion tokens", () => {
             .split(/[\s,]+/);
           for (const t of tokens) {
             if (/^-?[\d.]+m?s$/.test(t) && !loops.has(t)) {
-              offenders.push(`${file}: ${selector} { ${d[1]}: ${d[2].trim()} }`);
+              offenders.push(
+                `${file}: ${selector} { ${d[1]}: ${d[2].trim()} }`,
+              );
             }
           }
         }

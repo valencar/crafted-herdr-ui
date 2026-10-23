@@ -92,6 +92,6 @@
   --dur-fast: 120ms;
   --dur-base: 160ms;
   --dur-slow: 220ms;
-  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --tooltip-delay: 350ms;
 }
