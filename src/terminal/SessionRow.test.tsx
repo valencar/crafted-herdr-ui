@@ -421,4 +421,77 @@ describe("SessionRow", () => {
       expect(within(button).getByText("1 needs input")).toBeInTheDocument();
     });
   });
+
+  describe("dragging", () => {
+    /** Each tab 100 px wide, side by side from x = 0; the row is 400 x 44. */
+    function layout() {
+      vi.spyOn(
+        HTMLElement.prototype,
+        "getBoundingClientRect",
+      ).mockImplementation(function (this: HTMLElement) {
+        const tabs = Array.from(document.querySelectorAll(".session-tab"));
+        const i = tabs.indexOf(this);
+        const left = this.classList.contains("session-row-scroll")
+          ? 0
+          : i * 100;
+        const width = this.classList.contains("session-row-scroll") ? 400 : 100;
+        return {
+          left,
+          right: left + width,
+          top: 0,
+          bottom: 44,
+          width,
+          height: 44,
+          x: left,
+          y: 0,
+          toJSON: () => ({}),
+        };
+      });
+    }
+    afterEach(() => vi.restoreAllMocks());
+    const order = () => useTerminalStore.getState().tabs.map((t) => t.title);
+
+    it("dragging_a_tab_shows_a_drop_line_and_reorders_without_activating", () => {
+      open("buildbox", "w1:p1", "planner");
+      open("buildbox", "w1:p2", "infra");
+      open("buildbox", "w2:p1", "tester");
+      act(() => useTerminalStore.getState().activate(HOME));
+      layout();
+      render(<Harness machineId="buildbox" />);
+      const main = screen.getByRole("button", { name: /^tester/ });
+      fireEvent.pointerDown(main, { button: 0, clientX: 250, clientY: 20 });
+      fireEvent.pointerMove(window, { clientX: 120, clientY: 20 });
+      expect(main.closest(".session-tab")).toHaveAttribute(
+        "data-dragging",
+        "true",
+      );
+      const line = nav().querySelector(".tab-drop");
+      expect(line).not.toBeNull();
+      expect(line?.nextElementSibling).toBe(
+        screen.getByRole("button", { name: /^infra/ }).closest(".session-tab"),
+      );
+      fireEvent.pointerUp(window, { clientX: 120, clientY: 20 });
+      fireEvent.click(main);
+      expect(order()).toEqual(["planner", "tester", "infra"]);
+      expect(useTerminalStore.getState().activeKey).toBe(HOME);
+      expect(nav().querySelector(".tab-drop")).toBeNull();
+    });
+
+    it("the_close_mark_and_other_buttons_start_no_drag", () => {
+      open("buildbox", "w1:p1", "planner");
+      open("buildbox", "w1:p2", "infra");
+      layout();
+      render(<Harness machineId="buildbox" />);
+      const main = screen.getByRole("button", { name: /^planner/ });
+      fireEvent.pointerDown(main, { button: 1, clientX: 50, clientY: 20 });
+      fireEvent.pointerMove(window, { clientX: 250, clientY: 20 });
+      fireEvent.pointerUp(window, { clientX: 250, clientY: 20 });
+      const close = screen.getByRole("button", { name: "Close tab planner" });
+      fireEvent.pointerDown(close, { button: 0, clientX: 90, clientY: 20 });
+      fireEvent.pointerMove(window, { clientX: 250, clientY: 20 });
+      fireEvent.pointerUp(window, { clientX: 250, clientY: 20 });
+      expect(nav().querySelector(".tab-drop")).toBeNull();
+      expect(order()).toEqual(["planner", "infra"]);
+    });
+  });
 });

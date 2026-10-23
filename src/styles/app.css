@@ -2284,6 +2284,26 @@ select.field {
     var(--panel) 10.5px
   );
 }
+/* Dragging reorders: the lifted tab dims, the drop line marks where it lands. */
+.session-tab[data-dragging="true"] {
+  opacity: 0.5;
+}
+.session-row[data-dragging="true"] {
+  cursor: grabbing;
+  user-select: none;
+}
+.session-row[data-dragging="true"] .session-tab-main {
+  cursor: grabbing;
+}
+.tab-drop {
+  flex: 0 0 2px;
+  align-self: center;
+  height: 28px;
+  margin: 0 -1px;
+  border-radius: 1px;
+  background: var(--focus);
+  pointer-events: none;
+}
 .session-tab-main {
   flex: 1 1 auto;
   min-width: 0;

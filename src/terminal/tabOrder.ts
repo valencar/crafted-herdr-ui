@@ -61,3 +61,11 @@ export function tabShortcut(
   const i = stripOrder(tabs, machines).findIndex((t) => t.tabKey === tabKey);
   return i >= 0 && i < 8 ? i + 2 : null;
 }
+
+/** Where a dragged tab would land: the key of the first tab whose middle is right of `x`, else `null` (the end). */
+export function dropBefore(
+  mids: { key: string; mid: number }[],
+  x: number,
+): string | null {
+  return mids.find((m) => m.mid > x)?.key ?? null;
+}

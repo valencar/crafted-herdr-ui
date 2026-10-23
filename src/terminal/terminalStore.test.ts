@@ -196,4 +196,41 @@ describe("terminalStore", () => {
     store().activateMachine("staging");
     expect(store().activeKey).toBe(HOME);
   });
+  describe("moveTab", () => {
+    const seed = () => {
+      store().openTab(tab("a", "m1"));
+      store().openTab(tab("b", "m1"));
+      store().openTab(tab("c", "m2"));
+      store().openTab(tab("d", "m1"));
+    };
+    const order = () => keys().map((k) => k.split("::")[1]);
+
+    it("move_tab_within_a_workbox", () => {
+      seed();
+      store().moveTab("m1::d", "m1::a");
+      expect(order()).toEqual(["d", "a", "b", "c"]);
+      store().moveTab("m1::d", null);
+      // The end of m1 is just after its last tab; c (m2) is not in the way.
+      expect(order()).toEqual(["a", "b", "d", "c"]);
+      store().moveTab("m1::a", null);
+      expect(order()).toEqual(["b", "d", "a", "c"]);
+    });
+
+    it("move_tab_ignores_other_workboxes_and_unknown_keys", () => {
+      seed();
+      const before = keys();
+      store().moveTab("m1::a", "m2::c");
+      store().moveTab("m1::x", "m1::a");
+      store().moveTab("m1::a", "m1::x");
+      store().moveTab("m1::a", "m1::a");
+      expect(keys()).toEqual(before);
+    });
+
+    it("move_keeps_the_active_tab", () => {
+      seed();
+      store().activate("m1::b");
+      store().moveTab("m1::d", "m1::a");
+      expect(store().activeKey).toBe("m1::b");
+    });
+  });
 });
