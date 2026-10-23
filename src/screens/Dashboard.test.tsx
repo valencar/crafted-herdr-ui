@@ -208,10 +208,17 @@ describe("Dashboard", () => {
     expect(calls("open_session")).toHaveLength(0);
   });
 
-  it("needs_cards_have_no_reply", () => {
-    setup();
-    const needs = section("Needs you");
-    expect(within(needs).queryByRole("button", { name: /Reply/ })).toBeNull();
+  it("reply_on_a_blocked_card_only_selects_the_row", async () => {
+    const user = setup();
+    const card = within(section("Needs you")).getAllByRole("article")[0];
+    invoke.mockClear();
+    await user.click(within(card).getByRole("button", { name: "Reply…" }));
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    // Nothing is sent to the agent: no herdr command at all comes from the click.
+    expect(invoke.mock.calls.map((c) => c[0])).not.toContainEqual(
+      expect.stringMatching(/send|reply|mark_seen|open_session/),
+    );
   });
 
   it("needs_cards_are_live", () => {
