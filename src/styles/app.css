@@ -32,6 +32,26 @@ kbd {
   border-radius: var(--radius-s);
 }
 
+/* The hover and focus hint (`components/Tooltip.tsx`), portalled to the body. Above the toast (40),
+   so it also reads on a trigger inside a dialog. It never takes the pointer from its trigger. */
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: var(--fs-small);
+  line-height: 1.4;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--bg) 70%, transparent);
+  pointer-events: none;
+}
+
 /* ---------- shell ---------- */
 
 .app {

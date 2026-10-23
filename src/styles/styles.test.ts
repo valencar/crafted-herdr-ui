@@ -57,6 +57,20 @@ describe("app.css", () => {
     expect(rule(".palette")).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
 
+  it("draws_the_tooltip_above_every_layer_from_tokens_only", () => {
+    const z = (selector: string) =>
+      Number(/z-index:\s*(\d+)/.exec(rule(selector))?.[1] ?? 0);
+    // It also shows on triggers inside a dialog, so it sits over the scrim, the drawer and the toast.
+    expect(z(".tooltip")).toBeGreaterThan(z(".toast"));
+    expect(z(".tooltip")).toBeGreaterThan(z(".activity"));
+    expect(z(".tooltip")).toBeGreaterThan(z(".scrim"));
+    expect(rule(".tooltip")).toMatch(/position:\s*fixed/);
+    // Never in the way of the pointer: it must not take hover away from its trigger.
+    expect(rule(".tooltip")).toMatch(/pointer-events:\s*none/);
+    expect(rule(".tooltip")).toMatch(/font-size:\s*var\(--fs-(hint|small)\)/);
+    expect(rule(".tooltip")).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+
   it("never_lets_the_split_column_squeeze_the_terminal_below_320px", () => {
     const column = rule(".split-column");
     expect(column).toMatch(/max-width:\s*calc\(100% - 320px\)/);
