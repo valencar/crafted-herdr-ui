@@ -203,4 +203,35 @@ describe("PaneMenu", () => {
       window.removeEventListener("keydown", spy);
     }
   });
+
+  it("keys_with_focus_on_the_body_still_drive_the_open_menu", async () => {
+    const user = userEvent.setup();
+    render(<PaneMenu row={row} />);
+    await user.click(more());
+    // A click on the menu's padding or separator leaves focus on the body.
+    (document.activeElement as HTMLElement).blur();
+    expect(document.body).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getAllByRole("menuitem")[0]).toHaveFocus();
+    (document.activeElement as HTMLElement).blur();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(more()).toHaveFocus();
+  });
+
+  it("no_tooltip_over_the_open_menu", async () => {
+    const user = userEvent.setup();
+    render(<PaneMenu row={row} />);
+    // Closed: hovering ⋯ shows its tooltip.
+    await user.hover(more());
+    expect(await screen.findByText("More actions")).toBeInTheDocument();
+    await user.click(more());
+    await user.unhover(more());
+    expect(screen.queryByText("More actions")).toBeNull();
+    // Open: coming back to ⋯ shows nothing, however long the pointer stays.
+    await user.hover(more());
+    await new Promise((r) => setTimeout(r, 500));
+    expect(screen.queryByText("More actions")).toBeNull();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
 });

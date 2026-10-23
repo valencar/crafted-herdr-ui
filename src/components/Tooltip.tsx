@@ -32,6 +32,8 @@ type Place = { left: number } & ({ top: number } | { bottom: number });
 type Props = {
   label: string;
   shortcut?: ShortcutId;
+  /** True while something of the trigger's own is open under it (a menu): no tooltip then. */
+  disabled?: boolean;
   children: ReactElement<Record<string, unknown>>;
 };
 
@@ -77,6 +79,8 @@ class Controller {
   private shown = false;
   /** Set by a press on the trigger; the tooltip stays away until the pointer re-enters or focus moves. */
   private pressed = false;
+  /** Set while the trigger's own menu is open. */
+  private disabled = false;
 
   constructor(private readonly setPlace: (place: Place | null) => void) {}
 
@@ -105,7 +109,7 @@ class Controller {
   };
 
   private show(el: HTMLElement) {
-    if (this.pressed) return;
+    if (this.pressed || this.disabled) return;
     if (modalOpen() && !insideDialog(el)) return;
     const rect = el.getBoundingClientRect();
     const left = Math.max(EDGE, rect.left);
@@ -163,6 +167,12 @@ class Controller {
     this.hide();
   }
 
+  /** While disabled the tooltip stays away, and a shown one goes. */
+  setDisabled(disabled: boolean) {
+    this.disabled = disabled;
+    if (disabled) this.hide();
+  }
+
   /** A dialog, the palette or a sheet that opens under a shown tooltip takes it away. */
   modalChanged(modal: boolean) {
     if (modal && !insideDialog(this.trigger)) this.hide();
@@ -174,7 +184,12 @@ class Controller {
  * It is `aria-hidden`, so the trigger keeps its own accessible name. It stands down while a
  * dialog, the palette or a sheet is open, unless the trigger is inside that dialog.
  */
-export function Tooltip({ label, shortcut, children }: Props) {
+export function Tooltip({
+  label,
+  shortcut,
+  disabled = false,
+  children,
+}: Props) {
   const [place, setPlace] = useState<Place | null>(null);
   const [ctl] = useState(() => new Controller(setPlace));
   const tipRef = useRef<HTMLDivElement>(null);
@@ -183,6 +198,9 @@ export function Tooltip({ label, shortcut, children }: Props) {
   );
 
   useEffect(() => ctl.modalChanged(modal), [ctl, modal]);
+  useEffect(() => {
+    ctl.setDisabled(disabled);
+  }, [ctl, disabled]);
   // A pending delay must not fire after the trigger is gone.
   useEffect(() => () => ctl.hide(), [ctl]);
 

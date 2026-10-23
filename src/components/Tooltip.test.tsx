@@ -333,6 +333,28 @@ describe("Tooltip", () => {
     expect(tip()).toBeNull();
   });
 
+  it("disabled_shows_nothing_and_takes_a_shown_tooltip_away", () => {
+    const { rerender } = render(
+      <Tooltip label="Find in terminal">
+        <button type="button">Find</button>
+      </Tooltip>,
+    );
+    act(() => screen.getByRole("button").focus());
+    expect(tip()).not.toBeNull();
+    rerender(
+      <Tooltip label="Find in terminal" disabled>
+        <button type="button">Find</button>
+      </Tooltip>,
+    );
+    expect(tip()).toBeNull();
+    fireEvent.pointerEnter(screen.getByRole("button"));
+    advance(1000);
+    expect(tip()).toBeNull();
+    act(() => screen.getByRole("button").blur());
+    act(() => screen.getByRole("button").focus());
+    expect(tip()).toBeNull();
+  });
+
   it("shows_the_shortcut", () => {
     render(
       <Tooltip label="Find in terminal" shortcut="find">
