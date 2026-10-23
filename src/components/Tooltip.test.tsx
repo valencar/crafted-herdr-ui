@@ -17,7 +17,12 @@ function advance(ms: number) {
 let focusVisible = true;
 const realMatches = Element.prototype.matches;
 
+// Each test starts a minute after the last, so the module-level "a tooltip hid just now" memory
+// of one test never reaches the next.
+let clock = Date.parse("2030-01-01T00:00:00Z");
+
 beforeEach(() => {
+  clock += 60_000;
   focusVisible = true;
   vi.spyOn(Element.prototype, "matches").mockImplementation(function (
     this: Element,
@@ -28,6 +33,7 @@ beforeEach(() => {
       : realMatches.call(this, selector);
   });
   vi.useFakeTimers();
+  vi.setSystemTime(clock);
   useAppStore.setState({ dialogOpen: 0, paletteOpen: false, sheet: null });
 });
 
@@ -79,8 +85,6 @@ describe("Tooltip", () => {
   });
 
   it("neighbour_shows_at_once", () => {
-    // Earlier tests leave their own hide time behind; move well past it.
-    advance(1000);
     render(
       <>
         <Tooltip label="First">
@@ -143,6 +147,10 @@ describe("Tooltip", () => {
         </div>
       </>,
     );
+    // A tooltip is up over the terminal when Escape is typed in it.
+    fireEvent.pointerEnter(screen.getByRole("button"));
+    advance(350);
+    expect(tip()).not.toBeNull();
     const seen = vi.fn();
     document.addEventListener("keydown", seen);
     const event = new KeyboardEvent("keydown", {
@@ -156,6 +164,99 @@ describe("Tooltip", () => {
     expect(event.defaultPrevented).toBe(false);
     expect(stop).not.toHaveBeenCalled();
     expect(seen).toHaveBeenCalledTimes(1);
+    // The key was not the tooltip's: it stays until the pointer leaves.
+    expect(tip()).not.toBeNull();
+  });
+
+  it("hides_on_press_and_stays_away_until_re_entered", () => {
+    render(
+      <Tooltip label="Find in terminal">
+        <button type="button">Find</button>
+      </Tooltip>,
+    );
+    const button = screen.getByRole("button");
+    fireEvent.pointerEnter(button);
+    advance(350);
+    expect(tip()).not.toBeNull();
+    fireEvent.pointerDown(button);
+    expect(tip()).toBeNull();
+    // Neither the pending delay nor a neighbour shortcut brings it back while pressed.
+    advance(1000);
+    expect(tip()).toBeNull();
+    fireEvent.pointerLeave(button);
+    fireEvent.pointerEnter(button);
+    advance(350);
+    expect(tip()).not.toBeNull();
+  });
+
+  it("a_press_before_the_delay_cancels_it", () => {
+    render(
+      <Tooltip label="Find in terminal">
+        <button type="button">Find</button>
+      </Tooltip>,
+    );
+    const button = screen.getByRole("button");
+    fireEvent.pointerEnter(button);
+    advance(200);
+    fireEvent.pointerDown(button);
+    advance(1000);
+    expect(tip()).toBeNull();
+  });
+
+  it("a_press_then_keyboard_focus_shows_it_again", () => {
+    render(
+      <Tooltip label="Find in terminal">
+        <button type="button">Find</button>
+      </Tooltip>,
+    );
+    const button = screen.getByRole("button");
+    fireEvent.pointerDown(button);
+    act(() => button.focus());
+    expect(tip()).not.toBeNull();
+  });
+
+  it("hides_on_scroll_and_resize_and_stops_listening", () => {
+    const add = vi.spyOn(window, "addEventListener");
+    const remove = vi.spyOn(window, "removeEventListener");
+    const { unmount } = render(
+      <div>
+        <div data-testid="pane" />
+        <Tooltip label="Find in terminal">
+          <button type="button">Find</button>
+        </Tooltip>
+      </div>,
+    );
+    act(() => screen.getByRole("button").focus());
+    expect(tip()).not.toBeNull();
+    // A scroll of any element reaches window in the capture phase.
+    act(() => {
+      screen.getByTestId("pane").dispatchEvent(new Event("scroll"));
+    });
+    expect(tip()).toBeNull();
+    expect(remove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
+
+    act(() => {
+      screen.getByRole("button").blur();
+      screen.getByRole("button").focus();
+    });
+    expect(tip()).not.toBeNull();
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(tip()).toBeNull();
+
+    // Shown again, then unmounted: nothing is left listening.
+    act(() => {
+      screen.getByRole("button").blur();
+      screen.getByRole("button").focus();
+    });
+    const added = add.mock.calls.filter(([type]) => type === "resize").length;
+    unmount();
+    const removed = remove.mock.calls.filter(
+      ([type]) => type === "resize",
+    ).length;
+    expect(removed).toBe(added);
+    expect(tip()).toBeNull();
   });
 
   it("suppressed_under_a_dialog", () => {

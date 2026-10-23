@@ -38,6 +38,7 @@ type Props = {
 /** The child's own handlers; the tooltip's run after them. */
 type Handlers = {
   onPointerEnter?: (e: PointerEvent<HTMLElement>) => void;
+  onPointerDown?: (e: PointerEvent<HTMLElement>) => void;
   onPointerLeave?: (e: PointerEvent<HTMLElement>) => void;
   onFocus?: (e: FocusEvent<HTMLElement>) => void;
   onBlur?: (e: FocusEvent<HTMLElement>) => void;
@@ -74,6 +75,8 @@ class Controller {
   trigger: HTMLElement | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private shown = false;
+  /** Set by a press on the trigger; the tooltip stays away until the pointer re-enters or focus moves. */
+  private pressed = false;
 
   constructor(private readonly setPlace: (place: Place | null) => void) {}
 
@@ -82,11 +85,17 @@ class Controller {
     this.timer = null;
   }
 
+  /** A scroll or a resize moves the trigger from under the tooltip. */
+  private readonly dismiss = () => this.hide();
+
   private show(el: HTMLElement) {
+    if (this.pressed) return;
     if (modalOpen() && !insideDialog(el)) return;
     const rect = el.getBoundingClientRect();
     const left = Math.max(EDGE, rect.left);
     this.shown = true;
+    window.addEventListener("scroll", this.dismiss, true);
+    window.addEventListener("resize", this.dismiss);
     this.setPlace(
       rect.bottom + GAP + FLIP_HEIGHT > window.innerHeight
         ? { left, bottom: window.innerHeight - rect.top + GAP }
@@ -98,6 +107,8 @@ class Controller {
     this.clearTimer();
     if (this.shown) {
       this.shown = false;
+      window.removeEventListener("scroll", this.dismiss, true);
+      window.removeEventListener("resize", this.dismiss);
       lastHiddenAt = Date.now();
       this.setPlace(null);
     }
@@ -105,13 +116,26 @@ class Controller {
 
   enter(el: HTMLElement) {
     this.trigger = el;
+    this.pressed = false;
     this.clearTimer();
     if (justHidden()) this.show(el);
     else this.timer = setTimeout(() => this.show(el), TOOLTIP_DELAY_MS);
   }
 
+  /** A press may open a menu or dialog below the trigger, so the tooltip must not cover it. */
+  press() {
+    this.pressed = true;
+    this.hide();
+  }
+
+  leave() {
+    this.pressed = false;
+    this.hide();
+  }
+
   focus(el: HTMLElement) {
     this.trigger = el;
+    this.pressed = false;
     this.clearTimer();
     if (keyboardFocus(el)) this.show(el);
   }
@@ -163,9 +187,13 @@ export function Tooltip({ label, shortcut, children }: Props) {
       own.onPointerEnter?.(e);
       ctl.enter(e.currentTarget);
     },
+    onPointerDown: (e) => {
+      own.onPointerDown?.(e);
+      ctl.press();
+    },
     onPointerLeave: (e) => {
       own.onPointerLeave?.(e);
-      ctl.hide();
+      ctl.leave();
     },
     onFocus: (e) => {
       own.onFocus?.(e);
