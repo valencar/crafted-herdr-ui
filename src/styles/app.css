@@ -2295,11 +2295,13 @@ select.field {
 .session-row[data-dragging="true"] .session-tab-main {
   cursor: grabbing;
 }
+/* Takes no net room, so no tab shifts while dragging: the line's 2px plus the extra 2px flex gap
+   it brings on each side are cancelled by -2px margins (the row's gap is 2px). */
 .tab-drop {
   flex: 0 0 2px;
   align-self: center;
   height: 28px;
-  margin: 0 -1px;
+  margin: 0 -2px;
   border-radius: 1px;
   background: var(--focus);
   pointer-events: none;

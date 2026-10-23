@@ -30,8 +30,10 @@ type Press = {
   target: Element | null;
   /** Past the threshold. */
   active: boolean;
-  /** Escape, or the tab went away: the release that follows moves nothing. */
+  /** Escape, or the row's tabs changed: the release that follows moves nothing. */
   cancelled: boolean;
+  /** The row's keys when the press began. */
+  keysAtPress: string;
 };
 
 /**
@@ -63,10 +65,12 @@ export function useTabDrag(opts: Options): {
     setDrop(undefined);
   }, []);
 
-  // A drag whose tab is gone (closed by a state push) cancels; the pending release is ignored.
+  // A drag cancels when the row's tabs change under it (the dragged one closes, or another
+  // opens and may scroll the row): the drop line no longer shows where a release would land.
+  // The pending release is ignored.
   useEffect(() => {
     const p = press.current;
-    if (p && !p.cancelled && !opts.keys.includes(p.key)) {
+    if (p && !p.cancelled && opts.keys.join("\n") !== p.keysAtPress) {
       p.cancelled = true;
       clearVisual();
     }
@@ -99,6 +103,7 @@ export function useTabDrag(opts: Options): {
         target: e.currentTarget,
         active: false,
         cancelled: false,
+        keysAtPress: latest.current.keys.join("\n"),
       };
       press.current = p;
 

@@ -114,6 +114,30 @@ describe("useTabDrag", () => {
     expect(result.current.consumeClick()).toBe(true);
   });
 
+  it("drag_cancels_when_another_tab_opens", () => {
+    const { result, rerender, onMove } = setup();
+    press(result, "b");
+    move(200);
+    expect(result.current.dragging).toBe("b");
+    rerender({ keys: ["a", "b", "c", "d"] });
+    expect(result.current.dragging).toBeNull();
+    expect(result.current.dropBefore).toBeUndefined();
+    move(120);
+    release(120);
+    expect(onMove).not.toHaveBeenCalled();
+    expect(result.current.consumeClick()).toBe(true);
+  });
+
+  it("a_rerender_with_the_same_keys_keeps_the_drag", () => {
+    const { result, rerender, onMove } = setup();
+    press(result, "b");
+    move(200);
+    rerender({ keys: ["a", "b", "c"] });
+    expect(result.current.dragging).toBe("b");
+    release(120);
+    expect(onMove).toHaveBeenCalledWith("b", "b");
+  });
+
   it("only_a_primary_press_starts_a_drag", () => {
     const { result, onMove } = setup();
     press(result, "a", 50, 1);
