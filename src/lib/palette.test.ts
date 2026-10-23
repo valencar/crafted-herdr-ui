@@ -136,6 +136,37 @@ describe("rankItems", () => {
     expect(ext.open).toHaveBeenCalledWith(expect.anything(), "app");
   });
 
+  it("goes_to_the_open_tab_by_default_and_opens_external_with_alt_whatever_the_setting", () => {
+    for (const target of ["app", "external"] as const) {
+      const { items, open } = setup(target, openTabs);
+      const reviewer = items.find(
+        (i) => i.id === "agent:gpubox::w1:p1" && i.group === "Needs you",
+      );
+      expect(reviewer?.alt).toBe("external");
+      reviewer?.run("default");
+      reviewer?.run("alt");
+      expect(open).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ name: "reviewer" }),
+        "app",
+      );
+      expect(open).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ name: "reviewer" }),
+        "external",
+      );
+    }
+  });
+
+  it("names_the_alt_target_of_an_agent_without_a_tab_from_the_setting", () => {
+    expect(setup("app").items.find((i) => i.label === "builder")?.alt).toBe(
+      "external",
+    );
+    expect(
+      setup("external").items.find((i) => i.label === "builder")?.alt,
+    ).toBe("app");
+  });
+
   it("describes_an_agent_by_workbox_folder_and_status", () => {
     const { items } = setup();
     const reviewer = items.find((i) => i.label === "reviewer");

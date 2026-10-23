@@ -18,6 +18,8 @@ export type PaletteItem = {
   row?: Row;
   /** The shortcut shown at the end of the row. */
   shortcut?: ShortcutId;
+  /** For an agent: where ⌘Enter opens it (the other way from Enter). */
+  alt?: "app" | "external";
   /** `"default"` is Enter, `"alt"` is ⌘Enter. */
   run: (how: "default" | "alt") => void;
 };
@@ -60,23 +62,32 @@ export function buildItems(ctx: Context): PaletteItem[] {
   const urgent = needsYou(ctx.rows);
   const urgentKeys = new Set(urgent.map((r) => r.key));
   const other = ctx.rows.filter((r) => !urgentKeys.has(r.key));
-  const alt = ctx.openTarget === "app" ? "external" : "app";
+  const tabKeys = new Set(ctx.openTabs.map((t) => t.key));
 
-  const agent = (row: Row, group: PaletteGroup): PaletteItem => ({
-    id: `agent:${row.key}`,
-    group,
-    label: row.name,
-    detail: [
-      row.machineLabel,
-      row.folder === null ? null : shortPath(row.folder),
-      STATUS_LABEL[row.status],
-    ]
-      .filter((part) => part !== null)
-      .join(" · "),
-    keywords: [row.kind, row.title, row.paneId].filter(Boolean).join(" "),
-    row,
-    run: (how) => ctx.open(row, how === "alt" ? alt : undefined),
-  });
+  // The rule of `agentActions` and the Open button: with a tab open, Enter goes to it and ⌘Enter
+  // is the terminal app; without one, Enter follows the "Open sessions" setting.
+  const agent = (row: Row, group: PaletteGroup): PaletteItem => {
+    const hasTab = tabKeys.has(row.key);
+    const alt: "app" | "external" =
+      hasTab || ctx.openTarget === "app" ? "external" : "app";
+    return {
+      id: `agent:${row.key}`,
+      group,
+      label: row.name,
+      detail: [
+        row.machineLabel,
+        row.folder === null ? null : shortPath(row.folder),
+        STATUS_LABEL[row.status],
+      ]
+        .filter((part) => part !== null)
+        .join(" · "),
+      keywords: [row.kind, row.title, row.paneId].filter(Boolean).join(" "),
+      row,
+      alt,
+      run: (how) =>
+        ctx.open(row, how === "alt" ? alt : hasTab ? "app" : undefined),
+    };
+  };
 
   const tabs: PaletteItem[] = ctx.openTabs.map((t) => ({
     id: `tab:${t.key}`,

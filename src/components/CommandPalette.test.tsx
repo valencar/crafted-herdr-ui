@@ -224,6 +224,78 @@ describe("CommandPalette", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  describe("an agent with an open tab and Open sessions set to External", () => {
+    beforeEach(() => {
+      useAppStore.setState({
+        settings: {
+          open_target: "external",
+          terminal: "ghostty",
+        } as unknown as Settings,
+      });
+      useTerminalStore.setState({
+        tabs: [
+          {
+            tabKey: "buildbox::w1:p1",
+            target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+            title: "planner",
+            machineLabel: "buildbox",
+            state: "live",
+            error: null,
+            termId: 1,
+            exitCode: null,
+            attempts: 0,
+          },
+        ],
+        activeKey: HOME,
+      });
+    });
+
+    /** Types `planner` and moves to its agent option (the tab's own comes first). */
+    async function onTheAgent() {
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "planner");
+      const options = screen.getAllByRole("option");
+      const at = options.findIndex(
+        (o) => o.querySelector(".palette-tag")?.textContent !== "Open tabs",
+      );
+      expect(at).toBeGreaterThan(-1);
+      for (let i = 0; i < at; i += 1) await user.keyboard("{ArrowDown}");
+      return user;
+    }
+
+    it("enter_in_the_list_goes_to_the_tab", async () => {
+      const user = await onTheAgent();
+      await user.keyboard("{Enter}");
+      expect(useTerminalStore.getState().activeKey).toBe("buildbox::w1:p1");
+      expect(invoke).not.toHaveBeenCalledWith(
+        "open_session",
+        expect.anything(),
+      );
+    });
+
+    it("command_enter_in_the_list_opens_the_terminal_app", async () => {
+      const user = await onTheAgent();
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+      expect(invoke).toHaveBeenCalledWith("open_session", {
+        machineId: "buildbox",
+        paneId: "w1:p1",
+      });
+      expect(useTerminalStore.getState().activeKey).toBe(HOME);
+    });
+
+    it("the_footer_names_the_terminal_app_for_it_and_here_for_one_without_a_tab", async () => {
+      const user = await onTheAgent();
+      expect(document.querySelector(".palette-hint")).toHaveTextContent(
+        "⌘↩ Open in Ghostty",
+      );
+      await user.clear(screen.getByRole("combobox"));
+      await user.type(screen.getByRole("combobox"), "tester");
+      expect(document.querySelector(".palette-hint")).toHaveTextContent(
+        "⌘↩ Open here",
+      );
+    });
+  });
+
   it("closes_on_escape", async () => {
     const user = open();
     await user.keyboard("{Escape}");

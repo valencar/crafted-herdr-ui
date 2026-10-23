@@ -575,7 +575,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           {inFrame ? "Run" : "Open"} · <Kbd id="palette-open-alt" />{" "}
           {inFrame
             ? (frameAltLabel ?? "")
-            : openTarget === "app"
+            : (results[at]?.alt ??
+                  (openTarget === "app" ? "external" : "app")) === "external"
               ? `Open in ${terminalLabel}`
               : "Open here"}{" "}
           ·{" "}
