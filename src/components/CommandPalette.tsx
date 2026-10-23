@@ -278,6 +278,19 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     }).filter((a) => q === "" || fuzzyMatch(q, a.label) !== null);
   }, [frameRow, hasTab, openTarget, terminalLabel, query]);
 
+  // What ⌘↩ does in the frame, whatever the filter hides: the footer names it.
+  const frameAltLabel = useMemo(
+    () =>
+      frameRow
+        ? agentActions(frameRow, {
+            hasTab,
+            openTarget,
+            terminal: terminalLabel,
+          }).find((a) => a.id === "open-alt")?.label
+        : undefined,
+    [frameRow, hasTab, openTarget, terminalLabel],
+  );
+
   const results = useMemo(() => rankItems(items, query), [items, query]);
   const count = inFrame ? actions.length : results.length;
   const at = Math.min(active, Math.max(0, count - 1));
@@ -551,7 +564,12 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         <p className="palette-hint">
           <Kbd keys="↑" /> <Kbd keys="↓" /> Move · <Kbd keys="↵" />{" "}
           {inFrame ? "Run" : "Open"} · <Kbd id="palette-open-alt" />{" "}
-          {openTarget === "app" ? `Open in ${terminalLabel}` : "Open here"} ·{" "}
+          {inFrame
+            ? (frameAltLabel ?? "")
+            : openTarget === "app"
+              ? `Open in ${terminalLabel}`
+              : "Open here"}{" "}
+          ·{" "}
           {inFrame ? (
             <>
               <Kbd keys="⌫" /> Back

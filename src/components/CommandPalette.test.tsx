@@ -642,6 +642,41 @@ describe("CommandPalette agent frame", () => {
     expect(labels()).toEqual(["Copy attach command"]);
   });
 
+  it("the_frame_footer_names_what_cmd_enter_does_in_the_frame", async () => {
+    useAppStore.setState({
+      settings: {
+        open_target: "external",
+        terminal: "ghostty",
+      } as unknown as Settings,
+    });
+    useTerminalStore.setState({
+      tabs: [
+        {
+          tabKey: "buildbox::w1:p1",
+          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          title: "planner",
+          machineLabel: "buildbox",
+          state: "live",
+          error: null,
+          termId: 1,
+        },
+      ],
+      activeKey: HOME,
+    });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "planner");
+    await user.keyboard("{Tab}");
+    // ⌘↩ opens in the terminal app here, whatever "Open sessions" says, so the footer says so.
+    expect(document.querySelector(".palette-hint")).toHaveTextContent(
+      "↵ Run · ⌘↩ Open in Ghostty · ⌫ Back",
+    );
+    // Typing a filter that hides the action does not change what ⌘↩ does.
+    await user.type(screen.getByRole("combobox"), "copy");
+    expect(document.querySelector(".palette-hint")).toHaveTextContent(
+      "⌘↩ Open in Ghostty",
+    );
+  });
+
   it("lists_open_tabs_and_goes_to_one", async () => {
     useTerminalStore.setState({
       tabs: [
