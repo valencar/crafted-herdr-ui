@@ -162,6 +162,10 @@ describe("Dashboard", () => {
     expect(card.querySelectorAll(".skel").length).toBeGreaterThan(0);
     expect(card.querySelector(".status-bar")).toBeNull();
     expect(card).toHaveAttribute("aria-busy", "true");
+    // The action stays: a hung first connect can still be retried by hand.
+    expect(
+      within(card).getByRole("button", { name: "Retry now" }),
+    ).toBeInTheDocument();
     // A workbox that has answered keeps its bar and no skeleton.
     const ready = screen.getByRole("article", { name: /buildbox/ });
     expect(ready.querySelector(".status-bar")).not.toBeNull();
@@ -435,6 +439,14 @@ describe("Dashboard", () => {
     expect(t.querySelector(".tile-unit")).toHaveTextContent("min");
     expect(t).toHaveTextContent("2 min");
     expect(within(t).getByText("planner on buildbox")).toBeInTheDocument();
+  });
+
+  it("blocked_the_longest_shows_a_dash_when_the_blocked_age_is_unknown", () => {
+    setup(appState(machine("buildbox", undefined, { ages: {} })));
+    const t = tile("Blocked the longest");
+    expect(t.querySelector(".tile-num")).toHaveTextContent("—");
+    expect(t).not.toHaveTextContent("None");
+    expect(within(t).getByText(/ on buildbox$/)).toBeInTheDocument();
   });
 
   it("blocked_the_longest_shows_none_when_nobody_is_blocked", () => {

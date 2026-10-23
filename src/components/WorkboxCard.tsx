@@ -86,7 +86,7 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
           Open herdr
         </button>
       )}
-      {((kind === "reconnecting" && !pending) || kind === "attention") && (
+      {(kind === "reconnecting" || kind === "attention") && (
         <button
           type="button"
           className="btn btn-small"

@@ -63,8 +63,14 @@ type Props = {
 const AGE_UNIT: Record<string, string> = { m: "min", h: "h", d: "d" };
 
 /** "2m" becomes the number 2 and the unit "min"; "now" and a missing age have no unit. */
-function splitAge(age: string | null): { value: string; unit?: string } {
-  if (age === null) return { value: "None" };
+function splitAge(
+  longest: Row | null,
+  nowMs: number,
+): { value: string; unit?: string } {
+  if (longest === null) return { value: "None" };
+  // Blocked, but for how long is unknown: a dash, not "None".
+  const age = formatAge(longest.sinceMs, nowMs);
+  if (age === null) return { value: "—" };
   const m = /^(\d+)([mhd])$/.exec(age);
   return m ? { value: m[1], unit: AGE_UNIT[m[2]] } : { value: age };
 }
@@ -125,9 +131,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
   const working = useMemo(() => workingNow(rows), [rows]);
   const longest = oldestBlocked(rows);
   const online = onlineSummary(machines);
-  const longestAge = splitAge(
-    longest ? formatAge(longest.sinceMs, nowMs) : null,
-  );
+  const longestAge = splitAge(longest, nowMs);
   const response = responseStats(log ?? [], nowMs);
   const tabGroups = groupTabs(tabs, machines);
   const machineById = new Map(machines.map((m) => [m.id, m]));
@@ -203,6 +207,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
                         focusRow(key);
                       }}
                       onMarkSeen={markSeen}
+                      live
                     />
                   ))}
                 </div>

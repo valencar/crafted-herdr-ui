@@ -156,6 +156,17 @@ afterEach(() => {
 });
 
 describe("AllAgents", () => {
+  it("needs_cards_are_static_here", () => {
+    setup();
+    const cards = document.querySelectorAll("article.card");
+    expect(cards.length).toBeGreaterThan(0);
+    for (const card of cards) {
+      const dot = card.querySelector(".pill .sdot");
+      expect(dot).not.toBeNull();
+      expect(dot).not.toHaveClass("live");
+    }
+  });
+
   it("first_load_shows_a_skeleton", () => {
     setup(null);
     const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;
