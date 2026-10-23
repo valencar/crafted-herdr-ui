@@ -147,7 +147,10 @@ export function Sidebar({
             <HomeIcon />
           </button>
         </Tooltip>
-        <Tooltip label={`Needs you: ${needsCount} waiting`}>
+        <Tooltip
+          label={`Needs you: ${needsCount} waiting`}
+          shortcut="next-needs-you"
+        >
           <button
             type="button"
             className="rail-item rail-needs"
@@ -181,7 +184,7 @@ export function Sidebar({
                   data-health={m.health.kind}
                   aria-hidden="true"
                 >
-                  <HealthDot health={m.health} />
+                  <HealthDot health={m.health} live />
                 </span>
               </button>
             </Tooltip>
@@ -277,7 +280,7 @@ export function Sidebar({
             >
               <span className="nav-label">{m.label}</span>
               <span className="health" data-health={m.health.kind}>
-                <HealthDot health={m.health} />
+                <HealthDot health={m.health} live />
                 {HEALTH_LABEL[m.health.kind]}
               </span>
               <span className="count">{agentsByMachine.get(m.id) ?? 0}</span>

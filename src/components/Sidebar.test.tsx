@@ -512,6 +512,36 @@ describe("Sidebar", () => {
     }
   });
 
+  it("the_rail_needs_you_tooltip_shows_the_next_needs_you_shortcut", () => {
+    vi.useFakeTimers();
+    try {
+      renderSidebar(true);
+      const needs = screen.getByRole("button", {
+        name: "Needs you: 2 waiting",
+      });
+      fireEvent.pointerEnter(needs);
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(document.querySelector(".tooltip")).toHaveTextContent(
+        "Needs you: 2 waiting⌘J",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("workbox_health_dots_are_live_in_the_list_and_on_the_rail", () => {
+    for (const collapsed of [false, true]) {
+      const { unmount } = renderSidebar(collapsed);
+      const nav = screen.getByRole("navigation", { name: "Sidebar" });
+      const dots = nav.querySelectorAll(".health .sdot[data-health]");
+      expect(dots).toHaveLength(2);
+      for (const dot of dots) expect(dot).toHaveClass("live");
+      unmount();
+    }
+  });
+
   describe("faded names stay in tooltips", () => {
     function hover(el: Element): string | null {
       fireEvent.pointerEnter(el);
