@@ -41,6 +41,9 @@ export function runMenuAction(id: MenuId): void {
     case "palette":
       useAppStore.getState().setPaletteOpen(true);
       break;
+    case "shortcuts":
+      useAppStore.getState().setShortcutsOpen(true);
+      break;
     case "activity": {
       const { state: current, activityOpen: open } = useAppStore.getState();
       // Without herdr there is no command log to show.

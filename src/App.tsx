@@ -5,6 +5,7 @@ import { ClosePaneHost } from "./components/ClosePaneHost";
 import { CommandPalette } from "./components/CommandPalette";
 import { Header } from "./components/Header";
 import { VersionBanner } from "./components/HomeNotices";
+import { ShortcutsSheet } from "./components/ShortcutsSheet";
 import { StoreToast } from "./components/Toast";
 import { toRows } from "./lib/grouping";
 import { onFocusRow, onMenu, onNewSession, onOpenRow } from "./lib/ipc";
@@ -38,6 +39,8 @@ function App() {
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const paletteOpen = useAppStore((s) => s.paletteOpen);
   const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
+  const shortcutsOpen = useAppStore((s) => s.shortcutsOpen);
+  const setShortcutsOpen = useAppStore((s) => s.setShortcutsOpen);
   const herdrVersion = useAppStore((s) => s.state?.herdr_version ?? null);
   const compact = useAppStore((s) => s.settings?.row_density === "compact");
   const { current: terminal, installed } = useTerminals();
@@ -159,6 +162,9 @@ function App() {
       )}
       {sheet === "add-workbox" && <AddWorkbox />}
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
+      {shortcutsOpen && (
+        <ShortcutsSheet onClose={() => setShortcutsOpen(false)} />
+      )}
       <ClosePaneHost />
       {activityOpen && (
         <ActivityDrawer

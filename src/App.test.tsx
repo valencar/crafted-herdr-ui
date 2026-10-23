@@ -78,6 +78,7 @@ afterEach(() => {
     sheet: null,
     activityOpen: false,
     paletteOpen: false,
+    shortcutsOpen: false,
     dialogOpen: 0,
   });
   useTerminalStore.setState({
@@ -492,6 +493,25 @@ describe("menu events", () => {
     fireEvent.keyDown(palette, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(useAppStore.getState().dialogOpen).toBe(0);
+  });
+
+  it("shortcuts opens the shortcuts sheet, and Esc closes it", async () => {
+    render(<App />);
+    const search = await screen.findByRole("searchbox");
+    search.focus();
+    await menu("shortcuts");
+    const sheet = await screen.findByRole("dialog", {
+      name: "Keyboard shortcuts",
+    });
+    expect(screen.getByLabelText("Filter shortcuts")).toHaveFocus();
+    expect(useAppStore.getState().dialogOpen).toBe(1);
+    // A second ⌘/ while it is open does nothing.
+    await menu("shortcuts");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.keyDown(sheet, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(useAppStore.getState().shortcutsOpen).toBe(false);
+    expect(search).toHaveFocus();
   });
 
   it("menu events are ignored while a sheet or dialog is open", async () => {

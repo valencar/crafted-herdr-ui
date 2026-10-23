@@ -2774,6 +2774,111 @@ select.field {
   font-size: var(--fs-small);
 }
 
+/* The ⌘/ keyboard shortcuts sheet (`components/ShortcutsSheet.tsx`). It sits on `.scrim`, the
+   palette's layer: above the terminal panel, below the Activity drawer and the toast. */
+.shortcuts-scrim {
+  align-items: flex-start;
+  padding-top: 10vh;
+}
+.shortcuts {
+  width: min(860px, calc(100vw - 32px));
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  animation: enter-dialog var(--dur-slow) var(--ease-out);
+}
+.shortcuts:focus {
+  outline: none;
+}
+.shortcuts-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.shortcuts-title {
+  margin: 0;
+  flex: none;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.shortcuts-filter {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-m);
+  font: inherit;
+  font-size: var(--fs-meta);
+}
+.shortcuts-filter:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+.shortcuts-close {
+  display: flex;
+  flex: none;
+  padding: 4px;
+  color: var(--text-4);
+}
+.shortcuts-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+.shortcuts-section + .shortcuts-section {
+  margin-top: 20px;
+}
+.shortcuts-heading {
+  margin: 0 0 6px;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+}
+.shortcuts-heading.is-sub {
+  font-size: var(--fs-small);
+}
+.shortcuts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+}
+.shortcuts-row > .kbd {
+  flex: none;
+}
+.shortcuts-empty {
+  margin: 0;
+  padding: 24px 20px;
+  color: var(--text-3);
+}
+.shortcuts-note {
+  margin: 0;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-4);
+  font-size: var(--fs-small);
+}
+
 /* ---------- collapsed sidebar rail ---------- */
 
 .sidebar.is-collapsed {

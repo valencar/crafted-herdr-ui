@@ -29,6 +29,7 @@ pub enum MenuId {
     FontSmaller,
     FontReset,
     Activity,
+    Shortcuts,
     NewInWorkbox,
     CloseTab,
     NextTab,
@@ -59,6 +60,7 @@ impl MenuId {
             MenuId::FontSmaller => "font-smaller",
             MenuId::FontReset => "font-reset",
             MenuId::Activity => "activity",
+            MenuId::Shortcuts => "shortcuts",
             MenuId::NewInWorkbox => "new-in-workbox",
             MenuId::CloseTab => "close-tab",
             MenuId::NextTab => "next-tab",
@@ -119,6 +121,7 @@ pub fn items() -> Vec<(MenuId, &'static str, String)> {
         (FontSmaller, "Smaller Font"),
         (FontReset, "Reset Font"),
         (Activity, "Activity"),
+        (Shortcuts, "Keyboard Shortcuts"),
         (NewInWorkbox, "New Session in Workbox"),
         (CloseTab, "Close Tab"),
         (NextTab, "Next Tab"),
@@ -227,8 +230,9 @@ mod tests {
 
     use super::*;
 
-    /// The table as v0.5 shipped it; the JSON must keep giving exactly these.
-    const V0_5: [(MenuId, &str, &str); 23] = [
+    /// The table as v0.5 shipped it, plus v0.7's Keyboard Shortcuts item; the JSON must keep
+    /// giving exactly these.
+    const V0_5: [(MenuId, &str, &str); 24] = [
         (MenuId::Palette, "Command Palette", "CmdOrCtrl+K"),
         (MenuId::Dashboard, "Dashboard", "CmdOrCtrl+1"),
         (MenuId::ToggleTerminal, "Toggle Terminal", "Ctrl+Backquote"),
@@ -244,6 +248,7 @@ mod tests {
         (MenuId::FontSmaller, "Smaller Font", "CmdOrCtrl+Minus"),
         (MenuId::FontReset, "Reset Font", "CmdOrCtrl+0"),
         (MenuId::Activity, "Activity", "CmdOrCtrl+Shift+A"),
+        (MenuId::Shortcuts, "Keyboard Shortcuts", "CmdOrCtrl+Slash"),
         (
             MenuId::NewInWorkbox,
             "New Session in Workbox",
@@ -285,7 +290,7 @@ mod tests {
     #[test]
     fn menu_ids_and_accelerators_are_unique() {
         let all = items();
-        assert_eq!(all.len(), 23, "one entry per MenuId");
+        assert_eq!(all.len(), 24, "one entry per MenuId");
         let ids: HashSet<_> = all.iter().map(|(id, ..)| id.key()).collect();
         let keys: HashSet<_> = all.iter().map(|(.., accel)| accel.clone()).collect();
         assert_eq!(ids.len(), all.len(), "duplicate menu id");
@@ -366,6 +371,17 @@ mod tests {
             "same menu as Close Tab"
         );
         assert_eq!(MenuId::NewInWorkbox.key(), "new-in-workbox");
+    }
+
+    #[test]
+    fn shortcuts_item_in_view_menu() {
+        assert!(items().contains(&(
+            MenuId::Shortcuts,
+            "Keyboard Shortcuts",
+            "CmdOrCtrl+Slash".to_string()
+        )));
+        assert!(!MenuId::Shortcuts.in_terminal_menu());
+        assert_eq!(MenuId::Shortcuts.key(), "shortcuts");
     }
 
     #[test]

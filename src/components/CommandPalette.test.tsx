@@ -175,6 +175,21 @@ describe("CommandPalette", () => {
     expect(useTerminalStore.getState().activeKey).toBe(HOME);
   });
 
+  it("has_a_keyboard_shortcuts_command_that_opens_the_sheet", async () => {
+    useAppStore.setState({ shortcutsOpen: false });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "keyboard");
+    const [first] = screen.getAllByRole("option");
+    expect(first).toHaveTextContent("Keyboard shortcuts");
+    expect(first).toHaveTextContent("⌘/");
+    await user.keyboard("{Enter}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(useAppStore.getState().shortcutsOpen).toBe(true),
+    );
+    useAppStore.setState({ shortcutsOpen: false });
+  });
+
   it("dashboard_beside_terminal_command_label", async () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "dashboard beside");

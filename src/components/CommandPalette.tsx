@@ -224,6 +224,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           run: () => runMenuAction("activity"),
         },
         {
+          id: "shortcuts",
+          label: "Keyboard shortcuts",
+          shortcut: "shortcuts",
+          // After the palette has handed focus back, so the sheet remembers a control that stays.
+          run: () => {
+            window.setTimeout(() => runMenuAction("shortcuts"), 0);
+          },
+        },
+        {
           id: "refresh",
           label: "Refresh",
           shortcut: "refresh",
