@@ -15,9 +15,13 @@
   --chip: #1c1e23;
   --input: #17191d;
   --input-border: #24272d;
-  --hover: #17191d;
-  --nav-hover: #1a1c21;
-  --selected: #16181d;
+  /* Hover and selected fills are a veil of the text colour, so they read on any surface (and
+     in a light theme) instead of being one fixed grey. */
+  --fill-hover: color-mix(in oklab, var(--text) 6%, transparent);
+  --fill-selected: color-mix(in oklab, var(--text) 10%, transparent);
+  --hover: var(--fill-hover);
+  --nav-hover: var(--fill-hover);
+  --selected: var(--fill-selected);
   --segment: #15171b;
   --segment-on: #24272d;
 
@@ -83,4 +87,11 @@
   --fs-display-3: 28px;
   --font-size: var(--fs-body);
   --line-height: 1.45;
+
+  /* motion: the only durations a rule may use (loops excepted: 1.6s, 0.9s, 1.8s) */
+  --dur-fast: 120ms;
+  --dur-base: 160ms;
+  --dur-slow: 220ms;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --tooltip-delay: 350ms;
 }

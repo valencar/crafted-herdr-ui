@@ -364,6 +364,10 @@ kbd {
   min-height: 36px;
   font-size: var(--fs-meta);
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .btn:hover {
   background: var(--border-strong);
@@ -403,6 +407,10 @@ kbd {
   font-size: var(--fs-lead);
   line-height: 1;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .icon-btn:hover {
   background: var(--border-strong);
@@ -433,6 +441,10 @@ kbd {
   color: var(--text-2);
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .nav-item[aria-current="page"] {
   background: var(--selected);
@@ -497,6 +509,10 @@ kbd {
   font-size: var(--fs-meta);
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .nav-term:hover {
   background: var(--nav-hover);
@@ -911,6 +927,7 @@ kbd {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl);
   padding: 20px;
+  animation: enter-dialog var(--dur-slow) var(--ease-out);
 }
 .dialog-title {
   margin: 0 0 8px;
@@ -954,6 +971,7 @@ kbd {
   border-radius: var(--radius-m);
   padding: 10px 12px;
   color: var(--danger);
+  animation: enter-rise var(--dur-slow) var(--ease-out);
 }
 
 .toast-info {
@@ -983,6 +1001,7 @@ kbd {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl);
   overflow: hidden;
+  animation: enter-dialog var(--dur-slow) var(--ease-out);
 }
 .sheet-head {
   display: flex;
@@ -1656,6 +1675,7 @@ select.field {
   background: var(--panel-2);
   border-left: 1px solid var(--border-strong);
   box-shadow: -12px 0 32px color-mix(in srgb, var(--bg) 70%, transparent);
+  animation: enter-slide var(--dur-slow) var(--ease-out);
 }
 .activity-head {
   display: flex;
@@ -1977,6 +1997,10 @@ select.field {
   background: transparent;
   border: 0;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .wb-tab:hover {
   background: var(--segment);
@@ -2045,6 +2069,10 @@ select.field {
   display: flex;
   align-items: center;
   padding-right: 6px;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .session-tab:hover {
   background: var(--nav-hover);
@@ -2137,6 +2165,10 @@ select.field {
   font-size: var(--fs-body);
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .session-new:hover {
   background: var(--nav-hover);
@@ -2152,6 +2184,10 @@ select.field {
   background: transparent;
   border: 0;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .home-view:hover {
   background: var(--nav-hover);
@@ -2302,6 +2338,7 @@ select.field {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl);
   overflow: hidden;
+  animation: enter-dialog var(--dur-slow) var(--ease-out);
 }
 .palette-input {
   background: transparent;
@@ -2330,6 +2367,10 @@ select.field {
   padding: 8px 10px;
   border-radius: var(--radius-m);
   cursor: default;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .palette-option.is-active {
   background: var(--raised);

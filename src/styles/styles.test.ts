@@ -279,3 +279,114 @@ describe("type tokens", () => {
     expect(rule(".wb-tab")).toMatch(/max-width:\s*\d+px/);
   });
 });
+
+describe("motion tokens", () => {
+  const files = ["app.css", "windows.css", "global.css"];
+  const rulesOf = (file: string) =>
+    [...stripComments(read(file)).matchAll(/([^{}@]+)\{([^{}]*)\}/g)].map(
+      (m) => ({ selector: m[1].trim(), body: m[2] }),
+    );
+  const reduced = () => {
+    const text = stripComments(read("global.css"));
+    const at = text.indexOf("@media (prefers-reduced-motion: reduce)");
+    expect(at, "no reduced-motion block in global.css").toBeGreaterThan(-1);
+    // The block ends at its matching close brace.
+    let depth = 0;
+    for (let i = text.indexOf("{", at); i < text.length; i++) {
+      if (text[i] === "{") depth++;
+      if (text[i] === "}" && --depth === 0) return text.slice(at, i + 1);
+    }
+    throw new Error("unterminated reduced-motion block");
+  };
+
+  it("defines_motion_and_fill_tokens", () => {
+    const tokens = stripComments(read("tokens.css"));
+    for (const decl of [
+      "--dur-fast: 120ms;",
+      "--dur-base: 160ms;",
+      "--dur-slow: 220ms;",
+      "--ease-out: cubic-bezier(.22, 1, .36, 1);",
+      "--tooltip-delay: 350ms;",
+      "--fill-hover: color-mix(in oklab, var(--text) 6%, transparent);",
+      "--fill-selected: color-mix(in oklab, var(--text) 10%, transparent);",
+      "--hover: var(--fill-hover);",
+      "--nav-hover: var(--fill-hover);",
+      "--selected: var(--fill-selected);",
+    ]) {
+      expect(tokens).toContain(decl);
+    }
+  });
+
+  it("uses_motion_tokens_for_every_duration", () => {
+    const loops = new Set(["1.6s", "0.9s", ".9s", "1.8s"]);
+    const offenders: string[] = [];
+    let tokenised = 0;
+    for (const file of files) {
+      for (const { selector, body } of rulesOf(file)) {
+        tokenised += (body.match(/var\(--dur-(?:fast|base|slow)\)/g) ?? [])
+          .length;
+        for (const d of body.matchAll(
+          /(?:^|[;\s])((?:transition|animation)(?:-duration)?)\s*:\s*([^;]+)/g,
+        )) {
+          const tokens = d[2]
+            .replace(/var\(--dur-(?:fast|base|slow)\)/g, "DUR")
+            .replace(/\([^)]*\)/g, "()")
+            .split(/[\s,]+/);
+          for (const t of tokens) {
+            if (/^-?[\d.]+m?s$/.test(t) && !loops.has(t)) {
+              offenders.push(`${file}: ${selector} { ${d[1]}: ${d[2].trim()} }`);
+            }
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+    // The check above is vacuous unless the stylesheets really use the tokens.
+    expect(tokenised).toBeGreaterThan(0);
+  });
+
+  it("never_animates_terminal_resizing_layout", () => {
+    for (const selector of [
+      ".sidebar",
+      ".sidebar.is-collapsed",
+      ".split-column",
+      ".terminal-panel",
+      ".workspace",
+    ]) {
+      const found = rulesOf("app.css").filter((r) => r.selector === selector);
+      expect(found.length, `no rule for ${selector}`).toBeGreaterThan(0);
+      for (const { body } of found) {
+        expect(body, selector).not.toMatch(/transition|animation/);
+      }
+    }
+  });
+
+  it("reduced_motion_stops_loops_and_entrances", () => {
+    const block = reduced();
+    const selectors = new Set(
+      [...block.matchAll(/([^{}@]+)\{([^{}]*)\}/g)]
+        .filter((m) => /animation:\s*none/.test(m[2]))
+        .flatMap((m) => m[1].split(",").map((s) => s.trim())),
+    );
+    for (const selector of [".live", ".live::after", ".skel"]) {
+      expect(selectors, selector).toContain(selector);
+    }
+    const animated: string[] = [];
+    for (const file of files) {
+      for (const { selector, body } of rulesOf(file)) {
+        if (/animation[^;]*\b(?:enter|st)-[a-z]+/.test(body)) {
+          animated.push(...selector.split(",").map((s) => s.trim()));
+        }
+      }
+    }
+    expect(animated.length).toBeGreaterThan(0);
+    for (const selector of animated) {
+      expect(selectors, selector).toContain(selector);
+    }
+  });
+
+  it("figures_are_tabular", () => {
+    const body = rulesOf("global.css").find((r) => r.selector === "body");
+    expect(body?.body).toContain("font-variant-numeric: tabular-nums");
+  });
+});

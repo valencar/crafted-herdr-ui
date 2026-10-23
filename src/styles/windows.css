@@ -21,6 +21,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-m);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  animation: enter-pop var(--dur-base) var(--ease-out);
 }
 .menu-item {
   display: flex;
@@ -34,6 +35,10 @@
   color: var(--text-2);
   font-size: var(--fs-body);
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .menu-item:hover,
 .menu-item:focus-visible {
@@ -76,6 +81,10 @@
   border-radius: 7px;
   color: var(--text-2);
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 .settings-nav-item:hover {
   background: var(--nav-hover);
