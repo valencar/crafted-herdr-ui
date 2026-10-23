@@ -2071,6 +2071,10 @@ select.field {
     transparent
   );
   mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+  /* The fade is 24px wide. Scrolling a tab into view stops short of it, and the end of the row
+     leaves the same room, so neither a tab's close mark nor "New on" ever sits in the fade. */
+  scroll-padding-inline-end: 24px;
+  padding-inline-end: 24px;
 }
 .home-views {
   flex: 0 0 auto;

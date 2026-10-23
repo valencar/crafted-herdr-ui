@@ -380,6 +380,13 @@ describe("tabs", () => {
     );
     expect(body).toMatch(/mask-image:\s*linear-gradient\(/);
     expect(body).toMatch(/-webkit-mask-image:\s*linear-gradient\(/);
+    // The fade is 24px; scrolling a tab into view and the row's end keep clear of it.
+    const fade = Number(/#000 calc\(100% - (\d+)px\)/.exec(body)?.[1]);
+    expect(fade).toBeGreaterThan(0);
+    for (const prop of ["scroll-padding-inline-end", "padding-inline-end"]) {
+      const px = Number(new RegExp(`${prop}:\\s*(\\d+)px`).exec(body)?.[1]);
+      expect(px, prop).toBeGreaterThanOrEqual(fade);
+    }
   });
 
   it("an_activated_tab_does_not_fade_in_so_its_corners_never_seam", () => {
