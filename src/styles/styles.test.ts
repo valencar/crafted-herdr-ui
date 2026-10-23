@@ -2,7 +2,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { healthShape, type RowStatus } from "../lib/format";
+import type { DotStatus } from "../components/StatusDot";
+import { healthShape } from "../lib/format";
 
 // Vitest runs from the repo root; the stylesheet is read as text (it is not processed).
 const read = (file: string) =>
@@ -289,13 +290,17 @@ describe("status shapes", () => {
   );
 
   it("every_status_and_health_has_a_shape", () => {
-    const statuses: RowStatus[] = [
+    const statuses: DotStatus[] = [
       "blocked",
       "working",
       "done",
       "idle",
       "unknown",
       "shell",
+      // A terminal tab with no live session (`TabState`) draws its own shape.
+      "error",
+      "opening",
+      "detached",
     ];
     for (const status of statuses) {
       expect(selectors, status).toContain(`.sdot[data-status="${status}"]`);

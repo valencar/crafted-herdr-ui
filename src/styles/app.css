@@ -639,6 +639,22 @@ kbd {
   background: var(--text-4);
   border-color: var(--text-4);
 }
+/* Terminal tabs with no live session (`TabState`): error reads as attention, opening as the
+   first connect, detached as a dim dashed ring. */
+.sdot[data-status="error"] {
+  border-color: var(--danger);
+}
+.sdot[data-status="opening"] {
+  border-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  border-top-color: var(--text-2);
+}
+.sdot[data-status="opening"].live {
+  animation: st-spin 0.9s linear infinite;
+}
+.sdot[data-status="detached"] {
+  border-style: dashed;
+  opacity: 0.45;
+}
 .sdot[data-health="online"] {
   background: var(--online);
   border-color: var(--online);

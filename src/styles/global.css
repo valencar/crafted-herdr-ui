@@ -147,6 +147,7 @@ textarea {
   .live::after,
   .sdot[data-status="blocked"].live::after,
   .sdot[data-status="working"].live,
+  .sdot[data-status="opening"].live,
   .sdot[data-health="pending"].live,
   .sdot[data-health="reconnecting"].live,
   .skel,
