@@ -206,10 +206,13 @@ export function copyText(text: string): Promise<void> {
 }
 
 /**
- * Tells the OS the window's theme, so native pieces (context menus, the title bar) match the
- * page. Failures are ignored: the page itself is already drawn in the theme.
+ * Tells the OS the theme, so native pieces (context menus, the title bar) match the page.
+ * `null` follows the system. On macOS the theme is app-wide, and an explicit one pins the
+ * appearance of every window. Failures are ignored: the page itself is already drawn.
  */
-export async function setWindowTheme(theme: "dark" | "light"): Promise<void> {
+export async function setWindowTheme(
+  theme: "dark" | "light" | null,
+): Promise<void> {
   try {
     await getCurrentWindow().setTheme(theme);
   } catch {
