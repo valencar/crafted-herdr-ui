@@ -439,6 +439,10 @@ it("opens the tab but leaves the sheet alone when focus-row or open-row arrives 
     settings: { open_target: "app" } as unknown as Settings,
   });
   listBuildbox();
+  // The sheet lists agent kinds; the default mock answers every command with an object.
+  ipc.invokeTyped.mockImplementation(async (name: string) =>
+    name === "list_agent_kinds" ? [] : { installed: [], default: "ghostty" },
+  );
   render(<App />);
   await waitFor(() => expect(ipc.onOpenRow).toHaveBeenCalled());
   await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());

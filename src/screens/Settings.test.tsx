@@ -41,6 +41,8 @@ const DEFAULTS: SettingsData = {
   row_density: "comfortable",
   theme: "dark",
   new_session_kind: null,
+  new_session_hidden_kinds: [],
+  new_session_hide_shell: false,
 };
 
 const HERDR: HerdrStatus = {
@@ -77,6 +79,8 @@ const STATE: AppState = {
 
 let herdr: HerdrStatus;
 let shortcut: ShortcutStatus;
+/** What `list_agent_kinds` does: a list, or `"fail"`. */
+let kinds: string[] | "fail";
 
 function setup(settings: Partial<SettingsData> = {}, section?: string) {
   useAppStore.setState({
@@ -97,6 +101,7 @@ function setup(settings: Partial<SettingsData> = {}, section?: string) {
 beforeEach(() => {
   herdr = HERDR;
   shortcut = { registered: true, error: null };
+  kinds = ["claude", "codex"];
   chooseFile.mockReset();
   invoke
     .mockReset()
@@ -113,6 +118,9 @@ beforeEach(() => {
           return herdr;
         case "shortcut_status":
           return shortcut;
+        case "list_agent_kinds":
+          if (kinds === "fail") throw { kind: "invalid", message: "No herdr." };
+          return kinds;
         case "preview_launch_template":
           return `${(args as { template: string }).template.replace("{attach}", "ssh -t buildbox 'sh -c …'")}`;
         case "set_settings":
@@ -474,4 +482,140 @@ describe("Settings", () => {
       "Those settings are not valid.",
     );
   });
+});
+
+describe("Settings › New session options", () => {
+  const group = () =>
+    screen.findByRole("group", { name: "New session options" });
+  const boxes = (g: HTMLElement) =>
+    within(g)
+      .getAllByRole("checkbox")
+      .map((b) => b.closest("label")!.textContent);
+
+  it("lists_the_kinds_then_plain_shell_all_checked", async () => {
+    await setup();
+    const g = await group();
+    expect(
+      within(g).getByText("Choose what the Run list in New session offers."),
+    ).toBeInTheDocument();
+    await within(g).findByRole("checkbox", { name: "claude" });
+    expect(boxes(g)).toEqual(["CCclaude", "CXcodex", "$_Plain shell"]);
+    for (const box of within(g).getAllByRole("checkbox")) {
+      expect(box).toBeChecked();
+    }
+  });
+
+  it("unchecking_a_kind_hides_it_and_checking_shows_it_again", async () => {
+    const user = await setup();
+    const g = await group();
+    await user.click(await within(g).findByRole("checkbox", { name: "codex" }));
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { new_session_hidden_kinds: ["codex"] },
+    });
+    expect(
+      within(g).getByRole("checkbox", { name: "codex" }),
+    ).not.toBeChecked();
+    await user.click(within(g).getByRole("checkbox", { name: "claude" }));
+    expect(invoke).toHaveBeenLastCalledWith("set_settings", {
+      patch: { new_session_hidden_kinds: ["codex", "claude"] },
+    });
+    await user.click(within(g).getByRole("checkbox", { name: "codex" }));
+    expect(invoke).toHaveBeenLastCalledWith("set_settings", {
+      patch: { new_session_hidden_kinds: ["claude"] },
+    });
+  });
+
+  it("plain_shell_toggles_hide_shell", async () => {
+    const user = await setup();
+    const g = await group();
+    await user.click(
+      await within(g).findByRole("checkbox", { name: "Plain shell" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { new_session_hide_shell: true },
+    });
+    await user.click(within(g).getByRole("checkbox", { name: "Plain shell" }));
+    expect(invoke).toHaveBeenLastCalledWith("set_settings", {
+      patch: { new_session_hide_shell: false },
+    });
+  });
+
+  it("shows_hidden_options_unchecked", async () => {
+    await setup({
+      new_session_hidden_kinds: ["codex"],
+      new_session_hide_shell: true,
+    });
+    const g = await group();
+    await within(g).findByRole("checkbox", { name: "claude" });
+    expect(within(g).getByRole("checkbox", { name: "claude" })).toBeChecked();
+    expect(
+      within(g).getByRole("checkbox", { name: "codex" }),
+    ).not.toBeChecked();
+    expect(
+      within(g).getByRole("checkbox", { name: "Plain shell" }),
+    ).not.toBeChecked();
+  });
+
+  it("the_last_checked_option_cannot_be_unchecked", async () => {
+    await setup({
+      new_session_hidden_kinds: ["codex"],
+      new_session_hide_shell: true,
+    });
+    const g = await group();
+    const last = await within(g).findByRole("checkbox", { name: "claude" });
+    expect(last).toBeDisabled();
+    expect(last).toHaveAccessibleDescription("At least one option stays.");
+    expect(within(g).getByRole("checkbox", { name: "codex" })).toBeEnabled();
+    expect(
+      within(g).getByRole("checkbox", { name: "Plain shell" }),
+    ).toBeEnabled();
+  });
+
+  it("with_two_or_more_checked_none_is_disabled", async () => {
+    await setup();
+    const g = await group();
+    await within(g).findByRole("checkbox", { name: "claude" });
+    for (const box of within(g).getAllByRole("checkbox")) {
+      expect(box).toBeEnabled();
+    }
+    expect(within(g).queryByText("At least one option stays.")).toBeNull();
+  });
+
+  it("hidden_kinds_no_longer_installed_are_not_shown_and_left_alone", async () => {
+    const user = await setup({ new_session_hidden_kinds: ["gemini"] });
+    const g = await group();
+    await within(g).findByRole("checkbox", { name: "claude" });
+    expect(within(g).queryByRole("checkbox", { name: "gemini" })).toBeNull();
+    await user.click(within(g).getByRole("checkbox", { name: "codex" }));
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { new_session_hidden_kinds: ["gemini", "codex"] },
+    });
+  });
+
+  it("says_loading_while_the_kinds_load", async () => {
+    invoke.mockImplementation(async (name: string) =>
+      name === "list_agent_kinds" ? new Promise(() => {}) : null,
+    );
+    await setup();
+    const g = await group();
+    expect(within(g).getByText("Loading agent kinds…")).toBeInTheDocument();
+  });
+
+  it.each([["fail"], [[]]] as const)(
+    "no_kinds_shows_only_plain_shell_with_a_note (%j)",
+    async (result) => {
+      kinds = result as string[] | "fail";
+      await setup();
+      const g = await group();
+      expect(
+        await within(g).findByText("herdr listed no agent kinds."),
+      ).toBeInTheDocument();
+      expect(boxes(g)).toEqual(["$_Plain shell"]);
+      const shell = within(g).getByRole("checkbox", { name: "Plain shell" });
+      expect(shell).toBeChecked();
+      expect(shell).toBeDisabled();
+      expect(shell).toHaveAccessibleDescription("At least one option stays.");
+      expect(useAppStore.getState().toast).toBeNull();
+    },
+  );
 });

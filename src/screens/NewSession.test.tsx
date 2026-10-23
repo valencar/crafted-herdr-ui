@@ -92,11 +92,15 @@ const DEFAULT_SETTINGS: Settings = {
   row_density: "comfortable",
   theme: "dark",
   new_session_kind: null,
+  new_session_hidden_kinds: [],
+  new_session_hide_shell: false,
 };
 
 /** Settings as loaded, with the Run choice the sheet should start on. */
-function savedKind(kind: string | null) {
-  return { settings: { ...DEFAULT_SETTINGS, new_session_kind: kind } };
+function savedKind(kind: string | null, over: Partial<Settings> = {}) {
+  return {
+    settings: { ...DEFAULT_SETTINGS, new_session_kind: kind, ...over },
+  };
 }
 
 const KINDS = ["claude", "codex"];
@@ -351,10 +355,78 @@ describe("NewSession remembers the Run choice", () => {
     }
   });
 
+  const runRadios = () =>
+    within(screen.getByRole("group", { name: "Run" }))
+      .getAllByRole("radio")
+      .map((r) => r.closest("label")!.querySelector(".opt-name")!.textContent);
+
+  it("a_hidden_kind_is_not_offered", async () => {
+    setup(undefined, savedKind(null, { new_session_hidden_kinds: ["codex"] }));
+    await radio("claude");
+    expect(runRadios()).toEqual(["claude", "Plain shell"]);
+  });
+
+  it("a_hidden_plain_shell_is_not_offered", async () => {
+    setup(undefined, savedKind("codex", { new_session_hide_shell: true }));
+    await radio("claude");
+    expect(runRadios()).toEqual(["claude", "codex"]);
+    expect(screen.getByRole("radio", { name: "codex" })).toBeChecked();
+  });
+
+  it("a_saved_kind_that_is_hidden_starts_on_plain_shell", async () => {
+    setup(
+      undefined,
+      savedKind("claude", { new_session_hidden_kinds: ["claude"] }),
+    );
+    await radio("codex");
+    expect(runRadios()).toEqual(["codex", "Plain shell"]);
+    expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+  });
+
+  it("a_saved_kind_and_plain_shell_both_hidden_starts_on_the_first_shown_kind", async () => {
+    setup(
+      undefined,
+      savedKind("claude", {
+        new_session_hidden_kinds: ["claude"],
+        new_session_hide_shell: true,
+      }),
+    );
+    await radio("codex");
+    expect(runRadios()).toEqual(["codex"]);
+    expect(screen.getByRole("radio", { name: "codex" })).toBeChecked();
+  });
+
+  it("everything_hidden_or_uninstalled_still_offers_plain_shell", async () => {
+    setup(
+      undefined,
+      savedKind(null, {
+        new_session_hidden_kinds: ["claude", "codex"],
+        new_session_hide_shell: true,
+      }),
+    );
+    await radio("Plain shell");
+    expect(runRadios()).toEqual(["Plain shell"]);
+    expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+  });
+
+  it("the_only_shown_kind_being_uninstalled_still_offers_plain_shell", async () => {
+    setup(
+      undefined,
+      savedKind("gemini", {
+        new_session_hidden_kinds: ["claude", "codex"],
+        new_session_hide_shell: true,
+      }),
+    );
+    await radio("Plain shell");
+    expect(runRadios()).toEqual(["Plain shell"]);
+  });
+
   it("defaults_to_the_saved_kind", async () => {
     setup(undefined, savedKind("codex"));
     expect(await radio("codex")).toBeChecked();
-    expect(screen.getByRole("radio", { name: "Plain shell" })).not.toBeChecked();
+    expect(
+      screen.getByRole("radio", { name: "Plain shell" }),
+    ).not.toBeChecked();
   });
 
   it("saved_kind_no_longer_listed_falls_back_to_plain_shell", async () => {

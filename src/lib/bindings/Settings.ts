@@ -44,4 +44,13 @@ theme: Theme,
  * The Run choice the New session sheet starts on: the agent kind of the last session
  * created, or `None` for a plain shell.
  */
-new_session_kind: string | null, };
+new_session_kind: string | null, 
+/**
+ * Agent kinds the New session sheet leaves out. A hidden list, so a newly installed kind
+ * shows up on its own.
+ */
+new_session_hidden_kinds: Array<string>, 
+/**
+ * Whether the New session sheet leaves out Plain shell.
+ */
+new_session_hide_shell: boolean, };

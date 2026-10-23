@@ -3,6 +3,7 @@ import { HealthDot } from "../components/StatusDot";
 import { formatShortcut, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { KindBadge } from "../components/KindBadge";
 import { StoreToast } from "../components/Toast";
 import type { GroupBy } from "../lib/bindings/GroupBy";
 import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
@@ -110,19 +111,33 @@ function Check({
   hint,
   checked,
   onChange,
+  disabled,
+  describedBy,
+  badge,
 }: {
   label: string;
   hint?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  describedBy?: string;
+  /** A kind badge drawn before the label (`null` is Plain shell); hidden from screen readers. */
+  badge?: { kind: string | null };
 }) {
   return (
     <label className="check settings-check">
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
+        aria-describedby={describedBy}
         onChange={(e) => onChange(e.target.checked)}
       />
+      {badge && (
+        <span aria-hidden="true">
+          <KindBadge kind={badge.kind} named />
+        </span>
+      )}
       <span className="settings-check-text">
         {label}
         {hint && <span className="muted settings-hint">{hint}</span>}
@@ -195,6 +210,89 @@ function SecondsField({
   );
 }
 
+/** Which Run options the New session sheet offers: checked = shown, and at least one stays. */
+function NewSessionOptions({
+  settings,
+  update,
+}: {
+  settings: SettingsData;
+  update: Update;
+}) {
+  const labelId = useId();
+  const stayId = useId();
+  // `null` while loading; a failed or empty list means herdr offers no agent kinds.
+  const [kinds, setKinds] = useState<string[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    invokeTyped("list_agent_kinds")
+      .then((list) => {
+        if (!cancelled) setKinds(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setKinds([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hidden = settings.new_session_hidden_kinds;
+  const noKinds = kinds !== null && kinds.length === 0;
+  const options: { kind: string | null; on: boolean }[] = [
+    ...(kinds ?? []).map((k) => ({ kind: k, on: !hidden.includes(k) })),
+    // With no agent kinds the sheet offers Plain shell whatever is saved.
+    { kind: null, on: noKinds || !settings.new_session_hide_shell },
+  ];
+  const onCount = options.filter((o) => o.on).length;
+  const lastOne = kinds !== null && onCount === 1;
+
+  const toggle = (kind: string | null, on: boolean) => {
+    if (kind === null) return void update({ new_session_hide_shell: !on });
+    // Kinds that are no longer installed stay in the list.
+    void update({
+      new_session_hidden_kinds: on
+        ? hidden.filter((k) => k !== kind)
+        : [...hidden, kind],
+    });
+  };
+
+  return (
+    <div role="group" aria-labelledby={labelId} className="settings-fieldset">
+      <div id={labelId} className="settings-label">
+        New session options
+      </div>
+      <p className="muted settings-hint">
+        Choose what the Run list in New session offers.
+      </p>
+      {kinds === null ? (
+        <p className="muted settings-hint">Loading agent kinds…</p>
+      ) : (
+        <>
+          {options.map(({ kind, on }) => (
+            <Check
+              key={kind ?? "shell"}
+              label={kind ?? "Plain shell"}
+              badge={{ kind }}
+              checked={on}
+              disabled={lastOne && on}
+              describedBy={lastOne && on ? stayId : undefined}
+              onChange={(next) => toggle(kind, next)}
+            />
+          ))}
+          {noKinds && (
+            <p className="muted settings-hint">herdr listed no agent kinds.</p>
+          )}
+          {lastOne && (
+            <p id={stayId} className="muted settings-hint">
+              At least one option stays.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function General({
   settings,
   update,
@@ -223,6 +321,7 @@ function General({
         checked={settings.open_after_create}
         onChange={(open_after_create) => void update({ open_after_create })}
       />
+      <NewSessionOptions settings={settings} update={update} />
       <div className="settings-pair">
         <SecondsField
           key={`visible-${settings.poll_interval_visible_ms}`}

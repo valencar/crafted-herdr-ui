@@ -118,6 +118,13 @@ pub struct Settings {
     /// created, or `None` for a plain shell.
     #[serde(default)]
     pub new_session_kind: Option<String>,
+    /// Agent kinds the New session sheet leaves out. A hidden list, so a newly installed kind
+    /// shows up on its own.
+    #[serde(default)]
+    pub new_session_hidden_kinds: Vec<String>,
+    /// Whether the New session sheet leaves out Plain shell.
+    #[serde(default)]
+    pub new_session_hide_shell: bool,
 }
 
 impl Default for Settings {
@@ -143,6 +150,8 @@ impl Default for Settings {
             row_density: RowDensity::default(),
             theme: Theme::default(),
             new_session_kind: None,
+            new_session_hidden_kinds: Vec::new(),
+            new_session_hide_shell: false,
         }
     }
 }
@@ -172,6 +181,12 @@ impl Settings {
             .take()
             .map(|p| p.trim().to_owned())
             .filter(|p| !p.is_empty());
+        let mut seen = std::collections::HashSet::new();
+        self.new_session_hidden_kinds = std::mem::take(&mut self.new_session_hidden_kinds)
+            .into_iter()
+            .map(|k| k.trim().to_owned())
+            .filter(|k| !k.is_empty() && seen.insert(k.clone()))
+            .collect();
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -449,6 +464,8 @@ mod tests {
         assert_eq!(s.row_density, RowDensity::Comfortable);
         assert_eq!(s.theme, Theme::Dark);
         assert_eq!(s.new_session_kind, None);
+        assert!(s.new_session_hidden_kinds.is_empty());
+        assert!(!s.new_session_hide_shell);
         // The keys are exactly the spec's (section 8.8) plus `open_after_create` and the v0.2
         // terminal and layout keys.
         let keys: std::collections::BTreeSet<_> = serde_json::to_value(&s)
@@ -479,6 +496,8 @@ mod tests {
             "row_density",
             "theme",
             "new_session_kind",
+            "new_session_hidden_kinds",
+            "new_session_hide_shell",
         ]
         .map(String::from)
         .into();
@@ -577,6 +596,53 @@ mod tests {
         assert_eq!(cleared.new_session_kind, None);
         let read = Settings::from_entries(set.to_entries());
         assert_eq!(read.new_session_kind.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn settings_without_the_run_option_keys_load_the_defaults() {
+        let read = Settings::from_entries([("notify_done".to_owned(), json!(false))]);
+        assert!(read.new_session_hidden_kinds.is_empty());
+        assert!(!read.new_session_hide_shell);
+        let mut all = match serde_json::to_value(Settings::default()).unwrap() {
+            Value::Object(all) => all,
+            _ => unreachable!(),
+        };
+        all.remove("new_session_hidden_kinds");
+        all.remove("new_session_hide_shell");
+        let parsed: Settings = serde_json::from_value(Value::Object(all)).unwrap();
+        assert!(parsed.new_session_hidden_kinds.is_empty());
+        assert!(!parsed.new_session_hide_shell);
+    }
+
+    #[test]
+    fn a_patch_sets_the_run_options_and_they_round_trip() {
+        let set = Settings::default()
+            .merged(&json!({
+                "new_session_hidden_kinds": ["codex", "gemini"],
+                "new_session_hide_shell": true
+            }))
+            .unwrap();
+        assert_eq!(set.new_session_hidden_kinds, ["codex", "gemini"]);
+        assert!(set.new_session_hide_shell);
+        assert_eq!(Settings::from_entries(set.to_entries()), set);
+        let cleared = set
+            .merged(&json!({"new_session_hidden_kinds": [], "new_session_hide_shell": false}))
+            .unwrap();
+        assert!(cleared.new_session_hidden_kinds.is_empty());
+        assert!(!cleared.new_session_hide_shell);
+        assert!(
+            Settings::default()
+                .merged(&json!({"new_session_hidden_kinds": "codex"}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn hidden_kinds_drop_blanks_and_duplicates_keeping_order() {
+        let s = Settings::default()
+            .merged(&json!({"new_session_hidden_kinds": [" codex ", "", "  ", "claude", "codex", "claude"]}))
+            .unwrap();
+        assert_eq!(s.new_session_hidden_kinds, ["codex", "claude"]);
     }
 
     #[test]

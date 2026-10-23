@@ -264,6 +264,8 @@ describe("appStore", () => {
       row_density: "comfortable",
       theme: "dark",
       new_session_kind: null,
+      new_session_hidden_kinds: [] as string[],
+      new_session_hide_shell: false,
     } as const;
     useAppStore.getState().setSettings(settings);
     expect(useAppStore.getState().settings).toEqual(settings);

@@ -273,6 +273,7 @@ Bigger type, brighter secondary text and roomier rows. Use generic data (buildbo
 UI polish: motion, status shapes, the ⋯ menu, palette actions, the ⌘/ sheet, the light theme and a quieter notification rule. Use generic data (buildbox, gpubox, staging; api-service, web-app, infra). Every pull request's CI run attaches a test DMG (the `preview` job summary links it); install it and run this section on that build. These are the GUI-only checks no automated test covers.
 
 - [ ] New session: the first time, Run starts on Plain shell; after creating a session, the next sheet starts on that session's Run choice, also after a relaunch.
+- [ ] Settings > General > New session options: unchecking an option removes it from New session's Run list; the last checked option can't be unchecked.
 - [ ] Motion: hover and enter animations feel quick, never sluggish, and everything that loops or enters stops under System Settings > Accessibility > Display > Reduce motion (status dots, skeleton shimmer, menus, tooltips, the palette frame).
 - [ ] No lag when collapsing the sidebar (⌘B) or dragging the split column's handle, with a terminal open. The terminal never visibly resizes frame by frame.
 - [ ] Skeletons on first launch: the first connect shows placeholder rows (Dashboard and All agents) and placeholder lines in a workbox card that is still connecting, never a blank screen. They are replaced with no layout jump, and a reconnecting card keeps its last data, dimmed.

@@ -64,6 +64,8 @@ export function NewSession({ terminalName }: Props) {
   const setPendingOpen = useAppStore((s) => s.setPendingOpen);
   const openTarget = useAppStore((s) => s.settings?.open_target ?? "app");
   const savedKind = useAppStore((s) => s.settings?.new_session_kind ?? null);
+  const hiddenKinds = useAppStore((s) => s.settings?.new_session_hidden_kinds);
+  const hideShell = useAppStore((s) => s.settings?.new_session_hide_shell);
   // Read once: the prefill only seeds the form.
   const [prefill] = useState(() => useAppStore.getState().sheetPrefill);
 
@@ -145,12 +147,24 @@ export function NewSession({ terminalName }: Props) {
     };
   }, [reportError]);
 
+  // The Run options: the listed kinds minus the hidden ones, then Plain shell (`null`) unless
+  // hidden. Never empty: with nothing left, Plain shell is offered anyway.
+  const runOptions = useMemo<(string | null)[]>(() => {
+    const shown: (string | null)[] = (kinds ?? []).filter(
+      (k) => !hiddenKinds?.includes(k),
+    );
+    if (!hideShell) shown.push(null);
+    return shown.length > 0 ? shown : [null];
+  }, [kinds, hiddenKinds, hideShell]);
+  // Without a click: the saved choice if it is offered, else Plain shell, else the first option.
   const kind: string | null =
     kindChoice !== undefined
       ? kindChoice
-      : savedKind !== null && kinds?.includes(savedKind)
+      : runOptions.includes(savedKind)
         ? savedKind
-        : null;
+        : runOptions.includes(null)
+          ? null
+          : runOptions[0];
 
   const recentFolders = useMemo(() => {
     const seen = new Set<string>();
@@ -453,7 +467,7 @@ export function NewSession({ terminalName }: Props) {
           <p className="muted">Loading agent kinds…</p>
         ) : (
           <div className="opt-grid opt-grid-3">
-            {[...kinds, null].map((k) => (
+            {runOptions.map((k) => (
               <label
                 key={k ?? "shell"}
                 className="opt opt-row"
