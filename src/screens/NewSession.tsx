@@ -10,6 +10,7 @@ import type { Placement } from "../lib/bindings/Placement";
 import { actionErrorMessage, agentNameProblem, plural } from "../lib/format";
 import { toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
+import { saveSettings } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 
 const PREVIEW_DEBOUNCE_MS = 150;
@@ -62,6 +63,7 @@ export function NewSession({ terminalName }: Props) {
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
   const setPendingOpen = useAppStore((s) => s.setPendingOpen);
   const openTarget = useAppStore((s) => s.settings?.open_target ?? "app");
+  const savedKind = useAppStore((s) => s.settings?.new_session_kind ?? null);
   // Read once: the prefill only seeds the form.
   const [prefill] = useState(() => useAppStore.getState().sheetPrefill);
 
@@ -80,7 +82,7 @@ export function NewSession({ terminalName }: Props) {
   const [worktree, setWorktree] = useState(false);
   const [branch, setBranch] = useState("");
   const [kinds, setKinds] = useState<string[] | null>(null);
-  // `undefined` = the default (the first agent kind).
+  // `undefined` = the default (the saved Run choice, else a plain shell).
   const [kindChoice, setKindChoice] = useState<string | null | undefined>();
   const [name, setName] = useState("");
   const [placementChoice, setPlacementChoice] = useState<string | null>(null);
@@ -144,7 +146,11 @@ export function NewSession({ terminalName }: Props) {
   }, [reportError]);
 
   const kind: string | null =
-    kindChoice !== undefined ? kindChoice : (kinds?.[0] ?? null);
+    kindChoice !== undefined
+      ? kindChoice
+      : savedKind !== null && kinds?.includes(savedKind)
+        ? savedKind
+        : null;
 
   const recentFolders = useMemo(() => {
     const seen = new Set<string>();
@@ -263,6 +269,12 @@ export function NewSession({ terminalName }: Props) {
           machineId: sent.machineId,
           paneId: created.paneId,
         });
+      }
+      // Remember the Run choice only now that it made a session.
+      const rememberedKind =
+        useAppStore.getState().settings?.new_session_kind ?? null;
+      if (sent.kind !== rememberedKind) {
+        saveSettings({ new_session_kind: sent.kind });
       }
       // Closing a sheet the user already left could close the next one they opened.
       if (mounted.current) close();

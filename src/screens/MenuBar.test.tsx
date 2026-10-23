@@ -36,6 +36,7 @@ const SETTINGS: Settings = {
   sidebar_collapsed: false,
   row_density: "comfortable",
   theme: "dark",
+  new_session_kind: null,
 };
 const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();

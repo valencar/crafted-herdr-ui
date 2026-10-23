@@ -40,6 +40,7 @@ const DEFAULTS: SettingsData = {
   sidebar_collapsed: false,
   row_density: "comfortable",
   theme: "dark",
+  new_session_kind: null,
 };
 
 const HERDR: HerdrStatus = {

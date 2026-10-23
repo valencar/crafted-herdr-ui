@@ -48,6 +48,7 @@ const SETTINGS: Settings = {
   sidebar_collapsed: false,
   row_density: "comfortable",
   theme: "dark",
+  new_session_kind: null,
 };
 
 function setup(template = "") {

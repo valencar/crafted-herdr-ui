@@ -39,4 +39,9 @@ dashboard_split_width: number, terminal_font_size: number, sidebar_collapsed: bo
 /**
  * An old settings file has no `theme`; it loads as dark.
  */
-theme: Theme, };
+theme: Theme, 
+/**
+ * The Run choice the New session sheet starts on: the agent kind of the last session
+ * created, or `None` for a plain shell.
+ */
+new_session_kind: string | null, };

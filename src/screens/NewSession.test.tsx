@@ -91,7 +91,13 @@ const DEFAULT_SETTINGS: Settings = {
   sidebar_collapsed: false,
   row_density: "comfortable",
   theme: "dark",
+  new_session_kind: null,
 };
+
+/** Settings as loaded, with the Run choice the sheet should start on. */
+function savedKind(kind: string | null) {
+  return { settings: { ...DEFAULT_SETTINGS, new_session_kind: kind } };
+}
 
 const KINDS = ["claude", "codex"];
 /** Errors the next `create_session` calls fail with, oldest first. */
@@ -156,6 +162,11 @@ beforeEach(() => {
         case "create_session":
           if (createErrors.length > 0) throw createErrors.shift();
           return CREATED;
+        case "set_settings":
+          return {
+            ...(useAppStore.getState().settings ?? DEFAULT_SETTINGS),
+            ...(args as unknown as { patch: Partial<Settings> }).patch,
+          };
         default:
           return null;
       }
@@ -166,11 +177,12 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  useAppStore.setState({ settings: null });
 });
 
 describe("NewSession", () => {
   it("preview_matches_backend_plan", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     const expected = fakePreview({
@@ -191,7 +203,7 @@ describe("NewSession", () => {
   });
 
   it("create_disabled_until_valid", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await screen.findByRole("radio", { name: "claude" });
     expect(createButton()).toBeDisabled();
     await fillFolder(user, "/home/dev/projects/api-service");
@@ -207,7 +219,7 @@ describe("NewSession", () => {
   });
 
   it("shell_kind_omits_agent_start_line", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     expect(
@@ -291,7 +303,7 @@ describe("NewSession", () => {
   });
 
   it("cmd_enter_submits", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
@@ -311,6 +323,100 @@ describe("NewSession", () => {
     await fillFolder(user, "/home/dev/projects/api-service");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
     expect(callsTo("create_session")).toHaveLength(0);
+  });
+});
+
+describe("NewSession remembers the Run choice", () => {
+  const radio = (name: string) => screen.findByRole("radio", { name });
+  async function createValid(user: ReturnType<typeof userEvent.setup>) {
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    await user.click(createButton());
+  }
+
+  it("defaults_to_plain_shell_when_nothing_saved", async () => {
+    for (const store of [{}, savedKind(null)]) {
+      const user = setup(undefined, store);
+      await radio("claude");
+      expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+      expect(screen.getByRole("radio", { name: "claude" })).not.toBeChecked();
+      await fillFolder(user, "/home/dev/projects/api-service");
+      await vi.waitFor(() =>
+        expect(lastRequest("preview_new_session").kind).toBeNull(),
+      );
+      cleanup();
+      invoke.mockClear();
+      useAppStore.setState({ settings: null });
+    }
+  });
+
+  it("defaults_to_the_saved_kind", async () => {
+    setup(undefined, savedKind("codex"));
+    expect(await radio("codex")).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Plain shell" })).not.toBeChecked();
+  });
+
+  it("saved_kind_no_longer_listed_falls_back_to_plain_shell", async () => {
+    setup(undefined, savedKind("gemini"));
+    await radio("claude");
+    expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+  });
+
+  it("a click in the sheet wins over the saved kind", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await user.click(await radio("codex"));
+    expect(screen.getByRole("radio", { name: "codex" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "claude" })).not.toBeChecked();
+  });
+
+  it("create_saves_the_kind_used", async () => {
+    const user = setup();
+    await user.click(await radio("claude"));
+    await createValid(user);
+    await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
+    await vi.waitFor(() => expect(callsTo("set_settings")).toHaveLength(1));
+    expect(callsTo("set_settings")[0][1]).toEqual({
+      patch: { new_session_kind: "claude" },
+    });
+    expect(useAppStore.getState().settings?.new_session_kind).toBe("claude");
+  });
+
+  it("create with a plain shell after an agent saves null", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await user.click(await radio("Plain shell"));
+    await createValid(user);
+    await vi.waitFor(() => expect(callsTo("set_settings")).toHaveLength(1));
+    expect(callsTo("set_settings")[0][1]).toEqual({
+      patch: { new_session_kind: null },
+    });
+  });
+
+  it("create_with_the_saved_kind_does_not_save_again", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await radio("claude");
+    await createValid(user);
+    await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
+    expect(callsTo("create_session")).toHaveLength(1);
+    expect(callsTo("set_settings")).toHaveLength(0);
+  });
+
+  it("create with a plain shell and nothing saved does not save", async () => {
+    const user = setup();
+    await radio("claude");
+    await createValid(user);
+    await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
+    expect(callsTo("set_settings")).toHaveLength(0);
+  });
+
+  it("failed_create_or_cancel_saves_nothing", async () => {
+    const user = setup();
+    await user.click(await radio("claude"));
+    createErrors.push({ kind: "invalid", message: "Nope." });
+    await createValid(user);
+    expect(await screen.findByText("Nope.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(useAppStore.getState().sheet).toBeNull();
+    expect(callsTo("set_settings")).toHaveLength(0);
   });
 });
 
@@ -372,7 +478,7 @@ describe("NewSession form", () => {
     expect(
       group.getAllByRole("radio").map((r) => r.closest("label")!.textContent),
     ).toEqual(["CCclaude", "CXcodex", "$_Plain shell"]);
-    expect(group.getByRole("radio", { name: "claude" })).toBeChecked();
+    expect(group.getByRole("radio", { name: "Plain shell" })).toBeChecked();
   });
 
   it("defaults the placement to a new tab in the first workspace and lists the rest", async () => {
@@ -492,7 +598,7 @@ describe("NewSession form", () => {
   });
 
   it("splits Advanced agent arguments on whitespace, and only for an agent", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(screen.getByText("Advanced"));

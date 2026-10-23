@@ -114,6 +114,10 @@ pub struct Settings {
     /// An old settings file has no `theme`; it loads as dark.
     #[serde(default)]
     pub theme: Theme,
+    /// The Run choice the New session sheet starts on: the agent kind of the last session
+    /// created, or `None` for a plain shell.
+    #[serde(default)]
+    pub new_session_kind: Option<String>,
 }
 
 impl Default for Settings {
@@ -138,6 +142,7 @@ impl Default for Settings {
             sidebar_collapsed: false,
             row_density: RowDensity::default(),
             theme: Theme::default(),
+            new_session_kind: None,
         }
     }
 }
@@ -443,6 +448,7 @@ mod tests {
         assert!(!s.sidebar_collapsed);
         assert_eq!(s.row_density, RowDensity::Comfortable);
         assert_eq!(s.theme, Theme::Dark);
+        assert_eq!(s.new_session_kind, None);
         // The keys are exactly the spec's (section 8.8) plus `open_after_create` and the v0.2
         // terminal and layout keys.
         let keys: std::collections::BTreeSet<_> = serde_json::to_value(&s)
@@ -472,6 +478,7 @@ mod tests {
             "sidebar_collapsed",
             "row_density",
             "theme",
+            "new_session_kind",
         ]
         .map(String::from)
         .into();
@@ -545,6 +552,31 @@ mod tests {
         all.remove("theme");
         let parsed: Settings = serde_json::from_value(Value::Object(all)).unwrap();
         assert_eq!(parsed.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn settings_without_new_session_kind_load_as_none() {
+        let read = Settings::from_entries([("notify_done".to_owned(), json!(false))]);
+        assert_eq!(read.new_session_kind, None);
+        let mut all = match serde_json::to_value(Settings::default()).unwrap() {
+            Value::Object(all) => all,
+            _ => unreachable!(),
+        };
+        all.remove("new_session_kind");
+        let parsed: Settings = serde_json::from_value(Value::Object(all)).unwrap();
+        assert_eq!(parsed.new_session_kind, None);
+    }
+
+    #[test]
+    fn a_patch_sets_and_clears_the_new_session_kind() {
+        let set = Settings::default()
+            .merged(&json!({"new_session_kind": "claude"}))
+            .unwrap();
+        assert_eq!(set.new_session_kind.as_deref(), Some("claude"));
+        let cleared = set.merged(&json!({"new_session_kind": null})).unwrap();
+        assert_eq!(cleared.new_session_kind, None);
+        let read = Settings::from_entries(set.to_entries());
+        assert_eq!(read.new_session_kind.as_deref(), Some("claude"));
     }
 
     #[test]
