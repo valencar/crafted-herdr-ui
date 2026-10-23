@@ -164,6 +164,7 @@ textarea {
   .dialog,
   .sheet,
   .toast,
+  .term-bar,
   .activity {
     animation: none !important;
   }

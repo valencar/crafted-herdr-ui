@@ -9,6 +9,13 @@ import { useTerminalStore, type TermTab } from "./terminalStore";
 type Size = { cols: number; rows: number };
 
 /**
+ * A session that stayed up this long worked: its end is not a failed attempt. A session is
+ * "live" as soon as its pty runs, which is before the attach command inside can fail, so being
+ * live alone says nothing.
+ */
+const HEALTHY_MS = 3000;
+
+/**
  * Keystrokes headed for one live session. Each `term_write` is its own async call, so they could
  * overtake one another: at most one is in flight, and what is typed meanwhile waits in `pending`
  * and goes out as one write, in order, when the one in flight settles.
@@ -32,6 +39,10 @@ export function useTermSession(
   // Bumped by every open and by unmount; callbacks of an older session check it and stand down.
   const generation = useRef(0);
   const sentSize = useRef<Size | null>(null);
+  // When the live session went live (`Date.now()`); null when there is none.
+  const liveAt = useRef<number | null>(null);
+  // Set by `reattach`, read and cleared by the open it starts: the user asked, not the tab itself.
+  const asked = useRef(false);
   // The live session's writer; null when there is no session. Dropping it drops what is pending.
   const writer = useRef<Writer | null>(null);
 
@@ -51,7 +62,17 @@ export function useTermSession(
     const target = JSON.parse(targetJson) as TermTarget;
     const mine = ++generation.current;
     const { updateTab } = useTerminalStore.getState();
-    updateTab(tabKey, { state: "opening", error: null });
+    const again = asked.current;
+    asked.current = false;
+    const attempts =
+      useTerminalStore.getState().tabs.find((t) => t.tabKey === tabKey)
+        ?.attempts ?? 0;
+    updateTab(tabKey, {
+      state: "opening",
+      error: null,
+      exitCode: null,
+      attempts: again ? attempts + 1 : attempts,
+    });
     sentSize.current = { cols: term.cols, rows: term.rows };
     let exited = false;
     try {
@@ -64,9 +85,15 @@ export function useTermSession(
         exited = true;
         idRef.current = null;
         writer.current = null;
-        useTerminalStore
-          .getState()
-          .updateTab(tabKey, { state: "detached", termId: null });
+        const lived = liveAt.current === null ? 0 : Date.now() - liveAt.current;
+        liveAt.current = null;
+        const worked = !e.code || lived >= HEALTHY_MS;
+        useTerminalStore.getState().updateTab(tabKey, {
+          state: "detached",
+          termId: null,
+          exitCode: e.code,
+          ...(worked && { attempts: 0 }),
+        });
       });
       if (mine !== generation.current) {
         // Unmounted, or replaced by a newer open, while this one was starting.
@@ -76,6 +103,7 @@ export function useTermSession(
       if (exited) return;
       idRef.current = id;
       writer.current = { id, busy: false, pending: "" };
+      liveAt.current = Date.now();
       useTerminalStore
         .getState()
         .updateTab(tabKey, { state: "live", termId: id });
@@ -135,5 +163,9 @@ export function useTermSession(
     return () => sub.dispose();
   }, [termRef]);
 
-  return { reattach: open, resize };
+  const reattach = useCallback(() => {
+    asked.current = true;
+    return open();
+  }, [open]);
+  return { reattach, resize };
 }

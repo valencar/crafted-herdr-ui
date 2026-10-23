@@ -617,6 +617,22 @@ describe("motion tokens", () => {
     );
   });
 
+  it("the_detached_bar_is_docked_at_the_bottom_and_never_covers_the_terminal", () => {
+    const bar = rule(".term-bar");
+    expect(bar).not.toMatch(/inset\s*:/);
+    expect(bar).not.toMatch(/(?:^|[;\s])top\s*:/);
+    expect(bar).toMatch(/position:\s*absolute/);
+    expect(bar).toMatch(/\bbottom:\s*0/);
+    expect(bar).toMatch(/\bleft:\s*0/);
+    expect(bar).toMatch(/\bright:\s*0/);
+    expect(bar).toContain("var(--panel)");
+    expect(bar).toContain("var(--border-strong)");
+    expect(bar).toContain("enter-rise var(--dur-base) var(--ease-out)");
+    expect(bar).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(reduced()).toContain(".term-bar");
+    expect(css).not.toContain(".term-overlay");
+  });
+
   it("figures_are_tabular", () => {
     const body = rulesOf("global.css").find((r) => r.selector === "body");
     expect(body?.body).toContain("font-variant-numeric: tabular-nums");

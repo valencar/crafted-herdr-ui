@@ -26,6 +26,8 @@ function tab(machineId: string, paneId: string): TermTab {
     state: "live",
     error: null,
     termId: null,
+    exitCode: null,
+    attempts: 0,
   };
 }
 

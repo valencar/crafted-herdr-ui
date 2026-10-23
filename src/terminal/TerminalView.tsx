@@ -15,6 +15,8 @@ import { copyText } from "../lib/ipc";
 import { useResolvedTheme } from "../lib/theme";
 import { useAppStore } from "../store/appStore";
 import { useTerminalStore, type TermTab } from "./terminalStore";
+import { TermBar } from "./TermBar";
+import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
 import { xtermTheme } from "./xtermTheme";
 
@@ -207,11 +209,12 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
       termRef.current?.focus();
   }, [active, modal]);
 
-  // The overlay's default button takes focus, so Enter reattaches or retries.
-  const overlay = tab.state === "detached" || tab.state === "error";
+  // The bar's default button takes focus, so Enter reattaches or retries. It is disabled while a
+  // reattach is opening, so focus comes back each time the session ends again.
+  const ended = tab.state === "detached" || tab.state === "error";
   useEffect(() => {
-    if (active && overlay && !modalOpen()) overlayButtonRef.current?.focus();
-  }, [active, overlay]);
+    if (active && ended && !modalOpen()) overlayButtonRef.current?.focus();
+  }, [active, ended, tab.attempts]);
 
   useImperativeHandle(
     ref,
@@ -228,44 +231,38 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
 
   const closeTab = () => useTerminalStore.getState().closeTab(tab.tabKey);
 
+  // The bar needs the pane's row (to copy or open its attach command) and its workbox (ssh or
+  // not). The pane is "gone" only when its workbox has a list to look in and it is not on it.
+  const rows = useRowsByKey();
+  const row = tab.target.kind === "pane" ? rows.get(tab.tabKey) : undefined;
+  const machine = useAppStore((s) =>
+    s.state?.machines.find((m) => m.id === tab.target.machineId),
+  );
+  const gone =
+    tab.state === "detached" &&
+    tab.target.kind === "pane" &&
+    !row &&
+    !!machine?.snapshot &&
+    machine.health.kind !== "disabled";
+  // Silent on the first open: there is nothing to say until a reattach is under way or it ended.
+  const bar =
+    tab.state === "detached" ||
+    tab.state === "error" ||
+    (tab.state === "opening" && tab.attempts > 0);
+
   return (
     <div className="term-view" hidden={!active}>
       <div className="term-host" ref={hostRef} />
-      {tab.state === "detached" && (
-        <div className="term-overlay" role="group" aria-label="Detached">
-          <p className="term-overlay-title">Detached</p>
-          <div className="term-overlay-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              ref={overlayButtonRef}
-              onClick={() => void reattach()}
-            >
-              Reattach
-            </button>
-            <button type="button" className="btn" onClick={closeTab}>
-              Close tab
-            </button>
-          </div>
-        </div>
-      )}
-      {tab.state === "error" && (
-        <div className="term-overlay" role="alert">
-          <p className="term-overlay-title">{tab.error}</p>
-          <div className="term-overlay-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              ref={overlayButtonRef}
-              onClick={() => void reattach()}
-            >
-              Retry
-            </button>
-            <button type="button" className="btn" onClick={closeTab}>
-              Close tab
-            </button>
-          </div>
-        </div>
+      {bar && (
+        <TermBar
+          tab={tab}
+          row={row ?? null}
+          remote={machine?.is_local === false}
+          gone={gone}
+          onReattach={() => void reattach()}
+          onClose={closeTab}
+          buttonRef={overlayButtonRef}
+        />
       )}
     </div>
   );

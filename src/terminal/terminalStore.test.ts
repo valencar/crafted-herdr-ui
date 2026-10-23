@@ -40,6 +40,8 @@ describe("terminalStore", () => {
       state: "opening",
       error: null,
       termId: null,
+      exitCode: null,
+      attempts: 0,
     });
   });
 

@@ -42,6 +42,8 @@ const paneTab: TermTab = {
   state: "live",
   error: null,
   termId: 1,
+  exitCode: null,
+  attempts: 0,
 };
 
 const fullTab: TermTab = {
@@ -52,6 +54,8 @@ const fullTab: TermTab = {
   state: "live",
   error: null,
   termId: 2,
+  exitCode: null,
+  attempts: 0,
 };
 
 beforeEach(() => {

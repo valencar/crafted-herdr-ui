@@ -13,6 +13,10 @@ export type TermTab = {
   error: string | null;
   /** The id `term_write`, `term_resize` and `term_close` take; null while there is no session. */
   termId: number | null;
+  /** How the last session ended: the attach command's exit code; null while one runs, or when it gave none. */
+  exitCode: number | null;
+  /** Reattach and Retry clicks since a session last went live; 0 once one does. */
+  attempts: number;
 };
 
 /** The key of the pinned Home tab; every other key is a terminal tab's `tabKey`. */
@@ -69,6 +73,8 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
         state: "opening",
         error: null,
         termId: null,
+        exitCode: null,
+        attempts: 0,
       };
       return { ...shown, tabs: [...s.tabs, tab] };
     }),

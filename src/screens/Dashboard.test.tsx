@@ -377,6 +377,8 @@ describe("Dashboard", () => {
           state: "live",
           error: null,
           termId: null,
+          exitCode: null,
+          attempts: 0,
         },
       ],
       activeKey: HOME,

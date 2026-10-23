@@ -620,6 +620,8 @@ describe("AllAgents", () => {
           state: "live",
           error: null,
           termId: 1,
+          exitCode: null,
+          attempts: 0,
         },
       ],
       activeKey: "buildbox::w1:p1",

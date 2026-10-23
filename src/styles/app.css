@@ -1951,23 +1951,46 @@ select.field {
 .term-host .xterm {
   padding: 6px 0 0 8px;
 }
-.term-overlay {
+/* Under a session that ended: docked at the bottom, over the last rows only, so what the attach
+   command printed stays readable above it. */
+.term-bar {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border-strong);
+  color: var(--text-2);
+  animation: enter-rise var(--dur-base) var(--ease-out);
+}
+.term-bar-text {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: var(--bg);
-  color: var(--text-2);
-}
-.term-overlay-title {
-  margin: 0;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 320px;
   font-size: var(--fs-body);
 }
-.term-overlay-actions {
+.term-bar-attempt {
+  color: var(--text);
+  font-weight: 600;
+}
+.term-bar-title {
+  color: var(--text);
+}
+.term-bar-hint {
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.term-bar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
