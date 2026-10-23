@@ -228,9 +228,9 @@ describe("Tooltip", () => {
     );
     act(() => screen.getByRole("button").focus());
     expect(tip()).not.toBeNull();
-    // A scroll of any element reaches window in the capture phase.
+    // A scroll of the document moves every trigger, wherever it sits.
     act(() => {
-      screen.getByTestId("pane").dispatchEvent(new Event("scroll"));
+      document.dispatchEvent(new Event("scroll"));
     });
     expect(tip()).toBeNull();
     expect(remove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
@@ -256,6 +256,29 @@ describe("Tooltip", () => {
       ([type]) => type === "resize",
     ).length;
     expect(removed).toBe(added);
+    expect(tip()).toBeNull();
+  });
+
+  it("scroll_hides_only_when_it_moves_the_trigger", () => {
+    render(
+      <div data-testid="ancestor">
+        <div data-testid="sibling" />
+        <Tooltip label="Find in terminal">
+          <button type="button">Find</button>
+        </Tooltip>
+      </div>,
+    );
+    act(() => screen.getByRole("button").focus());
+    expect(tip()).not.toBeNull();
+    // An unrelated element scrolling (a terminal's output, say) leaves it be.
+    act(() => {
+      screen.getByTestId("sibling").dispatchEvent(new Event("scroll"));
+    });
+    expect(tip()).not.toBeNull();
+    // An ancestor of the trigger scrolling moves it from under the tooltip.
+    act(() => {
+      screen.getByTestId("ancestor").dispatchEvent(new Event("scroll"));
+    });
     expect(tip()).toBeNull();
   });
 

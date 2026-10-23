@@ -85,8 +85,24 @@ class Controller {
     this.timer = null;
   }
 
-  /** A scroll or a resize moves the trigger from under the tooltip. */
+  /** A resize moves the trigger from under the tooltip. */
   private readonly dismiss = () => this.hide();
+
+  /**
+   * A scroll does too, but only the document's or an ancestor's: a terminal's output scrolling
+   * elsewhere must not take a tooltip on nearby chrome away.
+   */
+  private readonly onScroll = (e: Event) => {
+    const target = e.target;
+    if (
+      target instanceof Node &&
+      target !== document &&
+      !(this.trigger && target.contains(this.trigger))
+    ) {
+      return;
+    }
+    this.hide();
+  };
 
   private show(el: HTMLElement) {
     if (this.pressed) return;
@@ -94,7 +110,7 @@ class Controller {
     const rect = el.getBoundingClientRect();
     const left = Math.max(EDGE, rect.left);
     this.shown = true;
-    window.addEventListener("scroll", this.dismiss, true);
+    window.addEventListener("scroll", this.onScroll, true);
     window.addEventListener("resize", this.dismiss);
     this.setPlace(
       rect.bottom + GAP + FLIP_HEIGHT > window.innerHeight
@@ -107,7 +123,7 @@ class Controller {
     this.clearTimer();
     if (this.shown) {
       this.shown = false;
-      window.removeEventListener("scroll", this.dismiss, true);
+      window.removeEventListener("scroll", this.onScroll, true);
       window.removeEventListener("resize", this.dismiss);
       lastHiddenAt = Date.now();
       this.setPlace(null);
