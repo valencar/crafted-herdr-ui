@@ -71,6 +71,7 @@ export type CommandResults = {
   term_resize: null;
   term_close: null;
   show_main_open_row: null;
+  set_visible_row: null;
 };
 export type CommandName = keyof CommandResults;
 
@@ -148,6 +149,8 @@ export type CommandArgs = {
   /** Kills the attach client; the herdr pane keeps running. */
   term_close: { id: number };
   show_main_open_row: { machineId: string; paneId: string };
+  /** The pane tab the main window is showing (`${machineId}::${paneId}`), or `null`; Rust skips notifications for it. */
+  set_visible_row: { key: string | null };
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([

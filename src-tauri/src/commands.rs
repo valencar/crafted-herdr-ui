@@ -18,6 +18,7 @@ use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
 use crate::herdr::cli::{CommandLogEntry, HerdrCli, T_DEFAULT};
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
+use crate::notify::VisibleRow;
 use crate::poller::Poller;
 use crate::preview::{PreviewManager, last_nonempty_line, pane_tail_argv};
 use crate::pty::TermSize;
@@ -749,6 +750,16 @@ pub fn show_main_open_row(app: AppHandle, machine_id: String, pane_id: String) {
         OPEN_ROW_EVENT,
         format!("{machine_id}::{pane_id}"),
     );
+}
+
+/// Records which pane's tab the main window is showing (`"<machineId>::<paneId>"`), or `None`,
+/// so a notification for that pane is skipped while the window is focused.
+#[tauri::command]
+pub fn set_visible_row(key: Option<String>, visible: State<'_, VisibleRow>) {
+    *visible
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = key;
 }
 
 #[tauri::command]

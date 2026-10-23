@@ -43,6 +43,7 @@
     "allow-rename-workspace",
     "allow-reply-to-agent",
     "allow-set-settings",
+    "allow-set-visible-row",
     "allow-start-machine-add",
     "allow-start-preview",
     "allow-stop-preview",
