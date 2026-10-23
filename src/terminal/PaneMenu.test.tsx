@@ -40,6 +40,7 @@ beforeEach(() => {
   copy.mockReset().mockResolvedValue(undefined);
   useAppStore.setState({
     selectedKey: null,
+    query: "",
     view: { kind: "dashboard" },
     toast: null,
     dialogOpen: 0,
@@ -91,6 +92,18 @@ describe("PaneMenu", () => {
     expect(useAppStore.getState().selectedKey).toBe(row.key);
     expect(useAppStore.getState().view).toEqual({ kind: "all" });
     expect(useTerminalStore.getState().activeKey).toBe(HOME);
+  });
+
+  it("show_in_all_clears_a_saved_search_so_the_row_is_in_the_list", async () => {
+    useAppStore.setState({ query: "no such agent" });
+    const user = userEvent.setup();
+    render(<PaneMenu row={row} />);
+    await user.click(more());
+    await user.click(
+      screen.getByRole("menuitem", { name: "Show in All agents" }),
+    );
+    expect(useAppStore.getState().query).toBe("");
+    expect(useAppStore.getState().selectedKey).toBe(row.key);
   });
 
   it("close_pane_confirms_first", async () => {

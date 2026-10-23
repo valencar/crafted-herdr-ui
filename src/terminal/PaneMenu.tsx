@@ -61,6 +61,8 @@ export function PaneMenu({ row }: { row: Row }) {
     if (item === "copy-attach") void copyAttach(row);
     else if (item === "mark-seen") markSeen(row);
     else if (item === "show-in-all") {
+      // A saved search could filter the row out of the list it is about to be shown in.
+      useAppStore.getState().setQuery("");
       select(row.key);
       showHomeView({ kind: "all" });
     } else setClosing(true);

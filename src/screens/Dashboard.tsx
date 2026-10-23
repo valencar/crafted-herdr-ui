@@ -233,6 +233,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
                           <button
                             type="button"
                             className="btn btn-small btn-ghost row-reveal"
+                            aria-label={`Mark ${r.name} seen`}
                             onClick={() => markSeen(r)}
                           >
                             Mark seen

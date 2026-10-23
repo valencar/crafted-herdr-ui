@@ -193,9 +193,13 @@ describe("Dashboard", () => {
       "Finished, not looked at yet",
     ).parentElement!;
     const row = within(finished).getAllByRole("listitem")[0];
+    // Each button names its agent, so several of them are told apart.
+    const name = row.querySelector(".dash-name")?.textContent ?? "";
+    expect(name).not.toBe("");
     const markSeenButton = within(row).getByRole("button", {
-      name: "Mark seen",
+      name: `Mark ${name} seen`,
     });
+    expect(markSeenButton).toHaveTextContent("Mark seen");
     const open = within(row).getByRole("button", { name: /^Open / });
     // Before Open in the row, so Tab reaches it first.
     expect(
