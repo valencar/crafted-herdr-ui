@@ -17,6 +17,7 @@ import { tailTargets, usePaneTails } from "../lib/usePaneTails";
 import { isEditable, isInTerminal } from "../lib/uiHelpers";
 import { useNow } from "../lib/useNow";
 import { useAppStore } from "../store/appStore";
+import { matchesShortcut } from "../lib/shortcuts";
 
 /** herdr's answer when a workspace has linked worktree workspaces (spec section 7). */
 const GROUP_CLOSE_CODE = "workspace_group_close_required";
@@ -67,8 +68,7 @@ export function Workbox({ machineId }: { machineId: string }) {
     const onKey = (e: KeyboardEvent) => {
       if (sheet || useAppStore.getState().dialogOpen > 0) return;
       if (
-        e.metaKey &&
-        e.key === "n" &&
+        matchesShortcut(e, "new-session") &&
         !isEditable(e.target) &&
         !isInTerminal(e.target)
       ) {

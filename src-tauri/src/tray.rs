@@ -20,6 +20,7 @@ use tokio::sync::watch;
 use crate::herdr::model::AgentStatus;
 use crate::menu;
 use crate::now_ms;
+use crate::platform;
 use crate::poller::Poller;
 use crate::settings::{SharedSettings, Theme};
 use crate::state::{AppState, Health};
@@ -356,7 +357,7 @@ pub fn start_badge<R: Runtime>(tray: TrayIcon<R>, state: watch::Receiver<AppStat
 
 /// ⌃⌥⌘H: the `global-show` entry of the shortcut table.
 pub fn global_shortcut() -> Shortcut {
-    menu::accelerator("global-show")
+    menu::accelerator("global-show", platform::OS)
         .and_then(|accelerator| Shortcut::from_str(&accelerator).ok())
         .unwrap_or_else(|| {
             Shortcut::new(
@@ -400,7 +401,8 @@ mod tests {
 
     #[test]
     fn global_show_parses_without_the_fallback() {
-        let accelerator = menu::accelerator("global-show").expect("in the table");
+        let accelerator =
+            menu::accelerator("global-show", crate::platform::Os::Mac).expect("in the table");
         assert_eq!(
             Shortcut::from_str(&accelerator).expect("parses"),
             Shortcut::new(
@@ -411,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn global_shortcut_unchanged() {
+    fn global_shortcut_is_ctrl_alt_super_h() {
         assert_eq!(
             global_shortcut(),
             Shortcut::new(

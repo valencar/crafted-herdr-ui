@@ -2,30 +2,64 @@ import { describe, expect, it } from "vitest";
 import table from "./shortcuts.json";
 import {
   SHEET_EXEMPT,
+  type ShortcutId,
   formatShortcut,
   formatTabShortcut,
+  isLinkModifier,
+  matchesShortcut,
   sheetRows,
   tabShortcutId,
+  terminalOwnsKey,
+  usesAppModifier,
 } from "./shortcuts";
 
 describe("formatShortcut", () => {
-  it("mac_labels", () => {
-    expect(formatShortcut("palette")).toBe("⌘K");
-    expect(formatShortcut("dashboard")).toBe("⌘1");
-    expect(formatShortcut("activity")).toBe("⇧⌘A");
-    expect(formatShortcut("toggle-terminal")).toBe("⌃`");
-    expect(formatShortcut("toggle-split")).toBe("⌘\\");
-    expect(formatShortcut("next-tab")).toBe("⌃⇥");
-    expect(formatShortcut("prev-tab")).toBe("⌃⇧⇥");
-    expect(formatShortcut("tab1")).toBe("⌘2");
-    expect(formatShortcut("tab8")).toBe("⌘9");
-    expect(formatShortcut("font-bigger")).toBe("⌘=");
-    expect(formatShortcut("font-smaller")).toBe("⌘-");
-    expect(formatShortcut("settings")).toBe("⌘,");
-    expect(formatShortcut("new-session")).toBe("⌘N");
-    expect(formatShortcut("refresh")).toBe("⌘R");
-    expect(formatShortcut("open-selected")).toBe("⌘↩");
-    expect(formatShortcut("create-session")).toBe("⌘↩");
+  it("mac labels match v0.7 snapshot", () => {
+    const snapshot: Record<string, string> = {
+      palette: "⌘K",
+      dashboard: "⌘1",
+      "toggle-terminal": "⌃`",
+      "toggle-split": "⌘\\",
+      "toggle-sidebar": "⌘B",
+      "next-needs-you": "⌘J",
+      find: "⌘F",
+      "font-bigger": "⌘=",
+      "font-smaller": "⌘-",
+      "font-reset": "⌘0",
+      activity: "⇧⌘A",
+      shortcuts: "⌘/",
+      "new-in-workbox": "⌘T",
+      "close-tab": "⌘W",
+      "next-tab": "⌃⇥",
+      "prev-tab": "⌃⇧⇥",
+      tab1: "⌘2",
+      tab2: "⌘3",
+      tab3: "⌘4",
+      tab4: "⌘5",
+      tab5: "⌘6",
+      tab6: "⌘7",
+      tab7: "⌘8",
+      tab8: "⌘9",
+      settings: "⌘,",
+      "new-session": "⌘N",
+      refresh: "⌘R",
+      "open-selected": "⌘↩",
+      "palette-open-alt": "⌘↩",
+      "create-session": "⌘↩",
+      "global-show": "⌃⌥⌘H",
+    };
+    expect(Object.keys(snapshot).sort()).toEqual(Object.keys(table).sort());
+    for (const [id, keys] of Object.entries(snapshot)) {
+      expect(formatShortcut(id as ShortcutId, undefined, "mac"), id).toBe(keys);
+    }
+    expect(formatShortcut("palette-open-alt", { enter: "↵" }, "mac")).toBe(
+      "⌘↵",
+    );
+  });
+
+  it("a null value has no label", () => {
+    // Every `windows` value is null until the Windows table lands.
+    expect(formatShortcut("palette", undefined, "windows")).toBe("");
   });
 
   it("shortcuts_id_formats", () => {
@@ -112,6 +146,129 @@ describe("sheetRows", () => {
     expect(new Set(rows.map((r) => r.label)).size).toBe(rows.length);
     expect(new Set(rows.map((r) => r.group))).toEqual(
       new Set(["around", "sessions", "list", "terminal"]),
+    );
+  });
+});
+
+const key = (init: KeyboardEventInit) => new KeyboardEvent("keydown", init);
+
+describe("matchesShortcut mac", () => {
+  it("matches the Cmd key and nothing else", () => {
+    expect(
+      matchesShortcut(key({ metaKey: true, key: "n" }), "new-session", "mac"),
+    ).toBe(true);
+    expect(
+      matchesShortcut(key({ ctrlKey: true, key: "n" }), "new-session", "mac"),
+    ).toBe(false);
+    expect(matchesShortcut(key({ key: "n" }), "new-session", "mac")).toBe(
+      false,
+    );
+  });
+
+  it("compares letters in the case the handlers did", () => {
+    expect(
+      matchesShortcut(key({ metaKey: true, key: "N" }), "new-session", "mac"),
+    ).toBe(false);
+    expect(
+      matchesShortcut(key({ metaKey: true, key: "f" }), "find", "mac"),
+    ).toBe(true);
+  });
+
+  it("create-session also takes Ctrl+Enter, the other ids do not", () => {
+    expect(
+      matchesShortcut(
+        key({ metaKey: true, key: "Enter" }),
+        "create-session",
+        "mac",
+      ),
+    ).toBe(true);
+    expect(
+      matchesShortcut(
+        key({ ctrlKey: true, key: "Enter" }),
+        "create-session",
+        "mac",
+      ),
+    ).toBe(true);
+    expect(
+      matchesShortcut(
+        key({ ctrlKey: true, key: "Enter" }),
+        "open-selected",
+        "mac",
+      ),
+    ).toBe(false);
+  });
+
+  it("matches named keys, digits and shifted ids", () => {
+    expect(
+      matchesShortcut(
+        key({ ctrlKey: true, key: "`" }),
+        "toggle-terminal",
+        "mac",
+      ),
+    ).toBe(true);
+    expect(
+      matchesShortcut(key({ metaKey: true, key: "2" }), "tab1", "mac"),
+    ).toBe(true);
+    expect(
+      matchesShortcut(
+        key({ metaKey: true, shiftKey: true, key: "A" }),
+        "activity",
+        "mac",
+      ),
+    ).toBe(true);
+    expect(
+      matchesShortcut(key({ metaKey: true, key: "a" }), "activity", "mac"),
+    ).toBe(false);
+  });
+});
+
+describe("the windows layer while the table has no windows values", () => {
+  it("matches nothing", () => {
+    expect(
+      matchesShortcut(
+        key({ ctrlKey: true, key: "n" }),
+        "new-session",
+        "windows",
+      ),
+    ).toBe(false);
+  });
+
+  it("leaves every key to the terminal", () => {
+    expect(terminalOwnsKey(key({ ctrlKey: true, key: "c" }), "windows")).toBe(
+      true,
+    );
+  });
+
+  it("uses Ctrl-click for a link", () => {
+    expect(isLinkModifier({ metaKey: false, ctrlKey: true }, "windows")).toBe(
+      true,
+    );
+    expect(isLinkModifier({ metaKey: true, ctrlKey: false }, "windows")).toBe(
+      false,
+    );
+  });
+});
+
+describe("mac modifier helpers", () => {
+  it("isLinkModifier is Cmd", () => {
+    expect(isLinkModifier({ metaKey: true, ctrlKey: false }, "mac")).toBe(true);
+    expect(isLinkModifier({ metaKey: false, ctrlKey: true }, "mac")).toBe(
+      false,
+    );
+  });
+
+  it("terminalOwnsKey is every key without Cmd", () => {
+    expect(terminalOwnsKey(key({ key: "a" }), "mac")).toBe(true);
+    expect(terminalOwnsKey(key({ ctrlKey: true, key: "c" }), "mac")).toBe(true);
+    expect(terminalOwnsKey(key({ metaKey: true, key: "c" }), "mac")).toBe(
+      false,
+    );
+  });
+
+  it("usesAppModifier is Cmd", () => {
+    expect(usesAppModifier(key({ metaKey: true, key: "x" }), "mac")).toBe(true);
+    expect(usesAppModifier(key({ ctrlKey: true, key: "x" }), "mac")).toBe(
+      false,
     );
   });
 });

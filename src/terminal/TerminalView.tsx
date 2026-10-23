@@ -20,6 +20,7 @@ import { TermBar } from "./TermBar";
 import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
 import { xtermTheme } from "./xtermTheme";
+import { isLinkModifier, terminalOwnsKey } from "../lib/shortcuts";
 
 const RESIZE_DEBOUNCE_MS = 50;
 /** Rows to lift the output by when the bar's height can't be measured (a hidden tab). */
@@ -29,8 +30,11 @@ const FALLBACK_LIFT_ROWS = 4;
  * What a click on a terminal link does: ⌘-click copies it and says so; a plain click does
  * nothing. The app opens no URL but herdr.dev, so there is no way to follow a link.
  */
-function copyLink(event: { metaKey: boolean }, uri: string): void {
-  if (!event.metaKey) return;
+function copyLink(
+  event: { metaKey: boolean; ctrlKey: boolean },
+  uri: string,
+): void {
+  if (!isLinkModifier(event)) return;
   copyText(uri).then(
     () => useAppStore.getState().showToast("Link copied", "info"),
     () =>
@@ -94,7 +98,7 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     // Plain-text URLs are copy-only too.
     term.loadAddon(new WebLinksAddon(copyLink));
     // ⌘ shortcuts belong to the menu, not to the program in the terminal.
-    term.attachCustomKeyEventHandler((e) => !e.metaKey);
+    term.attachCustomKeyEventHandler((e) => terminalOwnsKey(e));
     term.open(host);
     try {
       const webgl = new WebglAddon();

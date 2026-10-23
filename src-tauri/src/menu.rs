@@ -6,6 +6,7 @@ use tauri::menu::{Menu, MenuEvent, MenuItemBuilder, Submenu, SubmenuBuilder, WIN
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use ts_rs::TS;
 
+use crate::platform::{self, Os};
 use crate::tray::{self, MAIN_WINDOW, SETTINGS_WINDOW};
 
 /// Tells the main window which menu item was chosen; the payload is a [`MenuId`].
@@ -99,15 +100,20 @@ impl MenuId {
 /// The shortcut table the UI draws its labels from, so the menu and the labels can't drift.
 const SHORTCUTS_JSON: &str = include_str!("../../src/lib/shortcuts.json");
 
-/// The macOS accelerator of a shortcut id in `src/lib/shortcuts.json` (muda grammar), or
-/// `None` for an id the table doesn't have.
-pub fn accelerator(id: &str) -> Option<String> {
+/// The accelerator of a shortcut id in `src/lib/shortcuts.json` (muda grammar) for `os`, or
+/// `None` for an id the table doesn't have or one that has no value on that OS.
+pub fn accelerator(id: &str, os: Os) -> Option<String> {
     let table: serde_json::Value = serde_json::from_str(SHORTCUTS_JSON).ok()?;
-    Some(table.get(id)?.get("mac")?.as_str()?.to_string())
+    let column = match os {
+        Os::Mac => "mac",
+        Os::Windows => "windows",
+    };
+    Some(table.get(id)?.get(column)?.as_str()?.to_string())
 }
 
-/// Every forwarded menu item, in menu order: its id, label and accelerator (from the table).
-pub fn items() -> Vec<(MenuId, &'static str, String)> {
+/// Every forwarded menu item for `os`, in menu order: its id, label and accelerator (from the
+/// table). An item with no accelerator on `os` is left out.
+pub fn items_for(os: Os) -> Vec<(MenuId, &'static str, String)> {
     use MenuId::*;
     let labelled = [
         (Palette, "Command Palette"),
@@ -137,18 +143,21 @@ pub fn items() -> Vec<(MenuId, &'static str, String)> {
     ];
     labelled
         .into_iter()
-        .map(|(id, label)| (id, label, accelerator(id.key()).unwrap_or_default()))
+        .filter_map(|(id, label)| Some((id, label, accelerator(id.key(), os)?)))
         .collect()
 }
 
-/// A submenu with the forwarded items for which `pick` is true, in `items()` order.
+/// A submenu with the forwarded items for which `pick` is true, in `items_for` order.
 fn forwarded_submenu<R: Runtime>(
     app: &AppHandle<R>,
     title: &str,
     pick: impl Fn(MenuId) -> bool,
 ) -> tauri::Result<Submenu<R>> {
     let mut menu = SubmenuBuilder::new(app, title);
-    for (id, label, accelerator) in items().into_iter().filter(|(id, ..)| pick(*id)) {
+    for (id, label, accelerator) in items_for(platform::OS)
+        .into_iter()
+        .filter(|(id, ..)| pick(*id))
+    {
         let item = MenuItemBuilder::with_id(id.key(), label)
             .accelerator(&accelerator)
             .build(app)?;
@@ -161,7 +170,7 @@ fn forwarded_submenu<R: Runtime>(
 /// so ⌘W belongs to Close Tab. The red button still hides the main window.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let mut settings = MenuItemBuilder::with_id(SETTINGS_ITEM, "Settings…");
-    if let Some(accelerator) = accelerator(SETTINGS_ITEM) {
+    if let Some(accelerator) = accelerator(SETTINGS_ITEM, platform::OS) {
         settings = settings.accelerator(accelerator);
     }
     let settings = settings.build(app)?;
@@ -206,7 +215,10 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
         }
         return;
     }
-    let Some((id, ..)) = items().into_iter().find(|(id, ..)| id.key() == chosen) else {
+    let Some((id, ..)) = items_for(platform::OS)
+        .into_iter()
+        .find(|(id, ..)| id.key() == chosen)
+    else {
         return;
     };
     if id == MenuId::CloseTab {
@@ -229,6 +241,7 @@ mod tests {
     use muda::accelerator::Accelerator;
 
     use super::*;
+    use crate::platform::Os;
 
     /// The table as v0.5 shipped it, plus v0.7's Keyboard Shortcuts item; the JSON must keep
     /// giving exactly these.
@@ -268,8 +281,8 @@ mod tests {
     ];
 
     #[test]
-    fn accelerators_unchanged_from_v0_5() {
-        let now: Vec<_> = items()
+    fn mac_items_match_v0_7() {
+        let now: Vec<_> = items_for(Os::Mac)
             .into_iter()
             .map(|(id, label, accel)| (id, label.to_string(), accel.to_string()))
             .collect();
@@ -282,14 +295,22 @@ mod tests {
 
     #[test]
     fn accelerator_reads_the_json() {
-        assert_eq!(accelerator("palette"), Some("CmdOrCtrl+K".to_string()));
-        assert_eq!(accelerator("settings"), Some("CmdOrCtrl+Comma".to_string()));
-        assert_eq!(accelerator("nope"), None);
+        assert_eq!(
+            accelerator("palette", Os::Mac),
+            Some("CmdOrCtrl+K".to_string())
+        );
+        assert_eq!(
+            accelerator("settings", Os::Mac),
+            Some("CmdOrCtrl+Comma".to_string())
+        );
+        assert_eq!(accelerator("nope", Os::Mac), None);
+        // Every `windows` value is null until the Windows table lands.
+        assert_eq!(accelerator("palette", Os::Windows), None);
     }
 
     #[test]
     fn menu_ids_and_accelerators_are_unique() {
-        let all = items();
+        let all = items_for(Os::Mac);
         assert_eq!(all.len(), 24, "one entry per MenuId");
         let ids: HashSet<_> = all.iter().map(|(id, ..)| id.key()).collect();
         let keys: HashSet<_> = all.iter().map(|(.., accel)| accel.clone()).collect();
@@ -303,7 +324,7 @@ mod tests {
             Accelerator::from_str("Nope+K").is_err(),
             "the parser checks"
         );
-        for (id, _, accel) in items() {
+        for (id, _, accel) in items_for(Os::Mac) {
             assert!(
                 Accelerator::from_str(&accel).is_ok(),
                 "{id:?}: {accel:?} does not parse"
@@ -322,7 +343,7 @@ mod tests {
 
     #[test]
     fn dashboard_is_cmd_1_and_tabs_are_cmd_2_to_9() {
-        let all = items();
+        let all = items_for(Os::Mac);
         let find = |id: MenuId| all.iter().find(|(i, ..)| *i == id).cloned().unwrap();
         assert_eq!(
             find(MenuId::Dashboard),
@@ -352,7 +373,7 @@ mod tests {
 
     #[test]
     fn new_session_in_workbox_is_cmd_t_right_before_close_tab() {
-        let all = items();
+        let all = items_for(Os::Mac);
         let at = all
             .iter()
             .position(|(id, ..)| *id == MenuId::NewInWorkbox)
@@ -375,7 +396,7 @@ mod tests {
 
     #[test]
     fn shortcuts_item_in_view_menu() {
-        assert!(items().contains(&(
+        assert!(items_for(Os::Mac).contains(&(
             MenuId::Shortcuts,
             "Keyboard Shortcuts",
             "CmdOrCtrl+Slash".to_string()
@@ -386,7 +407,7 @@ mod tests {
 
     #[test]
     fn every_key_is_the_name_the_event_payload_serializes_to() {
-        for (id, ..) in items() {
+        for (id, ..) in items_for(Os::Mac) {
             assert_eq!(serde_json::to_value(id).unwrap(), id.key(), "{id:?}");
         }
     }

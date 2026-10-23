@@ -5,6 +5,7 @@ import type { Row } from "./grouping";
 import { invokeTyped } from "./ipc";
 import { openRow } from "./openRow";
 import { focusRowButton, isEditable, isInTerminal } from "./uiHelpers";
+import { matchesShortcut, usesAppModifier } from "./shortcuts";
 
 type Options = {
   /** The rows in the order the list shows them, for the arrow keys. */
@@ -46,14 +47,14 @@ export function useHomeShortcuts({
         return;
       }
       const onHome = useTerminalStore.getState().activeKey === HOME;
-      if (e.metaKey) {
-        if (e.key === "n") {
+      if (usesAppModifier(e)) {
+        if (matchesShortcut(e, "new-session")) {
           e.preventDefault();
           openNewSession();
-        } else if (e.key === "r") {
+        } else if (matchesShortcut(e, "refresh")) {
           e.preventDefault();
           invokeTyped("refresh_now", {}).catch(report);
-        } else if (e.key === "Enter" && onHome && actionRow) {
+        } else if (matchesShortcut(e, "open-selected") && onHome && actionRow) {
           e.preventDefault();
           openRow(actionRow);
         }
