@@ -94,7 +94,7 @@ const SHORTCUTS: [keys: ShortcutId | { keys: string }, what: string][] = [
   ["palette", "Search and jump"],
   ["new-session", "New session"],
   ["next-needs-you", "Next agent that needs you"],
-  ["toggle-split", "Move the terminal panel between the bottom and the right"],
+  ["toggle-split", "Dashboard beside terminal"],
   ["toggle-sidebar", "Collapse or expand the sidebar"],
   ["open-selected", "Open the selected session"],
   ["settings", "Settings"],

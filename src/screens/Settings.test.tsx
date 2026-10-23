@@ -376,6 +376,9 @@ describe("Settings", () => {
   it("lists the shortcuts and switches the global one", async () => {
     const user = await setup({}, "Shortcuts");
     expect(screen.getByText("Search and jump")).toBeInTheDocument();
+    // ⌘\ is the Dashboard column beside the terminal (as in shortcuts.json), not the old v0.2 panel.
+    expect(screen.getByText("Dashboard beside terminal")).toBeInTheDocument();
+    expect(screen.queryByText(/Move the terminal panel/)).toBeNull();
     expect(screen.getByText("⌘,")).toBeInTheDocument();
     await user.click(
       screen.getByRole("checkbox", { name: /Show or hide Crafted Herdr/ }),
