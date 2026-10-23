@@ -277,7 +277,7 @@ describe("Sidebar", () => {
       "herdr on gpubox, terminal tab",
     ]);
     expect(terms[0].querySelector(".mono")).toHaveTextContent("agent w1:p1");
-    expect(terms[0].querySelector(".dot")).toHaveAttribute(
+    expect(terms[0].querySelector(".sdot")).toHaveAttribute(
       "data-status",
       "blocked",
     );

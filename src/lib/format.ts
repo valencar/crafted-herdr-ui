@@ -177,6 +177,17 @@ export function isPending(health: Health): boolean {
 }
 
 /**
+ * The shape a workbox's health indicator takes: `reconnecting` splits into the first connect
+ * (`pending`, a spinner) and a retry after an error (`reconnecting`, a hollow ring).
+ */
+export function healthShape(
+  health: Health,
+): "online" | "pending" | "reconnecting" | "attention" | "disabled" {
+  if (isPending(health)) return "pending";
+  return health.kind;
+}
+
+/**
  * A successful read-only call: `api snapshot`, or `<noun> read …` (`pane read`, `agent read`).
  * The poller and the previews make these every couple of seconds, so the Activity drawer hides
  * them unless asked. A read that failed is never quiet.

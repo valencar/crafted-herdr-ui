@@ -585,29 +585,82 @@ kbd {
   cursor: default;
 }
 
-.dot {
+/* Status and health indicators (`StatusDot` / `HealthDot`). Each shape differs from the others
+   without color; loops (spec 3.3) run only on `.live`, which the mount site sets. */
+.sdot {
+  position: relative;
+  box-sizing: border-box;
+  display: inline-block;
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  flex-shrink: 0;
   background: transparent;
   border: 1.5px solid var(--muted);
 }
-.dot[data-status="blocked"] {
+.sdot[data-status="blocked"] {
   background: var(--st-needs);
   border-color: var(--st-needs);
+  /* Static, so reduced motion keeps blocked and done apart by shape. */
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-needs) 35%, transparent);
 }
-.dot[data-status="done"] {
+.sdot[data-status="blocked"].live::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  background: var(--st-needs);
+  opacity: 0.6;
+  animation: st-pulse 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.sdot[data-status="working"] {
+  width: 9px;
+  height: 9px;
+  border-color: color-mix(in srgb, var(--st-working) 28%, transparent);
+  border-top-color: var(--st-working);
+}
+.sdot[data-status="working"].live {
+  animation: st-spin 0.9s linear infinite;
+}
+.sdot[data-status="done"] {
   background: var(--st-done);
   border-color: var(--st-done);
 }
-.dot[data-status="working"] {
-  background: var(--st-working);
-  border-color: var(--st-working);
-}
-.dot[data-status="idle"] {
-  background: var(--st-idle);
+.sdot[data-status="idle"] {
   border-color: var(--st-idle);
+}
+.sdot[data-status="unknown"] {
+  border-style: dashed;
+}
+.sdot[data-status="shell"] {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--text-4);
+  border-color: var(--text-4);
+}
+.sdot[data-health="online"] {
+  background: var(--online);
+  border-color: var(--online);
+}
+.sdot[data-health="pending"] {
+  border-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  border-top-color: var(--text-2);
+}
+.sdot[data-health="pending"].live {
+  animation: st-spin 0.9s linear infinite;
+}
+.sdot[data-health="reconnecting"] {
+  border-color: var(--st-needs);
+}
+.sdot[data-health="reconnecting"].live {
+  animation: st-breathe 1.8s ease-in-out infinite;
+}
+.sdot[data-health="attention"] {
+  border-color: var(--danger);
+}
+.sdot[data-health="disabled"] {
+  opacity: 0.45;
 }
 .health {
   display: flex;
@@ -616,25 +669,11 @@ kbd {
   font-size: var(--fs-small);
   color: var(--muted);
 }
-.health .dot {
-  width: 6px;
-  height: 6px;
-  background: var(--muted);
-  border-color: var(--muted);
-}
 .health[data-health="online"] {
   color: var(--online);
 }
-.health[data-health="online"] .dot {
-  background: var(--online);
-  border-color: var(--online);
-}
 .health[data-health="attention"] {
   color: var(--st-needs);
-}
-.health[data-health="attention"] .dot {
-  background: var(--st-needs);
-  border-color: var(--st-needs);
 }
 
 /* ---------- sections ---------- */
@@ -859,6 +898,10 @@ kbd {
 }
 .pill {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-width: 92px;
   text-align: center;
   font-size: var(--fs-small);

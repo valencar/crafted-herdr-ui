@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { StatusDot } from "../components/StatusDot";
 import type { Row } from "../lib/grouping";
 import { isKeyForMenu } from "../lib/uiHelpers";
 import { HomeIcon } from "./HomeIcon";
@@ -133,11 +134,7 @@ export function AllTabsMenu({
                     aria-current={tab.tabKey === activeKey ? "true" : undefined}
                     onClick={() => choose(tab.tabKey)}
                   >
-                    <span
-                      className="dot"
-                      aria-hidden="true"
-                      data-status={tabDotStatus(tab, row)}
-                    />
+                    <StatusDot status={tabDotStatus(tab, row)} />
                     <span className="mono menu-tab-title">{tab.title}</span>
                     {words && <span className="muted">{words}</span>}
                   </button>

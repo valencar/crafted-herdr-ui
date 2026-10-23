@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { healthShape, type RowStatus } from "../lib/format";
 
 // Vitest runs from the repo root; the stylesheet is read as text (it is not processed).
 const read = (file: string) =>
@@ -277,6 +278,43 @@ describe("type tokens", () => {
       Number(/min-width:\s*(\d+)px/.exec(rule(".wb-tab"))?.[1]),
     ).toBeGreaterThanOrEqual(140);
     expect(rule(".wb-tab")).toMatch(/max-width:\s*\d+px/);
+  });
+});
+
+describe("status shapes", () => {
+  const selectors = new Set(
+    [...css.matchAll(/([^{}]+)\{[^}]*\}/g)].flatMap((m) =>
+      m[1].split(",").map((s) => s.trim()),
+    ),
+  );
+
+  it("every_status_and_health_has_a_shape", () => {
+    const statuses: RowStatus[] = [
+      "blocked",
+      "working",
+      "done",
+      "idle",
+      "unknown",
+      "shell",
+    ];
+    for (const status of statuses) {
+      expect(selectors, status).toContain(`.sdot[data-status="${status}"]`);
+    }
+    const healths: ReturnType<typeof healthShape>[] = [
+      "online",
+      "pending",
+      "reconnecting",
+      "attention",
+      "disabled",
+    ];
+    for (const health of healths) {
+      expect(selectors, health).toContain(`.sdot[data-health="${health}"]`);
+    }
+  });
+
+  it("blocked_keeps_a_static_halo", () => {
+    // Reduced motion removes the pulse, so the halo itself must not depend on `.live`.
+    expect(rule('.sdot[data-status="blocked"]')).toContain("box-shadow");
   });
 });
 

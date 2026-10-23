@@ -1,4 +1,5 @@
 import { Kbd } from "../components/Kbd";
+import { StatusDot } from "../components/StatusDot";
 import { useId, useMemo, type ReactNode } from "react";
 import { MachineNotices, NoAgentsYet } from "../components/HomeNotices";
 import { MetricTile } from "../components/MetricTile";
@@ -292,11 +293,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
                   const age = formatAge(r.sinceMs, nowMs);
                   return (
                     <li key={r.key} className="dash-row">
-                      <span
-                        className="dot"
-                        data-status="working"
-                        aria-hidden="true"
-                      />
+                      <StatusDot status="working" />
                       <span className="sr-only">Working</span>
                       <span className="mono dash-name">{r.name}</span>
                       {project(r) && <span>{project(r)}</span>}

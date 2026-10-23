@@ -1,4 +1,5 @@
 import { formatShortcut } from "../lib/shortcuts";
+import { HealthDot, StatusDot } from "../components/StatusDot";
 import { useEffect, useRef } from "react";
 import { HEALTH_LABEL, plural } from "../lib/format";
 import type { Row } from "../lib/grouping";
@@ -90,7 +91,11 @@ export function WorkboxRow({
                 data-health={health ?? "unknown"}
                 aria-hidden="true"
               >
-                <span className="dot" />
+                {group.machine ? (
+                  <HealthDot health={group.machine.health} />
+                ) : (
+                  <StatusDot status="unknown" />
+                )}
               </span>
               <span className="mono wb-tab-label">{group.label}</span>
               <span className="wb-tab-count">{group.tabs.length}</span>

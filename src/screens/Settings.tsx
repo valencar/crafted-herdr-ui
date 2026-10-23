@@ -1,4 +1,5 @@
 import { Kbd } from "../components/Kbd";
+import { HealthDot } from "../components/StatusDot";
 import { formatShortcut, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
@@ -529,7 +530,7 @@ function Workboxes() {
                 </span>
               </span>
               <span className="health" data-health={m.health.kind}>
-                <span className="dot" aria-hidden="true" />
+                <HealthDot health={m.health} />
                 {HEALTH_LABEL[m.health.kind]}
               </span>
               <input
@@ -615,7 +616,13 @@ function HerdrCli({
           className="health"
           data-health={status?.path ? "online" : "attention"}
         >
-          <span className="dot" aria-hidden="true" />
+          <HealthDot
+            health={
+              status?.path
+                ? { kind: "online" }
+                : { kind: "attention", error: "" }
+            }
+          />
           <span className="sr-only">
             {status?.path ? "Found" : "Not found"}
           </span>

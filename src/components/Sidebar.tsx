@@ -1,4 +1,5 @@
 import { Kbd } from "./Kbd";
+import { HealthDot, StatusDot } from "./StatusDot";
 import { formatShortcut } from "../lib/shortcuts";
 import { useMemo, useState } from "react";
 import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
@@ -166,7 +167,7 @@ export function Sidebar({
                 data-health={m.health.kind}
                 aria-hidden="true"
               >
-                <span className="dot" />
+                <HealthDot health={m.health} />
               </span>
             </button>
           );
@@ -253,7 +254,7 @@ export function Sidebar({
           >
             <span className="nav-label">{m.label}</span>
             <span className="health" data-health={m.health.kind}>
-              <span className="dot" aria-hidden="true" />
+              <HealthDot health={m.health} />
               {HEALTH_LABEL[m.health.kind]}
             </span>
             <span className="count">{agentsByMachine.get(m.id) ?? 0}</span>
@@ -272,11 +273,7 @@ export function Sidebar({
               >
                 <TerminalIcon />
                 <span className="mono">{tab.title}</span>
-                <span
-                  className="dot"
-                  aria-hidden="true"
-                  data-status={tabDotStatus(tab, row)}
-                />
+                <StatusDot status={tabDotStatus(tab, row)} />
               </button>
             );
           })}
@@ -299,12 +296,7 @@ export function Sidebar({
             className="nav-item"
             onClick={() => onProject(g)}
           >
-            <span
-              className="dot"
-              data-status={status}
-              title={STATUS_LABEL[status]}
-              aria-hidden="true"
-            />
+            <StatusDot status={status} title={STATUS_LABEL[status]} />
             <span className="sr-only">{STATUS_LABEL[status]}: </span>
             <span className="nav-label">{g.name}</span>
             <span className="mono nav-sub">{g.machineLabel}</span>

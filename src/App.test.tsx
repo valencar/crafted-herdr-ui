@@ -1640,7 +1640,7 @@ describe("the window chrome", () => {
         name: "Sidebar",
       });
       const dots = [
-        ...sidebar.querySelectorAll<HTMLElement>(".dot[data-status]"),
+        ...sidebar.querySelectorAll<HTMLElement>(".sdot[data-status]"),
       ];
       expect(dots.length).toBeGreaterThan(0);
       for (const dot of dots) {

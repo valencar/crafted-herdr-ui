@@ -1,4 +1,5 @@
 import { legendText, StatusBar } from "./StatusBar";
+import { HealthDot } from "./StatusDot";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { statusCounts } from "../lib/dashboard";
 import {
@@ -46,7 +47,7 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
           {machine.label}
         </h3>
         <span className="health" data-health={kind}>
-          <span className="dot" aria-hidden="true" />
+          <HealthDot health={machine.health} />
           {HEALTH_LABEL[kind]}
         </span>
       </div>

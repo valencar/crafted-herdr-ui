@@ -1,4 +1,5 @@
 import { formatTabShortcut } from "../lib/shortcuts";
+import { StatusDot } from "../components/StatusDot";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { projectNames, type Row } from "../lib/grouping";
 import { canOpenNewSession } from "../lib/newSessionTarget";
@@ -89,11 +90,7 @@ export function SessionRow({
                 }`}
                 onClick={() => activate(tab.tabKey)}
               >
-                <span
-                  className="dot"
-                  aria-hidden="true"
-                  data-status={tabDotStatus(tab, row)}
-                />
+                <StatusDot status={tabDotStatus(tab, row)} />
                 <span className="mono session-tab-title">{tab.title}</span>
                 {sub && (
                   <span

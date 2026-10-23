@@ -1,4 +1,5 @@
 import { Kbd } from "../components/Kbd";
+import { HealthDot, StatusDot } from "../components/StatusDot";
 import { useMemo } from "react";
 import { StoreToast } from "../components/Toast";
 import { HEALTH_LABEL, STATUS_LABEL, formatAge, plural } from "../lib/format";
@@ -33,7 +34,7 @@ function RowItem({ row, project, nowMs, primary }: RowItemProps) {
   const detail = [project, row.machineLabel, age].filter(Boolean).join(" · ");
   return (
     <li className="pop-row" data-row-key={row.key}>
-      <span className="dot" data-status={row.status} aria-hidden="true" />
+      <StatusDot status={row.status} />
       <span className="pop-row-text">
         <span className="pop-row-name">{row.name}</span>
         <span className="mono muted pop-row-detail">
@@ -164,7 +165,7 @@ export function MenuBar() {
         <ul className="pop-boxes" aria-label="Workboxes">
           {state.machines.map((m) => (
             <li key={m.id} className="health" data-health={m.health.kind}>
-              <span className="dot" aria-hidden="true" />
+              <HealthDot health={m.health} />
               {m.label}
               <span className="sr-only"> {HEALTH_LABEL[m.health.kind]}</span>
             </li>

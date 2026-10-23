@@ -13,6 +13,7 @@ import {
   isPending,
   isQuietRead,
   formatDuration,
+  healthShape,
   formatStaleness,
   isSupportedVersion,
   plural,
@@ -213,6 +214,20 @@ describe("isPending", () => {
     ).toBe(false);
     expect(isPending({ kind: "attention", error: "" })).toBe(false);
     expect(isPending({ kind: "online" })).toBe(false);
+  });
+});
+
+describe("healthShape", () => {
+  it("health_shape", () => {
+    expect(healthShape({ kind: "online" })).toBe("online");
+    expect(
+      healthShape({ kind: "reconnecting", retry_in_ms: 0, error: "" }),
+    ).toBe("pending");
+    expect(
+      healthShape({ kind: "reconnecting", retry_in_ms: 4000, error: "x" }),
+    ).toBe("reconnecting");
+    expect(healthShape({ kind: "attention", error: "boom" })).toBe("attention");
+    expect(healthShape({ kind: "disabled" })).toBe("disabled");
   });
 });
 
