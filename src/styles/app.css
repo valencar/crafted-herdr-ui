@@ -2727,6 +2727,40 @@ select.field {
 .palette-option.is-danger .palette-label {
   color: var(--danger);
 }
+/* A divider above Close pane…: drawn, not an element, so the listbox keeps only its options. */
+.palette-option.is-danger:not(:first-child) {
+  position: relative;
+  margin-top: 9px;
+}
+.palette-option.is-danger:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  inset: -5px 0 auto;
+  height: 1px;
+  background: var(--border);
+}
+/* The list (or an agent's actions) slides in when the palette switches between them. */
+.palette-frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.palette-frame.is-switched {
+  animation: enter-frame var(--dur-base) var(--ease-out);
+}
+.palette-crumb {
+  cursor: pointer;
+}
+.palette-crumb-back {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-lead);
+  line-height: 1;
+}
+.palette-crumb:hover .palette-crumb-back {
+  color: var(--text);
+}
 .palette-empty {
   margin: 0;
   padding: 16px;

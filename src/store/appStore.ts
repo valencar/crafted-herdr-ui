@@ -48,6 +48,8 @@ type AppStore = {
    * renders the confirmation for it (`ClosePaneHost`), so the dialog outlives the asker.
    */
   closeRow: Row | null;
+  /** Where focus goes when that confirmation ends: the control the asker was opened from. */
+  closeReturn: HTMLElement | null;
   /**
    * The herdr version whose "older than supported" banner was dismissed (`""` for an unreadable
    * one). Kept here so it survives going between Home and a Workbox screen.
@@ -82,7 +84,7 @@ type AppStore = {
   setView: (view: View) => void;
   setActivityOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
-  setCloseRow: (row: Row | null) => void;
+  setCloseRow: (row: Row | null, returnTo?: HTMLElement | null) => void;
   dismissVersionBanner: (version: string) => void;
   /** Shows an action error. Every report restarts the auto-dismiss timer. */
   reportError: (e: unknown) => void;
@@ -140,6 +142,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   activityOpen: false,
   paletteOpen: false,
   closeRow: null,
+  closeReturn: null,
   dismissedVersion: null,
   toast: null,
   toastTone: "error",
@@ -161,7 +164,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setView: (view) => set({ view }),
   setActivityOpen: (activityOpen) => set({ activityOpen }),
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
-  setCloseRow: (closeRow) => set({ closeRow }),
+  setCloseRow: (closeRow, returnTo = null) =>
+    set({ closeRow, closeReturn: closeRow ? returnTo : null }),
   dismissVersionBanner: (dismissedVersion) => set({ dismissedVersion }),
   reportError: (e) => {
     get().showToast(actionErrorMessage(toActionError(e)), "error");

@@ -289,6 +289,32 @@ describe("agentActions", () => {
     expect(find(external, "open-alt")?.label).toBe("Open in a tab here");
   });
 
+  it("with_a_tab_the_other_way_is_always_the_terminal_app", () => {
+    for (const openTarget of ["app", "external"] as const) {
+      const list = agentActions(row({}), { ...ctx, hasTab: true, openTarget });
+      expect(list.find((a) => a.id === "open")).toMatchObject({
+        label: "Go to tab",
+        how: "app",
+      });
+      expect(list.find((a) => a.id === "open-alt")).toMatchObject({
+        label: "Open in Ghostty",
+        how: "external",
+      });
+    }
+  });
+
+  it("the_two_open_actions_never_share_a_target", () => {
+    for (const hasTab of [true, false]) {
+      for (const openTarget of ["app", "external"] as const) {
+        const list = agentActions(row({}), { ...ctx, hasTab, openTarget });
+        const how = (id: string) => list.find((a) => a.id === id)?.how;
+        expect(how("open")).toBeDefined();
+        expect(how("open-alt")).toBeDefined();
+        expect(how("open")).not.toBe(how("open-alt"));
+      }
+    }
+  });
+
   it("lists_the_rest_in_order", () => {
     expect(ids(row({ status: "done" }))).toEqual([
       "open",

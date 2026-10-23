@@ -132,6 +132,12 @@ textarea {
     transform: translateY(8px);
   }
 }
+@keyframes enter-frame {
+  from {
+    transform: translateX(8px);
+    opacity: 0;
+  }
+}
 @keyframes enter-slide {
   from {
     transform: translateX(16px);
@@ -153,6 +159,7 @@ textarea {
   .skel,
   .menu,
   .palette,
+  .palette-frame.is-switched,
   .dialog,
   .sheet,
   .toast,

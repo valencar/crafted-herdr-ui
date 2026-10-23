@@ -109,6 +109,7 @@ afterEach(() => {
     settings: null,
     sheet: null,
     closeRow: null,
+    closeReturn: null,
   });
 });
 
@@ -499,6 +500,83 @@ describe("CommandPalette agent frame", () => {
     expect(screen.getByRole("combobox")).toHaveValue("tester");
   });
 
+  it("the_crumb_goes_back_with_the_mouse_and_never_takes_focus", async () => {
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "zsh");
+    await user.keyboard("{ArrowDown}{Tab}");
+    const bar = crumb() as HTMLElement;
+    expect(bar).not.toBeNull();
+    expect(bar.querySelector("button, a, [tabindex]")).toBeNull();
+    expect(fireEvent.mouseDown(bar)).toBe(false);
+    await user.click(bar);
+    expect(crumb()).toBeNull();
+    expect(screen.getByRole("combobox")).toHaveFocus();
+    expect(screen.getByRole("combobox")).toHaveValue("zsh");
+    expect(screen.getAllByRole("option")[1]).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("the_frame_slides_in_only_after_a_switch_and_the_listbox_holds_only_options", async () => {
+    const user = open();
+    const frameEl = () => document.querySelector(".palette-frame");
+    expect(frameEl()).not.toHaveClass("is-switched");
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    expect(frameEl()).toHaveClass("is-switched");
+    // The divider above Close pane… is drawn by CSS: every child of the list is an option.
+    const list = screen.getByRole("listbox");
+    expect(
+      [...list.children].every((c) => c.getAttribute("role") === "option"),
+    ).toBe(true);
+    const last = list.lastElementChild;
+    expect(last).toHaveClass("is-danger");
+    expect(last).toHaveTextContent("Close pane…");
+    await user.keyboard("{Backspace}");
+    expect(frameEl()).toHaveClass("is-switched");
+  });
+
+  it("with_a_tab_and_the_external_terminal_the_frame_offers_both_ways", async () => {
+    useAppStore.setState({
+      settings: {
+        open_target: "external",
+        terminal: "ghostty",
+      } as unknown as Settings,
+    });
+    useTerminalStore.setState({
+      tabs: [
+        {
+          tabKey: "buildbox::w1:p1",
+          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          title: "planner",
+          machineLabel: "buildbox",
+          state: "live",
+          error: null,
+          termId: 1,
+        },
+      ],
+      activeKey: HOME,
+    });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "planner");
+    await user.keyboard("{Tab}");
+    expect(labels().slice(0, 2)).toEqual(["Go to tab", "Open in Ghostty"]);
+    await user.click(screen.getByRole("option", { name: /Open in Ghostty/ }));
+    expect(invoke).toHaveBeenCalledWith("open_session", {
+      machineId: "buildbox",
+      paneId: "w1:p1",
+    });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+    cleanup();
+
+    const again = open();
+    await again.type(screen.getByRole("combobox"), "planner");
+    await again.keyboard("{Tab}");
+    await again.keyboard("{Enter}");
+    expect(useTerminalStore.getState().activeKey).toBe("buildbox::w1:p1");
+  });
+
   it("escape_in_the_frame_closes_the_palette", async () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "tester");
@@ -626,6 +704,62 @@ describe("CommandPalette agent frame", () => {
       paneId: "w2:p1",
     });
     expect(useAppStore.getState().closeRow).toBeNull();
+  });
+
+  it("focus_returns_to_where_the_palette_was_opened_after_the_close_confirmation", async () => {
+    render(<button>before</button>);
+    const before = screen.getByRole("button", { name: "before" });
+    before.focus();
+    const user = userEvent.setup();
+    render(
+      <>
+        <Harness />
+        <ClosePaneHost />
+      </>,
+    );
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    await user.click(screen.getByRole("option", { name: /Close pane…/ }));
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(before).toHaveFocus());
+
+    // And after confirming, too (the pane is closed by the mocked command).
+    cleanup();
+    onClose.mockReset();
+    render(<button>before</button>);
+    const again = screen.getByRole("button", { name: "before" });
+    again.focus();
+    render(
+      <>
+        <Harness />
+        <ClosePaneHost />
+      </>,
+    );
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    await user.click(screen.getByRole("option", { name: /Close pane…/ }));
+    await user.click(screen.getByRole("button", { name: "Close session" }));
+    await waitFor(() => expect(again).toHaveFocus());
+  });
+
+  it("with_nowhere_to_go_back_to_the_confirmation_ends_on_the_search_box", async () => {
+    render(<input type="search" aria-label="Search" />);
+    const user = userEvent.setup();
+    expect(document.activeElement).toBe(document.body);
+    render(
+      <>
+        <Harness />
+        <ClosePaneHost />
+      </>,
+    );
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    await user.click(screen.getByRole("option", { name: /Close pane…/ }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.getByRole("searchbox", { name: "Search" })).toHaveFocus(),
+    );
   });
 
   it("reply_goes_to_the_inspector", async () => {

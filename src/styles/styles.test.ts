@@ -607,6 +607,16 @@ describe("motion tokens", () => {
     ).toContain("opacity: 1");
   });
 
+  it("the_palette_frame_slides_with_the_base_duration_and_stops_for_reduced_motion", () => {
+    expect(rule(".palette-frame.is-switched")).toContain(
+      "enter-frame var(--dur-base) var(--ease-out)",
+    );
+    expect(reduced()).toContain(".palette-frame.is-switched");
+    expect(rule(".palette-option.is-danger:not(:first-child)::before")).toMatch(
+      /height:\s*1px/,
+    );
+  });
+
   it("figures_are_tabular", () => {
     const body = rulesOf("global.css").find((r) => r.selector === "body");
     expect(body?.body).toContain("font-variant-numeric: tabular-nums");

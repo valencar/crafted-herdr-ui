@@ -31,6 +31,17 @@ import { tabStatus, useRowsByKey } from "../terminal/tabInfo";
 import { stripOrder, tabShortcut } from "../terminal/tabOrder";
 import { useTerminalStore } from "../terminal/terminalStore";
 
+/** The first of these that focus can go back to: on the page, visible, and not the body. */
+function firstRestorable(els: (HTMLElement | null)[]): HTMLElement | undefined {
+  return els.find(
+    (el): el is HTMLElement =>
+      !!el &&
+      el.isConnected &&
+      el !== document.body &&
+      el.closest("[hidden]") === null,
+  );
+}
+
 /** Scrolls the active option into view as the arrow keys move. */
 function keepInView(id: string) {
   document.getElementById(id)?.scrollIntoView?.({ block: "nearest" });
@@ -109,6 +120,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [frame, setFrame] = useState<Frame>({ kind: "root" });
+  // Whether the frame has switched yet: the first list does not slide in with the dialog.
+  const [switched, setSwitched] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   // Whatever had focus when the palette was asked for, read while rendering so that
   // StrictMode's second effect run does not mistake the palette's own input for it.
@@ -137,12 +150,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         const now = document.activeElement;
         return !now || now === document.body;
       };
-      const target = [previousFocus, menuTrigger].find(
-        (el) =>
-          el?.isConnected &&
-          el !== document.body &&
-          el.closest("[hidden]") === null,
-      );
+      const target = firstRestorable([previousFocus, menuTrigger]);
       if (target && bodyHasFocus()) target.focus();
       // And once more after the item's own effects and the browser's default action for the
       // event that closed the palette: an item that moved focus (a new tab, a sheet, a search
@@ -281,11 +289,13 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     setQuery(frame.saved.query);
     setActive(frame.saved.active);
     setFrame({ kind: "root" });
+    setSwitched(true);
   }
 
   const enterFrame = (item: PaletteItem | undefined) => {
     if (!item?.row) return;
     setFrame({ kind: "agent", row: item.row, saved: { query, active: at } });
+    setSwitched(true);
     setQuery("");
     setActive(0);
   };
@@ -295,14 +305,20 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     setQuery(frame.saved.query);
     setActive(frame.saved.active);
     setFrame({ kind: "root" });
+    setSwitched(true);
   };
 
   const runAction = (row: Row, id: AgentAction["id"]) => {
     const store = useAppStore.getState();
-    const other = openTarget === "app" ? "external" : "app";
-    if (id === "open") void openRow(row, hasTab ? "app" : openTarget);
-    else if (id === "open-alt") void openRow(row, other);
-    else if (id === "reply") {
+    if (id === "open" || id === "open-alt") {
+      // The two never share a target: see `agentActions`.
+      const how = agentActions(row, {
+        hasTab,
+        openTarget,
+        terminal: terminalLabel,
+      }).find((a) => a.id === id)?.how;
+      void openRow(row, how);
+    } else if (id === "reply") {
       // Only navigates: the user types and sends it from the Inspector.
       store.setQuery("");
       showHomeView({ kind: "all" });
@@ -314,7 +330,13 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       store.setQuery("");
       store.select(row.key);
       showHomeView({ kind: "all" });
-    } else if (id === "close-pane") store.setCloseRow(row);
+    } else if (id === "close-pane") {
+      // The confirmation outlives the palette, and focus goes back to where ⌘K was pressed.
+      store.setCloseRow(
+        row,
+        firstRestorable([previousFocus, menuTrigger]) ?? null,
+      );
+    }
     onClose();
   };
 
@@ -406,111 +428,126 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             setActive(0);
           }}
         />
-        {inFrame && frameRow && (
-          <div className="palette-crumb">
-            <StatusDot status={frameRow.status} live />
-            <span className="palette-crumb-name">{frameRow.name}</span>
-            <span className="palette-detail mono">
-              {[
-                frameRow.machineLabel,
-                frameRow.folder === null ? null : shortPath(frameRow.folder),
-                STATUS_LABEL[frameRow.status],
-              ]
-                .filter((part) => part !== null)
-                .join(" · ")}
-            </span>
-          </div>
-        )}
-        <ul
-          id={listId}
-          className="palette-list"
-          role="listbox"
-          aria-label={inFrame ? "Actions" : "Results"}
+        <div
+          key={inFrame ? "agent" : "root"}
+          className={"palette-frame" + (switched ? " is-switched" : "")}
         >
-          {inFrame && frameRow
-            ? actions.map((action, index) => (
-                <li
-                  key={action.id}
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={index === at}
-                  className={
-                    "palette-option" +
-                    (index === at ? " is-active" : "") +
-                    (action.danger ? " is-danger" : "")
-                  }
-                  // Keeps the focus in the input while clicking.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onMouseMove={() => setActive(index)}
-                  onClick={() => runAction(frameRow, action.id)}
-                >
-                  <span className="palette-label">
-                    <Highlighted
-                      text={action.label}
-                      positions={
-                        fuzzyMatch(query.trim(), action.label)?.positions ?? []
-                      }
-                    />
-                  </span>
-                  <span className="palette-grow" />
-                  {action.keys && <Kbd keys={action.keys} />}
-                </li>
-              ))
-            : results.map((item, index) => (
-                <li
-                  key={item.id}
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={index === at}
-                  className={`palette-option${index === at ? " is-active" : ""}`}
-                  // Keeps the focus in the input while clicking.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onMouseMove={() => setActive(index)}
-                  onClick={(e) => run(item, e.metaKey ? "alt" : "default")}
-                >
-                  {item.row && <StatusDot status={item.row.status} live />}
-                  <span className="palette-label">
-                    <Highlighted
-                      text={item.label}
-                      positions={labelPositions(item, query)}
-                    />
-                  </span>
-                  <span className="palette-detail mono">{item.detail}</span>
-                  {index === at && (
-                    <span className="palette-keys">
-                      <Kbd keys="↵" /> Open
-                      {item.row && (
-                        <>
-                          {" "}
-                          <Kbd keys="⇥" /> Actions
-                        </>
-                      )}
+          {inFrame && frameRow && (
+            // Mouse only, like the chevron: ⌫ on an empty input is the keyboard's way back, and
+            // nothing inside the combobox may take focus.
+            <div
+              className="palette-crumb"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={goBack}
+            >
+              <span className="palette-crumb-back" aria-hidden="true">
+                ‹
+              </span>
+              <StatusDot status={frameRow.status} live />
+              <span className="palette-crumb-name">{frameRow.name}</span>
+              <span className="palette-detail mono">
+                {[
+                  frameRow.machineLabel,
+                  frameRow.folder === null ? null : shortPath(frameRow.folder),
+                  STATUS_LABEL[frameRow.status],
+                ]
+                  .filter((part) => part !== null)
+                  .join(" · ")}
+              </span>
+            </div>
+          )}
+          <ul
+            id={listId}
+            className="palette-list"
+            role="listbox"
+            aria-label={inFrame ? "Actions" : "Results"}
+          >
+            {inFrame && frameRow
+              ? actions.map((action, index) => (
+                  <li
+                    key={action.id}
+                    id={optionId(index)}
+                    role="option"
+                    aria-selected={index === at}
+                    className={
+                      "palette-option" +
+                      (index === at ? " is-active" : "") +
+                      (action.danger ? " is-danger" : "")
+                    }
+                    // Keeps the focus in the input while clicking.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseMove={() => setActive(index)}
+                    onClick={() => runAction(frameRow, action.id)}
+                  >
+                    <span className="palette-label">
+                      <Highlighted
+                        text={action.label}
+                        positions={
+                          fuzzyMatch(query.trim(), action.label)?.positions ??
+                          []
+                        }
+                      />
                     </span>
-                  )}
-                  {item.shortcut && <Kbd id={item.shortcut} />}
-                  {item.row && (
-                    // Mouse only: the keyboard has ⇥, and nothing inside an option may take
-                    // focus (the input keeps it, `aria-activedescendant` points at the option).
-                    <span
-                      className="palette-chev"
-                      aria-hidden="true"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        enterFrame(item);
-                      }}
-                    >
-                      ›
+                    <span className="palette-grow" />
+                    {action.keys && <Kbd keys={action.keys} />}
+                  </li>
+                ))
+              : results.map((item, index) => (
+                  <li
+                    key={item.id}
+                    id={optionId(index)}
+                    role="option"
+                    aria-selected={index === at}
+                    className={`palette-option${index === at ? " is-active" : ""}`}
+                    // Keeps the focus in the input while clicking.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseMove={() => setActive(index)}
+                    onClick={(e) => run(item, e.metaKey ? "alt" : "default")}
+                  >
+                    {item.row && <StatusDot status={item.row.status} live />}
+                    <span className="palette-label">
+                      <Highlighted
+                        text={item.label}
+                        positions={labelPositions(item, query)}
+                      />
                     </span>
-                  )}
-                  <span className="palette-tag">{item.group}</span>
-                </li>
-              ))}
-        </ul>
-        {count === 0 && (
-          <p className="palette-empty">
-            {inFrame ? "No such action." : "Nothing matches."}
-          </p>
-        )}
+                    <span className="palette-detail mono">{item.detail}</span>
+                    {index === at && (
+                      <span className="palette-keys">
+                        <Kbd keys="↵" /> Open
+                        {item.row && (
+                          <>
+                            {" "}
+                            <Kbd keys="⇥" /> Actions
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {item.shortcut && <Kbd id={item.shortcut} />}
+                    {item.row && (
+                      // Mouse only: the keyboard has ⇥, and nothing inside an option may take
+                      // focus (the input keeps it, `aria-activedescendant` points at the option).
+                      <span
+                        className="palette-chev"
+                        aria-hidden="true"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          enterFrame(item);
+                        }}
+                      >
+                        ›
+                      </span>
+                    )}
+                    <span className="palette-tag">{item.group}</span>
+                  </li>
+                ))}
+          </ul>
+          {count === 0 && (
+            <p className="palette-empty">
+              {inFrame ? "No such action." : "Nothing matches."}
+            </p>
+          )}
+        </div>
         <p className="palette-hint">
           <Kbd keys="↑" /> <Kbd keys="↓" /> Move · <Kbd keys="↵" />{" "}
           {inFrame ? "Run" : "Open"} · <Kbd id="palette-open-alt" />{" "}

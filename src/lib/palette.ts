@@ -187,6 +187,8 @@ export type AgentAction = {
   /** The key that runs it from anywhere in the frame. */
   keys?: string;
   danger?: boolean;
+  /** For the two open actions: where it opens. They never share a target. */
+  how?: "app" | "external";
 };
 
 /**
@@ -200,16 +202,38 @@ export function agentActions(
 ): AgentAction[] {
   const here = "Open in a tab here";
   const external = `Open in ${ctx.terminal}`;
-  const main = ctx.hasTab
-    ? "Go to tab"
+  // With a tab open, Enter goes to it and the other way is always the terminal app (as the
+  // Open button's menu has both); without one, the two are the "Open sessions" setting and
+  // the opposite of it.
+  const actions: AgentAction[] = ctx.hasTab
+    ? [
+        { id: "open", label: "Go to tab", keys: "↵", how: "app" },
+        {
+          id: "open-alt",
+          label: external,
+          keys: formatShortcut("palette-open-alt"),
+          how: "external",
+        },
+      ]
     : ctx.openTarget === "app"
-      ? here
-      : external;
-  const other = ctx.openTarget === "app" ? external : here;
-  const actions: AgentAction[] = [
-    { id: "open", label: main, keys: "↵" },
-    { id: "open-alt", label: other, keys: formatShortcut("palette-open-alt") },
-  ];
+      ? [
+          { id: "open", label: here, keys: "↵", how: "app" },
+          {
+            id: "open-alt",
+            label: external,
+            keys: formatShortcut("palette-open-alt"),
+            how: "external",
+          },
+        ]
+      : [
+          { id: "open", label: external, keys: "↵", how: "external" },
+          {
+            id: "open-alt",
+            label: here,
+            keys: formatShortcut("palette-open-alt"),
+            how: "app",
+          },
+        ];
   if (row.status === "idle" || row.status === "done") {
     actions.push({ id: "reply", label: "Reply…" });
   }
