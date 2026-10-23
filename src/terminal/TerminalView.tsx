@@ -3,6 +3,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
   type Ref,
 } from "react";
 import { Terminal } from "@xterm/xterm";
@@ -21,6 +22,8 @@ import { useTermSession } from "./useTermSession";
 import { xtermTheme } from "./xtermTheme";
 
 const RESIZE_DEBOUNCE_MS = 50;
+/** Rows to lift the output by when the bar's height can't be measured (a hidden tab). */
+const FALLBACK_LIFT_ROWS = 4;
 
 /**
  * What a click on a terminal link does: ⌘-click copies it and says so; a plain click does
@@ -216,6 +219,21 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     if (active && ended && !modalOpen()) overlayButtonRef.current?.focus();
   }, [active, ended, tab.attempts]);
 
+  // When a session ends, push its last output up past the bar, so the newest line (usually the
+  // error) is not under it. Only on the end, never while a session is live.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!ended || !term) return;
+    const bar =
+      hostRef.current?.parentElement?.querySelector<HTMLElement>(".term-bar");
+    const rowHeight = (hostRef.current?.clientHeight ?? 0) / term.rows;
+    const lines =
+      bar && bar.offsetHeight > 0 && rowHeight > 0
+        ? Math.ceil(bar.offsetHeight / rowHeight)
+        : FALLBACK_LIFT_ROWS;
+    term.write("\r\n".repeat(lines));
+  }, [ended]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -229,6 +247,7 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     [],
   );
 
+  const [clicked, setClicked] = useState<"Reattach" | "Retry">("Reattach");
   const closeTab = () => useTerminalStore.getState().closeTab(tab.tabKey);
 
   // The bar needs the pane's row (to copy or open its attach command) and its workbox (ssh or
@@ -259,7 +278,11 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
           row={row ?? null}
           remote={machine?.is_local === false}
           gone={gone}
-          onReattach={() => void reattach()}
+          clicked={clicked}
+          onReattach={() => {
+            setClicked(tab.state === "error" ? "Retry" : "Reattach");
+            void reattach();
+          }}
           onClose={closeTab}
           buttonRef={overlayButtonRef}
         />

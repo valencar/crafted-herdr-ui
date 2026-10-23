@@ -14,6 +14,8 @@ type Props = {
   remote: boolean;
   /** The pane is no longer in the app's state: nothing to reattach to. */
   gone: boolean;
+  /** Which button the user last clicked; the attempt line is named after it. */
+  clicked: "Reattach" | "Retry";
   onReattach: () => void;
   onClose: () => void;
   /** The default button, which takes focus so Enter reattaches. */
@@ -30,6 +32,7 @@ export function TermBar({
   row,
   remote,
   gone,
+  clicked,
   onReattach,
   onClose,
   buttonRef,
@@ -52,7 +55,7 @@ export function TermBar({
   const hint = opening || gone || failed ? null : reason.hint;
   const attempt =
     !opening && !gone && tab.attempts > 0
-      ? `${retryWord} failed (attempt ${tab.attempts}).`
+      ? `${clicked} failed (attempt ${tab.attempts}).`
       : null;
 
   return (
@@ -96,8 +99,8 @@ export function TermBar({
         )}
         <button
           type="button"
-          className="btn"
-          disabled={opening}
+          className={gone ? "btn btn-primary" : "btn"}
+          ref={gone ? buttonRef : undefined}
           onClick={onClose}
         >
           Close tab

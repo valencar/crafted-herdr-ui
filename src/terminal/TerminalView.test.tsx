@@ -478,19 +478,97 @@ describe("TerminalView", () => {
       expect(screen.getByText("Reattach failed (attempt 2).")).toBeVisible();
     });
 
-    it("a_session_that_worked_for_a_while_resets_the_count", async () => {
+    it("a_session_that_waits_on_a_human_before_failing_still_counts", async () => {
+      // The attach script prints "herdr not found … Press Enter to close" and waits: the session
+      // stays live for a long time, then exits 127. That is a failed attempt, not a working one.
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 127 });
+      const now = vi.spyOn(Date, "now");
+      const start = Date.now();
+      try {
+        for (const n of [1, 2]) {
+          await user.click(screen.getByRole("button", { name: "Reattach" }));
+          await flush();
+          expect(tabState().state).toBe("live");
+          now.mockReturnValue(start + n * 30_000);
+          emit({ kind: "exit", code: 127 });
+          expect(
+            screen.getByText(`Reattach failed (attempt ${n}).`),
+          ).toBeVisible();
+        }
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it("a_normal_end_resets_the_count", async () => {
       const user = userEvent.setup();
       render(<Harness />);
       await flush();
       emit({ kind: "exit", code: 1 });
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
-      const now = vi.spyOn(Date, "now");
-      now.mockReturnValue(Date.now() + 10_000);
       emit({ kind: "exit", code: 1 });
-      now.mockRestore();
+      expect(tabState().attempts).toBe(1);
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      emit({ kind: "exit", code: 0 });
       expect(tabState().attempts).toBe(0);
       expect(screen.queryByText(/Reattach failed/)).toBeNull();
+    });
+
+    it("a_failed_open_after_Reattach_is_still_called_Reattach_failed", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      open.mockRejectedValueOnce({ kind: "invalid", message: "No can do." });
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(tabState().state).toBe("error");
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Reattach failed (attempt 1).",
+      );
+      expect(screen.getByRole("alert")).not.toHaveTextContent("Retry failed");
+      // The button says Retry now, and a click on it renames the line.
+      open.mockRejectedValueOnce({ kind: "invalid", message: "No can do." });
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      await flush();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Retry failed (attempt 2).",
+      );
+    });
+
+    it("the_output_is_lifted_above_the_bar_when_a_session_ends_and_not_before", async () => {
+      render(<Harness />);
+      await flush();
+      expect(term().write).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^\r\n/),
+      );
+      // 40 px of bar over 20 px rows (600 px / 30 rows): two rows.
+      const height = vi
+        .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+        .mockReturnValue(40);
+      const host = vi
+        .spyOn(HTMLElement.prototype, "clientHeight", "get")
+        .mockReturnValue(600);
+      term().rows = 30;
+      try {
+        emit({ kind: "exit", code: 1 });
+        expect(term().write).toHaveBeenCalledWith("\r\n\r\n");
+      } finally {
+        height.mockRestore();
+        host.mockRestore();
+      }
+    });
+
+    it("an_unmeasurable_bar_still_lifts_the_output", async () => {
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(term().write).toHaveBeenCalledWith("\r\n\r\n\r\n\r\n");
     });
 
     it("a_reattach_that_fails_again_says_so_and_counts_up", async () => {
@@ -530,14 +608,11 @@ describe("TerminalView", () => {
       );
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       expect(screen.getByText("Reattaching…")).toBeInTheDocument();
-      for (const name of [
-        "Reattach",
-        "Close tab",
-        "Copy attach command",
-        /^Open in /,
-      ]) {
+      for (const name of ["Reattach", "Copy attach command", /^Open in /]) {
         expect(screen.getByRole("button", { name })).toBeDisabled();
       }
+      // A hung open always has a way out.
+      expect(screen.getByRole("button", { name: "Close tab" })).toBeEnabled();
       await act(async () => finish(60));
       expect(screen.queryByText("Reattaching…")).toBeNull();
     });
@@ -578,6 +653,7 @@ describe("TerminalView", () => {
       ).toBeNull();
       expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
       expect(screen.getByRole("button", { name: "Close tab" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
     });
 
     it("a_workbox_without_a_snapshot_does_not_make_the_pane_look_gone", async () => {

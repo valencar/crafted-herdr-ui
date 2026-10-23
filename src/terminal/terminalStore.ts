@@ -15,7 +15,7 @@ export type TermTab = {
   termId: number | null;
   /** How the last session ended: the attach command's exit code; null while one runs, or when it gave none. */
   exitCode: number | null;
-  /** Reattach and Retry clicks since a session last went live; 0 once one does. */
+  /** Reattach and Retry clicks since a session last ended normally (exit 0); the first open does not count. */
   attempts: number;
 };
 
