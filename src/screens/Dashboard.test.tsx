@@ -212,11 +212,14 @@ describe("Dashboard", () => {
     expect(calls("open_session")).toHaveLength(0);
   });
 
-  it("reply_on_a_blocked_card_only_selects_the_row", async () => {
+  it("details_on_a_blocked_card_only_selects_the_row_and_nothing_offers_a_reply", async () => {
     const user = setup();
     const card = within(section("Needs you")).getAllByRole("article")[0];
+    expect(card).toHaveAttribute("data-status", "blocked");
+    // A blocked agent is never answered for the user: no Reply… on its card.
+    expect(within(card).queryByRole("button", { name: /Reply/ })).toBeNull();
     invoke.mockClear();
-    await user.click(within(card).getByRole("button", { name: "Reply…" }));
+    await user.click(within(card).getByRole("button", { name: "Details…" }));
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
     expect(useAppStore.getState().view).toEqual({ kind: "all" });
     // Nothing is sent to the agent: no herdr command at all comes from the click.

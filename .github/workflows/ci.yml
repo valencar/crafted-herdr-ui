@@ -76,10 +76,11 @@ jobs:
   # A test build for every pull request: the same universal, ad-hoc signed DMG a release ships,
   # attached to the run as an artifact so a branch can be installed and tried before it merges.
   # Read-only, like the release build: it runs the project's dependencies and holds no write token.
-  # Dependabot PRs skip it (they change CI actions, not the app), to save macOS minutes.
+  # Dependabot PRs skip it (they change CI actions, not the app), to save macOS minutes. Fork PRs
+  # skip it too: it would build and publish a DMG from code the maintainer has not read.
   preview:
     needs: check
-    if: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' }}
+    if: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: macos-14
     timeout-minutes: 60
     permissions:

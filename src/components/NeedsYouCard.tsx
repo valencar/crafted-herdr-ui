@@ -71,7 +71,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
             className="btn"
             onClick={() => onSelect(row.key)}
           >
-            Reply…
+            Details…
           </button>
         )}
         {age && (
