@@ -22,6 +22,7 @@ pub use attach::{
 };
 pub use quote::{join_quoted, shell_quote};
 
+use crate::platform;
 use crate::state::{Health, MachineView};
 use launchers::{Alacritty, Custom, Ghostty, ITerm2, Kitty, TerminalApp, Warp, WezTerm};
 
@@ -185,7 +186,9 @@ pub fn default_terminal(installed: &[TerminalId]) -> TerminalId {
 
 /// Whether Spotlight knows an app with this bundle id.
 async fn bundle_installed(bundle_id: &str) -> bool {
-    let run = tokio::process::Command::new(MDFIND)
+    let mut cmd = tokio::process::Command::new(MDFIND);
+    platform::background(&mut cmd);
+    let run = cmd
         .arg(format!("kMDItemCFBundleIdentifier == '{bundle_id}'"))
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -344,7 +347,9 @@ async fn run_spec(
     if spec.detached {
         return spawn_detached(spec, env);
     }
-    let run = tokio::process::Command::new(&spec.program)
+    let mut cmd = tokio::process::Command::new(&spec.program);
+    platform::background(&mut cmd);
+    let run = cmd
         .args(&spec.args)
         .env_clear()
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
@@ -375,8 +380,9 @@ async fn run_spec(
 /// Starts the process and lets it go: no wait and no kill on drop, so a template that stays
 /// in the foreground (`wezterm start -- …`) is not killed after the launch timeout.
 fn spawn_detached(spec: &LaunchSpec, env: &[(String, String)]) -> Result<(), String> {
-    tokio::process::Command::new(&spec.program)
-        .args(&spec.args)
+    let mut cmd = tokio::process::Command::new(&spec.program);
+    platform::background(&mut cmd);
+    cmd.args(&spec.args)
         .env_clear()
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
         .envs(env.iter().map(|(k, v)| (k, v)))

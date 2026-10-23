@@ -11,7 +11,7 @@ use tokio::sync::Semaphore;
 use ts_rs::TS;
 
 use super::errors::HerdrError;
-use crate::{LOCAL, lock, now_ms};
+use crate::{LOCAL, lock, now_ms, platform};
 
 pub const T_DEFAULT: Duration = Duration::from_secs(10);
 pub const T_CREATE: Duration = Duration::from_secs(30);
@@ -235,6 +235,7 @@ impl HerdrCli {
         timeout: Duration,
     ) -> Result<(Option<i32>, String, String), HerdrError> {
         let mut cmd = Command::new(self.bin());
+        platform::background(&mut cmd);
         if let Some(id) = remote {
             cmd.arg("--machine").arg(id);
         }

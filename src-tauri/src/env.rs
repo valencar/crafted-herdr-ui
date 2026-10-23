@@ -11,6 +11,8 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
 
+use crate::platform;
+
 /// How long to wait for the login shell before giving up.
 const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -56,6 +58,7 @@ fn process_env() -> LoginEnv {
 /// Spawns `cmd` with no stdin and no stderr, and returns its stdout when it exits 0 within
 /// `limit`. The child is killed if it overruns.
 async fn stdout_if_ok(mut cmd: Command, limit: Duration) -> Option<String> {
+    platform::background(&mut cmd);
     let child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

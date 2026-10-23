@@ -6,6 +6,7 @@ pub mod herdr;
 pub mod machine_setup;
 pub mod menu;
 pub mod notify;
+pub mod platform;
 pub mod poller;
 pub mod preview;
 pub mod pty;
