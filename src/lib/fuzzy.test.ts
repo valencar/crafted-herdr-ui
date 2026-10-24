@@ -61,4 +61,15 @@ describe("fuzzyMatch", () => {
     );
     expect(fuzzyMatch("", "anything")?.positions).toEqual([]);
   });
+
+  it("positions_are_code_point_indexes_into_the_original_text", () => {
+    // The emoji is two UTF-16 units but one code point.
+    expect(fuzzyMatch("api", "🔧 api-service")?.positions).toEqual([2, 3, 4]);
+  });
+
+  it("positions_survive_a_character_whose_lowercase_is_longer", () => {
+    // "İ".toLowerCase() is two code points; "d" is still the second original character.
+    expect(fuzzyMatch("d", "İd")?.positions).toEqual([1]);
+    expect(fuzzyMatch("id", "İd")?.positions).toEqual([0, 1]);
+  });
 });

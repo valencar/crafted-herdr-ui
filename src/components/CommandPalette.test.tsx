@@ -685,6 +685,26 @@ describe("CommandPalette agent frame", () => {
     expect(label).toHaveTextContent("tester");
   });
 
+  it("marks_exactly_the_matched_letters_after_an_emoji", async () => {
+    useAppStore.setState({
+      state: {
+        ...state,
+        machines: [{ ...state.machines[0], label: "🔧 api-service" }],
+      },
+    });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "api");
+    const option = screen
+      .getAllByRole("option")
+      .find(
+        (o) =>
+          o.querySelector(".palette-label")?.textContent === "🔧 api-service",
+      );
+    expect(option).toBeDefined();
+    const marks = option?.querySelectorAll("mark.palette-mark");
+    expect([...(marks ?? [])].map((m) => m.textContent)).toEqual(["api"]);
+  });
+
   it("the_selected_option_shows_its_keys_and_the_footer_lists_tab", async () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "tester");
