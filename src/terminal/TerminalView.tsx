@@ -266,7 +266,7 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     s.state?.machines.find((m) => m.id === tab.target.machineId),
   );
   const gone =
-    tab.state === "detached" &&
+    ended &&
     tab.target.kind === "pane" &&
     !row &&
     !!machine?.snapshot &&

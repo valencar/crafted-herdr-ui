@@ -739,6 +739,27 @@ describe("TerminalView", () => {
       expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
     });
 
+    it("a_failed_open_on_a_vanished_pane_offers_only_Close_tab", async () => {
+      listed({ gone: true });
+      open.mockReset().mockRejectedValue({
+        kind: "invalid",
+        message: "No such pane.",
+      });
+      render(<Harness />);
+      await flush();
+      expect(tabState().state).toBe("error");
+      expect(
+        screen.getByText("This pane no longer exists on buildbox."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Copy attach command" }),
+      ).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
+    });
+
     it("Close_tab_takes_focus_when_the_pane_disappears_after_the_session_ended", async () => {
       listed();
       render(<Harness />);
