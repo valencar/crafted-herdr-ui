@@ -445,6 +445,7 @@ mod tests {
         assert_eq!(T::Custom.bundle_id(), None);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn detection_always_includes_terminal_and_keeps_offer_order() {
         assert_eq!(with_terminal_app(&[]), [T::TerminalApp]);
@@ -481,6 +482,7 @@ mod tests {
         assert!(!app_on_disk(TerminalId::Custom, &dirs, &|_| true));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn terminal_list_carries_the_default() {
         let list = TerminalList::new(vec![T::Warp, T::TerminalApp]);
