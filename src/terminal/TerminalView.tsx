@@ -215,19 +215,32 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
   const ended = tab.state === "detached" || tab.state === "error";
 
   // When a session ends, push its last output up past the bar, so the newest line (usually the
-  // error) is not under it. Only on the end, never while a session is live.
+  // error) is not under it. Only on the end, never while a session is live. A tab that ends in
+  // the background has a hidden bar that measures 0, so it gets `FALLBACK_LIFT_ROWS`; once the tab
+  // is shown the bar is measured and only the rows still missing are written. `lifted` is how
+  // many rows this end has pushed up; a live (or reopening) session resets it.
+  const lifted = useRef(0);
   useEffect(() => {
     const term = termRef.current;
-    if (!ended || !term) return;
+    if (!ended) {
+      lifted.current = 0;
+      return;
+    }
+    if (!term) return;
     const bar =
       hostRef.current?.parentElement?.querySelector<HTMLElement>(".term-bar");
     const rowHeight = (hostRef.current?.clientHeight ?? 0) / term.rows;
-    const lines =
+    const measured =
       bar && bar.offsetHeight > 0 && rowHeight > 0
         ? Math.ceil(bar.offsetHeight / rowHeight)
-        : FALLBACK_LIFT_ROWS;
-    term.write("\r\n".repeat(lines));
-  }, [ended]);
+        : null;
+    // Unmeasurable: lift the fallback once, and let a later, measurable run top it up.
+    const needed = measured ?? (lifted.current === 0 ? FALLBACK_LIFT_ROWS : 0);
+    const missing = needed - lifted.current;
+    if (missing <= 0) return;
+    term.write("\r\n".repeat(missing));
+    lifted.current = needed;
+  }, [ended, active]);
 
   useImperativeHandle(
     ref,

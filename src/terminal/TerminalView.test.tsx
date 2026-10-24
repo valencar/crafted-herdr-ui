@@ -564,6 +564,89 @@ describe("TerminalView", () => {
       }
     });
 
+    describe("a tab that ended while hidden", () => {
+      /** The blank-line writes so far, as a row count each. */
+      const lifts = () =>
+        term()
+          .write.mock.calls.map((c) => String(c[0]))
+          .filter((w) => /^(\r\n)+$/.test(w))
+          .map((w) => w.length / 2);
+      /** A bar `px` tall over 20 px rows (600 px / 30 rows). */
+      const barOf = (px: number) => {
+        const height = vi
+          .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+          .mockReturnValue(px);
+        const host = vi
+          .spyOn(HTMLElement.prototype, "clientHeight", "get")
+          .mockReturnValue(600);
+        term().rows = 30;
+        return () => {
+          height.mockRestore();
+          host.mockRestore();
+        };
+      };
+
+      it("is_topped_up_by_the_missing_rows_once_it_is_shown", async () => {
+        const view = render(<Harness active={false} />);
+        await flush();
+        emit({ kind: "exit", code: 1 });
+        expect(lifts()).toEqual([4]);
+        // 120 px of bar over 20 px rows: six rows, two more than the fallback lifted.
+        const restore = barOf(120);
+        try {
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([4, 2]);
+          // Shown again later, nothing is missing.
+          view.rerender(<Harness active={false} />);
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([4, 2]);
+        } finally {
+          restore();
+        }
+      });
+
+      it("writes_nothing_more_when_the_lift_already_covers_the_bar", async () => {
+        const view = render(<Harness active={false} />);
+        await flush();
+        emit({ kind: "exit", code: 1 });
+        // 60 px of bar over 20 px rows: three rows, fewer than the four lifted.
+        const restore = barOf(60);
+        try {
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([4]);
+        } finally {
+          restore();
+        }
+      });
+
+      it("starts_fresh_when_a_reattached_session_ends_again", async () => {
+        const user = userEvent.setup();
+        listed();
+        const view = render(<Harness active={false} />);
+        await flush();
+        emit({ kind: "exit", code: 1 });
+        expect(lifts()).toEqual([4]);
+        view.rerender(<Harness active />);
+        await user.click(screen.getByRole("button", { name: "Reattach" }));
+        await flush();
+        expect(tabState().state).toBe("live");
+        emit({ kind: "exit", code: 1 });
+        expect(lifts()).toEqual([4, 4]);
+      });
+
+      it("writes_nothing_while_the_session_is_live", async () => {
+        const view = render(<Harness active={false} />);
+        await flush();
+        const restore = barOf(120);
+        try {
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([]);
+        } finally {
+          restore();
+        }
+      });
+    });
+
     it("an_unmeasurable_bar_still_lifts_the_output", async () => {
       render(<Harness />);
       await flush();
