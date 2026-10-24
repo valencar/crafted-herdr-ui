@@ -72,4 +72,13 @@ describe("fuzzyMatch", () => {
     expect(fuzzyMatch("d", "İd")?.positions).toEqual([1]);
     expect(fuzzyMatch("id", "İd")?.positions).toEqual([0, 1]);
   });
+
+  it("a_label_matches_its_own_characters_typed_as_the_query", () => {
+    // Whole-string lowercase would turn "İ" into "i" plus U+0307 and a final "Σ" into "ς".
+    expect(fuzzyMatch("İd", "İd")?.positions).toEqual([0, 1]);
+    expect(fuzzyMatch("İ", "İstanbul")?.positions).toEqual([0]);
+    expect(fuzzyMatch("ΟΔΟΣ", "ΟΔΟΣ")?.positions).toEqual([0, 1, 2, 3]);
+    expect(fuzzyMatch("οδος", "ΟΔΟΣ")?.positions).toEqual([0, 1, 2, 3]);
+    expect(fuzzyMatch("Σ", "οδοσ")?.positions).toEqual([3]);
+  });
 });

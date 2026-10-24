@@ -1,11 +1,23 @@
 const WORD_BREAKS = new Set([" ", "-", "_", "/", ":", "."]);
 
 /**
+ * Case-folds `s` one code point at a time, to the first code point of each one's lowercase (the
+ * final sigma `ς` folds to `σ`). The query and the text both go through it, so a label always
+ * matches its own characters, and the result has one entry per code point of `s`.
+ */
+function fold(s: string): string[] {
+  return [...s].map((c) => {
+    const lower = [...c.toLowerCase()][0];
+    return lower === "ς" ? "σ" : lower;
+  });
+}
+
+/**
  * A case-insensitive subsequence match of `query` in `text`, or `null` when not every query
  * character appears in order. `positions` are the code-point indexes of the matched characters
  * in `text` (the original, not its lowercase), the indexes `[...text]` gives. Each code point of
- * `text` is compared by the first code point of its lowercase, so one whose lowercase is longer
- * (`İ`) still counts as one character.
+ * `text` and each of `query` are compared by the first code point of its lowercase (see `fold`),
+ * so one whose lowercase is longer (`İ`) still counts as one character.
  * Each matched character scores 1, plus 5 when it starts a word (the start, or after a space,
  * `-`, `_`, `/`, `:` or `.`) and 3 when it directly follows the previous match. A text that
  * starts with the query adds 10; a longer text loses 0.01 per character, so the shorter one
@@ -15,10 +27,9 @@ export function fuzzyMatch(
   query: string,
   text: string,
 ): { score: number; positions: number[] } | null {
-  const q = query.toLowerCase();
-  const t = text.toLowerCase();
+  const q = fold(query);
   const chars = [...text];
-  const lower = chars.map((c) => [...c.toLowerCase()][0]);
+  const lower = fold(text);
   const positions: number[] = [];
   let score = 0;
   let at = 0;
@@ -33,8 +44,8 @@ export function fuzzyMatch(
     previous = found;
     at = found + 1;
   }
-  if (t.startsWith(q)) score += 10;
-  return { score: score - 0.01 * t.length, positions };
+  if (q.every((ch, i) => lower[i] === ch)) score += 10;
+  return { score: score - 0.01 * text.toLowerCase().length, positions };
 }
 
 /** The score of `fuzzyMatch`, or `null` when there is no match. */
