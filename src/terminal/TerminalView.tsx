@@ -214,34 +214,6 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
 
   const ended = tab.state === "detached" || tab.state === "error";
 
-  // When a session ends, push its last output up past the bar, so the newest line (usually the
-  // error) is not under it. Only on the end, never while a session is live. A tab that ends in
-  // the background has a hidden bar that measures 0, so it gets `FALLBACK_LIFT_ROWS`; once the tab
-  // is shown the bar is measured and only the rows still missing are written. `lifted` is how
-  // many rows this end has pushed up; a live (or reopening) session resets it.
-  const lifted = useRef(0);
-  useEffect(() => {
-    const term = termRef.current;
-    if (!ended) {
-      lifted.current = 0;
-      return;
-    }
-    if (!term) return;
-    const bar =
-      hostRef.current?.parentElement?.querySelector<HTMLElement>(".term-bar");
-    const rowHeight = (hostRef.current?.clientHeight ?? 0) / term.rows;
-    const measured =
-      bar && bar.offsetHeight > 0 && rowHeight > 0
-        ? Math.ceil(bar.offsetHeight / rowHeight)
-        : null;
-    // Unmeasurable: lift the fallback once, and let a later, measurable run top it up.
-    const needed = measured ?? (lifted.current === 0 ? FALLBACK_LIFT_ROWS : 0);
-    const missing = needed - lifted.current;
-    if (missing <= 0) return;
-    term.write("\r\n".repeat(missing));
-    lifted.current = needed;
-  }, [ended, active]);
-
   useImperativeHandle(
     ref,
     () => ({
@@ -271,6 +243,40 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     !row &&
     !!machine?.snapshot &&
     machine.health.kind !== "disabled";
+
+  // When a session ends, push its last output up past the bar, so the newest line (usually the
+  // error) is not under it. Only on the end, never while a session is live. A tab that ends in
+  // the background has a hidden bar that measures 0, so it gets `FALLBACK_LIFT_ROWS`; once the tab
+  // is shown the bar is measured and only the rows still missing are written. `lifted` is how
+  // many rows this end has pushed up; a live (or reopening) session resets it. It measures again
+  // whenever the tab is shown or the bar's content changes.
+  const lifted = useRef(0);
+  useEffect(() => {
+    const term = termRef.current;
+    if (!ended) {
+      lifted.current = 0;
+      return;
+    }
+    if (!term) return;
+    const bar =
+      hostRef.current?.parentElement?.querySelector<HTMLElement>(".term-bar");
+    // The rows the box fits now: a tab shown after it ended has not been refitted yet, so
+    // `term.rows` may still be the old ones.
+    const rows = fitRef.current?.proposeDimensions()?.rows || term.rows;
+    const rowHeight = (hostRef.current?.clientHeight ?? 0) / rows;
+    const measured =
+      bar && bar.offsetHeight > 0 && rowHeight > 0
+        ? Math.ceil(bar.offsetHeight / rowHeight)
+        : null;
+    // Unmeasurable: lift the fallback once, and let a later, measurable run top it up.
+    const needed = measured ?? (lifted.current === 0 ? FALLBACK_LIFT_ROWS : 0);
+    const missing = needed - lifted.current;
+    if (missing <= 0) return;
+    term.write("\r\n".repeat(missing));
+    lifted.current = needed;
+    // `gone` changes the bar's words and buttons, so its height.
+  }, [ended, active, gone]);
+
   // The bar's default button takes focus, so Enter reattaches or retries. It is disabled while a
   // reattach is opening, so focus comes back each time the session ends again, and when the pane
   // disappears after the end (the default button becomes Close tab).

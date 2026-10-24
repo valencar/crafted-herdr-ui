@@ -605,6 +605,46 @@ describe("TerminalView", () => {
         }
       });
 
+      it("measures_with_the_rows_the_box_now_fits_not_the_ones_of_the_last_fit", async () => {
+        const view = render(<Harness active={false} />);
+        await flush();
+        emit({ kind: "exit", code: 1 });
+        expect(lifts()).toEqual([4]);
+        // An 800 px host fits 40 rows of 20 px, but the terminal still has its default 24
+        // (never fitted while hidden): 120 px of bar is six rows, not four.
+        const height = vi
+          .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+          .mockReturnValue(120);
+        const host = vi
+          .spyOn(HTMLElement.prototype, "clientHeight", "get")
+          .mockReturnValue(800);
+        h.fitDims = { cols: 100, rows: 40 };
+        term().rows = 24;
+        try {
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([4, 2]);
+        } finally {
+          height.mockRestore();
+          host.mockRestore();
+        }
+      });
+
+      it("is_topped_up_again_when_the_bar_changes_while_the_tab_stays_ended", async () => {
+        listed();
+        render(<Harness />);
+        await flush();
+        emit({ kind: "exit", code: 0 });
+        expect(lifts()).toEqual([4]);
+        // The pane vanishes: the bar shows other words and buttons and grows to six rows.
+        const restore = barOf(120);
+        try {
+          listed({ gone: true });
+          expect(lifts()).toEqual([4, 2]);
+        } finally {
+          restore();
+        }
+      });
+
       it("writes_nothing_more_when_the_lift_already_covers_the_bar", async () => {
         const view = render(<Harness active={false} />);
         await flush();
