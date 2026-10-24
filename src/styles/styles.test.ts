@@ -633,6 +633,13 @@ describe("motion tokens", () => {
     expect(css).not.toContain(".term-overlay");
   });
 
+  it("text_is_not_thinned_by_font_smoothing", () => {
+    // `antialiased` makes macOS draw light-on-dark text thin; the default weight is wanted.
+    for (const file of ["app.css", "windows.css", "global.css"]) {
+      expect(stripComments(read(file)), file).not.toMatch(/font-smoothing/);
+    }
+  });
+
   it("figures_are_tabular", () => {
     const body = rulesOf("global.css").find((r) => r.selector === "body");
     expect(body?.body).toContain("font-variant-numeric: tabular-nums");
