@@ -1,6 +1,10 @@
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import {
+  HOME,
+  useTerminalStore,
+  type TabState,
+} from "../terminal/terminalStore";
 
 vi.mock("./ipc", () => ({ invokeTyped: vi.fn() }));
 import { invokeTyped } from "./ipc";
@@ -13,14 +17,22 @@ function Probe() {
   return null;
 }
 
-function openPane(paneId: string) {
-  act(() =>
+/** Opens (or focuses) a pane tab; its session is live unless a state is given. */
+function openPane(paneId: string, state: TabState = "live") {
+  act(() => {
     useTerminalStore.getState().openTab({
       tabKey: `buildbox::${paneId}`,
       target: { kind: "pane", machineId: "buildbox", paneId },
       title: "planner",
       machineLabel: "Build box",
-    }),
+    });
+    useTerminalStore.getState().updateTab(`buildbox::${paneId}`, { state });
+  });
+}
+
+function setTabState(paneId: string, state: TabState) {
+  act(() =>
+    useTerminalStore.getState().updateTab(`buildbox::${paneId}`, { state }),
   );
 }
 
@@ -73,6 +85,25 @@ describe("useVisibleRowReport", () => {
         machineLabel: "Build box",
       }),
     );
+    expect(invoke).toHaveBeenLastCalledWith("set_visible_row", { key: null });
+  });
+
+  it("reports_null_for_a_tab_whose_session_is_not_live", () => {
+    render(<Probe />);
+    openPane("w1:p1", "opening");
+    expect(invoke).toHaveBeenLastCalledWith("set_visible_row", { key: null });
+    setTabState("w1:p1", "live");
+    expect(invoke).toHaveBeenLastCalledWith("set_visible_row", {
+      key: "buildbox::w1:p1",
+    });
+    setTabState("w1:p1", "detached");
+    expect(invoke).toHaveBeenLastCalledWith("set_visible_row", { key: null });
+    // Reattach: the same tab shows its output again.
+    setTabState("w1:p1", "live");
+    expect(invoke).toHaveBeenLastCalledWith("set_visible_row", {
+      key: "buildbox::w1:p1",
+    });
+    setTabState("w1:p1", "error");
     expect(invoke).toHaveBeenLastCalledWith("set_visible_row", { key: null });
   });
 
