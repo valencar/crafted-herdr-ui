@@ -13,7 +13,7 @@ use ts_rs::TS;
 
 use crate::lock;
 use crate::platform::runner::Runner;
-use crate::pty::{PtyControl, PtySpawner, TermSize};
+use crate::pty::{Chunk, PtyControl, PtySpawner, TermSize};
 use crate::trace::trace_event;
 
 pub type TermId = u32;
@@ -115,11 +115,14 @@ impl TermSessions {
         #[cfg(feature = "trace")]
         let received = std::time::Instant::now();
         let session = self.get(id)?;
-        let mut input = lock(&session.input);
-        let written = input
-            .write_all(data.as_bytes())
-            .and_then(|()| input.flush())
-            .map_err(|_| GONE.to_owned());
+        let written = {
+            let mut input = lock(&session.input);
+            input
+                .write_all(data.as_bytes())
+                .and_then(|()| input.flush())
+                .map_err(|_| GONE.to_owned())
+        };
+        // After the guard is gone, so the next keystroke never waits on trace I/O.
         trace_event!(
             "term_write",
             serde_json::json!({
@@ -166,7 +169,7 @@ impl TermSessions {
 /// The forwarding thread of one session. Holds no lock while blocked on the child or the sink.
 fn forward(
     id: TermId,
-    output: std::sync::mpsc::Receiver<Vec<u8>>,
+    output: std::sync::mpsc::Receiver<Chunk>,
     control: Arc<dyn PtyControl>,
     sink: TermSink,
     sessions: SessionMap,
@@ -174,18 +177,27 @@ fn forward(
     let mut pending = Vec::new();
     // Bytes read but not yet sent, so one event never carries more than `MAX_CHUNK` of them.
     let mut buffer: Vec<u8> = Vec::new();
+    // When the oldest byte of `buffer` was read from the pty (for the `term_out` timing). A batch
+    // keeps the earliest stamp of the chunks merged into it, and what is left over after the
+    // split keeps that stamp too.
+    #[cfg(feature = "trace")]
+    let mut read_at = std::time::Instant::now();
     loop {
         if buffer.is_empty() {
             match output.recv() {
-                Ok(bytes) => buffer = bytes,
+                Ok(chunk) => {
+                    buffer = chunk.bytes;
+                    #[cfg(feature = "trace")]
+                    {
+                        read_at = chunk.read_at;
+                    }
+                }
                 Err(_) => break,
             }
         }
-        #[cfg(feature = "trace")]
-        let read = std::time::Instant::now();
         while buffer.len() < MAX_CHUNK {
             match output.try_recv() {
-                Ok(bytes) => buffer.extend_from_slice(&bytes),
+                Ok(chunk) => buffer.extend_from_slice(&chunk.bytes),
                 Err(_) => break,
             }
         }
@@ -206,7 +218,7 @@ fn forward(
                 serde_json::json!({
                     "id": id,
                     "bytes": bytes,
-                    "us": read.elapsed().as_micros() as u64,
+                    "us": read_at.elapsed().as_micros() as u64,
                 })
             );
         }
@@ -321,7 +333,7 @@ mod tests {
         keep_open: bool,
         control: Arc<FakeControl>,
         spawned_sizes: Mutex<Vec<TermSize>>,
-        open_ends: Mutex<Vec<mpsc::Sender<Vec<u8>>>>,
+        open_ends: Mutex<Vec<mpsc::Sender<Chunk>>>,
     }
 
     impl FakeSpawner {
@@ -341,7 +353,7 @@ mod tests {
             lock(&self.spawned_sizes).push(size);
             let (tx, output) = mpsc::channel();
             for chunk in &self.chunks {
-                tx.send(chunk.clone()).expect("preload");
+                tx.send(Chunk::now(chunk.clone())).expect("preload");
             }
             if self.keep_open {
                 lock(&self.open_ends).push(tx);
@@ -420,12 +432,23 @@ mod tests {
         assert_eq!(get("COLORTERM"), ["truecolor"]);
     }
 
+    /// The trace log is process-wide, so the tests that read it share one directory, set up once.
+    #[cfg(feature = "trace")]
+    fn trace_dir() -> &'static std::path::Path {
+        static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        DIR.get_or_init(|| {
+            let dir = tempfile::tempdir().unwrap();
+            crate::trace::init(dir.path().to_path_buf());
+            dir
+        })
+        .path()
+    }
+
     /// A `trace` build logs the time of a keystroke write and of a chunk of output.
     #[cfg(feature = "trace")]
     #[test]
     fn terminal_traffic_is_traced_with_timings_and_sizes() {
-        let dir = tempfile::tempdir().unwrap();
-        crate::trace::init(dir.path().to_path_buf());
+        let dir = trace_dir();
         let spawner = FakeSpawner::new(vec![vec![b'x'; 1111]], true);
         let sessions = TermSessions::new(spawner);
         let (sink, rx) = recording_sink();
@@ -435,7 +458,7 @@ mod tests {
         rx.recv_timeout(WAIT).expect("the output");
         sessions.write(id, &"y".repeat(2222)).expect("write");
         // The output line is written just after the sink returns, on the forwarding thread.
-        let path = dir.path().join("trace.jsonl");
+        let path = dir.join("trace.jsonl");
         wait_until("the term_out line", || {
             std::fs::read_to_string(&path).is_ok_and(|t| t.contains("term_out"))
         });
@@ -452,6 +475,39 @@ mod tests {
         };
         assert!(find("term_out", 1111)["us"].as_u64().is_some());
         assert!(find("term_write", 2222)["us"].as_u64().is_some());
+        sessions.close_all();
+    }
+
+    /// The time a chunk waited in the channel counts: `term_out` runs from the pty read.
+    #[cfg(feature = "trace")]
+    #[test]
+    fn term_out_counts_from_the_pty_read_not_from_the_forwarder() {
+        let dir = trace_dir();
+        let spawner = FakeSpawner::new(Vec::new(), true);
+        let sessions = TermSessions::new(spawner.clone());
+        let (sink, rx) = recording_sink();
+        sessions
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
+            .expect("open");
+        let stale = Instant::now() - Duration::from_millis(300);
+        lock(&spawner.open_ends)[0]
+            .send(Chunk {
+                bytes: vec![b'z'; 3333],
+                read_at: stale,
+            })
+            .expect("send");
+        rx.recv_timeout(WAIT).expect("the output");
+        let path = dir.join("trace.jsonl");
+        wait_until("the term_out line", || {
+            std::fs::read_to_string(&path).is_ok_and(|t| t.contains("\"bytes\":3333"))
+        });
+        let text = std::fs::read_to_string(&path).unwrap();
+        let line: serde_json::Value = text
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .find(|v| v["kind"] == "term_out" && v["bytes"] == 3333)
+            .unwrap();
+        assert!(line["us"].as_u64().unwrap() >= 300_000, "{line}");
         sessions.close_all();
     }
 

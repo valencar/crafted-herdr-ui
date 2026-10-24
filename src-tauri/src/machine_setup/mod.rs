@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::lock;
 use crate::platform::runner::Runner;
-use crate::pty::{PtyControl, PtySpawner, TermSize};
+use crate::pty::{Chunk, PtyControl, PtySpawner, TermSize};
 
 /// The event the UI listens to.
 pub const SETUP_EVENT: &str = "machine-setup";
@@ -180,15 +180,15 @@ const DRAIN_MAX: Duration = Duration::from_secs(1);
 /// keep the terminal open after herdr itself is gone).
 fn drive(
     active: &Mutex<Option<Active>>,
-    output: mpsc::Receiver<Vec<u8>>,
+    output: mpsc::Receiver<Chunk>,
     control: Arc<dyn PtyControl>,
     stall_after: Duration,
 ) {
     let mut exited = None;
     loop {
         match output.recv_timeout(POLL.min(stall_after)) {
-            Ok(bytes) => {
-                if !deliver(active, &bytes) {
+            Ok(chunk) => {
+                if !deliver(active, &chunk.bytes) {
                     break;
                 }
             }
@@ -200,10 +200,10 @@ fn drive(
                     exited = Some(code);
                     let deadline = Instant::now() + DRAIN_MAX;
                     while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-                        let Ok(bytes) = output.recv_timeout(DRAIN.min(left)) else {
+                        let Ok(chunk) = output.recv_timeout(DRAIN.min(left)) else {
                             break;
                         };
-                        deliver(active, &bytes);
+                        deliver(active, &chunk.bytes);
                     }
                     break;
                 }

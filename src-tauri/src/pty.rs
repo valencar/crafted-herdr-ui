@@ -3,6 +3,7 @@
 use std::io::{self, Read, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::lock;
 use crate::platform::runner::Launch;
@@ -43,10 +44,27 @@ fn exit_code(status: &portable_pty::ExitStatus) -> i32 {
     i32::try_from(status.exit_code()).unwrap_or(-1)
 }
 
+/// One read of a process's output, stamped when it was read, so the time it then waits in the
+/// channel counts in the `term_out` timing.
+pub struct Chunk {
+    pub bytes: Vec<u8>,
+    pub read_at: Instant,
+}
+
+impl Chunk {
+    /// `bytes`, read just now.
+    pub fn now(bytes: Vec<u8>) -> Self {
+        Self {
+            bytes,
+            read_at: Instant::now(),
+        }
+    }
+}
+
 /// A started process: its output as chunks (the channel closes at end of output), the way to
 /// type into it, and the way to stop it.
 pub struct SpawnedPty {
-    pub output: mpsc::Receiver<Vec<u8>>,
+    pub output: mpsc::Receiver<Chunk>,
     pub input: Box<dyn Write + Send>,
     pub control: Arc<dyn PtyControl>,
 }
@@ -126,7 +144,7 @@ impl PtySpawner for PortablePty {
         std::thread::spawn(move || {
             let mut buffer = [0u8; 4096];
             while let Ok(n) = reader.read(&mut buffer) {
-                if n == 0 || tx.send(buffer[..n].to_vec()).is_err() {
+                if n == 0 || tx.send(Chunk::now(buffer[..n].to_vec())).is_err() {
                     break;
                 }
             }
@@ -181,7 +199,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             match pty.output.recv_timeout(Duration::from_millis(100)) {
-                Ok(bytes) => seen += &String::from_utf8_lossy(&bytes),
+                Ok(chunk) => seen += &String::from_utf8_lossy(&chunk.bytes),
                 Err(RecvTimeoutError::Disconnected) => break,
                 Err(RecvTimeoutError::Timeout) => {}
             }
@@ -216,7 +234,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             match pty.output.recv_timeout(Duration::from_millis(100)) {
-                Ok(bytes) => seen += &String::from_utf8_lossy(&bytes),
+                Ok(chunk) => seen += &String::from_utf8_lossy(&chunk.bytes),
                 Err(RecvTimeoutError::Disconnected) => break,
                 Err(RecvTimeoutError::Timeout) => {}
             }

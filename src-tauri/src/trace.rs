@@ -8,7 +8,8 @@
 //!
 //! Kinds: `herdr` (every command-log entry: machine, joined argv, `duration_ms`, `exit`),
 //! `term_write` (µs from receiving keystrokes to finishing the pty write) and `term_out`
-//! (µs from the forwarder receiving pty output to the sink call returning).
+//! (µs from the pty read to the sink call returning: each chunk is stamped by the pty reader
+//! thread, so the time it waits in the channel counts; a merged batch uses its earliest stamp).
 
 use std::path::PathBuf;
 

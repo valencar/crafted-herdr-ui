@@ -10,7 +10,7 @@ use crafted_herdr_ui_lib::machine_setup::{
     Emit, ExitHook, MachineSetup, RunExit, SetupEvent, SetupPrompt, SetupStep, StepState,
 };
 use crafted_herdr_ui_lib::platform::runner::{Launch, Runner};
-use crafted_herdr_ui_lib::pty::{PtyControl, PtySpawner, SpawnedPty, TermSize};
+use crafted_herdr_ui_lib::pty::{Chunk, PtyControl, PtySpawner, SpawnedPty, TermSize};
 
 /// The argv and environment a process was started with.
 type Spawn = (Vec<String>, Vec<(String, String)>);
@@ -32,7 +32,7 @@ fn fixture(name: &str) -> String {
 struct Replay {
     typed: Arc<Mutex<Vec<u8>>>,
     script: Mutex<Vec<Vec<u8>>>,
-    tx: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    tx: Mutex<Option<mpsc::Sender<Chunk>>>,
 }
 
 struct ReplayInput(Arc<Replay>);
@@ -48,7 +48,7 @@ impl Write for ReplayInput {
         if let (Some(chunk), Some(tx)) = (next, tx.as_ref()) {
             // A NUL splits one scripted reply into separate reads.
             for part in chunk.split(|b| *b == 0) {
-                let _ = tx.send(part.to_vec());
+                let _ = tx.send(Chunk::now(part.to_vec()));
             }
         }
         // The last scripted chunk is the end of the process's output.
@@ -130,7 +130,7 @@ impl PtySpawner for ReplaySpawner {
         lock(&self.spawned_with).push((argv, launch.env.clone()));
         lock(&self.sizes).push(size);
         let (tx, output) = mpsc::channel();
-        let _ = tx.send(self.first.clone());
+        let _ = tx.send(Chunk::now(self.first.clone()));
         let replay = Arc::new(Replay {
             typed: self.typed.clone(),
             script: Mutex::new(self.after_answers.clone()),
@@ -495,7 +495,7 @@ impl PtySpawner for Chatty {
             // for as long as the test could wait.
             std::thread::sleep(Duration::from_millis(300));
             for _ in 0..200 {
-                if tx.send(b"tick\n".to_vec()).is_err() {
+                if tx.send(Chunk::now(b"tick\n".to_vec())).is_err() {
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(50));
