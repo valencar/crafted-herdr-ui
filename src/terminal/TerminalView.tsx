@@ -7,7 +7,6 @@ import {
   type Ref,
 } from "react";
 import { Terminal } from "@xterm/xterm";
-import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -21,7 +20,7 @@ import { useTerminalStore, type TermTab } from "./terminalStore";
 import { TermBar } from "./TermBar";
 import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
-import { oscClipboardProvider } from "./oscClipboard";
+import { registerOscClipboard } from "./oscClipboard";
 import { terminalFont } from "./terminalFonts";
 import { xtermTheme } from "./xtermTheme";
 
@@ -107,8 +106,9 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     term.loadAddon(search);
     // Plain-text URLs are copy-only too.
     term.loadAddon(new WebLinksAddon(copyLink));
-    // OSC 52: a program (herdr copying its own selection) can write the Mac clipboard, never read it.
-    term.loadAddon(new ClipboardAddon(undefined, oscClipboardProvider));
+    // OSC 52: a program (herdr copying its own selection) can write the Mac clipboard, never read
+    // it, and a query is never answered.
+    registerOscClipboard(term);
     // ⌘ shortcuts belong to the menu, not to the program in the terminal.
     term.attachCustomKeyEventHandler((e) => !e.metaKey);
     term.open(host);

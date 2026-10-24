@@ -27,7 +27,7 @@ const h = vi.hoisted(() => ({
   fitDims: undefined as { cols: number; rows: number } | undefined,
   linkHandler: null as
     null | ((event: { metaKey: boolean }, uri: string) => void),
-  clipboardArgs: null as null | unknown[],
+  osc: new Map<number, (data: string) => boolean | Promise<boolean>>(),
   search: {
     findNext: vi.fn(() => true),
     findPrevious: vi.fn(() => true),
@@ -47,6 +47,15 @@ vi.mock("@xterm/xterm", () => ({
     dispose = vi.fn();
     focus = vi.fn();
     open = vi.fn();
+    parser = {
+      registerOscHandler: (
+        ident: number,
+        fn: (data: string) => boolean | Promise<boolean>,
+      ) => {
+        h.osc.set(ident, fn);
+        return { dispose: vi.fn() };
+      },
+    };
     keyHandler: FakeTerm["keyHandler"] = null;
     dataHandler: FakeTerm["dataHandler"] = null;
     constructor(options: Record<string, unknown>) {
@@ -99,14 +108,6 @@ vi.mock("@xterm/addon-web-links", () => ({
     dispose() {}
   },
 }));
-vi.mock("@xterm/addon-clipboard", () => ({
-  ClipboardAddon: class {
-    constructor(...args: unknown[]) {
-      h.clipboardArgs = args;
-    }
-    dispose() {}
-  },
-}));
 vi.mock("@xterm/addon-webgl", () => ({
   WebglAddon: class {
     constructor() {
@@ -127,7 +128,6 @@ import { copyText, invokeTyped, openTerm } from "../lib/ipc";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
 import { HOME, useTerminalStore } from "./terminalStore";
 import { xtermTheme } from "./xtermTheme";
-import { oscClipboardProvider } from "./oscClipboard";
 import { useResolvedTheme } from "../lib/theme";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
@@ -180,7 +180,7 @@ beforeEach(() => {
   h.observers.length = 0;
   h.fitDims = { cols: 100, rows: 30 };
   h.linkHandler = null;
-  h.clipboardArgs = null;
+  h.osc.clear();
   h.webglThrows = false;
   emitters.length = 0;
   h.search.findNext.mockClear();
@@ -271,13 +271,32 @@ describe("TerminalView", () => {
     });
   });
 
-  it("an_OSC_52_write_goes_through_the_write_only_clipboard_provider", async () => {
-    render(<Harness />);
-    await flush();
-    // The addon's own base64 codec (default), then our provider.
-    expect(h.clipboardArgs).toHaveLength(2);
-    expect(h.clipboardArgs?.[0]).toBeUndefined();
-    expect(h.clipboardArgs?.[1]).toBe(oscClipboardProvider);
+  describe("OSC 52", () => {
+    it("a_write_from_the_program_copies_the_text_and_toasts_Copied", async () => {
+      render(<Harness />);
+      await flush();
+      const handler = h.osc.get(52);
+      expect(handler).toBeDefined();
+      await act(async () => {
+        await handler?.(`c;${btoa("from herdr")}`);
+      });
+      expect(copy).toHaveBeenCalledWith("from herdr");
+      expect(useAppStore.getState().toast).toBe("Copied");
+    });
+
+    it("a_read_query_writes_nothing_to_the_session_and_copies_nothing", async () => {
+      render(<Harness />);
+      await flush();
+      invoke.mockClear();
+      let result: boolean | Promise<boolean> | undefined;
+      await act(async () => {
+        result = await h.osc.get(52)?.("c;?");
+      });
+      // Swallowed, so no other handler sees it, and no reply is typed into the pty.
+      expect(result).toBe(true);
+      expect(invoke).not.toHaveBeenCalledWith("term_write", expect.anything());
+      expect(copy).not.toHaveBeenCalled();
+    });
   });
 
   it("streams_data_events_into_the_terminal", async () => {
