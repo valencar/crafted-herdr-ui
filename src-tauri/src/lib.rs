@@ -14,6 +14,7 @@ pub mod settings;
 pub mod ssh_config;
 pub mod state;
 pub mod terminal;
+pub mod trace;
 pub mod tray;
 
 use std::path::PathBuf;
@@ -61,6 +62,10 @@ pub(crate) fn now_ms() -> u64 {
 /// Without herdr there is nothing to poll, so the UI just gets a state with `herdr_path: None`.
 fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
+    #[cfg(feature = "trace")]
+    if let Ok(dir) = app.path().app_log_dir() {
+        trace::init(dir);
+    }
     let settings = settings::load(&handle);
     platform::install_menu(&handle)?;
 

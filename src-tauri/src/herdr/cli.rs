@@ -12,6 +12,7 @@ use ts_rs::TS;
 
 use super::errors::HerdrError;
 use crate::platform::runner::{self, Runner};
+use crate::trace::trace_event;
 use crate::{LOCAL, lock, now_ms, platform};
 
 pub const T_DEFAULT: Duration = Duration::from_secs(10);
@@ -170,7 +171,7 @@ impl HerdrCli {
             Ok((code, stdout, stderr)) => (code, map(code, &stdout, &stderr)),
             Err(e) => (None, Err(e)),
         };
-        lock(&self.log).push(CommandLogEntry {
+        self.push_entry(CommandLogEntry {
             at_ms,
             machine: remote.map(str::to_owned),
             argv: args.to_vec(),
@@ -208,7 +209,7 @@ impl HerdrCli {
         error: Option<String>,
         note: Option<String>,
     ) {
-        lock(&self.log).push(CommandLogEntry {
+        self.push_entry(CommandLogEntry {
             at_ms: started_ms,
             machine: machine.filter(|m| *m != LOCAL).map(str::to_owned),
             argv,
@@ -217,6 +218,21 @@ impl HerdrCli {
             error,
             note,
         });
+    }
+
+    /// Adds `entry` to the command log; the one place an entry is made, so a `trace` build
+    /// sees every one.
+    fn push_entry(&self, entry: CommandLogEntry) {
+        trace_event!(
+            "herdr",
+            serde_json::json!({
+                "machine": entry.machine,
+                "argv": entry.argv.join(" "),
+                "duration_ms": entry.duration_ms,
+                "exit": entry.exit_code,
+            })
+        );
+        lock(&self.log).push(entry);
     }
 
     /// The resolved `herdr` binary, for the few calls that print plain text instead of JSON.

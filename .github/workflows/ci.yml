@@ -61,6 +61,12 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      # The `trace` feature (timing logs for instrumented builds) is off by default; this keeps
+      # its code compiling and its tests passing.
+      - name: Rust tests (trace feature)
+        working-directory: src-tauri
+        run: cargo test --features trace
+
       - name: Personal-data check
         run: scripts/check-no-personal-data.sh
 
@@ -74,8 +80,8 @@ jobs:
         run: pnpm tauri build --debug --bundles app
 
   # What exists of the Windows port, compiled and tested on a Windows runner. The Unix-only tests
-  # (bash fakes, /bin/sh, scripts/fake-herdr) are gated out with #[cfg(unix)], and the bash-driven
-  # tests in scripts/ are skipped. The build checks that the NSIS installer bundles; nothing is
+  # (bash fakes, /bin/sh, scripts/fake-herdr) are gated out with #[cfg(unix)], and the tests in
+  # scripts/ (most drive bash scripts) run only on macOS. The build checks that the NSIS installer bundles; nothing is
   # uploaded.
   windows:
     runs-on: windows-latest

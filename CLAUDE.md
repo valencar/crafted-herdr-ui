@@ -31,12 +31,14 @@ scripts/check-no-personal-data.sh
 scripts/build-site.sh  # project site (site/) → _site/; deployed to GitHub Pages by .github/workflows/pages.yml
 ```
 
-CI (`.github/workflows/ci.yml`) has two required jobs. `check` runs everything above on macOS. `windows` runs on `windows-latest`: `pnpm lint`, `pnpm typecheck`, `pnpm vitest run --exclude "scripts/**"` (the `scripts/*.test.ts` files drive bash scripts), then in `src-tauri` `cargo clippy --all-targets -- -D warnings` and `cargo test`, and last `pnpm tauri build --debug --bundles nsis`. There is no Windows machine locally, so Windows-only breakage shows up only on the PR.
+CI (`.github/workflows/ci.yml`) has two jobs. `check` runs on macOS: lint, typecheck, the Vitest tests, `cargo fmt --check`, clippy, `cargo test` (also `cargo test --features trace`), the personal-data check, the cask syntax check and a debug app build. `windows` runs a subset on `windows-latest`: `pnpm lint`, `pnpm typecheck`, `pnpm vitest run --exclude "scripts/**"` (the `scripts/` tests, most of which drive bash scripts, run only on macOS), then in `src-tauri` `cargo clippy --all-targets -- -D warnings` and `cargo test`, and last `pnpm tauri build --debug --bundles nsis`. There is no Windows machine locally, so Windows-only breakage shows up only on the PR.
 
 ## Testing
 
 - The integration suites in `src-tauri/tests/` run `scripts/fake-herdr` (bash), and some unit tests write `#!/bin/sh` fakes or run `/bin/sh`. They are Unix-only: gate a whole file with `#![cfg(unix)]`, a single test (and the helpers and imports only it uses) with `#[cfg(unix)]`. Don't use `#[allow]` to hide what the gate leaves unused, and never change an assertion to gate it.
-- The WSL hop (the Windows app running herdr inside WSL) has its own test, added with the Windows runner work; it doesn't use `scripts/fake-herdr`.
+- The second kind of gate is `#[cfg(not(windows))]`: tests that pin the Mac terminal catalog or default carry it, and their Windows equivalents arrive with the Windows Terminal launcher.
+- The WSL hop (the Windows app running herdr inside WSL) will have its own test, added with the Windows runner work; it won't use `scripts/fake-herdr`.
+- The `trace` feature (`cargo test --features trace`) adds timing logs for instrumented builds, written to `trace.jsonl` in the app log dir. It is off by default and compiles to nothing; the file holds machine labels and argv, so it is never committed.
 
 ## herdr facts the code relies on (verified on 0.9.3 and 0.9.4)
 

@@ -14,6 +14,7 @@ use ts_rs::TS;
 use crate::lock;
 use crate::platform::runner::Runner;
 use crate::pty::{PtyControl, PtySpawner, TermSize};
+use crate::trace::trace_event;
 
 pub type TermId = u32;
 
@@ -111,12 +112,23 @@ impl TermSessions {
 
     /// Types `data` into the terminal.
     pub fn write(&self, id: TermId, data: &str) -> Result<(), String> {
+        #[cfg(feature = "trace")]
+        let received = std::time::Instant::now();
         let session = self.get(id)?;
         let mut input = lock(&session.input);
-        input
+        let written = input
             .write_all(data.as_bytes())
             .and_then(|()| input.flush())
-            .map_err(|_| GONE.to_owned())
+            .map_err(|_| GONE.to_owned());
+        trace_event!(
+            "term_write",
+            serde_json::json!({
+                "id": id,
+                "bytes": data.len(),
+                "us": received.elapsed().as_micros() as u64,
+            })
+        );
+        written
     }
 
     pub fn resize(&self, id: TermId, size: TermSize) -> Result<(), String> {
@@ -169,6 +181,8 @@ fn forward(
                 Err(_) => break,
             }
         }
+        #[cfg(feature = "trace")]
+        let read = std::time::Instant::now();
         while buffer.len() < MAX_CHUNK {
             match output.try_recv() {
                 Ok(bytes) => buffer.extend_from_slice(&bytes),
@@ -182,7 +196,21 @@ fn forward(
         };
         let data = decode_utf8(&mut pending, &buffer);
         buffer = rest;
-        if !data.is_empty() && !sink(TermEvent::Data { data }) {
+        #[cfg(feature = "trace")]
+        let bytes = data.len();
+        let delivered = data.is_empty() || sink(TermEvent::Data { data });
+        #[cfg(feature = "trace")]
+        if bytes > 0 {
+            trace_event!(
+                "term_out",
+                serde_json::json!({
+                    "id": id,
+                    "bytes": bytes,
+                    "us": read.elapsed().as_micros() as u64,
+                })
+            );
+        }
+        if !delivered {
             // Nobody is listening: stop the child and reap it.
             lock(&sessions).remove(&id);
             control.kill();
@@ -390,6 +418,41 @@ mod tests {
         assert_eq!(get("PATH"), ["/usr/bin"]);
         assert_eq!(get("TERM"), ["xterm-256color"]);
         assert_eq!(get("COLORTERM"), ["truecolor"]);
+    }
+
+    /// A `trace` build logs the time of a keystroke write and of a chunk of output.
+    #[cfg(feature = "trace")]
+    #[test]
+    fn terminal_traffic_is_traced_with_timings_and_sizes() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::trace::init(dir.path().to_path_buf());
+        let spawner = FakeSpawner::new(vec![vec![b'x'; 1111]], true);
+        let sessions = TermSessions::new(spawner);
+        let (sink, rx) = recording_sink();
+        let id = sessions
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
+            .expect("open");
+        rx.recv_timeout(WAIT).expect("the output");
+        sessions.write(id, &"y".repeat(2222)).expect("write");
+        // The output line is written just after the sink returns, on the forwarding thread.
+        let path = dir.path().join("trace.jsonl");
+        wait_until("the term_out line", || {
+            std::fs::read_to_string(&path).is_ok_and(|t| t.contains("term_out"))
+        });
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let find = |kind: &str, bytes: u64| {
+            lines
+                .iter()
+                .find(|v| v["kind"] == kind && v["bytes"] == bytes)
+                .unwrap_or_else(|| panic!("no {kind} line of {bytes} bytes in {text}"))
+        };
+        assert!(find("term_out", 1111)["us"].as_u64().is_some());
+        assert!(find("term_write", 2222)["us"].as_u64().is_some());
+        sessions.close_all();
     }
 
     #[test]

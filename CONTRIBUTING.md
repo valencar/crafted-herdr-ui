@@ -26,7 +26,8 @@ scripts/check-no-personal-data.sh
 
 - Write the failing test first, then make it pass. Keep test output clean (no warnings).
 - Tests never run a real `herdr` that mutates state. Use `scripts/fake-herdr`.
-- `scripts/fake-herdr` is a bash script, so the tests that need it (and any that write `#!/bin/sh` fakes or run `/bin/sh`) are Unix-only: gate them with `#[cfg(unix)]` (`#![cfg(unix)]` for a whole file in `src-tauri/tests/`). You can't run the Windows job locally; the PR's Windows check is where its failures show.
+- `scripts/fake-herdr` is a bash script, so the tests that need it (and any that write `#!/bin/sh` fakes or run `/bin/sh`) are Unix-only: gate them with `#[cfg(unix)]` (`#![cfg(unix)]` for a whole file in `src-tauri/tests/`). Tests that pin the Mac terminal catalog or default use the second gate, `#[cfg(not(windows))]`; their Windows equivalents arrive with the Windows Terminal launcher. You can't run the Windows job locally; the PR's Windows check is where its failures show.
+- `cargo test --features trace` runs the tests of the `trace` feature (timing logs for instrumented builds; off by default). CI runs it on macOS too.
 - Live tests are opt-in (`HERDR_UI_LIVE=1`) and may touch only the machine named in `HERDR_UI_TEST_MACHINE`, inside a workspace or session named `herdr-ui-qa`.
 - Rust types shared with the UI are exported with `ts-rs` into `src/lib/bindings/` (generated, committed).
 
