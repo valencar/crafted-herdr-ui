@@ -247,7 +247,7 @@ describe("Settings", () => {
     await setup({}, "Terminal");
     const select = screen.getByLabelText("Terminal font");
     expect(select).toHaveAccessibleDescription(
-      "Font for terminal tabs in this window",
+      "Font for the terminal tabs in the main window",
     );
     // After the "Open sessions: In Crafted Herdr / In {Terminal}" choice, before the external
     // terminal picker, so it cannot be read as Ghostty's or iTerm2's font.

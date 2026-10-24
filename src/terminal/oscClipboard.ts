@@ -44,13 +44,14 @@ async function copyFromTerminal(text: string): Promise<void> {
  *   or a toast, so a stray sequence cannot clear the clipboard.
  * - a write from a tab that is not the visible one is swallowed too, so a background pane cannot
  *   overwrite the clipboard or keep a toast on screen (`isActive`).
- * The handler always returns true, so the sequence reaches nothing else.
+ * The handler always resolves to true, so the sequence reaches nothing else; it returns `true`
+ * synchronously for a sequence it ignores and a Promise only when it copies.
  */
 export function registerOscClipboard(
   term: { parser: Pick<Terminal["parser"], "registerOscHandler"> },
   isActive: () => boolean = () => true,
 ): IDisposable {
-  return term.parser.registerOscHandler(OSC_CLIPBOARD, async (data) => {
+  return term.parser.registerOscHandler(OSC_CLIPBOARD, (data) => {
     const parts = data.split(";");
     if (
       parts.length !== 2 ||
@@ -61,7 +62,8 @@ export function registerOscClipboard(
       return true;
     }
     const text = decode(parts[1]);
-    if (text) await copyFromTerminal(text);
-    return true;
+    if (!text) return true;
+    // Only a real copy is asynchronous; the parser waits for it before the next sequence.
+    return copyFromTerminal(text).then(() => true);
   });
 }

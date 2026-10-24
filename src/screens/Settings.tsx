@@ -536,7 +536,7 @@ function TerminalSection({
       <Field
         id={fontId}
         label="Terminal font"
-        hint="Font for terminal tabs in this window"
+        hint="Font for the terminal tabs in the main window"
       >
         <select
           id={fontId}

@@ -69,7 +69,7 @@ describe("registerOscClipboard", () => {
   it.each(["0", "c0", "x", "cut", "C"])(
     "swallows_a_write_to_the_unknown_target_%j_without_copying",
     async (targets) => {
-      await expect(send(`${targets};${b64("x")}`)).resolves.toBe(true);
+      expect(send(`${targets};${b64("x")}`)).toBe(true);
       expect(copy).not.toHaveBeenCalled();
       expect(useAppStore.getState().toast).toBeNull();
     },
@@ -79,7 +79,7 @@ describe("registerOscClipboard", () => {
     let visible = false;
     handlers.clear();
     registerOscClipboard(fakeTerm, () => visible);
-    await expect(send(`c;${b64("x")}`)).resolves.toBe(true);
+    expect(send(`c;${b64("x")}`)).toBe(true);
     expect(copy).not.toHaveBeenCalled();
     expect(useAppStore.getState().toast).toBeNull();
     visible = true;
@@ -99,7 +99,7 @@ describe("registerOscClipboard", () => {
   it.each(["c;?", ";?", "s;?", "cps;?", "p;?"])(
     "a_read_query_%j_is_swallowed_and_neither_copies_nor_toasts",
     async (data) => {
-      await expect(send(data)).resolves.toBe(true);
+      expect(send(data)).toBe(true);
       expect(copy).not.toHaveBeenCalled();
       expect(useAppStore.getState().toast).toBeNull();
     },
@@ -114,8 +114,17 @@ describe("registerOscClipboard", () => {
     ["", "nothing at all"],
     ["c;" + b64("x") + ";y", "an extra field"],
   ])("swallows_%j_(%s)_without_copying_or_toasting", async (data) => {
-    await expect(send(data)).resolves.toBe(true);
+    expect(send(data)).toBe(true);
     expect(copy).not.toHaveBeenCalled();
     expect(useAppStore.getState().toast).toBeNull();
+  });
+
+  it("an_ignored_sequence_answers_true_at_once_and_only_a_copy_returns_a_promise", async () => {
+    // The parser can finish an ignored sequence without a microtask round trip.
+    expect(send("c;?")).toBe(true);
+    expect(send(`c;${b64("")}`)).toBe(true);
+    const copying = send(`c;${b64("x")}`);
+    expect(copying).toBeInstanceOf(Promise);
+    await expect(copying).resolves.toBe(true);
   });
 });
