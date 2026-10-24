@@ -108,6 +108,11 @@ describe("sheetRows", () => {
       label: "Copy a link",
       keys: "⌘ click",
     });
+    expect(rows).toContainEqual({
+      group: "terminal",
+      label: "Select text",
+      keys: "⌥ drag",
+    });
     // No label twice, and the groups are the four the sheet draws.
     expect(new Set(rows.map((r) => r.label)).size).toBe(rows.length);
     expect(new Set(rows.map((r) => r.group))).toEqual(

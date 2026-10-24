@@ -7,6 +7,7 @@ import {
   type Ref,
 } from "react";
 import { Terminal } from "@xterm/xterm";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -19,6 +20,7 @@ import { useTerminalStore, type TermTab } from "./terminalStore";
 import { TermBar } from "./TermBar";
 import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
+import { oscClipboardProvider } from "./oscClipboard";
 import { xtermTheme } from "./xtermTheme";
 
 const RESIZE_DEBOUNCE_MS = 50;
@@ -84,6 +86,8 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
       theme: xtermTheme(styles),
       allowProposedApi: false,
       macOptionIsMeta: false,
+      // herdr turns on mouse reporting, so a plain drag goes to it; ⌥-drag always selects here.
+      macOptionClickForcesSelection: true,
       // OSC 8 hyperlinks: without a handler xterm would confirm() and window.open() them.
       linkHandler: { activate: copyLink, allowNonHttpProtocols: false },
     });
@@ -93,6 +97,8 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     term.loadAddon(search);
     // Plain-text URLs are copy-only too.
     term.loadAddon(new WebLinksAddon(copyLink));
+    // OSC 52: a program (herdr copying its own selection) can write the Mac clipboard, never read it.
+    term.loadAddon(new ClipboardAddon(undefined, oscClipboardProvider));
     // ⌘ shortcuts belong to the menu, not to the program in the terminal.
     term.attachCustomKeyEventHandler((e) => !e.metaKey);
     term.open(host);

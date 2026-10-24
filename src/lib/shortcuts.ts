@@ -80,6 +80,7 @@ const NON_MENU_ROWS: SheetRow[] = [
   { group: "list", label: "Move selection", keys: "↑ ↓" },
   { group: "list", label: "Close pane (asks first)", keys: "⌫" },
   { group: "terminal", label: "Copy a link", keys: "⌘ click" },
+  { group: "terminal", label: "Select text", keys: "⌥ drag" },
 ];
 
 type TableEntry = { label?: string; group?: SheetGroup };

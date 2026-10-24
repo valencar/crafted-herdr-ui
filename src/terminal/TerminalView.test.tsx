@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   fitDims: undefined as { cols: number; rows: number } | undefined,
   linkHandler: null as
     null | ((event: { metaKey: boolean }, uri: string) => void),
+  clipboardArgs: null as null | unknown[],
   search: {
     findNext: vi.fn(() => true),
     findPrevious: vi.fn(() => true),
@@ -97,6 +98,14 @@ vi.mock("@xterm/addon-web-links", () => ({
     dispose() {}
   },
 }));
+vi.mock("@xterm/addon-clipboard", () => ({
+  ClipboardAddon: class {
+    constructor(...args: unknown[]) {
+      h.clipboardArgs = args;
+    }
+    dispose() {}
+  },
+}));
 vi.mock("@xterm/addon-webgl", () => ({
   WebglAddon: class {
     constructor() {
@@ -117,6 +126,7 @@ import { copyText, invokeTyped, openTerm } from "../lib/ipc";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
 import { HOME, useTerminalStore } from "./terminalStore";
 import { xtermTheme } from "./xtermTheme";
+import { oscClipboardProvider } from "./oscClipboard";
 import { useResolvedTheme } from "../lib/theme";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
@@ -159,6 +169,7 @@ beforeEach(() => {
   h.observers.length = 0;
   h.fitDims = { cols: 100, rows: 30 };
   h.linkHandler = null;
+  h.clipboardArgs = null;
   h.webglThrows = false;
   emitters.length = 0;
   h.search.findNext.mockClear();
@@ -238,6 +249,24 @@ describe("TerminalView", () => {
       macOptionIsMeta: false,
     });
     expect(tabState()).toMatchObject({ state: "live", termId: 7 });
+  });
+
+  it("an_option_drag_always_makes_a_selection_even_while_herdr_reports_the_mouse", async () => {
+    render(<Harness />);
+    await flush();
+    expect(term().options).toMatchObject({
+      macOptionClickForcesSelection: true,
+      macOptionIsMeta: false,
+    });
+  });
+
+  it("an_OSC_52_write_goes_through_the_write_only_clipboard_provider", async () => {
+    render(<Harness />);
+    await flush();
+    // The addon's own base64 codec (default), then our provider.
+    expect(h.clipboardArgs).toHaveLength(2);
+    expect(h.clipboardArgs?.[0]).toBeUndefined();
+    expect(h.clipboardArgs?.[1]).toBe(oscClipboardProvider);
   });
 
   it("streams_data_events_into_the_terminal", async () => {
