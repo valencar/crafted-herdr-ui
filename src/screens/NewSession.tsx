@@ -12,6 +12,7 @@ import { toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { saveSettings } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
+import { matchesShortcut } from "../lib/shortcuts";
 
 const PREVIEW_DEBOUNCE_MS = 150;
 const MAX_RECENT_FOLDERS = 6;
@@ -336,7 +337,7 @@ export function NewSession({ terminalName }: Props) {
       subtitle="Start a terminal or an agent on any workbox"
       onClose={close}
       onKeyDown={(e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        if (matchesShortcut(e, "create-session")) {
           e.preventDefault();
           void submit(false);
         }

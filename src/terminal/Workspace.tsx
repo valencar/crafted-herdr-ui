@@ -16,6 +16,7 @@ import { useRowsByKey } from "./tabInfo";
 import { TabStrip } from "./TabStrip";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
 import { HOME, useTerminalStore } from "./terminalStore";
+import { matchesShortcut } from "../lib/shortcuts";
 
 export const DEFAULT_FONT_SIZE = 13;
 export const MIN_FONT_SIZE = 9;
@@ -196,7 +197,7 @@ export function Workspace({ children }: { children: ReactNode }) {
   };
 
   const onPanelKey = (e: KeyboardEvent) => {
-    if (e.metaKey && e.key === "f") {
+    if (matchesShortcut(e, "find")) {
       e.preventDefault();
       openFind();
     }

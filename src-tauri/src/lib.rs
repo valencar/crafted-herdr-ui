@@ -6,6 +6,7 @@ pub mod herdr;
 pub mod machine_setup;
 pub mod menu;
 pub mod notify;
+pub mod platform;
 pub mod poller;
 pub mod preview;
 pub mod pty;
@@ -13,6 +14,7 @@ pub mod settings;
 pub mod ssh_config;
 pub mod state;
 pub mod terminal;
+pub mod trace;
 pub mod tray;
 
 use std::path::PathBuf;
@@ -60,13 +62,19 @@ pub(crate) fn now_ms() -> u64 {
 /// Without herdr there is nothing to poll, so the UI just gets a state with `herdr_path: None`.
 fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
+    #[cfg(feature = "trace")]
+    if let Ok(dir) = app.path().app_log_dir() {
+        trace::init(dir);
+    }
     let settings = settings::load(&handle);
+    platform::install_menu(&handle)?;
 
     // The login shell and the version check are slow, so they run after the window is up (see
     // the end of this function). Until then the runner has no environment and no binary, and
     // the UI shows "Connecting to herdr…".
     let home = app.path().home_dir()?;
-    let cli = HerdrCli::without_env(PathBuf::new());
+    let cli =
+        HerdrCli::without_env(PathBuf::new()).with_runner(platform::default_runner(&settings));
     let locator = HerdrLocator::new(None, home);
 
     let activity_path = app.path().app_data_dir()?.join("activity.json");
@@ -185,7 +193,8 @@ async fn locate_and_poll(handle: tauri::AppHandle) {
 /// Runs `herdr status` once and adds it to the command log.
 async fn log_startup_status(cli: &HerdrCli, bin: PathBuf) {
     let started = now_ms();
-    let answered = env::herdr_status(&bin, cli.env(), settings::VERSION_TIMEOUT).await;
+    let answered =
+        env::herdr_status(cli.runner(), &bin, cli.env(), settings::VERSION_TIMEOUT).await;
     cli.record(
         None,
         vec!["status".to_owned()],
@@ -307,7 +316,6 @@ pub fn run() {
             commands::show_main_open_row,
             commands::set_visible_row,
         ])
-        .menu(menu::build)
         .on_menu_event(menu::on_event)
         .on_window_event(on_window_event)
         .setup(|app| start(app))

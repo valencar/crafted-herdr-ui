@@ -22,6 +22,7 @@ pub use attach::{
 };
 pub use quote::{join_quoted, shell_quote};
 
+use crate::platform;
 use crate::state::{Health, MachineView};
 use launchers::{Alacritty, Custom, Ghostty, ITerm2, Kitty, TerminalApp, Warp, WezTerm};
 
@@ -157,7 +158,7 @@ pub fn launcher_for(id: TerminalId, home: PathBuf, template: &str) -> Box<dyn La
 }
 
 /// Every terminal with a bundle id, in the order they are offered.
-const DETECTABLE: [TerminalId; 7] = [
+pub(crate) const DETECTABLE: [TerminalId; 7] = [
     TerminalId::Ghostty,
     TerminalId::ITerm2,
     TerminalId::Warp,
@@ -169,13 +170,15 @@ const DETECTABLE: [TerminalId; 7] = [
 
 /// The detected terminals in offer order, with Terminal added if detection missed it.
 fn with_terminal_app(found: &[TerminalId]) -> Vec<TerminalId> {
-    DETECTABLE
-        .into_iter()
+    platform::terminal_catalog()
+        .iter()
+        .copied()
         .filter(|t| *t == TerminalId::TerminalApp || found.contains(t))
         .collect()
 }
 
-/// The first installed of Ghostty, iTerm2, Warp, Terminal.
+/// The Mac preference: the first installed of Ghostty, iTerm2, Warp, Terminal. Callers go
+/// through `platform::default_terminal`.
 pub fn default_terminal(installed: &[TerminalId]) -> TerminalId {
     [TerminalId::Ghostty, TerminalId::ITerm2, TerminalId::Warp]
         .into_iter()
@@ -185,7 +188,9 @@ pub fn default_terminal(installed: &[TerminalId]) -> TerminalId {
 
 /// Whether Spotlight knows an app with this bundle id.
 async fn bundle_installed(bundle_id: &str) -> bool {
-    let run = tokio::process::Command::new(MDFIND)
+    let mut cmd = tokio::process::Command::new(MDFIND);
+    platform::background(&mut cmd);
+    let run = cmd
         .arg(format!("kMDItemCFBundleIdentifier == '{bundle_id}'"))
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -224,7 +229,7 @@ fn app_dirs() -> Vec<PathBuf> {
 pub async fn detect_installed() -> Vec<TerminalId> {
     let dirs = app_dirs();
     let mut checks = tokio::task::JoinSet::new();
-    for id in DETECTABLE {
+    for &id in platform::terminal_catalog() {
         let dirs = dirs.clone();
         checks.spawn(async move {
             let known = match id.bundle_id() {
@@ -252,14 +257,14 @@ impl InstalledCache {
         let mut cached = self.0.lock().await;
         match cached.as_ref() {
             Some(installed) => installed.clone(),
-            None => cached.insert(detect_installed().await).clone(),
+            None => cached.insert(platform::detect_terminals().await).clone(),
         }
     }
 
     /// Detects again, for when the user installed a terminal while the app was running.
     pub async fn refresh(&self) -> Vec<TerminalId> {
         let mut cached = self.0.lock().await;
-        cached.insert(detect_installed().await).clone()
+        cached.insert(platform::detect_terminals().await).clone()
     }
 }
 
@@ -273,7 +278,7 @@ pub struct TerminalList {
 
 impl TerminalList {
     pub fn new(installed: Vec<TerminalId>) -> Self {
-        let default = default_terminal(&installed);
+        let default = platform::default_terminal(&installed);
         Self { installed, default }
     }
 }
@@ -344,11 +349,12 @@ async fn run_spec(
     if spec.detached {
         return spawn_detached(spec, env);
     }
-    let run = tokio::process::Command::new(&spec.program)
+    let mut cmd = tokio::process::Command::new(&spec.program);
+    platform::background(&mut cmd);
+    let run = cmd
         .args(&spec.args)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-        .envs(env.iter().map(|(k, v)| (k, v)))
+        .envs(platform::launch_env(env))
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true)
         .output();
@@ -375,11 +381,11 @@ async fn run_spec(
 /// Starts the process and lets it go: no wait and no kill on drop, so a template that stays
 /// in the foreground (`wezterm start -- …`) is not killed after the launch timeout.
 fn spawn_detached(spec: &LaunchSpec, env: &[(String, String)]) -> Result<(), String> {
-    tokio::process::Command::new(&spec.program)
-        .args(&spec.args)
+    let mut cmd = tokio::process::Command::new(&spec.program);
+    platform::background(&mut cmd);
+    cmd.args(&spec.args)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-        .envs(env.iter().map(|(k, v)| (k, v)))
+        .envs(platform::launch_env(env))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -439,6 +445,7 @@ mod tests {
         assert_eq!(T::Custom.bundle_id(), None);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn detection_always_includes_terminal_and_keeps_offer_order() {
         assert_eq!(with_terminal_app(&[]), [T::TerminalApp]);
@@ -475,6 +482,7 @@ mod tests {
         assert!(!app_on_disk(TerminalId::Custom, &dirs, &|_| true));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn terminal_list_carries_the_default() {
         let list = TerminalList::new(vec![T::Warp, T::TerminalApp]);
@@ -499,6 +507,7 @@ mod tests {
         assert_eq!(json, r#"["iTerm2","terminalApp","wezTerm"]"#);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn launch_writes_support_files_once_and_reports_failures() {
         let dir = tempfile::tempdir().unwrap();
@@ -538,6 +547,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_detached_launch_returns_at_once_and_keeps_running() {
         let dir = tempfile::tempdir().unwrap();
@@ -617,6 +627,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_failure_without_stderr_says_how_it_ended() {
         let sh = |script: &str| LaunchSpec {
@@ -636,6 +647,7 @@ mod tests {
         assert_eq!(said, "sh failed: nope.");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_slow_launcher_is_killed_at_the_timeout() {
         let spec = LaunchSpec {

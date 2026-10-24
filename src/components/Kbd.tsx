@@ -13,6 +13,8 @@ export function Kbd(props: Props) {
     "id" in props
       ? formatShortcut(props.id, { enter: props.enter })
       : props.keys;
+  // An id with no key on this platform draws nothing.
+  if (text === "") return null;
   return (
     <kbd className={props.className ? `kbd ${props.className}` : "kbd"}>
       {text}

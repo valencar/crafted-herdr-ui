@@ -16,7 +16,11 @@ import {
   type AgentAction,
   type PaletteItem,
 } from "../lib/palette";
-import { tabShortcutId } from "../lib/shortcuts";
+import {
+  isLinkModifier,
+  matchesShortcut,
+  tabShortcutId,
+} from "../lib/shortcuts";
 import {
   focusReplyBox,
   focusSearch,
@@ -389,9 +393,16 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (inFrame && frameRow) {
-        const id = e.metaKey ? "open-alt" : actions[at]?.id;
+        const id = matchesShortcut(e, "palette-open-alt")
+          ? "open-alt"
+          : actions[at]?.id;
         if (id) runAction(frameRow, id);
-      } else run(results[at], e.metaKey ? "alt" : "default");
+      } else {
+        run(
+          results[at],
+          matchesShortcut(e, "palette-open-alt") ? "alt" : "default",
+        );
+      }
     } else if (e.key === "Tab") {
       // The input is the only stop: focus stays inside the dialog. On an agent, ⇥ also opens
       // its actions.
@@ -524,7 +535,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     // Keeps the focus in the input while clicking.
                     onMouseDown={(e) => e.preventDefault()}
                     onMouseMove={() => setActive(index)}
-                    onClick={(e) => run(item, e.metaKey ? "alt" : "default")}
+                    onClick={(e) =>
+                      run(item, isLinkModifier(e) ? "alt" : "default")
+                    }
                   >
                     {item.row && <StatusDot status={item.row.status} live />}
                     <span className="palette-label">

@@ -12,7 +12,9 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::lock;
-use crate::pty::{PtyControl, PtySpawner, TermSize};
+use crate::platform::runner::Runner;
+use crate::pty::{Chunk, PtyControl, PtySpawner, TermSize};
+use crate::trace::trace_event;
 
 pub type TermId = u32;
 
@@ -64,9 +66,11 @@ impl TermSessions {
         }
     }
 
-    /// Starts `argv` on a pty and streams its output to `sink` until it ends.
+    /// Starts `argv` on a pty (as `runner` runs it) and streams its output to `sink` until it
+    /// ends.
     pub fn open(
         &self,
+        runner: &Runner,
         argv: &[String],
         env: &[(String, String)],
         size: TermSize,
@@ -77,9 +81,12 @@ impl TermSessions {
         if sessions.len() >= MAX_SESSIONS {
             return Err(format!("Close a terminal tab first ({MAX_SESSIONS} open)."));
         }
+        let launch = runner
+            .wrap(argv, &term_env(env))
+            .map_err(|e| format!("Could not start the terminal: {e}"))?;
         let spawned = self
             .spawner
-            .spawn(argv, &term_env(env), clamped(size))
+            .spawn(&launch, clamped(size))
             .map_err(|e| format!("Could not start the terminal: {e}"))?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let control = spawned.control.clone();
@@ -105,12 +112,26 @@ impl TermSessions {
 
     /// Types `data` into the terminal.
     pub fn write(&self, id: TermId, data: &str) -> Result<(), String> {
+        #[cfg(feature = "trace")]
+        let received = std::time::Instant::now();
         let session = self.get(id)?;
-        let mut input = lock(&session.input);
-        input
-            .write_all(data.as_bytes())
-            .and_then(|()| input.flush())
-            .map_err(|_| GONE.to_owned())
+        let written = {
+            let mut input = lock(&session.input);
+            input
+                .write_all(data.as_bytes())
+                .and_then(|()| input.flush())
+                .map_err(|_| GONE.to_owned())
+        };
+        // After the guard is gone, so the next keystroke never waits on trace I/O.
+        trace_event!(
+            "term_write",
+            serde_json::json!({
+                "id": id,
+                "bytes": data.len(),
+                "us": received.elapsed().as_micros() as u64,
+            })
+        );
+        written
     }
 
     pub fn resize(&self, id: TermId, size: TermSize) -> Result<(), String> {
@@ -148,7 +169,7 @@ impl TermSessions {
 /// The forwarding thread of one session. Holds no lock while blocked on the child or the sink.
 fn forward(
     id: TermId,
-    output: std::sync::mpsc::Receiver<Vec<u8>>,
+    output: std::sync::mpsc::Receiver<Chunk>,
     control: Arc<dyn PtyControl>,
     sink: TermSink,
     sessions: SessionMap,
@@ -156,16 +177,27 @@ fn forward(
     let mut pending = Vec::new();
     // Bytes read but not yet sent, so one event never carries more than `MAX_CHUNK` of them.
     let mut buffer: Vec<u8> = Vec::new();
+    // When the oldest byte of `buffer` was read from the pty (for the `term_out` timing). A batch
+    // keeps the earliest stamp of the chunks merged into it, and what is left over after the
+    // split keeps that stamp too.
+    #[cfg(feature = "trace")]
+    let mut read_at = std::time::Instant::now();
     loop {
         if buffer.is_empty() {
             match output.recv() {
-                Ok(bytes) => buffer = bytes,
+                Ok(chunk) => {
+                    buffer = chunk.bytes;
+                    #[cfg(feature = "trace")]
+                    {
+                        read_at = chunk.read_at;
+                    }
+                }
                 Err(_) => break,
             }
         }
         while buffer.len() < MAX_CHUNK {
             match output.try_recv() {
-                Ok(bytes) => buffer.extend_from_slice(&bytes),
+                Ok(chunk) => buffer.extend_from_slice(&chunk.bytes),
                 Err(_) => break,
             }
         }
@@ -176,7 +208,21 @@ fn forward(
         };
         let data = decode_utf8(&mut pending, &buffer);
         buffer = rest;
-        if !data.is_empty() && !sink(TermEvent::Data { data }) {
+        #[cfg(feature = "trace")]
+        let bytes = data.len();
+        let delivered = data.is_empty() || sink(TermEvent::Data { data });
+        #[cfg(feature = "trace")]
+        if bytes > 0 {
+            trace_event!(
+                "term_out",
+                serde_json::json!({
+                    "id": id,
+                    "bytes": bytes,
+                    "us": read_at.elapsed().as_micros() as u64,
+                })
+            );
+        }
+        if !delivered {
             // Nobody is listening: stop the child and reap it.
             lock(&sessions).remove(&id);
             control.kill();
@@ -239,7 +285,10 @@ pub fn term_env(base: &[(String, String)]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pty::{PortablePty, SpawnedPty};
+    use crate::platform::runner::Launch;
+    #[cfg(unix)]
+    use crate::pty::PortablePty;
+    use crate::pty::SpawnedPty;
     use std::io;
     use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
@@ -284,7 +333,7 @@ mod tests {
         keep_open: bool,
         control: Arc<FakeControl>,
         spawned_sizes: Mutex<Vec<TermSize>>,
-        open_ends: Mutex<Vec<mpsc::Sender<Vec<u8>>>>,
+        open_ends: Mutex<Vec<mpsc::Sender<Chunk>>>,
     }
 
     impl FakeSpawner {
@@ -300,16 +349,11 @@ mod tests {
     }
 
     impl PtySpawner for FakeSpawner {
-        fn spawn(
-            &self,
-            _argv: &[String],
-            _env: &[(String, String)],
-            size: TermSize,
-        ) -> io::Result<SpawnedPty> {
+        fn spawn(&self, _launch: &Launch, size: TermSize) -> io::Result<SpawnedPty> {
             lock(&self.spawned_sizes).push(size);
             let (tx, output) = mpsc::channel();
             for chunk in &self.chunks {
-                tx.send(chunk.clone()).expect("preload");
+                tx.send(Chunk::now(chunk.clone())).expect("preload");
             }
             if self.keep_open {
                 lock(&self.open_ends).push(tx);
@@ -388,6 +432,85 @@ mod tests {
         assert_eq!(get("COLORTERM"), ["truecolor"]);
     }
 
+    /// The trace log is process-wide, so the tests that read it share one directory, set up once.
+    #[cfg(feature = "trace")]
+    fn trace_dir() -> &'static std::path::Path {
+        static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        DIR.get_or_init(|| {
+            let dir = tempfile::tempdir().unwrap();
+            crate::trace::init(dir.path().to_path_buf());
+            dir
+        })
+        .path()
+    }
+
+    /// A `trace` build logs the time of a keystroke write and of a chunk of output.
+    #[cfg(feature = "trace")]
+    #[test]
+    fn terminal_traffic_is_traced_with_timings_and_sizes() {
+        let dir = trace_dir();
+        let spawner = FakeSpawner::new(vec![vec![b'x'; 1111]], true);
+        let sessions = TermSessions::new(spawner);
+        let (sink, rx) = recording_sink();
+        let id = sessions
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
+            .expect("open");
+        rx.recv_timeout(WAIT).expect("the output");
+        sessions.write(id, &"y".repeat(2222)).expect("write");
+        // The output line is written just after the sink returns, on the forwarding thread.
+        let path = dir.join("trace.jsonl");
+        wait_until("the term_out line", || {
+            std::fs::read_to_string(&path).is_ok_and(|t| t.contains("term_out"))
+        });
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let find = |kind: &str, bytes: u64| {
+            lines
+                .iter()
+                .find(|v| v["kind"] == kind && v["bytes"] == bytes)
+                .unwrap_or_else(|| panic!("no {kind} line of {bytes} bytes in {text}"))
+        };
+        assert!(find("term_out", 1111)["us"].as_u64().is_some());
+        assert!(find("term_write", 2222)["us"].as_u64().is_some());
+        sessions.close_all();
+    }
+
+    /// The time a chunk waited in the channel counts: `term_out` runs from the pty read.
+    #[cfg(feature = "trace")]
+    #[test]
+    fn term_out_counts_from_the_pty_read_not_from_the_forwarder() {
+        let dir = trace_dir();
+        let spawner = FakeSpawner::new(Vec::new(), true);
+        let sessions = TermSessions::new(spawner.clone());
+        let (sink, rx) = recording_sink();
+        sessions
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
+            .expect("open");
+        let stale = Instant::now() - Duration::from_millis(300);
+        lock(&spawner.open_ends)[0]
+            .send(Chunk {
+                bytes: vec![b'z'; 3333],
+                read_at: stale,
+            })
+            .expect("send");
+        rx.recv_timeout(WAIT).expect("the output");
+        let path = dir.join("trace.jsonl");
+        wait_until("the term_out line", || {
+            std::fs::read_to_string(&path).is_ok_and(|t| t.contains("\"bytes\":3333"))
+        });
+        let text = std::fs::read_to_string(&path).unwrap();
+        let line: serde_json::Value = text
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .find(|v| v["kind"] == "term_out" && v["bytes"] == 3333)
+            .unwrap();
+        assert!(line["us"].as_u64().unwrap() >= 300_000, "{line}");
+        sessions.close_all();
+    }
+
     #[test]
     fn open_refuses_the_seventeenth_session() {
         let spawner = FakeSpawner::new(Vec::new(), true);
@@ -395,11 +518,11 @@ mod tests {
         let sink: TermSink = Arc::new(|_| true);
         for _ in 0..MAX_SESSIONS {
             sessions
-                .open(&argv(), &[], size(80, 24), sink.clone())
+                .open(&Runner::Direct, &argv(), &[], size(80, 24), sink.clone())
                 .expect("open");
         }
         assert_eq!(sessions.len(), MAX_SESSIONS);
-        let refused = sessions.open(&argv(), &[], size(80, 24), sink.clone());
+        let refused = sessions.open(&Runner::Direct, &argv(), &[], size(80, 24), sink.clone());
         assert_eq!(
             refused,
             Err("Close a terminal tab first (16 open).".to_owned())
@@ -407,7 +530,7 @@ mod tests {
         sessions.close_all();
         assert_eq!(sessions.len(), 0);
         sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("room again");
     }
 
@@ -416,7 +539,7 @@ mod tests {
         let sessions = TermSessions::new(FakeSpawner::new(Vec::new(), false));
         let (sink, rx) = recording_sink();
         let id = sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("open");
         assert_eq!(until_exit(&rx), [TermEvent::Exit { code: Some(0) }]);
         let gone = Err("That terminal is no longer open.".to_owned());
@@ -434,7 +557,7 @@ mod tests {
         let sessions = TermSessions::new(spawner.clone());
         let sink: TermSink = Arc::new(|_| false);
         sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("open");
         wait_until("the child to be killed", || {
             spawner.control.kills.load(Ordering::SeqCst) == 1
@@ -448,7 +571,7 @@ mod tests {
         let sessions = TermSessions::new(spawner.clone());
         let (sink, rx) = recording_sink();
         let id = sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("open");
         sessions.close(id);
         assert_eq!(spawner.control.kills.load(Ordering::SeqCst), 1);
@@ -467,7 +590,7 @@ mod tests {
         let sessions = TermSessions::new(FakeSpawner::new(chunks, false));
         let (sink, rx) = recording_sink();
         sessions
-            .open(&argv(), &[], size(80, 24), sink)
+            .open(&Runner::Direct, &argv(), &[], size(80, 24), sink)
             .expect("open");
         let mut text = String::new();
         let mut messages = 0;
@@ -487,7 +610,9 @@ mod tests {
         let spawner = FakeSpawner::new(Vec::new(), true);
         let sessions = TermSessions::new(spawner.clone());
         let sink: TermSink = Arc::new(|_| true);
-        let id = sessions.open(&argv(), &[], size(0, 0), sink).expect("open");
+        let id = sessions
+            .open(&Runner::Direct, &argv(), &[], size(0, 0), sink)
+            .expect("open");
         sessions.resize(id, size(0, 5)).expect("resize");
         sessions.resize(id, size(7, 0)).expect("resize");
         sessions.resize(id, size(100, 30)).expect("resize");
@@ -512,7 +637,7 @@ mod tests {
         .to_vec();
         let env = vec![("PATH".to_owned(), "/usr/bin:/bin".to_owned())];
         let id = sessions
-            .open(&argv, &env, size(80, 24), sink)
+            .open(&Runner::Direct, &argv, &env, size(80, 24), sink)
             .expect("open");
         let mut seen = String::new();
         let mut exit = None;

@@ -8,18 +8,16 @@
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
-use tauri_plugin_positioner::{Position, WindowExt};
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
 use crate::herdr::model::AgentStatus;
-use crate::menu;
 use crate::now_ms;
+use crate::platform;
 use crate::poller::Poller;
 use crate::settings::{SharedSettings, Theme};
 use crate::state::{AppState, Health};
@@ -35,7 +33,7 @@ const MENU_OPEN: &str = "open";
 const MENU_NEW_SESSION: &str = "new-session";
 const MENU_SETTINGS: &str = "settings";
 const MENU_QUIT: &str = "quit";
-const ICON_SIZE: u32 = 44;
+pub(crate) const ICON_SIZE: u32 = 44;
 /// A click on the tray icon this soon after the popover hid itself is the click that made it
 /// lose focus, so it closes the popover rather than opening it again.
 const BLUR_GRACE_MS: u64 = 300;
@@ -58,6 +56,14 @@ pub fn needs_you_count(state: &AppState) -> usize {
 /// The text next to the tray icon: the count, or nothing at 0.
 pub fn badge_title(count: usize) -> Option<String> {
     (count > 0).then(|| count.to_string())
+}
+
+/// The tray tooltip: the app's name, and how many agents need the user.
+pub fn badge_tooltip(count: usize) -> String {
+    match count {
+        0 => "Crafted Herdr".to_owned(),
+        n => format!("Crafted Herdr · {n} need you"),
+    }
 }
 
 /// Calls `apply` with the needs-you count now and each time it changes, until the channel
@@ -271,7 +277,7 @@ fn toggle_popover<R: Runtime>(app: &AppHandle<R>) {
         PopoverClick::Ignore => {}
         PopoverClick::Show => {
             // Without a tray position yet (no tray event seen) it stays where it was.
-            let _ = window.as_ref().window().move_window(Position::TrayCenter);
+            platform::place_popover(&window);
             let _ = window.show();
             let _ = window.set_focus();
         }
@@ -306,10 +312,10 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<TrayIcon<R>>
             &MenuItem::with_id(app, MENU_QUIT, "Quit", true, None::<&str>)?,
         ],
     )?;
-    let icon = Image::new_owned(template_icon_rgba(ICON_SIZE), ICON_SIZE, ICON_SIZE);
+    let (icon, as_template) = platform::tray_icon();
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
-        .icon_as_template(true)
+        .icon_as_template(as_template)
         .tooltip("Crafted Herdr")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -343,12 +349,7 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<TrayIcon<R>>
 /// task; `state` is the watch the poller's emit callback fills.
 pub fn start_badge<R: Runtime>(tray: TrayIcon<R>, state: watch::Receiver<AppState>) {
     tauri::async_runtime::spawn(run_badge(state, move |count| {
-        let _ = tray.set_title(badge_title(count));
-        let tooltip = match count {
-            0 => "Crafted Herdr".to_owned(),
-            n => format!("Crafted Herdr · {n} need you"),
-        };
-        let _ = tray.set_tooltip(Some(tooltip));
+        platform::apply_badge(&tray, count);
     }));
 }
 
@@ -356,7 +357,7 @@ pub fn start_badge<R: Runtime>(tray: TrayIcon<R>, state: watch::Receiver<AppStat
 
 /// ⌃⌥⌘H: the `global-show` entry of the shortcut table.
 pub fn global_shortcut() -> Shortcut {
-    menu::accelerator("global-show")
+    platform::accelerator("global-show")
         .and_then(|accelerator| Shortcut::from_str(&accelerator).ok())
         .unwrap_or_else(|| {
             Shortcut::new(
@@ -385,6 +386,7 @@ pub fn set_global_shortcut<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::menu;
 
     #[test]
     fn settings_window_background_follows_the_saved_theme() {
@@ -400,7 +402,8 @@ mod tests {
 
     #[test]
     fn global_show_parses_without_the_fallback() {
-        let accelerator = menu::accelerator("global-show").expect("in the table");
+        let accelerator =
+            menu::accelerator("global-show", crate::platform::Os::Mac).expect("in the table");
         assert_eq!(
             Shortcut::from_str(&accelerator).expect("parses"),
             Shortcut::new(
@@ -411,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn global_shortcut_unchanged() {
+    fn global_shortcut_is_ctrl_alt_super_h() {
         assert_eq!(
             global_shortcut(),
             Shortcut::new(

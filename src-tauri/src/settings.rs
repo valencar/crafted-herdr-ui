@@ -407,7 +407,9 @@ impl HerdrLocator {
         let resolved = resolve_with_saved(saved, login_hit, &self.home, &|p| p.is_file());
         cli.set_bin(resolved.path.clone().unwrap_or_default());
         let version = match &resolved.path {
-            Some(bin) => crate::env::herdr_version(bin, cli.env(), VERSION_TIMEOUT).await,
+            Some(bin) => {
+                crate::env::herdr_version(cli.runner(), bin, cli.env(), VERSION_TIMEOUT).await
+            }
             None => None,
         };
         let status = HerdrStatus {
@@ -824,6 +826,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     fn fake_herdr(dir: &Path, name: &str, version: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let bin = dir.join(name);
@@ -832,6 +835,7 @@ mod tests {
         bin
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn locating_points_the_runner_at_the_binary_and_reads_its_version() {
         let dir = tempfile::tempdir().unwrap();

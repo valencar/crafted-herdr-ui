@@ -17,6 +17,7 @@ import { actionErrorMessage } from "../lib/format";
 import { invokeTyped, onMachineSetup, toActionError } from "../lib/ipc";
 import { showHomeView, terminalName, useTerminals } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
+import { matchesShortcut } from "../lib/shortcuts";
 
 const POLL_MS = 2000;
 const GIVE_UP_MS = 10 * 60_000;
@@ -380,7 +381,7 @@ export function AddWorkbox() {
         subtitle="Any machine you can already SSH into"
         onClose={close}
         onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+          if (matchesShortcut(e, "create-session")) {
             e.preventDefault();
             void addHere();
           }

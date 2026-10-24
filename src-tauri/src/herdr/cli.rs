@@ -11,7 +11,9 @@ use tokio::sync::Semaphore;
 use ts_rs::TS;
 
 use super::errors::HerdrError;
-use crate::{LOCAL, lock, now_ms};
+use crate::platform::runner::{self, Runner};
+use crate::trace::trace_event;
+use crate::{LOCAL, lock, now_ms, platform};
 
 pub const T_DEFAULT: Duration = Duration::from_secs(10);
 pub const T_CREATE: Duration = Duration::from_secs(30);
@@ -70,6 +72,9 @@ pub struct HerdrCli {
     env: Arc<OnceLock<Vec<(String, String)>>>,
     log: Arc<Mutex<CommandLog>>,
     limits: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
+    /// How every herdr command reaches the OS (`Direct` on the Mac). Set by `with_runner`;
+    /// every clone has its own copy of it.
+    runner: Runner,
 }
 
 impl HerdrCli {
@@ -81,7 +86,21 @@ impl HerdrCli {
             env: Arc::default(),
             log: Arc::default(),
             limits: Arc::default(),
+            runner: Runner::Direct,
         }
+    }
+
+    /// The same runner, with every command going through `runner` instead of `Direct`. Call it
+    /// right after construction, before the first clone.
+    pub fn with_runner(mut self, runner: Runner) -> Self {
+        self.runner = runner;
+        self
+    }
+
+    /// How this runner's commands reach the OS. The terminal and the `machine add` pty use it
+    /// too, so there is one source of truth.
+    pub fn runner(&self) -> &Runner {
+        &self.runner
     }
 
     /// Sets the environment of a runner made with `without_env`. Only the first call counts.
@@ -97,6 +116,7 @@ impl HerdrCli {
             env: Arc::new(cell),
             log: Arc::default(),
             limits: Arc::default(),
+            runner: Runner::Direct,
         }
     }
 
@@ -151,7 +171,7 @@ impl HerdrCli {
             Ok((code, stdout, stderr)) => (code, map(code, &stdout, &stderr)),
             Err(e) => (None, Err(e)),
         };
-        lock(&self.log).push(CommandLogEntry {
+        self.push_entry(CommandLogEntry {
             at_ms,
             machine: remote.map(str::to_owned),
             argv: args.to_vec(),
@@ -189,7 +209,7 @@ impl HerdrCli {
         error: Option<String>,
         note: Option<String>,
     ) {
-        lock(&self.log).push(CommandLogEntry {
+        self.push_entry(CommandLogEntry {
             at_ms: started_ms,
             machine: machine.filter(|m| *m != LOCAL).map(str::to_owned),
             argv,
@@ -198,6 +218,21 @@ impl HerdrCli {
             error,
             note,
         });
+    }
+
+    /// Adds `entry` to the command log; the one place an entry is made, so a `trace` build
+    /// sees every one.
+    fn push_entry(&self, entry: CommandLogEntry) {
+        trace_event!(
+            "herdr",
+            serde_json::json!({
+                "machine": entry.machine,
+                "argv": entry.argv.join(" "),
+                "duration_ms": entry.duration_ms,
+                "exit": entry.exit_code,
+            })
+        );
+        lock(&self.log).push(entry);
     }
 
     /// The resolved `herdr` binary, for the few calls that print plain text instead of JSON.
@@ -234,14 +269,19 @@ impl HerdrCli {
         args: &[String],
         timeout: Duration,
     ) -> Result<(Option<i32>, String, String), HerdrError> {
-        let mut cmd = Command::new(self.bin());
+        let mut argv = vec![self.bin().to_string_lossy().into_owned()];
         if let Some(id) = remote {
-            cmd.arg("--machine").arg(id);
+            argv.extend(["--machine".to_owned(), id.to_owned()]);
         }
-        cmd.args(args)
-            .env_clear()
-            .envs(self.env().iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::null())
+        argv.extend_from_slice(args);
+        let launch = self
+            .runner
+            .wrap(&argv, self.env())
+            .map_err(|message| HerdrError::Spawn { message })?;
+        let mut cmd = Command::new(&launch.program);
+        platform::background(&mut cmd);
+        runner::apply(&launch, &mut cmd);
+        cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);

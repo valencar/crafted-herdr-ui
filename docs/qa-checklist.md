@@ -295,3 +295,19 @@ UI polish: motion, status shapes, the ⋯ menu, palette actions, the ⌘/ sheet,
 - [ ] Reattach: end an attach (close the pane in herdr, or disconnect a remote workbox). The bar docks at the bottom with the attach's own output still readable above it, and its reason names the cause (exit code, herdr not found or ssh unreachable). A second Reattach shows "Reattach failed (attempt 2)". "Copy attach command" and "Open in {Terminal}" work, and a pane that is gone offers only Close tab. Known: a reattach that ends non-zero hours after the click says "Reattach failed (attempt 1)".
 - [ ] Notifications: with the main window focused on an agent's terminal tab, no banner for that agent. Switching to another app, another tab or Home, or hiding the window to the tray, brings banners back. The tray badge counts either way.
 - [ ] PR preview DMG: install the DMG from a pull request's CI run (the `preview` job summary), run the first-launch steps from the README, and work through this section on it.
+
+## v0.6 baseline (Mac)
+
+The Windows port is judged against how the Mac app performs today, so we record timings from an instrumented Mac build first. You need no code knowledge, only about ten minutes. The instrumented build writes a log of timings (it is a debug build with the `trace` feature turned on; a normal build writes nothing and is unchanged).
+
+1. In a terminal, in this repo's folder, run `pnpm install` (once), then `pnpm tauri build --debug --bundles app --features trace`. It takes a few minutes the first time. (`--bundles app` skips the DMG step, which can fail on a first build.)
+2. Quit your normal Crafted Herdr (menu bar icon > Quit), so only the instrumented app polls herdr.
+3. Open the app the build made: `src-tauri/target/debug/bundle/macos/Crafted Herdr.app` (double-click it in Finder, or run `open "src-tauri/target/debug/bundle/macos/Crafted Herdr.app"`). If macOS blocks it, right-click it and choose Open.
+4. In Settings, make sure every workbox you use is enabled, so the app polls all of them.
+5. Use the app normally for 2 minutes with all those workboxes on: look at the Dashboard, open two or three terminal tabs and type in them, and let a few polls go by.
+6. Quit the instrumented app (Crafted Herdr > Quit, or the tray menu).
+7. Find the log: `~/Library/Logs/dev.crafted.herdr-ui/trace.jsonl` (in Finder: Go > Go to Folder, paste `~/Library/Logs/dev.crafted.herdr-ui`). It is a plain text file with one line per event. Each run adds to the end of the file; delete it before step 3 if you want a clean run. A line with `"machine": null` is the Local machine.
+8. Send `trace.jsonl` to the coordinator only, and nowhere else. The file contains your real machine labels and the commands the app ran, which is personal data under the repo's rules, so never commit it, paste it into an issue, or put it in a screenshot.
+9. Quit the instrumented app and open your normal Crafted Herdr again (the instrumented one is slower and writes to disk).
+
+The coordinator records the median `duration_ms` of the `api snapshot` lines for each workbox, under generic names (buildbox, gpubox, staging), as the baseline the Windows builds are compared with.

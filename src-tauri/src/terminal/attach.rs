@@ -559,6 +559,7 @@ mod tests {
         assert!(check_openable(&machine("b", Some("buildbox"), "work-2")).is_ok());
     }
 
+    #[cfg(unix)]
     /// Runs the local attach command with the real `/bin/sh` against a fake herdr that refuses
     /// to attach unless given `--takeover`, and returns (exit ok, the calls it logged).
     fn run_local_attach(session: &str, terminal_id: &str, answer: &str) -> (bool, Vec<String>) {
@@ -604,6 +605,7 @@ mod tests {
         (ok, calls)
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_command_takes_over_only_after_a_y() {
         let id = "x'; echo pwned; '$HOME";
@@ -624,6 +626,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     /// Runs the attach command for `m` under `/bin/sh` against a fake `herdr` that exits with
     /// `herdr_exit`, answering `answer` to any prompt. The remote command is run through the
     /// same `sh -c '…'` it would get over ssh, with the fake first on PATH. Returns the exit
@@ -666,6 +669,7 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
     #[test]
     fn exit_127_says_herdr_is_missing_and_never_offers_takeover() {
         let remote = machine("buildbox", Some("buildbox"), "default");
@@ -687,6 +691,7 @@ mod tests {
         assert!(!shown.contains("Take over"), "{shown}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn other_non_zero_exits_still_offer_takeover_and_success_is_quiet() {
         for m in [

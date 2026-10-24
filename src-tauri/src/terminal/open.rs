@@ -13,7 +13,7 @@ use crate::state::{AppState, MachineView};
 
 use super::{
     InstalledCache, LaunchSpec, TerminalId, attach_argv, check_bin, check_openable,
-    check_terminal_id, default_terminal, full_ui_argv, launch, launcher_for,
+    check_terminal_id, full_ui_argv, launch, launcher_for,
 };
 
 fn find_machine<'a>(state: &'a AppState, machine_id: &str) -> Result<&'a MachineView, ActionError> {
@@ -98,7 +98,7 @@ pub(crate) fn attach_for_pane(
 fn chosen_terminal(settings: &Settings, installed: &[TerminalId]) -> TerminalId {
     settings
         .terminal
-        .unwrap_or_else(|| default_terminal(installed))
+        .unwrap_or_else(|| crate::platform::default_terminal(installed))
 }
 
 /// The process that opens `argv` in the terminal the settings ask for.
@@ -202,6 +202,7 @@ pub(crate) fn open_argv(
 mod tests {
     use super::*;
     use crate::state::fixtures::state;
+    #[cfg(not(windows))]
     use crate::terminal;
     use crate::terminal::join_quoted;
 
@@ -220,6 +221,7 @@ mod tests {
         assert_eq!(local, ["/opt/herdr/bin/herdr"]);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn launches_are_logged_as_plain_herdr_arguments() {
         let state = state();
@@ -299,6 +301,7 @@ mod tests {
         "/Users/dev".into()
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_launch_follows_the_saved_terminal_and_open_mode() {
         let argv = vec!["ssh".to_owned(), "-t".into(), "buildbox".into()];

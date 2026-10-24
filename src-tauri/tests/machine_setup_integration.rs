@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 use crafted_herdr_ui_lib::machine_setup::{
     Emit, ExitHook, MachineSetup, RunExit, SetupEvent, SetupPrompt, SetupStep, StepState,
 };
-use crafted_herdr_ui_lib::pty::{PtyControl, PtySpawner, SpawnedPty, TermSize};
+use crafted_herdr_ui_lib::platform::runner::{Launch, Runner};
+use crafted_herdr_ui_lib::pty::{Chunk, PtyControl, PtySpawner, SpawnedPty, TermSize};
 
 /// The argv and environment a process was started with.
 type Spawn = (Vec<String>, Vec<(String, String)>);
@@ -31,7 +32,7 @@ fn fixture(name: &str) -> String {
 struct Replay {
     typed: Arc<Mutex<Vec<u8>>>,
     script: Mutex<Vec<Vec<u8>>>,
-    tx: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    tx: Mutex<Option<mpsc::Sender<Chunk>>>,
 }
 
 struct ReplayInput(Arc<Replay>);
@@ -47,7 +48,7 @@ impl Write for ReplayInput {
         if let (Some(chunk), Some(tx)) = (next, tx.as_ref()) {
             // A NUL splits one scripted reply into separate reads.
             for part in chunk.split(|b| *b == 0) {
-                let _ = tx.send(part.to_vec());
+                let _ = tx.send(Chunk::now(part.to_vec()));
             }
         }
         // The last scripted chunk is the end of the process's output.
@@ -124,16 +125,12 @@ impl ReplaySpawner {
 }
 
 impl PtySpawner for ReplaySpawner {
-    fn spawn(
-        &self,
-        argv: &[String],
-        env: &[(String, String)],
-        size: TermSize,
-    ) -> io::Result<SpawnedPty> {
-        lock(&self.spawned_with).push((argv.to_vec(), env.to_vec()));
+    fn spawn(&self, launch: &Launch, size: TermSize) -> io::Result<SpawnedPty> {
+        let argv = [vec![launch.program.clone()], launch.args.clone()].concat();
+        lock(&self.spawned_with).push((argv, launch.env.clone()));
         lock(&self.sizes).push(size);
         let (tx, output) = mpsc::channel();
-        let _ = tx.send(self.first.clone());
+        let _ = tx.send(Chunk::now(self.first.clone()));
         let replay = Arc::new(Replay {
             typed: self.typed.clone(),
             script: Mutex::new(self.after_answers.clone()),
@@ -208,7 +205,7 @@ fn session_flow_types_the_answers_the_prompts_need() {
     let (emit, events) = collect();
     let env = vec![("PATH".to_owned(), "/usr/bin".to_owned())];
     setup
-        .start(&argv(), &env, emit, ignore_exit())
+        .start(&Runner::Direct, &argv(), &env, emit, ignore_exit())
         .expect("start");
     assert_eq!(lock(&spawner.spawned_with)[0], (argv(), env));
     assert_eq!(
@@ -281,9 +278,9 @@ fn only_one_setup_runs_at_a_time() {
     let (emit, events) = collect();
     let (on_exit, exited) = exits();
     setup
-        .start(&argv(), &[], emit.clone(), on_exit)
+        .start(&Runner::Direct, &argv(), &[], emit.clone(), on_exit)
         .expect("first");
-    let second = setup.start(&argv(), &[], emit, ignore_exit());
+    let second = setup.start(&Runner::Direct, &argv(), &[], emit, ignore_exit());
     assert!(second.is_err_and(|e| e.contains("already running")));
     assert_eq!(lock(&spawner.spawned_with).len(), 1);
 
@@ -302,7 +299,11 @@ fn only_one_setup_runs_at_a_time() {
     );
     // The slot is free again.
     let (emit, _) = collect();
-    assert!(setup.start(&argv(), &[], emit, ignore_exit()).is_ok());
+    assert!(
+        setup
+            .start(&Runner::Direct, &argv(), &[], emit, ignore_exit())
+            .is_ok()
+    );
     setup.cancel();
 }
 
@@ -314,7 +315,7 @@ fn silence_without_a_prompt_stalls_once_and_a_prompt_never_stalls() {
     let setup = MachineSetup::with_stall(quiet, Duration::from_millis(60));
     let (emit, events) = collect();
     setup
-        .start(&argv(), &[], emit, ignore_exit())
+        .start(&Runner::Direct, &argv(), &[], emit, ignore_exit())
         .expect("start");
     wait_for(&events, "stall", |e| *e == SetupEvent::Stalled);
     std::thread::sleep(Duration::from_millis(200));
@@ -335,7 +336,7 @@ fn silence_without_a_prompt_stalls_once_and_a_prompt_never_stalls() {
     let setup = MachineSetup::with_stall(waiting, Duration::from_millis(60));
     let (emit, events) = collect();
     setup
-        .start(&argv(), &[], emit, ignore_exit())
+        .start(&Runner::Direct, &argv(), &[], emit, ignore_exit())
         .expect("start");
     wait_for(&events, "prompt", |e| matches!(e, SetupEvent::Prompt(_)));
     std::thread::sleep(Duration::from_millis(250));
@@ -349,7 +350,9 @@ fn a_failed_run_reports_the_failure_and_not_ok() {
     let setup = MachineSetup::new(spawner);
     let (emit, events) = collect();
     let (on_exit, exited) = exits();
-    setup.start(&argv(), &[], emit, on_exit).expect("start");
+    setup
+        .start(&Runner::Direct, &argv(), &[], emit, on_exit)
+        .expect("start");
     wait_for(&events, "finish", |e| {
         matches!(e, SetupEvent::Finished { ok: false })
     });
@@ -386,7 +389,7 @@ fn picker_redraws_after_the_answer_never_hide_or_pre_answer_the_consent() {
     let setup = MachineSetup::new(spawner.clone());
     let (emit, events) = collect();
     setup
-        .start(&argv(), &[], emit, ignore_exit())
+        .start(&Runner::Direct, &argv(), &[], emit, ignore_exit())
         .expect("start");
 
     wait_for(&events, "picker", |e| {
@@ -427,7 +430,7 @@ fn a_redraw_does_not_hide_the_stall_either() {
     let setup = MachineSetup::with_stall(spawner, Duration::from_millis(60));
     let (emit, events) = collect();
     setup
-        .start(&argv(), &[], emit, ignore_exit())
+        .start(&Runner::Direct, &argv(), &[], emit, ignore_exit())
         .expect("start");
     wait_for(&events, "picker", |e| matches!(e, SetupEvent::Prompt(_)));
     setup.answer("1").expect("pick");
@@ -447,7 +450,9 @@ fn the_run_ends_when_the_process_exits_even_if_the_terminal_stays_open() {
     let setup = MachineSetup::new(spawner);
     let (emit, events) = collect();
     let (on_exit, exited) = exits();
-    setup.start(&argv(), &[], emit, on_exit).expect("start");
+    setup
+        .start(&Runner::Direct, &argv(), &[], emit, on_exit)
+        .expect("start");
     wait_for(&events, "finish", |e| {
         matches!(e, SetupEvent::Finished { ok: true })
     });
@@ -483,19 +488,14 @@ impl PtyControl for Chatty {
 }
 
 impl PtySpawner for Chatty {
-    fn spawn(
-        &self,
-        _argv: &[String],
-        _env: &[(String, String)],
-        _size: TermSize,
-    ) -> io::Result<SpawnedPty> {
+    fn spawn(&self, _launch: &Launch, _size: TermSize) -> io::Result<SpawnedPty> {
         let (tx, output) = mpsc::channel();
         std::thread::spawn(move || {
             // Quiet long enough for the driver to notice the exit, then never quiet again
             // for as long as the test could wait.
             std::thread::sleep(Duration::from_millis(300));
             for _ in 0..200 {
-                if tx.send(b"tick\n".to_vec()).is_err() {
+                if tx.send(Chunk::now(b"tick\n".to_vec())).is_err() {
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(50));
@@ -515,7 +515,7 @@ fn the_drain_after_an_exit_has_a_total_cap_not_only_an_idle_gap() {
     let (emit, events) = collect();
     let started = Instant::now();
     setup
-        .start(&argv(), &[], emit, ignore_exit())
+        .start(&Runner::Direct, &argv(), &[], emit, ignore_exit())
         .expect("start");
     wait_for(&events, "finish", |e| {
         matches!(e, SetupEvent::Finished { .. })

@@ -3,8 +3,10 @@
 use std::io::{self, Read, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::lock;
+use crate::platform::runner::Launch;
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 /// A terminal's size in character cells.
@@ -42,25 +44,38 @@ fn exit_code(status: &portable_pty::ExitStatus) -> i32 {
     i32::try_from(status.exit_code()).unwrap_or(-1)
 }
 
+/// One read of a process's output, stamped when it was read, so the time it then waits in the
+/// channel counts in the `term_out` timing.
+pub struct Chunk {
+    pub bytes: Vec<u8>,
+    pub read_at: Instant,
+}
+
+impl Chunk {
+    /// `bytes`, read just now.
+    pub fn now(bytes: Vec<u8>) -> Self {
+        Self {
+            bytes,
+            read_at: Instant::now(),
+        }
+    }
+}
+
 /// A started process: its output as chunks (the channel closes at end of output), the way to
 /// type into it, and the way to stop it.
 pub struct SpawnedPty {
-    pub output: mpsc::Receiver<Vec<u8>>,
+    pub output: mpsc::Receiver<Chunk>,
     pub input: Box<dyn Write + Send>,
     pub control: Arc<dyn PtyControl>,
 }
 
 /// Starts a process on a pseudo-terminal. A trait so tests can replay a transcript instead.
 pub trait PtySpawner: Send + Sync {
-    fn spawn(
-        &self,
-        argv: &[String],
-        env: &[(String, String)],
-        size: TermSize,
-    ) -> io::Result<SpawnedPty>;
+    fn spawn(&self, launch: &Launch, size: TermSize) -> io::Result<SpawnedPty>;
 }
 
-/// The real thing, with `portable-pty`: the given size, exactly the given environment.
+/// The real thing, with `portable-pty`: the given size, and exactly the launch's environment
+/// (it clears the inherited one when `clear_env` is set). Exempt from `platform::background`.
 pub struct PortablePty;
 
 struct PortableControl {
@@ -104,22 +119,19 @@ fn pty_error(e: impl std::fmt::Display) -> io::Error {
 }
 
 impl PtySpawner for PortablePty {
-    fn spawn(
-        &self,
-        argv: &[String],
-        env: &[(String, String)],
-        size: TermSize,
-    ) -> io::Result<SpawnedPty> {
-        let (program, args) = argv
-            .split_first()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty command"))?;
+    fn spawn(&self, launch: &Launch, size: TermSize) -> io::Result<SpawnedPty> {
+        if launch.program.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty command"));
+        }
         let pair = native_pty_system()
             .openpty(size.pty_size())
             .map_err(pty_error)?;
-        let mut command = CommandBuilder::new(program);
-        command.args(args);
-        command.env_clear();
-        for (key, value) in env {
+        let mut command = CommandBuilder::new(&launch.program);
+        command.args(&launch.args);
+        if launch.clear_env {
+            command.env_clear();
+        }
+        for (key, value) in &launch.env {
             command.env(key, value);
         }
         let child = pair.slave.spawn_command(command).map_err(pty_error)?;
@@ -132,7 +144,7 @@ impl PtySpawner for PortablePty {
         std::thread::spawn(move || {
             let mut buffer = [0u8; 4096];
             while let Ok(n) = reader.read(&mut buffer) {
-                if n == 0 || tx.send(buffer[..n].to_vec()).is_err() {
+                if n == 0 || tx.send(Chunk::now(buffer[..n].to_vec())).is_err() {
                     break;
                 }
             }
@@ -149,13 +161,19 @@ impl PtySpawner for PortablePty {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::{Duration, Instant};
 
-    #[cfg(unix)]
+    /// What `Runner::Direct` makes of `argv`, with the PATH these tests have always used.
+    fn direct(argv: &[String]) -> Launch {
+        crate::platform::runner::Runner::Direct
+            .wrap(argv, &[("PATH".to_owned(), "/usr/bin:/bin".to_owned())])
+            .expect("wrap")
+    }
+
     #[test]
     fn the_real_pty_carries_output_and_keystrokes() {
         // A shell stands in for herdr: no herdr, no network.
@@ -168,8 +186,7 @@ mod tests {
         .to_vec();
         let pty = PortablePty
             .spawn(
-                &argv,
-                &[("PATH".to_owned(), "/usr/bin:/bin".to_owned())],
+                &direct(&argv),
                 TermSize {
                     cols: 120,
                     rows: 40,
@@ -182,7 +199,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             match pty.output.recv_timeout(Duration::from_millis(100)) {
-                Ok(bytes) => seen += &String::from_utf8_lossy(&bytes),
+                Ok(chunk) => seen += &String::from_utf8_lossy(&chunk.bytes),
                 Err(RecvTimeoutError::Disconnected) => break,
                 Err(RecvTimeoutError::Timeout) => {}
             }
@@ -196,18 +213,13 @@ mod tests {
         assert_eq!(pty.control.wait(), 0);
     }
 
-    #[cfg(unix)]
     #[test]
     fn resize_reaches_the_child() {
         let argv: Vec<String> = ["/bin/sh", "-c", "read a; stty size"]
             .map(str::to_owned)
             .to_vec();
         let pty = PortablePty
-            .spawn(
-                &argv,
-                &[("PATH".to_owned(), "/usr/bin:/bin".to_owned())],
-                TermSize { cols: 80, rows: 24 },
-            )
+            .spawn(&direct(&argv), TermSize { cols: 80, rows: 24 })
             .expect("spawn");
         pty.control
             .resize(TermSize {
@@ -222,7 +234,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             match pty.output.recv_timeout(Duration::from_millis(100)) {
-                Ok(bytes) => seen += &String::from_utf8_lossy(&bytes),
+                Ok(chunk) => seen += &String::from_utf8_lossy(&chunk.bytes),
                 Err(RecvTimeoutError::Disconnected) => break,
                 Err(RecvTimeoutError::Timeout) => {}
             }

@@ -11,6 +11,9 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
 
+use crate::platform;
+use crate::platform::runner::{self, Runner};
+
 /// How long to wait for the login shell before giving up.
 const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -56,6 +59,7 @@ fn process_env() -> LoginEnv {
 /// Spawns `cmd` with no stdin and no stderr, and returns its stdout when it exits 0 within
 /// `limit`. The child is killed if it overruns.
 async fn stdout_if_ok(mut cmd: Command, limit: Duration) -> Option<String> {
+    platform::background(&mut cmd);
     let child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -160,38 +164,46 @@ pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
     parts.next().is_none().then_some(version)
 }
 
-/// Runs `<bin> <args…>` with exactly `env` and returns its stdout when it exits 0 in time.
-/// For the few herdr calls that print plain text instead of JSON, so they don't go through
-/// `HerdrCli`: `--version`, `status` and `agent start --help`.
+/// Runs `<bin> <args…>` as `runner` runs it, with exactly `env`, and returns its stdout when it
+/// exits 0 in time. For the few herdr calls that print plain text instead of JSON, so they
+/// don't go through `HerdrCli`: `--version`, `status` and `agent start --help`.
 async fn run_plain_text(
+    runner: &Runner,
     bin: &Path,
     env: &[(String, String)],
     args: &[&str],
     limit: Duration,
 ) -> Option<String> {
-    let mut cmd = Command::new(bin);
-    cmd.args(args)
-        .env_clear()
-        .envs(env.iter().map(|(k, v)| (k, v)));
+    let mut argv = vec![bin.to_string_lossy().into_owned()];
+    argv.extend(args.iter().map(|a| (*a).to_owned()));
+    let launch = runner.wrap(&argv, env).ok()?;
+    let mut cmd = Command::new(&launch.program);
+    runner::apply(&launch, &mut cmd);
     stdout_if_ok(cmd, limit).await
 }
 
 /// Runs `<bin> --version` with exactly `env` and returns the version it reports (`0.9.4`).
 /// `None` if the binary fails, hangs past `limit`, or prints something unrecognizable.
 pub async fn herdr_version(
+    runner: &Runner,
     bin: &Path,
     env: &[(String, String)],
     limit: Duration,
 ) -> Option<String> {
-    let text = run_plain_text(bin, env, &["--version"], limit).await?;
+    let text = run_plain_text(runner, bin, env, &["--version"], limit).await?;
     let (major, minor, patch) = parse_version(&text)?;
     Some(format!("{major}.{minor}.{patch}"))
 }
 
 /// Runs `<bin> status` with exactly `env` and returns what it prints. The spec asks for it at
 /// startup; the answer is only logged, nothing depends on it. `None` if it fails or hangs.
-pub async fn herdr_status(bin: &Path, env: &[(String, String)], limit: Duration) -> Option<String> {
-    let text = run_plain_text(bin, env, &["status"], limit).await?;
+pub async fn herdr_status(
+    runner: &Runner,
+    bin: &Path,
+    env: &[(String, String)],
+    limit: Duration,
+) -> Option<String> {
+    let text = run_plain_text(runner, bin, env, &["status"], limit).await?;
     Some(text.trim().to_owned())
 }
 
@@ -221,11 +233,12 @@ pub fn parse_agent_kinds(help: &str) -> Vec<String> {
 /// Runs `<bin> agent start --help` with exactly `env` and returns the agent kinds it lists.
 /// `None` if the binary fails, hangs past `limit`, or lists no kinds.
 pub async fn herdr_agent_kinds(
+    runner: &Runner,
     bin: &Path,
     env: &[(String, String)],
     limit: Duration,
 ) -> Option<Vec<String>> {
-    let text = run_plain_text(bin, env, &["agent", "start", "--help"], limit).await?;
+    let text = run_plain_text(runner, bin, env, &["agent", "start", "--help"], limit).await?;
     let kinds = parse_agent_kinds(&text);
     (!kinds.is_empty()).then_some(kinds)
 }
@@ -234,8 +247,10 @@ pub async fn herdr_agent_kinds(
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+    #[cfg(unix)]
     use std::time::Duration;
 
     fn existing(paths: &[&str]) -> impl Fn(&Path) -> bool {
@@ -351,6 +366,7 @@ mod tests {
         assert_eq!(parse_version("herdr 0.x.1"), None);
     }
 
+    #[cfg(unix)]
     /// Writes an executable script that ignores its arguments.
     fn fake_shell(dir: &Path, name: &str, body: &str) -> String {
         let path = dir.join(name);
@@ -359,6 +375,7 @@ mod tests {
         path.to_str().unwrap().to_string()
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_reads_nul_separated_env_from_the_shell() {
         let dir = tempfile::tempdir().unwrap();
@@ -378,18 +395,21 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_runs_real_sh_with_login_and_command_flags() {
         let login = capture_login_env_with("/bin/sh", Duration::from_secs(5)).await;
         assert!(login.vars.contains_key("PATH"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_falls_back_to_process_env_when_shell_is_missing() {
         let login = capture_login_env_with("/nonexistent/shell", Duration::from_secs(5)).await;
         assert_eq!(login.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_falls_back_on_timeout() {
         let dir = tempfile::tempdir().unwrap();
@@ -400,6 +420,7 @@ mod tests {
         assert_eq!(login.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn capture_falls_back_when_shell_fails() {
         let dir = tempfile::tempdir().unwrap();
@@ -408,6 +429,7 @@ mod tests {
         assert_eq!(login.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn which_returns_absolute_existing_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -424,6 +446,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn which_rejects_relative_alias_and_missing_paths() {
         let dir = tempfile::tempdir().unwrap();
@@ -442,6 +465,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn which_is_none_when_shell_times_out_or_is_missing() {
         let dir = tempfile::tempdir().unwrap();
@@ -453,6 +477,7 @@ mod tests {
         assert_eq!(login_which_herdr("/nonexistent/shell").await, None);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn herdr_version_runs_the_binary_with_the_given_env() {
         let dir = tempfile::tempdir().unwrap();
@@ -462,10 +487,17 @@ mod tests {
             r#"[ "$1" = "--version" ] && echo "herdr $FAKE_VERSION""#,
         );
         let env = [("FAKE_VERSION".to_string(), "0.9.4-preview.1".to_string())];
-        let v = herdr_version(Path::new(&bin), &env, Duration::from_secs(5)).await;
+        let v = herdr_version(
+            &Runner::Direct,
+            Path::new(&bin),
+            &env,
+            Duration::from_secs(5),
+        )
+        .await;
         assert_eq!(v.as_deref(), Some("0.9.4"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn herdr_version_is_none_on_failure_garbage_timeout_or_missing_binary() {
         let dir = tempfile::tempdir().unwrap();
@@ -477,12 +509,17 @@ mod tests {
             let bin = fake_shell(dir.path(), name, body);
             let limit = Duration::from_millis(300);
             assert_eq!(
-                herdr_version(Path::new(&bin), &[], limit).await,
+                herdr_version(&Runner::Direct, Path::new(&bin), &[], limit).await,
                 None,
                 "{name}"
             );
         }
-        let missing = herdr_version(Path::new("/nonexistent/herdr"), &[], Duration::from_secs(1));
+        let missing = herdr_version(
+            &Runner::Direct,
+            Path::new("/nonexistent/herdr"),
+            &[],
+            Duration::from_secs(1),
+        );
         assert_eq!(missing.await, None);
     }
 
@@ -497,6 +534,7 @@ mod tests {
         assert!(parse_agent_kinds("--kind <KIND>\n[possible values: ]").is_empty());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn herdr_status_runs_status_and_returns_its_text() {
         let dir = tempfile::tempdir().unwrap();
@@ -507,15 +545,21 @@ mod tests {
         );
         let limit = Duration::from_secs(5);
         assert_eq!(
-            herdr_status(Path::new(&ok), &[], limit).await.as_deref(),
+            herdr_status(&Runner::Direct, Path::new(&ok), &[], limit)
+                .await
+                .as_deref(),
             Some("server running")
         );
         let fail = fake_shell(dir.path(), "status-fail", "echo 'no server'; exit 1");
-        assert_eq!(herdr_status(Path::new(&fail), &[], limit).await, None);
-        let missing = herdr_status(Path::new("/nonexistent/herdr"), &[], limit);
+        assert_eq!(
+            herdr_status(&Runner::Direct, Path::new(&fail), &[], limit).await,
+            None
+        );
+        let missing = herdr_status(&Runner::Direct, Path::new("/nonexistent/herdr"), &[], limit);
         assert_eq!(missing.await, None);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn herdr_agent_kinds_runs_agent_start_help() {
         let dir = tempfile::tempdir().unwrap();
@@ -524,7 +568,8 @@ mod tests {
             "kinds-ok",
             r#"[ "$1 $2 $3" = "agent start --help" ] && printf -- '--kind <KIND>\n[possible values: claude, codex]\n'"#,
         );
-        let kinds = herdr_agent_kinds(Path::new(&ok), &[], Duration::from_secs(5)).await;
+        let kinds =
+            herdr_agent_kinds(&Runner::Direct, Path::new(&ok), &[], Duration::from_secs(5)).await;
         assert_eq!(kinds, Some(vec!["claude".to_string(), "codex".to_string()]));
 
         let none = fake_shell(dir.path(), "kinds-none", "echo 'no values'");
@@ -536,10 +581,17 @@ mod tests {
         let hang = fake_shell(dir.path(), "kinds-hang", "exec sleep 30");
         for bin in [none, fail, hang] {
             let limit = Duration::from_millis(300);
-            assert_eq!(herdr_agent_kinds(Path::new(&bin), &[], limit).await, None);
+            assert_eq!(
+                herdr_agent_kinds(&Runner::Direct, Path::new(&bin), &[], limit).await,
+                None
+            );
         }
-        let missing =
-            herdr_agent_kinds(Path::new("/nonexistent/herdr"), &[], Duration::from_secs(1));
+        let missing = herdr_agent_kinds(
+            &Runner::Direct,
+            Path::new("/nonexistent/herdr"),
+            &[],
+            Duration::from_secs(1),
+        );
         assert_eq!(missing.await, None);
     }
 }

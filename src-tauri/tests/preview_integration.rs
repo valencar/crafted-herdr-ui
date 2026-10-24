@@ -3,6 +3,8 @@
 //!
 //! fake-herdr names its files after the joined argv.
 
+#![cfg(unix)]
+
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
