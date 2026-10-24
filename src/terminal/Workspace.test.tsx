@@ -108,6 +108,7 @@ const fixture = raw.result.snapshot as unknown as Snapshot;
 
 const SETTINGS = {
   terminal_font_size: 13,
+  terminal_font: "hack",
   dashboard_split: false,
   dashboard_split_width: 420,
 } as Settings;

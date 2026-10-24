@@ -1,4 +1,8 @@
-/* Bundled Geist and Geist Mono (SIL OFL, see ../fonts/OFL.txt). No network font loading. */
+/*
+ * Bundled fonts, no network font loading. Geist and Geist Mono (the UI), plus the terminal
+ * choices Hack (MIT and Bitstream Vera, ../fonts/LICENSE-Hack.md), IBM Plex Mono and
+ * JetBrains Mono (SIL OFL, ../fonts/OFL-*.txt). Geist's license is ../fonts/OFL.txt.
+ */
 @font-face {
   font-family: "Geist";
   font-weight: 400;
@@ -40,6 +44,69 @@
   font-style: normal;
   font-display: swap;
   src: url("../fonts/GeistMono-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/GeistMono-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Hack";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/Hack-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Hack";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/Hack-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/JetBrainsMono-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/JetBrainsMono-Bold.woff2") format("woff2");
 }
 
 *,

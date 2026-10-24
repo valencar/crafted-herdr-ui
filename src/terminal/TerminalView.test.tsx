@@ -3,6 +3,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TermEvent } from "../lib/bindings/TermEvent";
+import type { TerminalFont } from "../lib/bindings/TerminalFont";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
@@ -139,13 +140,23 @@ const emitters: ((e: TermEvent) => void)[] = [];
 function Harness({
   active = true,
   handle,
+  font = "hack",
 }: {
   active?: boolean;
   handle?: React.Ref<TerminalHandle>;
+  font?: TerminalFont;
 }) {
   const tab = useTerminalStore((s) => s.tabs.find((t) => t.tabKey === KEY));
   if (!tab) return null;
-  return <TerminalView tab={tab} active={active} fontSize={13} ref={handle} />;
+  return (
+    <TerminalView
+      tab={tab}
+      active={active}
+      fontSize={13}
+      font={font}
+      ref={handle}
+    />
+  );
 }
 
 const tabState = () => useTerminalStore.getState().tabs[0];
@@ -1234,11 +1245,12 @@ describe("TerminalView", () => {
   });
 
   it("refits_and_resizes_the_session_once_the_font_has_loaded", async () => {
-    let loaded: () => void = () => {};
+    // Each face (regular and bold) is loaded on its own.
+    const loaded: (() => void)[] = [];
     const load = vi.fn(
       () =>
         new Promise<void>((resolve) => {
-          loaded = resolve;
+          loaded.push(resolve);
         }),
     );
     Object.defineProperty(document, "fonts", {
@@ -1252,7 +1264,7 @@ describe("TerminalView", () => {
       expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
       const before = term().options.fontFamily;
       h.fitDims = { cols: 110, rows: 35 }; // the real font's grid
-      await act(async () => loaded());
+      await act(async () => loaded.forEach((done) => done()));
       expect(term().options.fontFamily).not.toBe(before);
       expect(invoke).toHaveBeenCalledWith("term_resize", {
         id: 7,
@@ -1262,6 +1274,129 @@ describe("TerminalView", () => {
     } finally {
       Reflect.deleteProperty(document, "fonts");
     }
+  });
+
+  describe("the terminal font", () => {
+    /** A `document.fonts` whose loads stay pending until they are finished. */
+    function pendingFonts() {
+      const pending: { query: string; resolve: () => void }[] = [];
+      const load = vi.fn(
+        (query: string) =>
+          new Promise<void>((resolve) => {
+            pending.push({ query, resolve });
+          }),
+      );
+      Object.defineProperty(document, "fonts", {
+        configurable: true,
+        value: { load },
+      });
+      return {
+        load,
+        /** Finishes the pending loads whose query mentions `family` (all, if none is given). */
+        finish: (family = "") => {
+          for (const p of pending.filter((p) => p.query.includes(family))) {
+            p.resolve();
+          }
+          pending.splice(
+            0,
+            pending.length,
+            ...pending.filter((p) => !p.query.includes(family)),
+          );
+        },
+      };
+    }
+    afterEach(() => Reflect.deleteProperty(document, "fonts"));
+
+    it("the_xterm_is_created_from_the_setting_not_from_the_ui_mono_token", async () => {
+      render(<Harness font="ibm_plex_mono" />);
+      await flush();
+      expect(term().options).toMatchObject({
+        fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, monospace',
+        fontWeight: 500,
+        fontWeightBold: 700,
+        lineHeight: 1.2,
+      });
+    });
+
+    it("the_default_Hack_is_regular_with_a_bold", async () => {
+      render(<Harness />);
+      await flush();
+      expect(term().options).toMatchObject({
+        fontFamily: '"Hack", ui-monospace, Menlo, monospace',
+        fontWeight: 400,
+        fontWeightBold: 700,
+        lineHeight: 1.2,
+      });
+    });
+
+    it("a_change_updates_the_options_then_refits_once_the_new_font_has_loaded_keeping_the_session", async () => {
+      const fonts = pendingFonts();
+      const { rerender } = render(<Harness font="hack" />);
+      await flush();
+      fonts.finish();
+      await flush();
+      const first = term();
+      invoke.mockClear();
+      fonts.load.mockClear();
+
+      rerender(<Harness font="jetbrains_mono" />);
+      await flush();
+      // The options change at once; xterm draws with the family as it loads.
+      expect(term().options).toMatchObject({
+        fontFamily: '"JetBrains Mono", ui-monospace, Menlo, monospace',
+        fontWeight: 500,
+        fontWeightBold: 700,
+        lineHeight: 1.2,
+      });
+      // It waits for the regular and the bold face of the new family before it measures.
+      expect(fonts.load).toHaveBeenCalledWith(
+        '500 13px "JetBrains Mono", ui-monospace, Menlo, monospace',
+      );
+      expect(fonts.load).toHaveBeenCalledWith(
+        '700 13px "JetBrains Mono", ui-monospace, Menlo, monospace',
+      );
+      expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
+
+      const before = term().options.fontFamily;
+      h.fitDims = { cols: 96, rows: 28 }; // the new font's grid
+      fonts.finish();
+      await flush();
+      expect(term().options.fontFamily).not.toBe(before); // measured again
+      expect(invoke).toHaveBeenCalledWith("term_resize", {
+        id: 7,
+        cols: 96,
+        rows: 28,
+      });
+      // The same terminal and session: scrollback is kept.
+      expect(h.terms).toHaveLength(1);
+      expect(term()).toBe(first);
+      expect(first.dispose).not.toHaveBeenCalled();
+      expect(open).toHaveBeenCalledTimes(1);
+    });
+
+    it("a_font_replaced_before_it_loaded_does_not_refit_for_the_old_one", async () => {
+      const fonts = pendingFonts();
+      const { rerender } = render(<Harness font="hack" />);
+      await flush();
+      fonts.finish();
+      await flush();
+      invoke.mockClear();
+      rerender(<Harness font="geist_mono" />);
+      await flush();
+      rerender(<Harness font="ibm_plex_mono" />);
+      await flush();
+      h.fitDims = { cols: 90, rows: 26 };
+      fonts.finish("Geist Mono");
+      await flush();
+      expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
+      fonts.finish("IBM Plex Mono");
+      await flush();
+      expect(invoke).toHaveBeenCalledWith("term_resize", {
+        id: 7,
+        cols: 90,
+        rows: 26,
+      });
+    });
   });
 
   it("keeps_the_session_when_the_tab_object_changes_but_the_target_does_not", async () => {

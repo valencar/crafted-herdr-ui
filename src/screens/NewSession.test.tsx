@@ -88,6 +88,7 @@ const DEFAULT_SETTINGS: Settings = {
   dashboard_split: false,
   dashboard_split_width: 420,
   terminal_font_size: 13,
+  terminal_font: "hack",
   sidebar_collapsed: false,
   row_density: "comfortable",
   theme: "dark",

@@ -234,6 +234,7 @@ const SETTINGS = {
   dashboard_split: false,
   dashboard_split_width: 420,
   terminal_font_size: 13,
+  terminal_font: "hack",
 };
 
 /** The callback the app registered for an event, by the ipc helper's mock. */

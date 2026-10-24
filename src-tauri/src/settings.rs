@@ -76,6 +76,19 @@ pub enum Theme {
     Light,
 }
 
+/// The font the in-app terminal draws with. All four are bundled with the app; the default is
+/// `Hack`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum TerminalFont {
+    #[default]
+    Hack,
+    IbmPlexMono,
+    GeistMono,
+    JetbrainsMono,
+}
+
 /// The Dashboard column's width in points when it sits beside a terminal.
 pub const SPLIT_WIDTH_RANGE: std::ops::RangeInclusive<u32> = 360..=1200;
 pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=24;
@@ -109,6 +122,9 @@ pub struct Settings {
     /// The width of that column, in points.
     pub dashboard_split_width: u32,
     pub terminal_font_size: u8,
+    /// Which bundled font the terminal uses. An old settings file has none; it loads as Hack.
+    #[serde(default)]
+    pub terminal_font: TerminalFont,
     pub sidebar_collapsed: bool,
     pub row_density: RowDensity,
     /// An old settings file has no `theme`; it loads as dark.
@@ -146,6 +162,7 @@ impl Default for Settings {
             dashboard_split: false,
             dashboard_split_width: 420,
             terminal_font_size: 13,
+            terminal_font: TerminalFont::default(),
             sidebar_collapsed: false,
             row_density: RowDensity::default(),
             theme: Theme::default(),
@@ -460,6 +477,7 @@ mod tests {
         assert!(!s.dashboard_split);
         assert_eq!(s.dashboard_split_width, 420);
         assert_eq!(s.terminal_font_size, 13);
+        assert_eq!(s.terminal_font, TerminalFont::Hack);
         assert!(!s.sidebar_collapsed);
         assert_eq!(s.row_density, RowDensity::Comfortable);
         assert_eq!(s.theme, Theme::Dark);
@@ -492,6 +510,7 @@ mod tests {
             "dashboard_split",
             "dashboard_split_width",
             "terminal_font_size",
+            "terminal_font",
             "sidebar_collapsed",
             "row_density",
             "theme",
@@ -659,6 +678,54 @@ mod tests {
                 .merged(&json!({"theme": "blue"}))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn terminal_font_defaults_to_hack() {
+        assert_eq!(TerminalFont::default(), TerminalFont::Hack);
+        assert_eq!(Settings::default().terminal_font, TerminalFont::Hack);
+        // A settings file written before this key existed loads as Hack.
+        let read = Settings::from_entries([("notify_done".to_owned(), json!(false))]);
+        assert_eq!(read.terminal_font, TerminalFont::Hack);
+        let mut all = match serde_json::to_value(Settings::default()).unwrap() {
+            Value::Object(all) => all,
+            _ => unreachable!(),
+        };
+        all.remove("terminal_font");
+        let parsed: Settings = serde_json::from_value(Value::Object(all)).unwrap();
+        assert_eq!(parsed.terminal_font, TerminalFont::Hack);
+    }
+
+    #[test]
+    fn terminal_font_round_trips_snake_case() {
+        for (font, name) in [
+            (TerminalFont::Hack, "hack"),
+            (TerminalFont::IbmPlexMono, "ibm_plex_mono"),
+            (TerminalFont::GeistMono, "geist_mono"),
+            (TerminalFont::JetbrainsMono, "jetbrains_mono"),
+        ] {
+            assert_eq!(serde_json::to_value(font).unwrap(), json!(name));
+            let set = Settings::default()
+                .merged(&json!({"terminal_font": name}))
+                .unwrap();
+            assert_eq!(set.terminal_font, font);
+            assert_eq!(Settings::from_entries(set.to_entries()), set);
+        }
+        assert!(
+            Settings::default()
+                .merged(&json!({"terminal_font": "comic_sans"}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn an_unknown_stored_terminal_font_loads_as_the_default() {
+        let read = Settings::from_entries([
+            ("terminal_font".to_owned(), json!("comic_sans")),
+            ("notify_done".to_owned(), json!(false)),
+        ]);
+        assert_eq!(read.terminal_font, TerminalFont::Hack);
+        assert!(!read.notify_done);
     }
 
     #[test]

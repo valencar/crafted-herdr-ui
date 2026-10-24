@@ -13,6 +13,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import type { TerminalFont } from "../lib/bindings/TerminalFont";
 import { copyText } from "../lib/ipc";
 import { useResolvedTheme } from "../lib/theme";
 import { useAppStore } from "../store/appStore";
@@ -21,6 +22,7 @@ import { TermBar } from "./TermBar";
 import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
 import { oscClipboardProvider } from "./oscClipboard";
+import { terminalFont } from "./terminalFonts";
 import { xtermTheme } from "./xtermTheme";
 
 const RESIZE_DEBOUNCE_MS = 50;
@@ -61,26 +63,34 @@ type Props = {
   /** Only the active tab is visible; the others stay mounted (hidden) to keep their sessions. */
   active: boolean;
   fontSize: number;
+  /** Which bundled font to draw with (the `terminal_font` setting); a change is applied live. */
+  font: TerminalFont;
   ref?: Ref<TerminalHandle>;
 };
 
 /** One tab's xterm terminal and its session, from open to close. */
-export function TerminalView({ tab, active, fontSize, ref }: Props) {
+export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const searchRef = useRef<SearchAddon | null>(null);
   const overlayButtonRef = useRef<HTMLButtonElement>(null);
   const initialFontSize = useRef(fontSize);
+  const spec = terminalFont(font);
+  const initialSpec = useRef(spec);
 
   // The terminal is created once per mount and disposed on unmount.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const styles = getComputedStyle(document.documentElement);
-    const fontFamily = styles.getPropertyValue("--font-mono").trim();
+    const { fontFamily, fontWeight, fontWeightBold, lineHeight } =
+      initialSpec.current;
     const term = new Terminal({
       fontFamily,
+      fontWeight,
+      fontWeightBold,
+      lineHeight,
       fontSize: initialFontSize.current,
       scrollback: 10000,
       theme: xtermTheme(styles),
@@ -147,25 +157,37 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     resize(term.cols, term.rows);
   }, [resize]);
 
-  // The bundled font may still be loading when xterm measures a cell. Once it is loaded, make
-  // xterm measure again (it only does so when the option changes), then refit.
+  // The terminal follows the font setting, and the bundled font may still be loading when xterm
+  // measures a cell. So: apply the font's options (a no-op on the first run, when the terminal
+  // was just created with them), wait until both of its faces are loaded, then make xterm
+  // measure again (it only does so when the option changes) and refit, which tells the session
+  // the new size. The terminal, its scrollback and its session are kept.
   useEffect(() => {
     const term = termRef.current;
+    const fonts = document.fonts;
     if (!term) return;
-    const family = term.options.fontFamily ?? "";
+    const { fontFamily: family, fontWeight, fontWeightBold, lineHeight } = spec;
+    term.options.fontFamily = family;
+    term.options.fontWeight = fontWeight;
+    term.options.fontWeightBold = fontWeightBold;
+    term.options.lineHeight = lineHeight;
+    if (!fonts) return;
     let stale = false;
-    document.fonts
-      ?.load(`${initialFontSize.current}px ${family}`)
+    const size = initialFontSize.current;
+    Promise.all([
+      fonts.load(`${fontWeight} ${size}px ${family}`),
+      fonts.load(`${fontWeightBold} ${size}px ${family}`),
+    ])
       .then(() => {
         if (stale) return;
-        term.options.fontFamily = `${family.trim()} `;
+        term.options.fontFamily = `${family} `;
         fitNow();
       })
       .catch(() => {});
     return () => {
       stale = true;
     };
-  }, [fitNow]);
+  }, [spec, fitNow]);
 
   // Follow the box's size, but only while this tab is the visible one.
   useEffect(() => {

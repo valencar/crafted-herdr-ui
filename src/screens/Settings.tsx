@@ -20,6 +20,7 @@ import type { Theme } from "../lib/bindings/Theme";
 import type { AttachMode } from "../lib/bindings/AttachMode";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
+import type { TerminalFont } from "../lib/bindings/TerminalFont";
 import type { TerminalId } from "../lib/bindings/TerminalId";
 import type { TerminalList } from "../lib/bindings/TerminalList";
 import {
@@ -30,6 +31,7 @@ import {
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { useTheme } from "../lib/useTheme";
 import { useAppStore } from "../store/appStore";
+import { TERMINAL_FONTS } from "../terminal/terminalFonts";
 
 type SectionId =
   | "general"
@@ -463,6 +465,7 @@ function TerminalSection({
   const targetId = useId();
   const whereId = useId();
   const attachId = useId();
+  const fontId = useId();
   useEffect(() => {
     let cancelled = false;
     invokeTyped("get_terminals")
@@ -568,6 +571,23 @@ function TerminalSection({
           </button>
         </div>
       </fieldset>
+
+      <Field id={fontId} label="Font">
+        <select
+          id={fontId}
+          className="field"
+          value={settings.terminal_font}
+          onChange={(e) =>
+            void update({ terminal_font: e.target.value as TerminalFont })
+          }
+        >
+          {TERMINAL_FONTS.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </Field>
 
       <div className="settings-pair">
         <Field id={whereId} label="Each session opens in a">

@@ -37,6 +37,7 @@ const DEFAULTS: SettingsData = {
   dashboard_split: false,
   dashboard_split_width: 420,
   terminal_font_size: 13,
+  terminal_font: "hack",
   sidebar_collapsed: false,
   row_density: "comfortable",
   theme: "dark",
@@ -224,6 +225,27 @@ describe("Settings", () => {
     expect(
       within(group).getByRole("radio", { name: /^Ghostty/ }),
     ).not.toBeChecked();
+  });
+
+  it("the terminal font is a labelled select of the four fonts and saves terminal_font", async () => {
+    const user = await setup({}, "Terminal");
+    const select = screen.getByLabelText("Font");
+    expect(select.tagName).toBe("SELECT");
+    expect(
+      within(select)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Hack", "IBM Plex Mono", "Geist Mono", "JetBrains Mono"]);
+    expect(select).toHaveValue("hack");
+    await user.selectOptions(select, "JetBrains Mono");
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { terminal_font: "jetbrains_mono" },
+    });
+  });
+
+  it("the terminal font select shows the saved font", async () => {
+    await setup({ terminal_font: "ibm_plex_mono" }, "Terminal");
+    expect(screen.getByLabelText("Font")).toHaveValue("ibm_plex_mono");
   });
 
   it("saves open mode and attach mode", async () => {
