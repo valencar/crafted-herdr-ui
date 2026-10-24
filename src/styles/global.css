@@ -1,7 +1,8 @@
 /*
- * Bundled fonts, no network font loading. Geist and Geist Mono (the UI), plus the terminal
- * choices Hack (MIT and Bitstream Vera, ../fonts/LICENSE-Hack.md), IBM Plex Mono and
- * JetBrains Mono (SIL OFL, ../fonts/OFL-*.txt). Geist's license is ../fonts/OFL.txt.
+ * Bundled fonts, all full, unmodified upstream files; no network font loading. Geist and Geist
+ * Mono (the UI; SIL OFL, ../fonts/OFL.txt) and the terminal choices: Hack (MIT and Bitstream
+ * Vera, ../fonts/LICENSE-Hack.md), IBM Plex Mono (SIL OFL with the reserved name "Plex",
+ * ../fonts/LICENSE-IBMPlexMono.txt) and JetBrains Mono (SIL OFL, ../fonts/OFL-JetBrainsMono.txt).
  */
 @font-face {
   font-family: "Geist";
