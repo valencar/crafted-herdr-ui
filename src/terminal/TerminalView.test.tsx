@@ -284,6 +284,21 @@ describe("TerminalView", () => {
       expect(useAppStore.getState().toast).toBe("Copied");
     });
 
+    it("a_background_tab_cannot_write_the_clipboard", async () => {
+      const { rerender } = render(<Harness active={false} />);
+      await flush();
+      await act(async () => {
+        await h.osc.get(52)?.(`c;${btoa("x")}`);
+      });
+      expect(copy).not.toHaveBeenCalled();
+      rerender(<Harness active />);
+      await flush();
+      await act(async () => {
+        await h.osc.get(52)?.(`c;${btoa("x")}`);
+      });
+      expect(copy).toHaveBeenCalledWith("x");
+    });
+
     it("a_read_query_writes_nothing_to_the_session_and_copies_nothing", async () => {
       render(<Harness />);
       await flush();

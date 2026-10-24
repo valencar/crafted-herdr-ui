@@ -42,14 +42,22 @@ async function copyFromTerminal(text: string): Promise<void> {
  *   (a reply would put bytes chosen by the program's output into the pty input);
  * - invalid base64 or UTF-8, an empty text and an unknown target are swallowed without copying
  *   or a toast, so a stray sequence cannot clear the clipboard.
+ * - a write from a tab that is not the visible one is swallowed too, so a background pane cannot
+ *   overwrite the clipboard or keep a toast on screen (`isActive`).
  * The handler always returns true, so the sequence reaches nothing else.
  */
-export function registerOscClipboard(term: {
-  parser: Pick<Terminal["parser"], "registerOscHandler">;
-}): IDisposable {
+export function registerOscClipboard(
+  term: { parser: Pick<Terminal["parser"], "registerOscHandler"> },
+  isActive: () => boolean = () => true,
+): IDisposable {
   return term.parser.registerOscHandler(OSC_CLIPBOARD, async (data) => {
     const parts = data.split(";");
-    if (parts.length !== 2 || !TARGETS.test(parts[0]) || parts[1] === "?") {
+    if (
+      parts.length !== 2 ||
+      !TARGETS.test(parts[0]) ||
+      parts[1] === "?" ||
+      !isActive()
+    ) {
       return true;
     }
     const text = decode(parts[1]);

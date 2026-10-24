@@ -635,7 +635,7 @@ describe("motion tokens", () => {
 
   it("text_is_not_thinned_by_font_smoothing", () => {
     // `antialiased` makes macOS draw light-on-dark text thin; the default weight is wanted.
-    for (const file of ["app.css", "windows.css", "global.css"]) {
+    for (const file of ["app.css", "windows.css", "global.css", "tokens.css"]) {
       expect(stripComments(read(file)), file).not.toMatch(/font-smoothing/);
     }
   });

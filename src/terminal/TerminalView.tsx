@@ -75,6 +75,11 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
   const searchRef = useRef<SearchAddon | null>(null);
   const overlayButtonRef = useRef<HTMLButtonElement>(null);
   const initialFontSize = useRef(fontSize);
+  // Read by the OSC 52 handler: only the visible tab may write the clipboard.
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
   const spec = terminalFont(font);
   const initialSpec = useRef(spec);
 
@@ -108,7 +113,7 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     term.loadAddon(new WebLinksAddon(copyLink));
     // OSC 52: a program (herdr copying its own selection) can write the Mac clipboard, never read
     // it, and a query is never answered.
-    registerOscClipboard(term);
+    registerOscClipboard(term, () => activeRef.current);
     // ⌘ shortcuts belong to the menu, not to the program in the terminal.
     term.attachCustomKeyEventHandler((e) => !e.metaKey);
     term.open(host);
@@ -180,6 +185,8 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     ])
       .then(() => {
         if (stale) return;
+        // The trailing space is what makes xterm measure again (it ignores an unchanged value).
+        // The next font change sets a plain family, which differs from this one as well.
         term.options.fontFamily = `${family} `;
         fitNow();
       })

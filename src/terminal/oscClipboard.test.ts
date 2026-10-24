@@ -75,6 +75,18 @@ describe("registerOscClipboard", () => {
     },
   );
 
+  it("a_write_from_a_tab_that_is_not_the_visible_one_is_swallowed", async () => {
+    let visible = false;
+    handlers.clear();
+    registerOscClipboard(fakeTerm, () => visible);
+    await expect(send(`c;${b64("x")}`)).resolves.toBe(true);
+    expect(copy).not.toHaveBeenCalled();
+    expect(useAppStore.getState().toast).toBeNull();
+    visible = true;
+    await send(`c;${b64("x")}`);
+    expect(copy).toHaveBeenCalledWith("x");
+  });
+
   it("a_failed_copy_shows_the_error_toast_and_not_Copied", async () => {
     copy.mockRejectedValue(new Error("denied"));
     await expect(send(`c;${b64("x")}`)).resolves.toBe(true);

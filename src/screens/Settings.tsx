@@ -158,10 +158,13 @@ function Check({
 function Field({
   id,
   label,
+  hint,
   children,
 }: {
   id: string;
   label: ReactNode;
+  /** Shown under the control; the control points at it with `aria-describedby={`${id}-hint`}`. */
+  hint?: string;
   children: ReactNode;
 }) {
   return (
@@ -170,6 +173,11 @@ function Field({
         {label}
       </label>
       {children}
+      {hint && (
+        <span id={`${id}-hint`} className="muted settings-hint">
+          {hint}
+        </span>
+      )}
     </div>
   );
 }
@@ -525,6 +533,28 @@ function TerminalSection({
         </div>
       </div>
 
+      <Field
+        id={fontId}
+        label="Terminal font"
+        hint="Font for terminal tabs in this window"
+      >
+        <select
+          id={fontId}
+          className="field"
+          aria-describedby={`${fontId}-hint`}
+          value={settings.terminal_font}
+          onChange={(e) =>
+            void update({ terminal_font: e.target.value as TerminalFont })
+          }
+        >
+          {TERMINAL_FONTS.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+
       <fieldset className="settings-fieldset">
         <legend className="settings-label">Open sessions in</legend>
         <div className="opt-grid opt-grid-4">
@@ -571,23 +601,6 @@ function TerminalSection({
           </button>
         </div>
       </fieldset>
-
-      <Field id={fontId} label="Font">
-        <select
-          id={fontId}
-          className="field"
-          value={settings.terminal_font}
-          onChange={(e) =>
-            void update({ terminal_font: e.target.value as TerminalFont })
-          }
-        >
-          {TERMINAL_FONTS.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.label}
-            </option>
-          ))}
-        </select>
-      </Field>
 
       <div className="settings-pair">
         <Field id={whereId} label="Each session opens in a">

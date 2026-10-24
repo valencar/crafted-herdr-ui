@@ -229,7 +229,7 @@ describe("Settings", () => {
 
   it("the terminal font is a labelled select of the four fonts and saves terminal_font", async () => {
     const user = await setup({}, "Terminal");
-    const select = screen.getByLabelText("Font");
+    const select = screen.getByLabelText("Terminal font");
     expect(select.tagName).toBe("SELECT");
     expect(
       within(select)
@@ -243,9 +243,27 @@ describe("Settings", () => {
     });
   });
 
+  it("the terminal font reads as the in-app terminal's: hinted, and grouped with Open sessions", async () => {
+    await setup({}, "Terminal");
+    const select = screen.getByLabelText("Terminal font");
+    expect(select).toHaveAccessibleDescription(
+      "Font for terminal tabs in this window",
+    );
+    // After the "Open sessions: In Crafted Herdr / In {Terminal}" choice, before the external
+    // terminal picker, so it cannot be read as Ghostty's or iTerm2's font.
+    const follows = (a: Element, b: Element) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      follows(screen.getByRole("group", { name: "Open sessions" }), select),
+    ).toBe(true);
+    expect(
+      follows(select, screen.getByRole("group", { name: "Open sessions in" })),
+    ).toBe(true);
+  });
+
   it("the terminal font select shows the saved font", async () => {
     await setup({ terminal_font: "ibm_plex_mono" }, "Terminal");
-    expect(screen.getByLabelText("Font")).toHaveValue("ibm_plex_mono");
+    expect(screen.getByLabelText("Terminal font")).toHaveValue("ibm_plex_mono");
   });
 
   it("saves open mode and attach mode", async () => {
