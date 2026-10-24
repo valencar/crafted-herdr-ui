@@ -140,6 +140,7 @@ pub fn background(cmd: &mut Command) -> &mut Command {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(windows))]
     use super::*;
 
     #[cfg(not(windows))]
