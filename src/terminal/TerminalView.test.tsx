@@ -1,5 +1,5 @@
 import { createRef, useEffect, useState } from "react";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TermEvent } from "../lib/bindings/TermEvent";
@@ -20,6 +20,8 @@ type FakeTerm = {
   focus: ReturnType<typeof vi.fn>;
   keyHandler: ((e: { metaKey: boolean }) => boolean) | null;
   dataHandler: ((d: string) => void) | null;
+  /** The fake selection: the text, or "" for none; `select` also fires onSelectionChange. */
+  select: (text: string) => void;
 };
 
 const h = vi.hoisted(() => ({
@@ -58,6 +60,22 @@ vi.mock("@xterm/xterm", () => ({
     };
     keyHandler: FakeTerm["keyHandler"] = null;
     dataHandler: FakeTerm["dataHandler"] = null;
+    selection = "";
+    selectionListeners: (() => void)[] = [];
+    select(text: string) {
+      this.selection = text;
+      this.selectionListeners.forEach((fn) => fn());
+    }
+    hasSelection() {
+      return this.selection !== "";
+    }
+    getSelection() {
+      return this.selection;
+    }
+    onSelectionChange(fn: () => void) {
+      this.selectionListeners.push(fn);
+      return { dispose: vi.fn() };
+    }
     constructor(options: Record<string, unknown>) {
       this.options = options;
       h.terms.push(this as unknown as FakeTerm);
@@ -268,6 +286,101 @@ describe("TerminalView", () => {
     expect(term().options).toMatchObject({
       macOptionClickForcesSelection: true,
       macOptionIsMeta: false,
+    });
+  });
+
+  describe("copy on select", () => {
+    const host = () => document.querySelector(".term-host") as HTMLElement;
+    const press = (detail = 1) =>
+      fireEvent.mouseDown(host(), { button: 0, detail });
+    const release = () => fireEvent.mouseUp(document, { button: 0 });
+
+    it("a_drag_that_selects_copies_the_text_on_mouse_up_and_toasts_Copied", async () => {
+      render(<Harness />);
+      await flush();
+      press();
+      term().select("npm test");
+      // Nothing yet: it copies when the button is released, not while selecting.
+      expect(copy).not.toHaveBeenCalled();
+      release();
+      await flush();
+      expect(copy).toHaveBeenCalledTimes(1);
+      expect(copy).toHaveBeenCalledWith("npm test");
+      expect(useAppStore.getState().toast).toBe("Copied");
+    });
+
+    it("a_double_click_word_selection_copies_too", async () => {
+      render(<Harness />);
+      await flush();
+      press(2);
+      term().select("word");
+      release();
+      await flush();
+      expect(copy).toHaveBeenCalledWith("word");
+    });
+
+    it("a_refused_copy_shows_the_error_toast", async () => {
+      copy.mockRejectedValue(new Error("denied"));
+      render(<Harness />);
+      await flush();
+      press();
+      term().select("x");
+      release();
+      await flush();
+      expect(useAppStore.getState().toast).toBe(
+        "Couldn’t copy to the clipboard.",
+      );
+    });
+
+    it("a_selection_that_changes_without_the_mouse_does_not_copy", async () => {
+      render(<Harness />);
+      await flush();
+      term().select("search hit"); // search, keyboard selection, select all
+      release();
+      await flush();
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("a_click_that_clears_the_selection_copies_nothing", async () => {
+      render(<Harness />);
+      await flush();
+      term().select("old");
+      press();
+      term().select(""); // xterm clears it on mouse down
+      release();
+      await flush();
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("a_drag_that_herdr_took_leaves_an_old_selection_alone", async () => {
+      render(<Harness />);
+      await flush();
+      term().select("old"); // from an earlier option-drag
+      press();
+      release(); // mouse reporting: xterm never changed the selection
+      await flush();
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("a_release_without_a_press_in_this_terminal_copies_nothing", async () => {
+      render(<Harness />);
+      await flush();
+      release();
+      await flush();
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("one_drag_copies_once", async () => {
+      render(<Harness />);
+      await flush();
+      press();
+      term().select("a");
+      term().select("ab");
+      release();
+      release();
+      await flush();
+      expect(copy).toHaveBeenCalledTimes(1);
+      expect(copy).toHaveBeenCalledWith("ab");
     });
   });
 

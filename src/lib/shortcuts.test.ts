@@ -110,7 +110,7 @@ describe("sheetRows", () => {
     });
     expect(rows).toContainEqual({
       group: "terminal",
-      label: "Select text",
+      label: "Select and copy text",
       keys: "⌥ drag",
     });
     // No label twice, and the groups are the four the sheet draws.

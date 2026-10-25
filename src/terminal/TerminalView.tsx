@@ -20,7 +20,7 @@ import { useTerminalStore, type TermTab } from "./terminalStore";
 import { TermBar } from "./TermBar";
 import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
-import { registerOscClipboard } from "./oscClipboard";
+import { copyFromTerminal, registerOscClipboard } from "./oscClipboard";
 import { terminalFont } from "./terminalFonts";
 import { xtermTheme } from "./xtermTheme";
 
@@ -116,6 +116,29 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     registerOscClipboard(term, () => activeRef.current);
     // ⌘ shortcuts belong to the menu, not to the program in the terminal.
     term.attachCustomKeyEventHandler((e) => !e.metaKey);
+    // Copy on select, like herdr does: a drag (or a double or triple click) that changed xterm's
+    // selection copies it when the button is released. Not on every selection change, so a
+    // keyboard selection, select all or a search hit never touches the clipboard, and not for a
+    // drag herdr took through mouse reporting, which leaves an older selection unchanged.
+    let pressed = false;
+    let changed = false;
+    const onSelection = term.onSelectionChange(() => {
+      if (pressed) changed = true;
+    });
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      pressed = true;
+      changed = false;
+    };
+    const onUp = () => {
+      if (!pressed) return;
+      pressed = false;
+      const text = changed && term.hasSelection() ? term.getSelection() : "";
+      if (text) void copyFromTerminal(text);
+    };
+    // Capture, so it is noted before xterm handles the press; the release can land anywhere.
+    host.addEventListener("mousedown", onDown, true);
+    document.addEventListener("mouseup", onUp);
     term.open(host);
     try {
       const webgl = new WebglAddon();
@@ -130,6 +153,9 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     fitRef.current = fit;
     searchRef.current = search;
     return () => {
+      host.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("mouseup", onUp);
+      onSelection.dispose();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;

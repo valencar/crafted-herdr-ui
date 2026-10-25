@@ -24,7 +24,8 @@ function decode(payload: string): string | null {
   }
 }
 
-async function copyFromTerminal(text: string): Promise<void> {
+/** Copies text a program or the user selected in the terminal, and says so (or says it failed). */
+export async function copyFromTerminal(text: string): Promise<void> {
   const { showToast } = useAppStore.getState();
   try {
     await copyText(text);
