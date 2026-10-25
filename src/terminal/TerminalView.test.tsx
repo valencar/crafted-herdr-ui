@@ -26,6 +26,8 @@ type FakeTerm = {
   emitSelectionChange: () => void;
   /** Listeners of the fake's own document mouseup, still registered. */
   mouseUpListeners: number;
+  /** The `onSelectionChange` subscribers that are still subscribed. */
+  selectionListeners: (() => void)[];
 };
 
 const h = vi.hoisted(() => ({
