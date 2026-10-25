@@ -117,28 +117,48 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     // ⌘ shortcuts belong to the menu, not to the program in the terminal.
     term.attachCustomKeyEventHandler((e) => !e.metaKey);
     // Copy on select, like herdr does: a drag (or a double or triple click) that changed xterm's
-    // selection copies it when the button is released. Not on every selection change, so a
-    // keyboard selection, select all or a search hit never touches the clipboard, and not for a
-    // drag herdr took through mouse reporting, which leaves an older selection unchanged.
+    // selection copies it when the button is released. xterm 6.0.0 fires `onSelectionChange` for
+    // a mouse selection in one place only, its own document `mouseup` listener, which it adds at
+    // mousedown, so after ours (added here, at mount). Reading the selection inside our listener
+    // would see nothing yet; the decision is therefore taken a macrotask later, once every
+    // mouseup listener has run, whatever their order. Not on every selection change, so a keyboard
+    // selection, Select All or a search hit never touches the clipboard; not for a drag herdr took
+    // through mouse reporting (xterm's selection is unchanged, so an older one is not copied
+    // again); and not for a tab that is not the visible one.
     let pressed = false;
     let changed = false;
+    let decide: ReturnType<typeof setTimeout> | undefined;
+    const forget = () => {
+      pressed = false;
+      changed = false;
+    };
     const onSelection = term.onSelectionChange(() => {
       if (pressed) changed = true;
     });
     const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
+      clearTimeout(decide);
       pressed = true;
       changed = false;
     };
     const onUp = () => {
       if (!pressed) return;
-      pressed = false;
-      const text = changed && term.hasSelection() ? term.getSelection() : "";
-      if (text) void copyFromTerminal(text);
+      clearTimeout(decide);
+      decide = setTimeout(() => {
+        const text =
+          pressed && changed && activeRef.current && term.hasSelection()
+            ? term.getSelection()
+            : "";
+        forget();
+        if (text) void copyFromTerminal(text);
+      }, 0);
     };
-    // Capture, so it is noted before xterm handles the press; the release can land anywhere.
+    // Capture, so it is noted before xterm handles the press. The release can land anywhere, so
+    // it is heard on the document; a release outside the window never arrives, so a blur forgets
+    // the press.
     host.addEventListener("mousedown", onDown, true);
     document.addEventListener("mouseup", onUp);
+    window.addEventListener("blur", forget);
     term.open(host);
     try {
       const webgl = new WebglAddon();
@@ -153,8 +173,10 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     fitRef.current = fit;
     searchRef.current = search;
     return () => {
+      clearTimeout(decide);
       host.removeEventListener("mousedown", onDown, true);
       document.removeEventListener("mouseup", onUp);
+      window.removeEventListener("blur", forget);
       onSelection.dispose();
       term.dispose();
       termRef.current = null;
