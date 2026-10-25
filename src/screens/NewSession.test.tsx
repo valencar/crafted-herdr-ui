@@ -88,9 +88,21 @@ const DEFAULT_SETTINGS: Settings = {
   dashboard_split: false,
   dashboard_split_width: 420,
   terminal_font_size: 13,
+  terminal_font: "hack",
   sidebar_collapsed: false,
   row_density: "comfortable",
+  theme: "dark",
+  new_session_kind: null,
+  new_session_hidden_kinds: [],
+  new_session_hide_shell: false,
 };
+
+/** Settings as loaded, with the Run choice the sheet should start on. */
+function savedKind(kind: string | null, over: Partial<Settings> = {}) {
+  return {
+    settings: { ...DEFAULT_SETTINGS, new_session_kind: kind, ...over },
+  };
+}
 
 const KINDS = ["claude", "codex"];
 /** Errors the next `create_session` calls fail with, oldest first. */
@@ -155,6 +167,11 @@ beforeEach(() => {
         case "create_session":
           if (createErrors.length > 0) throw createErrors.shift();
           return CREATED;
+        case "set_settings":
+          return {
+            ...(useAppStore.getState().settings ?? DEFAULT_SETTINGS),
+            ...(args as unknown as { patch: Partial<Settings> }).patch,
+          };
         default:
           return null;
       }
@@ -165,11 +182,12 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  useAppStore.setState({ settings: null });
 });
 
 describe("NewSession", () => {
   it("preview_matches_backend_plan", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     const expected = fakePreview({
@@ -190,7 +208,7 @@ describe("NewSession", () => {
   });
 
   it("create_disabled_until_valid", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await screen.findByRole("radio", { name: "claude" });
     expect(createButton()).toBeDisabled();
     await fillFolder(user, "/home/dev/projects/api-service");
@@ -206,7 +224,7 @@ describe("NewSession", () => {
   });
 
   it("shell_kind_omits_agent_start_line", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     expect(
@@ -224,7 +242,7 @@ describe("NewSession", () => {
   });
 
   it("trust_retry_flow", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(
@@ -252,10 +270,11 @@ describe("NewSession", () => {
       branch: "feat/x",
       trust: true,
     });
+    expect(lastRequest("create_session").kind).toBe("claude");
   });
 
   it("recognises a trust refusal by message alone and shows other errors inline", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(
@@ -290,7 +309,7 @@ describe("NewSession", () => {
   });
 
   it("cmd_enter_submits", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
@@ -310,6 +329,216 @@ describe("NewSession", () => {
     await fillFolder(user, "/home/dev/projects/api-service");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
     expect(callsTo("create_session")).toHaveLength(0);
+  });
+});
+
+describe("NewSession remembers the Run choice", () => {
+  const radio = (name: string) => screen.findByRole("radio", { name });
+  async function createValid(user: ReturnType<typeof userEvent.setup>) {
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    await user.click(createButton());
+  }
+
+  it("defaults_to_plain_shell_when_nothing_saved", async () => {
+    for (const store of [{}, savedKind(null)]) {
+      const user = setup(undefined, store);
+      await radio("claude");
+      expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+      expect(screen.getByRole("radio", { name: "claude" })).not.toBeChecked();
+      await fillFolder(user, "/home/dev/projects/api-service");
+      await vi.waitFor(() =>
+        expect(lastRequest("preview_new_session").kind).toBeNull(),
+      );
+      cleanup();
+      invoke.mockClear();
+      useAppStore.setState({ settings: null });
+    }
+  });
+
+  const runRadios = () =>
+    within(screen.getByRole("group", { name: "Run" }))
+      .getAllByRole("radio")
+      .map((r) => r.closest("label")!.querySelector(".opt-name")!.textContent);
+
+  it("a_hidden_kind_is_not_offered", async () => {
+    setup(undefined, savedKind(null, { new_session_hidden_kinds: ["codex"] }));
+    await radio("claude");
+    expect(runRadios()).toEqual(["claude", "Plain shell"]);
+  });
+
+  it("a_hidden_plain_shell_is_not_offered", async () => {
+    setup(undefined, savedKind("codex", { new_session_hide_shell: true }));
+    await radio("claude");
+    expect(runRadios()).toEqual(["claude", "codex"]);
+    expect(screen.getByRole("radio", { name: "codex" })).toBeChecked();
+  });
+
+  it("a_saved_kind_that_is_hidden_starts_on_plain_shell", async () => {
+    setup(
+      undefined,
+      savedKind("claude", { new_session_hidden_kinds: ["claude"] }),
+    );
+    await radio("codex");
+    expect(runRadios()).toEqual(["codex", "Plain shell"]);
+    expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+  });
+
+  it("a_saved_kind_and_plain_shell_both_hidden_starts_on_the_first_shown_kind", async () => {
+    setup(
+      undefined,
+      savedKind("claude", {
+        new_session_hidden_kinds: ["claude"],
+        new_session_hide_shell: true,
+      }),
+    );
+    await radio("codex");
+    expect(runRadios()).toEqual(["codex"]);
+    expect(screen.getByRole("radio", { name: "codex" })).toBeChecked();
+  });
+
+  it("everything_hidden_or_uninstalled_still_offers_plain_shell", async () => {
+    setup(
+      undefined,
+      savedKind(null, {
+        new_session_hidden_kinds: ["claude", "codex"],
+        new_session_hide_shell: true,
+      }),
+    );
+    await radio("Plain shell");
+    expect(runRadios()).toEqual(["Plain shell"]);
+    expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+  });
+
+  it("the_only_shown_kind_being_uninstalled_still_offers_plain_shell", async () => {
+    setup(
+      undefined,
+      savedKind("gemini", {
+        new_session_hidden_kinds: ["claude", "codex"],
+        new_session_hide_shell: true,
+      }),
+    );
+    await radio("Plain shell");
+    expect(runRadios()).toEqual(["Plain shell"]);
+  });
+
+  it("a_clicked_kind_that_gets_hidden_meanwhile_is_not_sent", async () => {
+    const user = setup(undefined, savedKind(null));
+    await user.click(await radio("codex"));
+    act(() => {
+      useAppStore.setState({
+        settings: {
+          ...DEFAULT_SETTINGS,
+          new_session_hidden_kinds: ["codex"],
+        },
+      });
+    });
+    expect(runRadios()).toEqual(["claude", "Plain shell"]);
+    expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    await user.click(createButton());
+    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
+    expect(lastRequest("create_session").kind).toBeNull();
+  });
+
+  it("defaults_to_the_saved_kind", async () => {
+    setup(undefined, savedKind("codex"));
+    expect(await radio("codex")).toBeChecked();
+    expect(
+      screen.getByRole("radio", { name: "Plain shell" }),
+    ).not.toBeChecked();
+  });
+
+  it("saved_kind_no_longer_listed_falls_back_to_plain_shell", async () => {
+    setup(undefined, savedKind("gemini"));
+    await radio("claude");
+    expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
+  });
+
+  it("a click in the sheet wins over the saved kind", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await user.click(await radio("codex"));
+    expect(screen.getByRole("radio", { name: "codex" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "claude" })).not.toBeChecked();
+  });
+
+  it("create_saves_the_kind_used", async () => {
+    const user = setup();
+    await user.click(await radio("claude"));
+    await createValid(user);
+    await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
+    await vi.waitFor(() => expect(callsTo("set_settings")).toHaveLength(1));
+    expect(callsTo("set_settings")[0][1]).toEqual({
+      patch: { new_session_kind: "claude" },
+    });
+    expect(useAppStore.getState().settings?.new_session_kind).toBe("claude");
+  });
+
+  it("create with a plain shell after an agent saves null", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await user.click(await radio("Plain shell"));
+    await createValid(user);
+    await vi.waitFor(() => expect(callsTo("set_settings")).toHaveLength(1));
+    expect(callsTo("set_settings")[0][1]).toEqual({
+      patch: { new_session_kind: null },
+    });
+  });
+
+  it("create_with_the_saved_kind_does_not_save_again", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await radio("claude");
+    await createValid(user);
+    await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
+    expect(callsTo("create_session")).toHaveLength(1);
+    expect(callsTo("set_settings")).toHaveLength(0);
+  });
+
+  it("create with a plain shell and nothing saved does not save", async () => {
+    const user = setup();
+    await radio("claude");
+    await createValid(user);
+    await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
+    expect(callsTo("set_settings")).toHaveLength(0);
+  });
+
+  it("a create that finishes after the sheet was closed still saves the kind", async () => {
+    const user = setup();
+    await user.click(await radio("claude"));
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    let finish: (v: unknown) => void = () => {};
+    const base = invoke.getMockImplementation() as (
+      name: string,
+      args?: unknown,
+    ) => Promise<unknown>;
+    invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "create_session") {
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      }
+      return base(name, args);
+    });
+    await user.click(createButton());
+    await user.keyboard("{Escape}");
+    cleanup();
+    finish(CREATED);
+    await vi.waitFor(() => expect(callsTo("set_settings")).toHaveLength(1));
+    expect(callsTo("set_settings")[0][1]).toEqual({
+      patch: { new_session_kind: "claude" },
+    });
+  });
+
+  it("failed_create_or_cancel_saves_nothing", async () => {
+    const user = setup();
+    await user.click(await radio("claude"));
+    createErrors.push({ kind: "invalid", message: "Nope." });
+    await createValid(user);
+    expect(await screen.findByText("Nope.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(useAppStore.getState().sheet).toBeNull();
+    expect(callsTo("set_settings")).toHaveLength(0);
   });
 });
 
@@ -371,7 +600,7 @@ describe("NewSession form", () => {
     expect(
       group.getAllByRole("radio").map((r) => r.closest("label")!.textContent),
     ).toEqual(["CCclaude", "CXcodex", "$_Plain shell"]);
-    expect(group.getByRole("radio", { name: "claude" })).toBeChecked();
+    expect(group.getByRole("radio", { name: "Plain shell" })).toBeChecked();
   });
 
   it("defaults the placement to a new tab in the first workspace and lists the rest", async () => {
@@ -453,28 +682,25 @@ describe("NewSession form", () => {
     const user = setup(
       appState(machine("buildbox", { snapshot: snap }), machine("gpubox")),
     );
-    const recent = screen
-      .getAllByRole("button")
-      .filter((b) =>
-        b.getAttribute("title")?.startsWith("/home/dev/projects/"),
-      );
-    const titles = recent.map((b) => b.getAttribute("title"));
-    expect(titles).toEqual(
-      [0, 1, 2, 3, 4, 5].map((n) => `/home/dev/projects/p${n}`),
+    // The buttons show the folder's name; the app tooltip (not a native title) has the path.
+    const recentButtons = () =>
+      screen.getAllByRole("button").filter((b) => /^p\d$/.test(b.textContent!));
+    const recent = recentButtons();
+    expect(recent.map((b) => b.textContent)).toEqual(
+      [0, 1, 2, 3, 4, 5].map((n) => `p${n}`),
     );
+    expect(recent.every((b) => !b.hasAttribute("title"))).toBe(true);
     await user.click(recent[0]);
-    expect(screen.getByLabelText("Project folder")).toHaveValue(titles[0]);
+    expect(screen.getByLabelText("Project folder")).toHaveValue(
+      "/home/dev/projects/p0",
+    );
     // The other machine's folders are its own.
     await user.click(screen.getByRole("radio", { name: /gpubox/ }));
-    expect(
-      screen
-        .getAllByRole("button")
-        .some((b) => b.getAttribute("title") === titles[0]),
-    ).toBe(false);
+    expect(recentButtons()).toHaveLength(0);
   });
 
   it("requires a branch for a worktree and sends it with trust off", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(
@@ -494,7 +720,7 @@ describe("NewSession form", () => {
   });
 
   it("splits Advanced agent arguments on whitespace, and only for an agent", async () => {
-    const user = setup();
+    const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(screen.getByText("Advanced"));

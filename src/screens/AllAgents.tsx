@@ -1,10 +1,13 @@
+import { Kbd } from "../components/Kbd";
 import { useEffect, useMemo, useState } from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { MachineNotices, NoAgentsYet } from "../components/HomeNotices";
+import { EmptyState } from "../components/EmptyState";
 import { Inspector } from "../components/Inspector";
 import { NeedsYouCard } from "../components/NeedsYouCard";
 import { ProjectGroup } from "../components/ProjectGroup";
+import { SkeletonList } from "../components/Skeleton";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { failingNote, isFailing } from "../lib/dashboard";
 import { lastLines, plural } from "../lib/format";
@@ -146,11 +149,11 @@ export function AllAgents() {
               }
             }}
           />
-          <kbd>⌘F</kbd>
+          <Kbd id="find" />
         </label>
         <MachineNotices machines={state?.machines ?? []} nowMs={nowMs} />
         {state === null ? (
-          <p className="empty">Connecting to herdr…</p>
+          <SkeletonList />
         ) : !hasAnyRows ? (
           <NoAgentsYet machines={state.machines} />
         ) : (
@@ -225,7 +228,9 @@ export function AllAgents() {
                 </span>
               </div>
               {groups.length === 0 && (
-                <p className="empty">No sessions match “{query.trim()}”.</p>
+                <EmptyState title="No matches" icon="search">
+                  <p>No sessions match “{query.trim()}”.</p>
+                </EmptyState>
               )}
               {groups.map((g) => (
                 <ProjectGroup

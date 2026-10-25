@@ -1,4 +1,8 @@
-import { useMemo, useState } from "react";
+import { Kbd } from "./Kbd";
+import { HealthDot, StatusDot } from "./StatusDot";
+import { Tooltip } from "./Tooltip";
+import { tabShortcutId, type ShortcutId } from "../lib/shortcuts";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Group } from "../lib/grouping";
@@ -7,35 +11,36 @@ import { useAppStore } from "../store/appStore";
 import { HomeIcon } from "../terminal/HomeIcon";
 import {
   tabDotStatus,
-  tabStatus,
+  tabName,
   tabTreeName,
   useRowsByKey,
 } from "../terminal/tabInfo";
-import { groupTabs } from "../terminal/tabOrder";
+import { groupTabs, tabShortcut } from "../terminal/tabOrder";
 import { useTerminalStore } from "../terminal/terminalStore";
 
 /** How many projects show before "{n} more". */
 const PROJECTS_SHOWN = 3;
 
-/** A small terminal window, drawn in the text colour; the row's name says what it is. */
-function TerminalIcon() {
+/**
+ * A row's trailing cell: what it shows at rest (a count, or nothing) gives way to its shortcut
+ * on hover or keyboard focus. Both sit in one grid cell, so the row never changes width.
+ */
+function HintSlot({
+  rest,
+  shortcut,
+}: {
+  rest?: ReactNode;
+  shortcut?: ShortcutId;
+}) {
   return (
-    <svg
-      className="nav-term-icon"
-      width="12"
-      height="12"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.8" />
-      <path d="m4.8 6.4 2 1.6-2 1.6M8.6 10h2.6" />
-    </svg>
+    <span className="nav-slot">
+      <span className="nav-slot-rest">{rest}</span>
+      {shortcut && (
+        <span className="nav-slot-hint">
+          <Kbd id={shortcut} />
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -112,6 +117,17 @@ export function Sidebar({
     }
     return counts;
   }, [rows]);
+  const navRef = useRef<HTMLElement>(null);
+  // The row for the open screen or tab stays in view when a long list scrolls.
+  useEffect(() => {
+    const current = navRef.current?.querySelectorAll<HTMLElement>(
+      '[aria-current="page"]',
+    );
+    const row =
+      [...(current ?? [])].find((el) => el.classList.contains("nav-term")) ??
+      current?.[0];
+    row?.scrollIntoView?.({ block: "nearest" });
+  }, [activeKey, dashboardActive, activeWorkbox]);
   const [allProjects, setAllProjects] = useState(false);
   const hidden = Math.max(0, projects.length - PROJECTS_SHOWN);
   const shownProjects = allProjects
@@ -119,85 +135,92 @@ export function Sidebar({
     : projects.slice(0, PROJECTS_SHOWN);
   if (collapsed) {
     return (
-      <nav className="sidebar is-collapsed" aria-label="Sidebar">
-        <button
-          type="button"
-          className="rail-item"
-          aria-label="Dashboard"
-          aria-current={dashboardActive ? "page" : undefined}
-          title="Dashboard ⌘1"
-          onClick={onDashboard}
-        >
-          <HomeIcon />
-        </button>
-        <button
-          type="button"
-          className="rail-item rail-needs"
-          aria-label={`Needs you: ${needsCount} waiting`}
-          title={`Needs you: ${needsCount} waiting`}
-          onClick={() => onJump("needs-you")}
-        >
-          <span
-            className={`count${needsCount > 0 ? " count-needs" : ""}`}
-            aria-hidden="true"
-          >
-            {needsCount}
-          </span>
-        </button>
-        {machines.map((m) => {
-          const label = `${m.label}: ${HEALTH_LABEL[m.health.kind]}`;
-          return (
-            <button
-              key={m.id}
-              type="button"
-              className={`rail-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
-              aria-label={label}
-              aria-current={m.id === activeWorkbox ? "page" : undefined}
-              title={label}
-              onClick={() => onWorkbox(m.id)}
-            >
-              <span className="rail-icon" aria-hidden="true">
-                {m.label.slice(0, 1).toUpperCase()}
-              </span>
-              <span
-                className="health rail-health"
-                data-health={m.health.kind}
-                aria-hidden="true"
-              >
-                <span className="dot" />
-              </span>
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          className="rail-item"
-          aria-label="Add workbox"
-          title="Add workbox"
-          onClick={onAddWorkbox}
-        >
-          <span className="rail-icon" aria-hidden="true">
-            +
-          </span>
-        </button>
-        <div className="sidebar-foot">
+      <nav ref={navRef} className="sidebar is-collapsed" aria-label="Sidebar">
+        <Tooltip label="Dashboard" shortcut="dashboard">
           <button
             type="button"
             className="rail-item"
-            aria-label="Expand sidebar"
-            title="Expand sidebar ⌘B"
-            onClick={toggleSidebar}
+            aria-label="Dashboard"
+            aria-current={dashboardActive ? "page" : undefined}
+            onClick={onDashboard}
           >
-            <span className="rail-icon" aria-hidden="true">
-              »
+            <HomeIcon />
+          </button>
+        </Tooltip>
+        <Tooltip
+          label={`Needs you: ${needsCount} waiting`}
+          shortcut="next-needs-you"
+        >
+          <button
+            type="button"
+            className="rail-item rail-needs"
+            aria-label={`Needs you: ${needsCount} waiting`}
+            onClick={() => onJump("needs-you")}
+          >
+            <span
+              className={`count${needsCount > 0 ? " count-needs" : ""}`}
+              aria-hidden="true"
+            >
+              {needsCount}
             </span>
           </button>
+        </Tooltip>
+        {machines.map((m) => {
+          const label = `${m.label}: ${HEALTH_LABEL[m.health.kind]}`;
+          return (
+            <Tooltip key={m.id} label={label}>
+              <button
+                type="button"
+                className={`rail-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
+                aria-label={label}
+                aria-current={m.id === activeWorkbox ? "page" : undefined}
+                onClick={() => onWorkbox(m.id)}
+              >
+                <span className="rail-icon" aria-hidden="true">
+                  {m.label.slice(0, 1).toUpperCase()}
+                </span>
+                <span
+                  className="health rail-health"
+                  data-health={m.health.kind}
+                  aria-hidden="true"
+                >
+                  <HealthDot health={m.health} live />
+                </span>
+              </button>
+            </Tooltip>
+          );
+        })}
+        <Tooltip label="Add workbox">
+          <button
+            type="button"
+            className="rail-item"
+            aria-label="Add workbox"
+            onClick={onAddWorkbox}
+          >
+            <span className="rail-icon" aria-hidden="true">
+              +
+            </span>
+          </button>
+        </Tooltip>
+        <div className="sidebar-foot">
+          <Tooltip label="Expand sidebar" shortcut="toggle-sidebar">
+            <button
+              type="button"
+              className="rail-item"
+              aria-label="Expand sidebar"
+              onClick={toggleSidebar}
+            >
+              <span className="rail-icon" aria-hidden="true">
+                »
+              </span>
+            </button>
+          </Tooltip>
         </div>
       </nav>
     );
   }
   return (
-    <nav className="sidebar" aria-label="Sidebar">
+    <nav ref={navRef} className="sidebar" aria-label="Sidebar">
       <button
         type="button"
         className="nav-item"
@@ -206,7 +229,7 @@ export function Sidebar({
       >
         <HomeIcon />
         <span className="nav-label">Dashboard</span>
-        <kbd className="nav-kbd">⌘1</kbd>
+        <HintSlot shortcut="dashboard" />
       </button>
       <button
         type="button"
@@ -214,12 +237,17 @@ export function Sidebar({
         onClick={() => onJump("needs-you")}
       >
         <span className="nav-label">Needs you</span>
-        <span
-          className="count count-needs"
-          aria-label={`${needsCount} waiting`}
-        >
-          {needsCount}
-        </span>
+        <HintSlot
+          rest={
+            <span
+              className="count count-needs"
+              aria-label={`${needsCount} waiting`}
+            >
+              {needsCount}
+            </span>
+          }
+          shortcut="next-needs-you"
+        />
       </button>
       <button
         type="button"
@@ -243,39 +271,39 @@ export function Sidebar({
       </div>
       {machines.map((m) => (
         <div className="nav-box" key={m.id}>
-          <button
-            type="button"
-            className={`nav-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
-            aria-current={m.id === activeWorkbox ? "page" : undefined}
-            onClick={() => onWorkbox(m.id)}
-          >
-            <span className="nav-label">{m.label}</span>
-            <span className="health" data-health={m.health.kind}>
-              <span className="dot" aria-hidden="true" />
-              {HEALTH_LABEL[m.health.kind]}
-            </span>
-            <span className="count">{agentsByMachine.get(m.id) ?? 0}</span>
-          </button>
+          <Tooltip label={`${m.label}: ${HEALTH_LABEL[m.health.kind]}`}>
+            <button
+              type="button"
+              className={`nav-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
+              aria-current={m.id === activeWorkbox ? "page" : undefined}
+              onClick={() => onWorkbox(m.id)}
+            >
+              <span className="nav-label">{m.label}</span>
+              <span className="health" data-health={m.health.kind}>
+                <HealthDot health={m.health} live />
+                {HEALTH_LABEL[m.health.kind]}
+              </span>
+              <span className="count">{agentsByMachine.get(m.id) ?? 0}</span>
+            </button>
+          </Tooltip>
           {(tabsByMachine.get(m.id) ?? []).map((tab) => {
             const row = rows.get(tab.tabKey);
+            const n = tabShortcut(tab.tabKey, tabs, machines);
+            const shortcut = n === null ? null : tabShortcutId(n);
             return (
-              <button
-                key={tab.tabKey}
-                type="button"
-                className="nav-term"
-                aria-label={tabTreeName(tab, row)}
-                aria-current={tab.tabKey === activeKey ? "page" : undefined}
-                title={tabStatus(tab, row) ?? tab.title}
-                onClick={() => activate(tab.tabKey)}
-              >
-                <TerminalIcon />
-                <span className="mono">{tab.title}</span>
-                <span
-                  className="dot"
-                  aria-hidden="true"
-                  data-status={tabDotStatus(tab, row)}
-                />
-              </button>
+              <Tooltip key={tab.tabKey} label={tabName(tab, row)}>
+                <button
+                  type="button"
+                  className="nav-term"
+                  aria-label={tabTreeName(tab, row)}
+                  aria-current={tab.tabKey === activeKey ? "page" : undefined}
+                  onClick={() => activate(tab.tabKey)}
+                >
+                  <StatusDot status={tabDotStatus(tab, row)} live />
+                  <span className="mono">{tab.title}</span>
+                  {shortcut !== null && <HintSlot shortcut={shortcut} />}
+                </button>
+              </Tooltip>
             );
           })}
         </div>
@@ -291,22 +319,21 @@ export function Sidebar({
       {shownProjects.map((g) => {
         const status = worstStatus(g);
         return (
-          <button
+          <Tooltip
             key={g.key}
-            type="button"
-            className="nav-item"
-            onClick={() => onProject(g)}
+            label={`${g.name} on ${g.machineLabel} · ${STATUS_LABEL[status]}`}
           >
-            <span
-              className="dot"
-              data-status={status}
-              title={STATUS_LABEL[status]}
-              aria-hidden="true"
-            />
-            <span className="sr-only">{STATUS_LABEL[status]}: </span>
-            <span className="nav-label">{g.name}</span>
-            <span className="mono nav-sub">{g.machineLabel}</span>
-          </button>
+            <button
+              type="button"
+              className="nav-item"
+              onClick={() => onProject(g)}
+            >
+              <StatusDot status={status} />
+              <span className="sr-only">{STATUS_LABEL[status]}: </span>
+              <span className="nav-label">{g.name}</span>
+              <span className="mono nav-sub">{g.machineLabel}</span>
+            </button>
+          </Tooltip>
         );
       })}
       {hidden > 0 && (
@@ -330,13 +357,16 @@ export function Sidebar({
           aria-pressed={activityOpen}
           onClick={onActivity}
         >
-          Activity ⌘⇧A
+          Activity
+          <HintSlot shortcut="activity" />
         </button>
         <button type="button" className="nav-link" onClick={onSettings}>
-          Settings ⌘,
+          Settings
+          <HintSlot shortcut="settings" />
         </button>
         <button type="button" className="nav-link" onClick={toggleSidebar}>
-          Collapse sidebar ⌘B
+          Collapse sidebar
+          <HintSlot shortcut="toggle-sidebar" />
         </button>
       </div>
     </nav>

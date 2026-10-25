@@ -15,6 +15,7 @@ import { ContextBar } from "./ContextBar";
 import { useRowsByKey } from "./tabInfo";
 import { TabStrip } from "./TabStrip";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
+import { DEFAULT_TERMINAL_FONT } from "./terminalFonts";
 import { HOME, useTerminalStore } from "./terminalStore";
 
 export const DEFAULT_FONT_SIZE = 13;
@@ -66,6 +67,9 @@ export function Workspace({ children }: { children: ReactNode }) {
   const activeKey = useTerminalStore((s) => s.activeKey);
   const fontSize = useAppStore(
     (s) => s.settings?.terminal_font_size ?? DEFAULT_FONT_SIZE,
+  );
+  const font = useAppStore(
+    (s) => s.settings?.terminal_font ?? DEFAULT_TERMINAL_FONT,
   );
   const rows = useRowsByKey();
   const split = useAppStore((s) => s.settings?.dashboard_split ?? false);
@@ -270,6 +274,7 @@ export function Workspace({ children }: { children: ReactNode }) {
                 // A hidden view has no size to fit to.
                 active={tab.tabKey === activeKey}
                 fontSize={fontSize}
+                font={font}
               />
             ))}
           </div>

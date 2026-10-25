@@ -1,4 +1,6 @@
+import { Skeleton } from "./Skeleton";
 import { legendText, StatusBar } from "./StatusBar";
+import { HealthDot } from "./StatusDot";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { statusCounts } from "../lib/dashboard";
 import {
@@ -6,6 +8,7 @@ import {
   formatAge,
   formatStaleness,
   HEALTH_LABEL,
+  isPending,
   plural,
 } from "../lib/format";
 import type { Row } from "../lib/grouping";
@@ -27,6 +30,8 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
   const headingId = useId();
   const report = useAppStore((s) => s.reportError);
   const kind = machine.health.kind;
+  // The first connect: nothing is known yet, so the card holds its shape with placeholders.
+  const pending = isPending(machine.health);
   const stale = kind !== "online";
   const counts = statusCounts(rows);
   // An online workbox answers every poll, but `last_ok_ms` only moves when the snapshot
@@ -40,27 +45,38 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
     <article
       className={`wb-card${stale ? " is-stale" : ""}`}
       aria-labelledby={headingId}
+      aria-busy={pending || undefined}
     >
       <div className="wb-card-head">
         <h3 id={headingId} className="wb-card-name mono">
           {machine.label}
         </h3>
         <span className="health" data-health={kind}>
-          <span className="dot" aria-hidden="true" />
+          <HealthDot health={machine.health} />
           {HEALTH_LABEL[kind]}
         </span>
       </div>
-      <div className="wb-card-mix">
-        <StatusBar counts={counts} />
-        <div className="wb-card-legend muted">
-          <span>{legendText(counts)}</span>
-          {stale && age !== null && <span>as of {agoText(age)}</span>}
+      {pending ? (
+        <div className="wb-card-mix">
+          <Skeleton height="8px" radius="4px" />
+          <Skeleton width="62%" height="10px" />
+          <Skeleton width="38%" height="10px" />
         </div>
-      </div>
-      <div className="wb-card-foot muted">
-        <span>{updated[0].toUpperCase() + updated.slice(1)}</span>
-        <span>{plural(tabCount, "tab", "tabs")} open</span>
-      </div>
+      ) : (
+        <>
+          <div className="wb-card-mix">
+            <StatusBar counts={counts} />
+            <div className="wb-card-legend muted">
+              <span>{legendText(counts)}</span>
+              {stale && age !== null && <span>as of {agoText(age)}</span>}
+            </div>
+          </div>
+          <div className="wb-card-foot muted">
+            <span>{updated[0].toUpperCase() + updated.slice(1)}</span>
+            <span>{plural(tabCount, "tab", "tabs")} open</span>
+          </div>
+        </>
+      )}
       {kind === "online" && (
         <button
           type="button"

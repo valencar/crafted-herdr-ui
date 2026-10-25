@@ -3,6 +3,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
   type Ref,
 } from "react";
 import { Terminal } from "@xterm/xterm";
@@ -11,13 +12,21 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import type { TerminalFont } from "../lib/bindings/TerminalFont";
 import { copyText } from "../lib/ipc";
+import { useResolvedTheme } from "../lib/theme";
 import { useAppStore } from "../store/appStore";
 import { useTerminalStore, type TermTab } from "./terminalStore";
+import { TermBar } from "./TermBar";
+import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
+import { copyFromTerminal, registerOscClipboard } from "./oscClipboard";
+import { terminalFont } from "./terminalFonts";
 import { xtermTheme } from "./xtermTheme";
 
 const RESIZE_DEBOUNCE_MS = 50;
+/** Rows to lift the output by when the bar's height can't be measured (a hidden tab). */
+const FALLBACK_LIFT_ROWS = 4;
 
 /**
  * What a click on a terminal link does: ⌘-click copies it and says so; a plain click does
@@ -53,31 +62,46 @@ type Props = {
   /** Only the active tab is visible; the others stay mounted (hidden) to keep their sessions. */
   active: boolean;
   fontSize: number;
+  /** Which bundled font to draw with (the `terminal_font` setting); a change is applied live. */
+  font: TerminalFont;
   ref?: Ref<TerminalHandle>;
 };
 
 /** One tab's xterm terminal and its session, from open to close. */
-export function TerminalView({ tab, active, fontSize, ref }: Props) {
+export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const searchRef = useRef<SearchAddon | null>(null);
   const overlayButtonRef = useRef<HTMLButtonElement>(null);
   const initialFontSize = useRef(fontSize);
+  // Read by the OSC 52 handler: only the visible tab may write the clipboard.
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+  const spec = terminalFont(font);
+  const initialSpec = useRef(spec);
 
   // The terminal is created once per mount and disposed on unmount.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const styles = getComputedStyle(document.documentElement);
-    const fontFamily = styles.getPropertyValue("--font-mono").trim();
+    const { fontFamily, fontWeight, fontWeightBold, lineHeight } =
+      initialSpec.current;
     const term = new Terminal({
       fontFamily,
+      fontWeight,
+      fontWeightBold,
+      lineHeight,
       fontSize: initialFontSize.current,
       scrollback: 10000,
       theme: xtermTheme(styles),
       allowProposedApi: false,
       macOptionIsMeta: false,
+      // herdr turns on mouse reporting, so a plain drag goes to it; ⌥-drag always selects here.
+      macOptionClickForcesSelection: true,
       // OSC 8 hyperlinks: without a handler xterm would confirm() and window.open() them.
       linkHandler: { activate: copyLink, allowNonHttpProtocols: false },
     });
@@ -87,8 +111,54 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     term.loadAddon(search);
     // Plain-text URLs are copy-only too.
     term.loadAddon(new WebLinksAddon(copyLink));
+    // OSC 52: a program (herdr copying its own selection) can write the Mac clipboard, never read
+    // it, and a query is never answered.
+    registerOscClipboard(term, () => activeRef.current);
     // ⌘ shortcuts belong to the menu, not to the program in the terminal.
     term.attachCustomKeyEventHandler((e) => !e.metaKey);
+    // Copy on select, like herdr does: a drag (or a double or triple click) that changed xterm's
+    // selection copies it when the button is released. xterm 6.0.0 fires `onSelectionChange` for
+    // a mouse selection in one place only, its own document `mouseup` listener, which it adds at
+    // mousedown, so after ours (added here, at mount). Reading the selection inside our listener
+    // would see nothing yet; the decision is therefore taken a macrotask later, once every
+    // mouseup listener has run, whatever their order. Not on every selection change, so a keyboard
+    // selection, Select All or a search hit never touches the clipboard; not for a drag herdr took
+    // through mouse reporting (xterm's selection is unchanged, so an older one is not copied
+    // again); and not for a tab that is not the visible one.
+    let pressed = false;
+    let changed = false;
+    let decide: ReturnType<typeof setTimeout> | undefined;
+    const forget = () => {
+      pressed = false;
+      changed = false;
+    };
+    const onSelection = term.onSelectionChange(() => {
+      if (pressed) changed = true;
+    });
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      clearTimeout(decide);
+      pressed = true;
+      changed = false;
+    };
+    const onUp = () => {
+      if (!pressed) return;
+      clearTimeout(decide);
+      decide = setTimeout(() => {
+        const text =
+          pressed && changed && activeRef.current && term.hasSelection()
+            ? term.getSelection()
+            : "";
+        forget();
+        if (text) void copyFromTerminal(text);
+      }, 0);
+    };
+    // Capture, so it is noted before xterm handles the press. The release can land anywhere, so
+    // it is heard on the document; a release outside the window never arrives, so a blur forgets
+    // the press.
+    host.addEventListener("mousedown", onDown, true);
+    document.addEventListener("mouseup", onUp);
+    window.addEventListener("blur", forget);
     term.open(host);
     try {
       const webgl = new WebglAddon();
@@ -103,12 +173,29 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     fitRef.current = fit;
     searchRef.current = search;
     return () => {
+      clearTimeout(decide);
+      host.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("mouseup", onUp);
+      window.removeEventListener("blur", forget);
+      onSelection.dispose();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
       searchRef.current = null;
     };
   }, []);
+
+  // The terminal follows the theme. `useTheme` writes `data-theme` before it publishes the
+  // resolved theme, so the tokens read here are already the new ones. Only the colors change:
+  // the terminal, its scrollback and its session are kept.
+  const resolved = useResolvedTheme((s) => s.resolved);
+  const paintedAs = useRef(resolved);
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || paintedAs.current === resolved) return;
+    paintedAs.current = resolved;
+    term.options.theme = xtermTheme(getComputedStyle(document.documentElement));
+  }, [resolved]);
 
   const { reattach, resize } = useTermSession(tab, termRef);
 
@@ -123,25 +210,39 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     resize(term.cols, term.rows);
   }, [resize]);
 
-  // The bundled font may still be loading when xterm measures a cell. Once it is loaded, make
-  // xterm measure again (it only does so when the option changes), then refit.
+  // The terminal follows the font setting, and the bundled font may still be loading when xterm
+  // measures a cell. So: apply the font's options (a no-op on the first run, when the terminal
+  // was just created with them), wait until both of its faces are loaded, then make xterm
+  // measure again (it only does so when the option changes) and refit, which tells the session
+  // the new size. The terminal, its scrollback and its session are kept.
   useEffect(() => {
     const term = termRef.current;
+    const fonts = document.fonts;
     if (!term) return;
-    const family = term.options.fontFamily ?? "";
+    const { fontFamily: family, fontWeight, fontWeightBold, lineHeight } = spec;
+    term.options.fontFamily = family;
+    term.options.fontWeight = fontWeight;
+    term.options.fontWeightBold = fontWeightBold;
+    term.options.lineHeight = lineHeight;
+    if (!fonts) return;
     let stale = false;
-    document.fonts
-      ?.load(`${initialFontSize.current}px ${family}`)
+    const size = initialFontSize.current;
+    Promise.all([
+      fonts.load(`${fontWeight} ${size}px ${family}`),
+      fonts.load(`${fontWeightBold} ${size}px ${family}`),
+    ])
       .then(() => {
         if (stale) return;
-        term.options.fontFamily = `${family.trim()} `;
+        // The trailing space is what makes xterm measure again (it ignores an unchanged value).
+        // The next font change sets a plain family, which differs from this one as well.
+        term.options.fontFamily = `${family} `;
         fitNow();
       })
       .catch(() => {});
     return () => {
       stale = true;
     };
-  }, [fitNow]);
+  }, [spec, fitNow]);
 
   // Follow the box's size, but only while this tab is the visible one.
   useEffect(() => {
@@ -194,11 +295,7 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
       termRef.current?.focus();
   }, [active, modal]);
 
-  // The overlay's default button takes focus, so Enter reattaches or retries.
-  const overlay = tab.state === "detached" || tab.state === "error";
-  useEffect(() => {
-    if (active && overlay && !modalOpen()) overlayButtonRef.current?.focus();
-  }, [active, overlay]);
+  const ended = tab.state === "detached" || tab.state === "error";
 
   useImperativeHandle(
     ref,
@@ -213,46 +310,85 @@ export function TerminalView({ tab, active, fontSize, ref }: Props) {
     [],
   );
 
+  const [clicked, setClicked] = useState<"Reattach" | "Retry">("Reattach");
   const closeTab = () => useTerminalStore.getState().closeTab(tab.tabKey);
+
+  // The bar needs the pane's row (to copy or open its attach command) and its workbox (ssh or
+  // not). The pane is "gone" only when its workbox has a list to look in and it is not on it.
+  const rows = useRowsByKey();
+  const row = tab.target.kind === "pane" ? rows.get(tab.tabKey) : undefined;
+  const machine = useAppStore((s) =>
+    s.state?.machines.find((m) => m.id === tab.target.machineId),
+  );
+  const gone =
+    ended &&
+    tab.target.kind === "pane" &&
+    !row &&
+    !!machine?.snapshot &&
+    machine.health.kind !== "disabled";
+
+  // When a session ends, push its last output up past the bar, so the newest line (usually the
+  // error) is not under it. Only on the end, never while a session is live. A tab that ends in
+  // the background has a hidden bar that measures 0, so it gets `FALLBACK_LIFT_ROWS`; once the tab
+  // is shown the bar is measured and only the rows still missing are written. `lifted` is how
+  // many rows this end has pushed up; a live (or reopening) session resets it. It measures again
+  // whenever the tab is shown or the bar's content changes.
+  const lifted = useRef(0);
+  useEffect(() => {
+    const term = termRef.current;
+    if (!ended) {
+      lifted.current = 0;
+      return;
+    }
+    if (!term) return;
+    const bar =
+      hostRef.current?.parentElement?.querySelector<HTMLElement>(".term-bar");
+    // The rows the box fits now: a tab shown after it ended has not been refitted yet, so
+    // `term.rows` may still be the old ones.
+    const rows = fitRef.current?.proposeDimensions()?.rows || term.rows;
+    const rowHeight = (hostRef.current?.clientHeight ?? 0) / rows;
+    const measured =
+      bar && bar.offsetHeight > 0 && rowHeight > 0
+        ? Math.ceil(bar.offsetHeight / rowHeight)
+        : null;
+    // Unmeasurable: lift the fallback once, and let a later, measurable run top it up.
+    const needed = measured ?? (lifted.current === 0 ? FALLBACK_LIFT_ROWS : 0);
+    const missing = needed - lifted.current;
+    if (missing <= 0) return;
+    term.write("\r\n".repeat(missing));
+    lifted.current = needed;
+    // `gone` changes the bar's words and buttons, so its height.
+  }, [ended, active, gone]);
+
+  // The bar's default button takes focus, so Enter reattaches or retries. It is disabled while a
+  // reattach is opening, so focus comes back each time the session ends again, and when the pane
+  // disappears after the end (the default button becomes Close tab).
+  useEffect(() => {
+    if (active && ended && !modalOpen()) overlayButtonRef.current?.focus();
+  }, [active, ended, gone, tab.attempts]);
+  // Silent on the first open: there is nothing to say until a reattach is under way or it ended.
+  const bar =
+    tab.state === "detached" ||
+    tab.state === "error" ||
+    (tab.state === "opening" && tab.attempts > 0);
 
   return (
     <div className="term-view" hidden={!active}>
       <div className="term-host" ref={hostRef} />
-      {tab.state === "detached" && (
-        <div className="term-overlay" role="group" aria-label="Detached">
-          <p className="term-overlay-title">Detached</p>
-          <div className="term-overlay-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              ref={overlayButtonRef}
-              onClick={() => void reattach()}
-            >
-              Reattach
-            </button>
-            <button type="button" className="btn" onClick={closeTab}>
-              Close tab
-            </button>
-          </div>
-        </div>
-      )}
-      {tab.state === "error" && (
-        <div className="term-overlay" role="alert">
-          <p className="term-overlay-title">{tab.error}</p>
-          <div className="term-overlay-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              ref={overlayButtonRef}
-              onClick={() => void reattach()}
-            >
-              Retry
-            </button>
-            <button type="button" className="btn" onClick={closeTab}>
-              Close tab
-            </button>
-          </div>
-        </div>
+      {bar && (
+        <TermBar
+          tab={tab}
+          row={row ?? null}
+          remote={machine?.is_local === false}
+          gone={gone}
+          clicked={clicked}
+          onReattach={() => {
+            setClicked(tab.state === "error" ? "Retry" : "Reattach");
+            void reattach();
+          }}
+          onClose={closeTab}
+          buttonRef={overlayButtonRef}
+        />
       )}
     </div>
   );

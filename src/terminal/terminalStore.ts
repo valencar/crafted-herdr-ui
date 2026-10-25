@@ -13,6 +13,10 @@ export type TermTab = {
   error: string | null;
   /** The id `term_write`, `term_resize` and `term_close` take; null while there is no session. */
   termId: number | null;
+  /** How the last session ended: the attach command's exit code; null while one runs, or when it gave none. */
+  exitCode: number | null;
+  /** Reattach and Retry clicks since a session last ended normally (exit 0); the first open does not count. */
+  attempts: number;
 };
 
 /** The key of the pinned Home tab; every other key is a terminal tab's `tabKey`. */
@@ -37,6 +41,11 @@ type TerminalStore = {
   activate: (key: string) => void;
   /** Activates the workbox's remembered tab if it is still open, else its first open tab; does nothing with none. */
   activateMachine: (machineId: string) => void;
+  /**
+   * Moves a tab to sit directly before `beforeKey`, or after its workbox's last tab when that is
+   * `null`. Does nothing for an unknown key, tabs of two workboxes, or a tab before itself.
+   */
+  moveTab: (tabKey: string, beforeKey: string | null) => void;
   /** Moves from the active key along `order` (Home first, then the tabs as the strip shows them), wrapping. */
   cycle: (dir: 1 | -1, order: string[]) => void;
   /** On Home: back to the last terminal tab, if it is still there. On a tab: Home. */
@@ -64,6 +73,8 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
         state: "opening",
         error: null,
         termId: null,
+        exitCode: null,
+        attempts: 0,
       };
       return { ...shown, tabs: [...s.tabs, tab] };
     }),
@@ -105,6 +116,28 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
       tabs.find((t) => t.target.machineId === machineId);
     if (target) activate(target.tabKey);
   },
+  moveTab: (tabKey, beforeKey) =>
+    set((s) => {
+      if (tabKey === beforeKey) return {};
+      const moving = s.tabs.find((t) => t.tabKey === tabKey);
+      if (!moving) return {};
+      const machineId = moving.target.machineId;
+      const rest = s.tabs.filter((t) => t.tabKey !== tabKey);
+      let at: number;
+      if (beforeKey === null) {
+        at =
+          rest.reduce(
+            (last, t, i) => (t.target.machineId === machineId ? i : last),
+            -1,
+          ) + 1;
+      } else {
+        at = rest.findIndex((t) => t.tabKey === beforeKey);
+        if (at < 0 || rest[at].target.machineId !== machineId) return {};
+      }
+      const tabs = [...rest.slice(0, at), moving, ...rest.slice(at)];
+      if (tabs.every((t, i) => t === s.tabs[i])) return {};
+      return { tabs };
+    }),
   cycle: (dir, order) => {
     if (order.length === 0) return;
     const at = order.indexOf(get().activeKey);

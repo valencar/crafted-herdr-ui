@@ -1,8 +1,10 @@
+import { Kbd } from "./Kbd";
+import { formatTabShortcut } from "../lib/shortcuts";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Row } from "../lib/grouping";
 import { copyText, invokeTyped } from "../lib/ipc";
 import { openFull, openRow } from "../lib/openRow";
-import { isKeyForMenu } from "../lib/uiHelpers";
+import { PINNED, useMenuBehavior } from "../lib/useMenuBehavior";
 import { useAppStore } from "../store/appStore";
 import { tabShortcut } from "../terminal/tabOrder";
 import { useTerminalStore } from "../terminal/terminalStore";
@@ -17,18 +19,6 @@ type Props = {
   wide?: boolean;
   /** A key hint shown inside the main button (the Inspector's ⌘↩). */
   kbd?: string;
-};
-
-/**
- * Set inline so no stylesheet order can undo it: `.menu` (windows.css, loaded after app.css) is
- * absolute with its own top/right, and would otherwise win over any `.open-menu` rule.
- */
-const PINNED: CSSProperties = {
-  position: "fixed",
-  top: "auto",
-  right: "auto",
-  bottom: "auto",
-  left: "auto",
 };
 
 /** Room the four-item menu needs; below this much space under the chevron it opens upwards. */
@@ -60,58 +50,19 @@ export function OpenButton({
   const shortcut = hasTab ? tabShortcut(row.key, tabs, machines) : null;
   const label = hasTab ? "Go to tab" : "Open";
   // "Go to tab" shows its own ⌘ number or nothing; the `kbd` hint belongs to "Open".
-  const hint = hasTab ? (shortcut === null ? null : `⌘${shortcut}`) : kbd;
-  const name = `${label} ${row.name}${shortcut === null ? "" : ` (⌘${shortcut})`}`;
+  const hint = hasTab
+    ? shortcut === null
+      ? null
+      : formatTabShortcut(shortcut)
+    : kbd;
+  const name = `${label} ${row.name}${shortcut === null ? "" : ` (${formatTabShortcut(shortcut)})`}`;
 
-  useEffect(() => {
-    if (!open) return;
-    const items = () => [
-      ...(rootRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ??
-        []),
-    ];
-    items()[0]?.focus();
-    const close = () => setOpen(false);
-    const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) close();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      // Not this menu's key: something else already handled it, or it was typed in another
-      // control (the palette's input).
-      if (!isKeyForMenu(rootRef.current, e)) return;
-      if (e.key === "Escape") {
-        close();
-        chevronRef.current?.focus();
-        return;
-      }
-      const all = items();
-      const at = all.indexOf(document.activeElement as HTMLElement);
-      let next: number;
-      if (e.key === "ArrowDown") next = (at + 1) % all.length;
-      else if (e.key === "ArrowUp") next = (at - 1 + all.length) % all.length;
-      else if (e.key === "Home") next = 0;
-      else if (e.key === "End") next = all.length - 1;
-      else return;
-      e.preventDefault();
-      all[next]?.focus();
-    };
-    // Focus moving to another control (the palette opening) leaves the menu behind: close it.
-    const onFocusIn = (e: FocusEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) close();
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("focusin", onFocusIn);
-    // The menu is fixed, so it would stay behind if the page moved under it.
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, true);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("focusin", onFocusIn);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
-    };
-  }, [open]);
+  useMenuBehavior(open, setOpen, {
+    items: rootRef,
+    contains: (t) => rootRef.current?.contains(t) === true,
+    returnFocus: () => chevronRef.current?.focus(),
+    closeOnMove: true,
+  });
 
   // The attach command, fetched each time the menu opens, so "Copy attach command" is
   // instant. The copy no longer has to happen inside the click, so this is only a head start.
@@ -199,7 +150,7 @@ export function OpenButton({
         onClick={() => void (hasTab ? openRow(row, "app") : openRow(row))}
       >
         {label}
-        {hint && <kbd className="mono">{hint}</kbd>}
+        {hint && <Kbd keys={hint} className="mono" />}
       </button>
       <button
         ref={chevronRef}

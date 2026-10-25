@@ -1,4 +1,9 @@
-/* Bundled Geist and Geist Mono (SIL OFL, see ../fonts/OFL.txt). No network font loading. */
+/*
+ * Bundled fonts, all full, unmodified upstream files; no network font loading. Geist and Geist
+ * Mono (the UI; SIL OFL, ../fonts/OFL.txt) and the terminal choices: Hack (MIT and Bitstream
+ * Vera, ../fonts/LICENSE-Hack.md), IBM Plex Mono (SIL OFL with the reserved name "Plex",
+ * ../fonts/LICENSE-IBMPlexMono.txt) and JetBrains Mono (SIL OFL, ../fonts/OFL-JetBrainsMono.txt).
+ */
 @font-face {
   font-family: "Geist";
   font-weight: 400;
@@ -41,6 +46,69 @@
   font-display: swap;
   src: url("../fonts/GeistMono-SemiBold.woff2") format("woff2");
 }
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/GeistMono-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Hack";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/Hack-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Hack";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/Hack-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/JetBrainsMono-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/JetBrainsMono-Bold.woff2") format("woff2");
+}
 
 *,
 *::before,
@@ -61,7 +129,8 @@ body {
   font-family: var(--font-sans);
   font-size: var(--fs-body);
   line-height: var(--line-height);
-  -webkit-font-smoothing: antialiased;
+  /* Counts, ages and sizes line up and don't jitter as they change. */
+  font-variant-numeric: tabular-nums;
 }
 
 code,
@@ -82,4 +151,88 @@ textarea {
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+/* ---------- motion ---------- */
+
+/* Loops: only an element with `.live` (or the skeleton) may repeat. Transform, opacity and
+   colors are the only things that animate; nothing that resizes the terminal does. */
+@keyframes st-pulse {
+  75%,
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+@keyframes st-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes st-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes skel-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Entrances */
+@keyframes enter-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes enter-dialog {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes enter-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes enter-frame {
+  from {
+    transform: translateX(8px);
+    opacity: 0;
+  }
+}
+@keyframes enter-slide {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+
+/* Everything that loops or enters stops; each element simply appears in its final state.
+   Keep this list in step with every selector that uses an `enter-*` or `st-*` keyframe.
+   `!important`: global.css loads before app.css and windows.css, whose rules would win. */
+@media (prefers-reduced-motion: reduce) {
+  .live,
+  .live::after,
+  .sdot[data-status="blocked"].live::after,
+  .sdot[data-status="working"].live,
+  .sdot[data-status="opening"].live,
+  .sdot[data-health="pending"].live,
+  .sdot[data-health="reconnecting"].live,
+  .skel,
+  .menu,
+  .palette,
+  .shortcuts,
+  .palette-frame.is-switched,
+  .dialog,
+  .sheet,
+  .toast,
+  .term-bar,
+  .activity {
+    animation: none !important;
+  }
 }

@@ -1,0 +1,170 @@
+{
+  "palette": {
+    "mac": "CmdOrCtrl+K",
+    "windows": null,
+    "label": "Command palette",
+    "group": "around"
+  },
+  "dashboard": {
+    "mac": "CmdOrCtrl+1",
+    "windows": null,
+    "label": "Go to Dashboard",
+    "group": "around"
+  },
+  "toggle-terminal": {
+    "mac": "Ctrl+Backquote",
+    "windows": null,
+    "label": "Toggle terminal",
+    "group": "sessions"
+  },
+  "toggle-split": {
+    "mac": "CmdOrCtrl+Backslash",
+    "windows": null,
+    "label": "Dashboard beside terminal",
+    "group": "sessions"
+  },
+  "toggle-sidebar": {
+    "mac": "CmdOrCtrl+B",
+    "windows": null,
+    "label": "Toggle sidebar",
+    "group": "around"
+  },
+  "next-needs-you": {
+    "mac": "CmdOrCtrl+J",
+    "windows": null,
+    "label": "Next needs-you",
+    "group": "around"
+  },
+  "find": {
+    "mac": "CmdOrCtrl+F",
+    "windows": null,
+    "label": "Find",
+    "group": "around"
+  },
+  "font-bigger": {
+    "mac": "CmdOrCtrl+Equal",
+    "windows": null,
+    "label": "Bigger font",
+    "group": "terminal"
+  },
+  "font-smaller": {
+    "mac": "CmdOrCtrl+Minus",
+    "windows": null,
+    "label": "Smaller font",
+    "group": "terminal"
+  },
+  "font-reset": {
+    "mac": "CmdOrCtrl+0",
+    "windows": null,
+    "label": "Reset font",
+    "group": "terminal"
+  },
+  "activity": {
+    "mac": "CmdOrCtrl+Shift+A",
+    "windows": null,
+    "label": "Activity",
+    "group": "around"
+  },
+  "shortcuts": {
+    "mac": "CmdOrCtrl+Slash",
+    "windows": null,
+    "label": "This sheet",
+    "group": "around"
+  },
+  "new-in-workbox": {
+    "mac": "CmdOrCtrl+T",
+    "windows": null,
+    "label": "New session in workbox",
+    "group": "sessions"
+  },
+  "close-tab": {
+    "mac": "CmdOrCtrl+W",
+    "windows": null,
+    "label": "Close tab",
+    "group": "sessions"
+  },
+  "next-tab": {
+    "mac": "Ctrl+Tab",
+    "windows": null,
+    "label": "Next tab",
+    "group": "sessions"
+  },
+  "prev-tab": {
+    "mac": "Ctrl+Shift+Tab",
+    "windows": null,
+    "label": "Previous tab",
+    "group": "sessions"
+  },
+  "tab1": {
+    "mac": "CmdOrCtrl+2",
+    "windows": null,
+    "label": "Go to tab 1–8",
+    "group": "sessions"
+  },
+  "tab2": {
+    "mac": "CmdOrCtrl+3",
+    "windows": null
+  },
+  "tab3": {
+    "mac": "CmdOrCtrl+4",
+    "windows": null
+  },
+  "tab4": {
+    "mac": "CmdOrCtrl+5",
+    "windows": null
+  },
+  "tab5": {
+    "mac": "CmdOrCtrl+6",
+    "windows": null
+  },
+  "tab6": {
+    "mac": "CmdOrCtrl+7",
+    "windows": null
+  },
+  "tab7": {
+    "mac": "CmdOrCtrl+8",
+    "windows": null
+  },
+  "tab8": {
+    "mac": "CmdOrCtrl+9",
+    "windows": null
+  },
+  "settings": {
+    "mac": "CmdOrCtrl+Comma",
+    "windows": null,
+    "label": "Settings",
+    "group": "around"
+  },
+  "new-session": {
+    "mac": "CmdOrCtrl+N",
+    "windows": null,
+    "label": "New session",
+    "group": "sessions"
+  },
+  "refresh": {
+    "mac": "CmdOrCtrl+R",
+    "windows": null,
+    "label": "Refresh",
+    "group": "list"
+  },
+  "open-selected": {
+    "mac": "CmdOrCtrl+Enter",
+    "windows": null,
+    "label": "Open selected agent",
+    "group": "list"
+  },
+  "palette-open-alt": {
+    "mac": "CmdOrCtrl+Enter",
+    "windows": null
+  },
+  "create-session": {
+    "mac": "CmdOrCtrl+Enter",
+    "windows": null
+  },
+  "global-show": {
+    "mac": "Ctrl+Alt+Super+H",
+    "windows": null,
+    "label": "Open the app from anywhere",
+    "group": "around"
+  }
+}

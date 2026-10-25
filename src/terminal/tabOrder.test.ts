@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { groupTabs, stripOrder, tabShortcut } from "./tabOrder";
+import { dropBefore, groupTabs, stripOrder, tabShortcut } from "./tabOrder";
 import type { TermTab } from "./terminalStore";
 
 function machine(id: string): MachineView {
@@ -26,6 +26,8 @@ function tab(machineId: string, paneId: string): TermTab {
     state: "live",
     error: null,
     termId: null,
+    exitCode: null,
+    attempts: 0,
   };
 }
 
@@ -96,5 +98,18 @@ describe("tabShortcut", () => {
     expect(tabShortcut("local::p7", tabs, machines)).toBe(9);
     expect(tabShortcut("local::p8", tabs, machines)).toBeNull();
     expect(tabShortcut("local::nope", tabs, machines)).toBeNull();
+  });
+});
+
+describe("drop_before", () => {
+  const mids = [
+    { key: "a", mid: 50 },
+    { key: "b", mid: 150 },
+    { key: "c", mid: 250 },
+  ];
+  it("picks_the_first_tab_whose_middle_is_to_the_right", () => {
+    expect(dropBefore(mids, 10)).toBe("a");
+    expect(dropBefore(mids, 100)).toBe("b");
+    expect(dropBefore(mids, 300)).toBeNull();
   });
 });

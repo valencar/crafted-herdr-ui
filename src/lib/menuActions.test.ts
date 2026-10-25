@@ -65,3 +65,13 @@ describe("new-in-workbox", () => {
     expect(openNewSession).toHaveBeenCalledWith(undefined);
   });
 });
+
+describe("shortcuts", () => {
+  afterEach(() => useAppStore.setState({ shortcutsOpen: false }));
+
+  it("shortcuts_opens_the_sheet", () => {
+    useAppStore.setState({ shortcutsOpen: false });
+    runMenuAction("shortcuts");
+    expect(useAppStore.getState().shortcutsOpen).toBe(true);
+  });
+});

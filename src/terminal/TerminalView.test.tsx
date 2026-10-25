@@ -1,10 +1,14 @@
 import { createRef, useEffect, useState } from "react";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TermEvent } from "../lib/bindings/TermEvent";
+import type { TerminalFont } from "../lib/bindings/TerminalFont";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
+import type { AppState } from "../lib/bindings/AppState";
+import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
 
 type FakeTerm = {
@@ -16,6 +20,14 @@ type FakeTerm = {
   focus: ReturnType<typeof vi.fn>;
   keyHandler: ((e: { metaKey: boolean }) => boolean) | null;
   dataHandler: ((d: string) => void) | null;
+  /** The fake selection ("" for none). Setting it fires nothing; see `open` in the fake. */
+  selection: string;
+  /** A programmatic change (select all, a search hit, the keyboard), which fires at once. */
+  emitSelectionChange: () => void;
+  /** Listeners of the fake's own document mouseup, still registered. */
+  mouseUpListeners: number;
+  /** The `onSelectionChange` subscribers that are still subscribed. */
+  selectionListeners: (() => void)[];
 };
 
 const h = vi.hoisted(() => ({
@@ -23,6 +35,7 @@ const h = vi.hoisted(() => ({
   fitDims: undefined as { cols: number; rows: number } | undefined,
   linkHandler: null as
     null | ((event: { metaKey: boolean }, uri: string) => void),
+  osc: new Map<number, (data: string) => boolean | Promise<boolean>>(),
   search: {
     findNext: vi.fn(() => true),
     findPrevious: vi.fn(() => true),
@@ -41,9 +54,54 @@ vi.mock("@xterm/xterm", () => ({
     write = vi.fn();
     dispose = vi.fn();
     focus = vi.fn();
-    open = vi.fn();
+    // xterm 6.0.0 fires onSelectionChange for a mouse selection in one place: its document
+    // `mouseup` listener, which it adds at mousedown (so after the app's own listeners, which
+    // were added at mount). Dragging and double clicks only redraw.
+    open = vi.fn((host: HTMLElement) => {
+      host.addEventListener("mousedown", () => {
+        const before = this.selection;
+        this.mouseUpListeners += 1;
+        const up = () => {
+          this.mouseUpListeners -= 1;
+          document.removeEventListener("mouseup", up);
+          if (this.selection !== before) this.emitSelectionChange();
+        };
+        document.addEventListener("mouseup", up);
+      });
+    });
+    parser = {
+      registerOscHandler: (
+        ident: number,
+        fn: (data: string) => boolean | Promise<boolean>,
+      ) => {
+        h.osc.set(ident, fn);
+        return { dispose: vi.fn() };
+      },
+    };
     keyHandler: FakeTerm["keyHandler"] = null;
     dataHandler: FakeTerm["dataHandler"] = null;
+    selection = "";
+    selectionListeners: (() => void)[] = [];
+    mouseUpListeners = 0;
+    emitSelectionChange() {
+      this.selectionListeners.forEach((fn) => fn());
+    }
+    hasSelection() {
+      return this.selection !== "";
+    }
+    getSelection() {
+      return this.selection;
+    }
+    onSelectionChange(fn: () => void) {
+      this.selectionListeners.push(fn);
+      return {
+        dispose: () => {
+          this.selectionListeners = this.selectionListeners.filter(
+            (f) => f !== fn,
+          );
+        },
+      };
+    }
     constructor(options: Record<string, unknown>) {
       this.options = options;
       h.terms.push(this as unknown as FakeTerm);
@@ -114,6 +172,7 @@ import { copyText, invokeTyped, openTerm } from "../lib/ipc";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
 import { HOME, useTerminalStore } from "./terminalStore";
 import { xtermTheme } from "./xtermTheme";
+import { useResolvedTheme } from "../lib/theme";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const open = vi.mocked(openTerm);
@@ -125,13 +184,23 @@ const emitters: ((e: TermEvent) => void)[] = [];
 function Harness({
   active = true,
   handle,
+  font = "hack",
 }: {
   active?: boolean;
   handle?: React.Ref<TerminalHandle>;
+  font?: TerminalFont;
 }) {
   const tab = useTerminalStore((s) => s.tabs.find((t) => t.tabKey === KEY));
   if (!tab) return null;
-  return <TerminalView tab={tab} active={active} fontSize={13} ref={handle} />;
+  return (
+    <TerminalView
+      tab={tab}
+      active={active}
+      fontSize={13}
+      font={font}
+      ref={handle}
+    />
+  );
 }
 
 const tabState = () => useTerminalStore.getState().tabs[0];
@@ -155,6 +224,7 @@ beforeEach(() => {
   h.observers.length = 0;
   h.fitDims = { cols: 100, rows: 30 };
   h.linkHandler = null;
+  h.osc.clear();
   h.webglThrows = false;
   emitters.length = 0;
   h.search.findNext.mockClear();
@@ -185,6 +255,39 @@ afterEach(() => {
 });
 
 describe("TerminalView", () => {
+  it("terminal_recolors_without_recreating", async () => {
+    useResolvedTheme.setState({ resolved: "dark" });
+    render(<Harness />);
+    await flush();
+    expect(h.terms).toHaveLength(1);
+    // Count every assignment of `options.theme` from here on.
+    const sets: unknown[] = [];
+    let current = term().options.theme;
+    Object.defineProperty(term().options, "theme", {
+      get: () => current,
+      set: (value) => {
+        sets.push(value);
+        current = value;
+      },
+    });
+    const root = document.documentElement;
+    const token = vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (name: string) =>
+        name === "--bg" ? "#f7f7f8" : "#17181b",
+    } as unknown as CSSStyleDeclaration);
+    root.dataset.theme = "light";
+    act(() => useResolvedTheme.setState({ resolved: "light" }));
+    token.mockRestore();
+    expect(sets).toHaveLength(1);
+    expect(sets[0]).toMatchObject({ background: "#f7f7f8" });
+    // The same terminal, scrollback and session intact.
+    expect(h.terms).toHaveLength(1);
+    expect(term().dispose).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledTimes(1);
+    delete root.dataset.theme;
+    useResolvedTheme.setState({ resolved: "dark" });
+  });
+
   it("opens_the_session_at_the_fitted_size_with_the_theme_and_options", async () => {
     render(<Harness />);
     await flush();
@@ -201,6 +304,270 @@ describe("TerminalView", () => {
       macOptionIsMeta: false,
     });
     expect(tabState()).toMatchObject({ state: "live", termId: 7 });
+  });
+
+  it("an_option_drag_always_makes_a_selection_even_while_herdr_reports_the_mouse", async () => {
+    render(<Harness />);
+    await flush();
+    expect(term().options).toMatchObject({
+      macOptionClickForcesSelection: true,
+      macOptionIsMeta: false,
+    });
+  });
+
+  describe("copy on select", () => {
+    const hosts = () => [
+      ...document.querySelectorAll<HTMLElement>(".term-host"),
+    ];
+    const press = (host = hosts()[0], detail = 1) =>
+      fireEvent.mouseDown(host, { button: 0, detail });
+    const release = (target: Document | HTMLElement = document) =>
+      fireEvent.mouseUp(target, { button: 0 });
+    /** Lets the copy that follows a release (a macrotask later) finish. */
+    const settle = () =>
+      act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      });
+    /** A whole drag: the selection is made while the button is down, then the button is released. */
+    async function drag(fake: FakeTerm, text: string, over?: HTMLElement) {
+      press(over);
+      fake.selection = text;
+      expect(copy).not.toHaveBeenCalled(); // nothing while selecting
+      release();
+      await settle();
+    }
+
+    it("a_drag_that_selects_copies_the_text_after_xterm_has_handled_the_release_and_toasts_Copied", async () => {
+      render(<Harness />);
+      await flush();
+      await drag(term(), "npm test");
+      expect(copy).toHaveBeenCalledTimes(1);
+      expect(copy).toHaveBeenCalledWith("npm test");
+      expect(useAppStore.getState().toast).toBe("Copied");
+    });
+
+    it("a_double_click_word_selection_copies_too", async () => {
+      render(<Harness />);
+      await flush();
+      press(hosts()[0], 2);
+      term().selection = "word"; // xterm selects the word on the press itself
+      release();
+      await settle();
+      expect(copy).toHaveBeenCalledWith("word");
+    });
+
+    it("a_triple_click_line_selection_copies_too", async () => {
+      render(<Harness />);
+      await flush();
+      press(hosts()[0], 3);
+      term().selection = "the whole line";
+      release();
+      await settle();
+      expect(copy).toHaveBeenCalledWith("the whole line");
+    });
+
+    it("a_release_outside_the_terminal_still_copies_a_drag_that_began_inside", async () => {
+      render(
+        <>
+          <Harness />
+          <button>elsewhere</button>
+        </>,
+      );
+      await flush();
+      press();
+      term().selection = "dragged out";
+      release(screen.getByRole("button", { name: "elsewhere" }));
+      await settle();
+      expect(copy).toHaveBeenCalledWith("dragged out");
+    });
+
+    it("a_refused_copy_shows_the_error_toast", async () => {
+      copy.mockRejectedValue(new Error("denied"));
+      render(<Harness />);
+      await flush();
+      await drag(term(), "x");
+      expect(useAppStore.getState().toast).toBe(
+        "Couldn’t copy to the clipboard.",
+      );
+    });
+
+    it("a_selection_that_changes_without_the_mouse_does_not_copy", async () => {
+      render(<Harness />);
+      await flush();
+      term().selection = "search hit"; // a search hit, the keyboard, select all
+      term().emitSelectionChange();
+      release();
+      await settle();
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("a_click_that_clears_the_selection_copies_nothing", async () => {
+      render(<Harness />);
+      await flush();
+      term().selection = "old";
+      press();
+      term().selection = ""; // xterm clears it on the press
+      release();
+      await settle();
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("a_drag_that_herdr_took_leaves_an_old_selection_alone", async () => {
+      render(<Harness />);
+      await flush();
+      term().selection = "old"; // from an earlier option-drag
+      press();
+      release(); // mouse reporting: xterm never changed the selection
+      await settle();
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("a_release_without_a_press_in_this_terminal_copies_nothing", async () => {
+      render(<Harness />);
+      await flush();
+      term().selection = "text";
+      release();
+      await settle();
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("one_drag_copies_once", async () => {
+      render(<Harness />);
+      await flush();
+      press();
+      term().selection = "ab";
+      release();
+      release();
+      await settle();
+      expect(copy).toHaveBeenCalledTimes(1);
+      expect(copy).toHaveBeenCalledWith("ab");
+    });
+
+    it("a_hidden_tab_never_copies", async () => {
+      render(<Harness active={false} />);
+      await flush();
+      await drag(term(), "from a hidden tab");
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("a_press_lost_to_a_window_blur_is_forgotten", async () => {
+      render(<Harness />);
+      await flush();
+      press();
+      term().selection = "text";
+      fireEvent.blur(window); // released outside the app: no mouseup arrives
+      release();
+      await settle();
+      expect(copy).not.toHaveBeenCalled();
+    });
+
+    it("with_two_tabs_each_copies_only_its_own_selection", async () => {
+      const other = "buildbox::w1:p2";
+      useTerminalStore.getState().openTab({
+        tabKey: other,
+        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p2" },
+        title: "second",
+        machineLabel: "buildbox",
+      });
+      function Two() {
+        const tabs = useTerminalStore((s) => s.tabs);
+        return (
+          <>
+            {tabs.map((tab) => (
+              <TerminalView
+                key={tab.tabKey}
+                tab={tab}
+                active
+                fontSize={13}
+                font="hack"
+              />
+            ))}
+          </>
+        );
+      }
+      render(<Two />);
+      await flush();
+      expect(h.terms).toHaveLength(2);
+      const [a, b] = h.terms;
+      // Tab B holds a selection of its own that it did not just make.
+      b.selection = "b's old selection";
+      await drag(a, "from a", hosts()[0]);
+      expect(copy).toHaveBeenCalledTimes(1);
+      expect(copy).toHaveBeenCalledWith("from a");
+      copy.mockClear();
+      await drag(b, "from b", hosts()[1]);
+      expect(copy).toHaveBeenCalledTimes(1);
+      expect(copy).toHaveBeenCalledWith("from b");
+    });
+
+    it("removes_its_listeners_when_the_terminal_unmounts", async () => {
+      const { unmount } = render(<Harness />);
+      await flush();
+      const host = hosts()[0];
+      const docRemoved = vi.spyOn(document, "removeEventListener");
+      const hostRemoved = vi.spyOn(host, "removeEventListener");
+      const winRemoved = vi.spyOn(window, "removeEventListener");
+      const fake = term();
+      expect(fake.selectionListeners).toHaveLength(1);
+      unmount();
+      expect(docRemoved).toHaveBeenCalledWith("mouseup", expect.any(Function));
+      expect(hostRemoved).toHaveBeenCalledWith(
+        "mousedown",
+        expect.any(Function),
+        true,
+      );
+      expect(winRemoved).toHaveBeenCalledWith("blur", expect.any(Function));
+      expect(fake.selectionListeners).toHaveLength(0);
+      // Nothing is left to copy on a later press and release.
+      fake.selection = "late";
+      fireEvent.mouseDown(host, { button: 0 });
+      release();
+      await settle();
+      expect(copy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("OSC 52", () => {
+    it("a_write_from_the_program_copies_the_text_and_toasts_Copied", async () => {
+      render(<Harness />);
+      await flush();
+      const handler = h.osc.get(52);
+      expect(handler).toBeDefined();
+      await act(async () => {
+        await handler?.(`c;${btoa("from herdr")}`);
+      });
+      expect(copy).toHaveBeenCalledWith("from herdr");
+      expect(useAppStore.getState().toast).toBe("Copied");
+    });
+
+    it("a_background_tab_cannot_write_the_clipboard", async () => {
+      const { rerender } = render(<Harness active={false} />);
+      await flush();
+      await act(async () => {
+        await h.osc.get(52)?.(`c;${btoa("x")}`);
+      });
+      expect(copy).not.toHaveBeenCalled();
+      rerender(<Harness active />);
+      await flush();
+      await act(async () => {
+        await h.osc.get(52)?.(`c;${btoa("x")}`);
+      });
+      expect(copy).toHaveBeenCalledWith("x");
+    });
+
+    it("a_read_query_writes_nothing_to_the_session_and_copies_nothing", async () => {
+      render(<Harness />);
+      await flush();
+      invoke.mockClear();
+      let result: boolean | Promise<boolean> | undefined;
+      await act(async () => {
+        result = await h.osc.get(52)?.("c;?");
+      });
+      // Swallowed, so no other handler sees it, and no reply is typed into the pty.
+      expect(result).toBe(true);
+      expect(invoke).not.toHaveBeenCalledWith("term_write", expect.anything());
+      expect(copy).not.toHaveBeenCalled();
+    });
   });
 
   it("streams_data_events_into_the_terminal", async () => {
@@ -295,13 +662,13 @@ describe("TerminalView", () => {
     render(<Harness />);
     await flush();
     emit({ kind: "exit", code: 0 });
-    expect(screen.getByText("Detached")).toBeInTheDocument();
+    expect(screen.getByText("Detached. The attach ended.")).toBeInTheDocument();
     expect(tabState()).toMatchObject({ state: "detached", termId: null });
     await user.click(screen.getByRole("button", { name: "Reattach" }));
     await flush();
     expect(open).toHaveBeenCalledTimes(2);
     expect(tabState()).toMatchObject({ state: "live", termId: 8 });
-    expect(screen.queryByText("Detached")).toBeNull();
+    expect(screen.queryByText("Detached. The attach ended.")).toBeNull();
     // Both sessions stream into the one terminal.
     expect(h.terms).toHaveLength(1);
     emit({ kind: "data", data: "again" });
@@ -337,6 +704,515 @@ describe("TerminalView", () => {
     await flush();
     expect(tabState()).toMatchObject({ state: "live", termId: 21 });
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  describe("the bar under a session that ended", () => {
+    const snapshot = raw.result.snapshot as unknown as Snapshot;
+    /** The app state with buildbox listed (remote unless `local`), optionally without this tab's pane. */
+    const listed = (opts: { local?: boolean; gone?: boolean } = {}) => {
+      const snap = structuredClone(snapshot);
+      if (opts.gone) {
+        snap.agents = snap.agents.filter((a) => a.pane_id !== "w1:p1");
+        snap.panes = snap.panes.filter((p) => p.pane_id !== "w1:p1");
+      }
+      const state: AppState = {
+        machines: [
+          {
+            id: "buildbox",
+            label: "buildbox",
+            target: opts.local ? null : "buildbox",
+            session: "default",
+            is_local: opts.local ?? false,
+            health: { kind: "online" },
+            snapshot: snap,
+            last_ok_ms: 1,
+            ages: {},
+          },
+        ],
+        herdr_version: "0.9.4",
+        herdr_path: "/home/dev/.local/bin/herdr",
+        generated_at_ms: 1,
+      };
+      act(() => useAppStore.setState({ state }));
+    };
+    /** Every open from now on ends at once with `code`. */
+    const failWith = (code: number | null) =>
+      open.mockImplementation(async (_t, _c, _r, onEvent) => {
+        emitters.push(onEvent);
+        queueMicrotask(() => onEvent({ kind: "exit", code }));
+        return 50;
+      });
+
+    afterEach(() => act(() => useAppStore.setState({ state: null })));
+
+    it("an_exit_with_code_1_says_so_and_the_output_stays_uncovered", async () => {
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(
+        screen.getByText("The attach command stopped with exit 1."),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Its output is above.")).toBeInTheDocument();
+      expect(tabState()).toMatchObject({ state: "detached", exitCode: 1 });
+      // The host (xterm) is a sibling of the bar, and still there.
+      const host = document.querySelector(".term-host");
+      expect(host).not.toBeNull();
+      expect(host?.contains(document.querySelector(".term-bar"))).toBe(false);
+    });
+
+    it("a_remote_255_names_the_workbox", async () => {
+      listed();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 255 });
+      expect(
+        screen.getByText("Couldn’t reach buildbox over ssh."),
+      ).toBeInTheDocument();
+    });
+
+    it("a_local_255_is_a_plain_non_zero_exit", async () => {
+      listed({ local: true });
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 255 });
+      expect(
+        screen.getByText("The attach command stopped with exit 255."),
+      ).toBeInTheDocument();
+    });
+
+    it("going_live_again_clears_the_exit_code", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(tabState().exitCode).toBe(1);
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(tabState()).toMatchObject({ state: "live", exitCode: null });
+    });
+
+    it("a_session_that_goes_live_and_dies_at_once_still_counts_as_a_failed_attempt", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      // The pty starts (the tab is live), then the attach command inside fails.
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(tabState().state).toBe("live");
+      emit({ kind: "exit", code: 1 });
+      expect(screen.getByText("Reattach failed (attempt 1).")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(screen.getByText("Reattach failed (attempt 2).")).toBeVisible();
+    });
+
+    it("a_session_that_waits_on_a_human_before_failing_still_counts", async () => {
+      // The attach script prints "herdr not found … Press Enter to close" and waits: the session
+      // stays live for a long time, then exits 127. That is a failed attempt, not a working one.
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 127 });
+      const now = vi.spyOn(Date, "now");
+      const start = Date.now();
+      try {
+        for (const n of [1, 2]) {
+          await user.click(screen.getByRole("button", { name: "Reattach" }));
+          await flush();
+          expect(tabState().state).toBe("live");
+          now.mockReturnValue(start + n * 30_000);
+          emit({ kind: "exit", code: 127 });
+          expect(
+            screen.getByText(`Reattach failed (attempt ${n}).`),
+          ).toBeVisible();
+        }
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it("a_normal_end_resets_the_count", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(tabState().attempts).toBe(1);
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      expect(tabState().attempts).toBe(0);
+      expect(screen.queryByText(/Reattach failed/)).toBeNull();
+    });
+
+    it("a_failed_open_after_Reattach_is_still_called_Reattach_failed", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      open.mockRejectedValueOnce({ kind: "invalid", message: "No can do." });
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(tabState().state).toBe("error");
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Reattach failed (attempt 1).",
+      );
+      expect(screen.getByRole("alert")).not.toHaveTextContent("Retry failed");
+      // The button says Retry now, and a click on it renames the line.
+      open.mockRejectedValueOnce({ kind: "invalid", message: "No can do." });
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      await flush();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Retry failed (attempt 2).",
+      );
+    });
+
+    it("the_output_is_lifted_above_the_bar_when_a_session_ends_and_not_before", async () => {
+      render(<Harness />);
+      await flush();
+      expect(term().write).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^\r\n/),
+      );
+      // 40 px of bar over 20 px rows (600 px / 30 rows): two rows.
+      const height = vi
+        .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+        .mockReturnValue(40);
+      const host = vi
+        .spyOn(HTMLElement.prototype, "clientHeight", "get")
+        .mockReturnValue(600);
+      term().rows = 30;
+      try {
+        emit({ kind: "exit", code: 1 });
+        expect(term().write).toHaveBeenCalledWith("\r\n\r\n");
+      } finally {
+        height.mockRestore();
+        host.mockRestore();
+      }
+    });
+
+    describe("a tab that ended while hidden", () => {
+      /** The blank-line writes so far, as a row count each. */
+      const lifts = () =>
+        term()
+          .write.mock.calls.map((c) => String(c[0]))
+          .filter((w) => /^(\r\n)+$/.test(w))
+          .map((w) => w.length / 2);
+      /** A bar `px` tall over 20 px rows (600 px / 30 rows). */
+      const barOf = (px: number) => {
+        const height = vi
+          .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+          .mockReturnValue(px);
+        const host = vi
+          .spyOn(HTMLElement.prototype, "clientHeight", "get")
+          .mockReturnValue(600);
+        term().rows = 30;
+        return () => {
+          height.mockRestore();
+          host.mockRestore();
+        };
+      };
+
+      it("is_topped_up_by_the_missing_rows_once_it_is_shown", async () => {
+        const view = render(<Harness active={false} />);
+        await flush();
+        emit({ kind: "exit", code: 1 });
+        expect(lifts()).toEqual([4]);
+        // 120 px of bar over 20 px rows: six rows, two more than the fallback lifted.
+        const restore = barOf(120);
+        try {
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([4, 2]);
+          // Shown again later, nothing is missing.
+          view.rerender(<Harness active={false} />);
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([4, 2]);
+        } finally {
+          restore();
+        }
+      });
+
+      it("measures_with_the_rows_the_box_now_fits_not_the_ones_of_the_last_fit", async () => {
+        const view = render(<Harness active={false} />);
+        await flush();
+        emit({ kind: "exit", code: 1 });
+        expect(lifts()).toEqual([4]);
+        // An 800 px host fits 40 rows of 20 px, but the terminal still has its default 24
+        // (never fitted while hidden): 120 px of bar is six rows, not four.
+        const height = vi
+          .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+          .mockReturnValue(120);
+        const host = vi
+          .spyOn(HTMLElement.prototype, "clientHeight", "get")
+          .mockReturnValue(800);
+        h.fitDims = { cols: 100, rows: 40 };
+        term().rows = 24;
+        try {
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([4, 2]);
+        } finally {
+          height.mockRestore();
+          host.mockRestore();
+        }
+      });
+
+      it("is_topped_up_again_when_the_bar_changes_while_the_tab_stays_ended", async () => {
+        listed();
+        render(<Harness />);
+        await flush();
+        emit({ kind: "exit", code: 0 });
+        expect(lifts()).toEqual([4]);
+        // The pane vanishes: the bar shows other words and buttons and grows to six rows.
+        const restore = barOf(120);
+        try {
+          listed({ gone: true });
+          expect(lifts()).toEqual([4, 2]);
+        } finally {
+          restore();
+        }
+      });
+
+      it("writes_nothing_more_when_the_lift_already_covers_the_bar", async () => {
+        const view = render(<Harness active={false} />);
+        await flush();
+        emit({ kind: "exit", code: 1 });
+        // 60 px of bar over 20 px rows: three rows, fewer than the four lifted.
+        const restore = barOf(60);
+        try {
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([4]);
+        } finally {
+          restore();
+        }
+      });
+
+      it("starts_fresh_when_a_reattached_session_ends_again", async () => {
+        const user = userEvent.setup();
+        listed();
+        const view = render(<Harness active={false} />);
+        await flush();
+        emit({ kind: "exit", code: 1 });
+        expect(lifts()).toEqual([4]);
+        view.rerender(<Harness active />);
+        await user.click(screen.getByRole("button", { name: "Reattach" }));
+        await flush();
+        expect(tabState().state).toBe("live");
+        emit({ kind: "exit", code: 1 });
+        expect(lifts()).toEqual([4, 4]);
+      });
+
+      it("writes_nothing_while_the_session_is_live", async () => {
+        const view = render(<Harness active={false} />);
+        await flush();
+        const restore = barOf(120);
+        try {
+          view.rerender(<Harness active />);
+          expect(lifts()).toEqual([]);
+        } finally {
+          restore();
+        }
+      });
+    });
+
+    it("an_unmeasurable_bar_still_lifts_the_output", async () => {
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(term().write).toHaveBeenCalledWith("\r\n\r\n\r\n\r\n");
+    });
+
+    it("a_reattach_that_fails_again_says_so_and_counts_up", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      // Plain detach: no failure to report yet.
+      expect(screen.queryByText(/Reattach failed/)).toBeNull();
+      failWith(1);
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(screen.getByText("Reattach failed (attempt 1).")).toBeVisible();
+      expect(tabState()).toMatchObject({ state: "detached", attempts: 1 });
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(screen.getByText("Reattach failed (attempt 2).")).toBeVisible();
+      expect(screen.queryByText("Reattach failed (attempt 1).")).toBeNull();
+      // The reason is still there under the count.
+      expect(
+        screen.getByText("The attach command stopped with exit 1."),
+      ).toBeVisible();
+    });
+
+    it("while_reattaching_the_bar_says_so_and_its_buttons_are_disabled", async () => {
+      listed();
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      let finish: (id: number) => void = () => {};
+      open.mockImplementationOnce(
+        () =>
+          new Promise<number>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      expect(screen.getByText("Reattaching…")).toBeInTheDocument();
+      for (const name of ["Reattach", "Copy attach command", /^Open in /]) {
+        expect(screen.getByRole("button", { name })).toBeDisabled();
+      }
+      // A hung open always has a way out.
+      expect(screen.getByRole("button", { name: "Close tab" })).toBeEnabled();
+      await act(async () => finish(60));
+      expect(screen.queryByText("Reattaching…")).toBeNull();
+    });
+
+    it("a_failed_open_keeps_its_message_in_the_bar_with_Retry_and_an_attempt_count", async () => {
+      const user = userEvent.setup();
+      open.mockReset().mockRejectedValue({
+        kind: "invalid",
+        message: "Close a terminal tab first (16 open).",
+      });
+      render(<Harness />);
+      await flush();
+      const bar = screen.getByRole("alert");
+      expect(bar).toHaveTextContent("Close a terminal tab first (16 open).");
+      expect(bar).not.toHaveTextContent("failed (attempt");
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      await flush();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Retry failed (attempt 1).",
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Close a terminal tab first (16 open).",
+      );
+      expect(screen.getByRole("button", { name: "Retry" })).toHaveFocus();
+    });
+
+    it("a_gone_pane_offers_only_Close_tab", async () => {
+      listed({ gone: true });
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      expect(
+        screen.getByText("This pane no longer exists on buildbox."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Copy attach command" }),
+      ).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
+    });
+
+    it("a_failed_open_on_a_vanished_pane_offers_only_Close_tab", async () => {
+      listed({ gone: true });
+      open.mockReset().mockRejectedValue({
+        kind: "invalid",
+        message: "No such pane.",
+      });
+      render(<Harness />);
+      await flush();
+      expect(tabState().state).toBe("error");
+      expect(
+        screen.getByText("This pane no longer exists on buildbox."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Copy attach command" }),
+      ).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
+    });
+
+    it("Close_tab_takes_focus_when_the_pane_disappears_after_the_session_ended", async () => {
+      listed();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      expect(screen.getByRole("button", { name: "Reattach" })).toHaveFocus();
+      listed({ gone: true });
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
+    });
+
+    it("a_workbox_without_a_snapshot_does_not_make_the_pane_look_gone", async () => {
+      listed();
+      act(() =>
+        useAppStore.setState((s) => ({
+          state: s.state && {
+            ...s.state,
+            machines: s.state.machines.map((m) => ({ ...m, snapshot: null })),
+          },
+        })),
+      );
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0 });
+      expect(screen.queryByText(/no longer exists/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Reattach" })).toBeVisible();
+    });
+
+    it("Copy_attach_command_copies_the_text_from_Rust", async () => {
+      listed();
+      const user = userEvent.setup();
+      invoke.mockImplementation(async (name: string) =>
+        name === "copy_attach_command" ? "ssh -t buildbox herdr attach" : null,
+      );
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      await user.click(
+        screen.getByRole("button", { name: "Copy attach command" }),
+      );
+      expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+        machineId: "buildbox",
+        paneId: "w1:p1",
+      });
+      expect(copy).toHaveBeenCalledWith("ssh -t buildbox herdr attach");
+    });
+
+    it("Open_in_the_terminal_opens_the_row_outside_the_app", async () => {
+      listed();
+      const user = userEvent.setup();
+      invoke.mockImplementation(async (name: string) =>
+        name === "get_terminals"
+          ? { installed: ["ghostty"], default: "ghostty" }
+          : null,
+      );
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      await flush(); // the terminal list arrives
+      await user.click(screen.getByRole("button", { name: "Open in Ghostty" }));
+      expect(invoke).toHaveBeenCalledWith("open_session", {
+        machineId: "buildbox",
+        paneId: "w1:p1",
+      });
+    });
+
+    it("the_default_button_takes_focus_and_Escape_is_left_alone", async () => {
+      const user = userEvent.setup();
+      const onKey = vi.fn();
+      document.addEventListener("keydown", onKey);
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 1 });
+      expect(screen.getByRole("button", { name: "Reattach" })).toHaveFocus();
+      await user.keyboard("{Escape}");
+      expect(onKey).toHaveBeenCalledTimes(1);
+      expect(onKey.mock.calls[0][0].defaultPrevented).toBe(false);
+      document.removeEventListener("keydown", onKey);
+      // And Enter reattaches.
+      await user.keyboard("{Enter}");
+      await flush();
+      expect(open).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("unmount_closes_the_session_and_disposes_the_terminal", async () => {
@@ -659,11 +1535,12 @@ describe("TerminalView", () => {
   });
 
   it("refits_and_resizes_the_session_once_the_font_has_loaded", async () => {
-    let loaded: () => void = () => {};
+    // Each face (regular and bold) is loaded on its own.
+    const loaded: (() => void)[] = [];
     const load = vi.fn(
       () =>
         new Promise<void>((resolve) => {
-          loaded = resolve;
+          loaded.push(resolve);
         }),
     );
     Object.defineProperty(document, "fonts", {
@@ -677,7 +1554,7 @@ describe("TerminalView", () => {
       expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
       const before = term().options.fontFamily;
       h.fitDims = { cols: 110, rows: 35 }; // the real font's grid
-      await act(async () => loaded());
+      await act(async () => loaded.forEach((done) => done()));
       expect(term().options.fontFamily).not.toBe(before);
       expect(invoke).toHaveBeenCalledWith("term_resize", {
         id: 7,
@@ -687,6 +1564,129 @@ describe("TerminalView", () => {
     } finally {
       Reflect.deleteProperty(document, "fonts");
     }
+  });
+
+  describe("the terminal font", () => {
+    /** A `document.fonts` whose loads stay pending until they are finished. */
+    function pendingFonts() {
+      const pending: { query: string; resolve: () => void }[] = [];
+      const load = vi.fn(
+        (query: string) =>
+          new Promise<void>((resolve) => {
+            pending.push({ query, resolve });
+          }),
+      );
+      Object.defineProperty(document, "fonts", {
+        configurable: true,
+        value: { load },
+      });
+      return {
+        load,
+        /** Finishes the pending loads whose query mentions `family` (all, if none is given). */
+        finish: (family = "") => {
+          for (const p of pending.filter((p) => p.query.includes(family))) {
+            p.resolve();
+          }
+          pending.splice(
+            0,
+            pending.length,
+            ...pending.filter((p) => !p.query.includes(family)),
+          );
+        },
+      };
+    }
+    afterEach(() => Reflect.deleteProperty(document, "fonts"));
+
+    it("the_xterm_is_created_from_the_setting_not_from_the_ui_mono_token", async () => {
+      render(<Harness font="ibm_plex_mono" />);
+      await flush();
+      expect(term().options).toMatchObject({
+        fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, monospace',
+        fontWeight: 500,
+        fontWeightBold: 700,
+        lineHeight: 1.2,
+      });
+    });
+
+    it("the_default_Hack_is_regular_with_a_bold", async () => {
+      render(<Harness />);
+      await flush();
+      expect(term().options).toMatchObject({
+        fontFamily: '"Hack", ui-monospace, Menlo, monospace',
+        fontWeight: 400,
+        fontWeightBold: 700,
+        lineHeight: 1.2,
+      });
+    });
+
+    it("a_change_updates_the_options_then_refits_once_the_new_font_has_loaded_keeping_the_session", async () => {
+      const fonts = pendingFonts();
+      const { rerender } = render(<Harness font="hack" />);
+      await flush();
+      fonts.finish();
+      await flush();
+      const first = term();
+      invoke.mockClear();
+      fonts.load.mockClear();
+
+      rerender(<Harness font="jetbrains_mono" />);
+      await flush();
+      // The options change at once; xterm draws with the family as it loads.
+      expect(term().options).toMatchObject({
+        fontFamily: '"JetBrains Mono", ui-monospace, Menlo, monospace',
+        fontWeight: 500,
+        fontWeightBold: 700,
+        lineHeight: 1.2,
+      });
+      // It waits for the regular and the bold face of the new family before it measures.
+      expect(fonts.load).toHaveBeenCalledWith(
+        '500 13px "JetBrains Mono", ui-monospace, Menlo, monospace',
+      );
+      expect(fonts.load).toHaveBeenCalledWith(
+        '700 13px "JetBrains Mono", ui-monospace, Menlo, monospace',
+      );
+      expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
+
+      const before = term().options.fontFamily;
+      h.fitDims = { cols: 96, rows: 28 }; // the new font's grid
+      fonts.finish();
+      await flush();
+      expect(term().options.fontFamily).not.toBe(before); // measured again
+      expect(invoke).toHaveBeenCalledWith("term_resize", {
+        id: 7,
+        cols: 96,
+        rows: 28,
+      });
+      // The same terminal and session: scrollback is kept.
+      expect(h.terms).toHaveLength(1);
+      expect(term()).toBe(first);
+      expect(first.dispose).not.toHaveBeenCalled();
+      expect(open).toHaveBeenCalledTimes(1);
+    });
+
+    it("a_font_replaced_before_it_loaded_does_not_refit_for_the_old_one", async () => {
+      const fonts = pendingFonts();
+      const { rerender } = render(<Harness font="hack" />);
+      await flush();
+      fonts.finish();
+      await flush();
+      invoke.mockClear();
+      rerender(<Harness font="geist_mono" />);
+      await flush();
+      rerender(<Harness font="ibm_plex_mono" />);
+      await flush();
+      h.fitDims = { cols: 90, rows: 26 };
+      fonts.finish("Geist Mono");
+      await flush();
+      expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
+      fonts.finish("IBM Plex Mono");
+      await flush();
+      expect(invoke).toHaveBeenCalledWith("term_resize", {
+        id: 7,
+        cols: 90,
+        rows: 26,
+      });
+    });
   });
 
   it("keeps_the_session_when_the_tab_object_changes_but_the_target_does_not", async () => {

@@ -97,6 +97,12 @@ describe("capabilities", () => {
     expect(p).toContain("allow-set-settings");
   });
 
+  it("every_window_may_set_its_native_theme", () => {
+    for (const file of ["default.json", "popover.json", "settings.json"]) {
+      expect(permissions(file), file).toContain("core:window:allow-set-theme");
+    }
+  });
+
   const windows: Array<[string, string]> = [
     ["src/main.tsx", "default.json"],
     ["src/popover.tsx", "popover.json"],
@@ -131,11 +137,19 @@ describe("runtimeImports", () => {
       'import "./k";',
       'import type from "./l";',
     ].join("\n");
-    expect(runtimeImports(text)).toEqual(["./f", "./g", "./i", "./j", "./k", "./l"]);
+    expect(runtimeImports(text)).toEqual([
+      "./f",
+      "./g",
+      "./i",
+      "./j",
+      "./k",
+      "./l",
+    ]);
   });
 
   it("reads_multiline_named_imports", () => {
-    const text = 'import {\n  a,\n  b,\n} from "./m";\nimport type {\n  C,\n} from "./n";';
+    const text =
+      'import {\n  a,\n  b,\n} from "./m";\nimport type {\n  C,\n} from "./n";';
     expect(runtimeImports(text)).toEqual(["./m"]);
   });
 });

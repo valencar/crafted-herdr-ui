@@ -1,16 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "Capability for the Settings window: events, the commands Settings calls, and the file dialog for Choose binary. No terminal sessions",
+  "description": "Capability for the Settings window: events, the commands Settings calls (including the agent kinds list for New session options), and the file dialog for Choose binary. No terminal sessions",
   "windows": [
     "settings"
   ],
   "permissions": [
     "core:default",
+    "core:window:allow-set-theme",
     "allow-get-settings",
     "allow-get-state",
     "allow-get-terminals",
     "allow-herdr-status",
+    "allow-list-agent-kinds",
     "allow-list-terminals",
     "allow-machine-set-enabled",
     "allow-preview-launch-template",

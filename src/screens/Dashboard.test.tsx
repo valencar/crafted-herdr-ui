@@ -143,6 +143,109 @@ afterEach(() => {
 });
 
 describe("Dashboard", () => {
+  it("first_load_shows_a_skeleton", () => {
+    setup(null);
+    const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;
+    expect(busy).not.toBeNull();
+    expect(busy).toHaveTextContent("Connecting to herdr…");
+    expect(busy.querySelector(".skel")).not.toBeNull();
+  });
+
+  it("pending_workbox_shows_a_skeleton", () => {
+    setup(
+      appState(
+        machine("buildbox"),
+        machine("gpubox", { kind: "reconnecting", retry_in_ms: 0, error: "" }),
+      ),
+    );
+    const card = screen.getByRole("article", { name: /gpubox/ });
+    expect(card.querySelectorAll(".skel").length).toBeGreaterThan(0);
+    expect(card.querySelector(".status-bar")).toBeNull();
+    expect(card).toHaveAttribute("aria-busy", "true");
+    // The action stays: a hung first connect can still be retried by hand.
+    expect(
+      within(card).getByRole("button", { name: "Retry now" }),
+    ).toBeInTheDocument();
+    // A workbox that has answered keeps its bar and no skeleton.
+    const ready = screen.getByRole("article", { name: /buildbox/ });
+    expect(ready.querySelector(".status-bar")).not.toBeNull();
+    expect(ready.querySelector(".skel")).toBeNull();
+  });
+
+  it("a_retrying_workbox_keeps_its_status_bar", () => {
+    setup(
+      appState(
+        machine("gpubox", {
+          kind: "reconnecting",
+          retry_in_ms: 2000,
+          error: "timed out",
+        }),
+      ),
+    );
+    const card = screen.getByRole("article", { name: /gpubox/ });
+    expect(card.querySelector(".status-bar")).not.toBeNull();
+    expect(card.querySelector(".skel")).toBeNull();
+  });
+
+  it("finished_rows_offer_mark_seen", async () => {
+    const user = setup();
+    const finished = within(section("Needs you")).getByText(
+      "Finished, not looked at yet",
+    ).parentElement!;
+    const row = within(finished).getAllByRole("listitem")[0];
+    // Each button names its agent, so several of them are told apart.
+    const name = row.querySelector(".dash-name")?.textContent ?? "";
+    expect(name).not.toBe("");
+    const markSeenButton = within(row).getByRole("button", {
+      name: `Mark ${name} seen`,
+    });
+    expect(markSeenButton).toHaveTextContent("Mark seen");
+    const open = within(row).getByRole("button", { name: /^Open / });
+    // Before Open in the row, so Tab reaches it first.
+    expect(
+      markSeenButton.compareDocumentPosition(open) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await user.click(markSeenButton);
+    expect(calls("mark_seen")).toHaveLength(1);
+    expect(calls("mark_seen")[0][1]).toEqual({
+      machineId: "buildbox",
+      paneId: "w2:p1",
+    });
+    // It marks seen only: nothing was opened.
+    expect(calls("open_session")).toHaveLength(0);
+  });
+
+  it("details_on_a_blocked_card_only_selects_the_row_and_nothing_offers_a_reply", async () => {
+    const user = setup();
+    const card = within(section("Needs you")).getAllByRole("article")[0];
+    expect(card).toHaveAttribute("data-status", "blocked");
+    // A blocked agent is never answered for the user: no Reply… on its card.
+    expect(within(card).queryByRole("button", { name: /Reply/ })).toBeNull();
+    invoke.mockClear();
+    await user.click(within(card).getByRole("button", { name: "Details…" }));
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    // Nothing is sent to the agent: no herdr command at all comes from the click.
+    expect(invoke.mock.calls.map((c) => c[0])).not.toContainEqual(
+      expect.stringMatching(/send|reply|mark_seen|open_session/),
+    );
+  });
+
+  it("needs_cards_are_live", () => {
+    setup();
+    const needs = section("Needs you");
+    for (const card of within(needs).getAllByRole("article")) {
+      expect(card.querySelector(".pill .sdot")).toHaveClass("live");
+    }
+    const finished = within(needs).getByText(
+      "Finished, not looked at yet",
+    ).parentElement!;
+    const pills = finished.querySelectorAll(".pill .sdot");
+    expect(pills.length).toBeGreaterThan(0);
+    for (const dot of pills) expect(dot).not.toHaveClass("live");
+  });
+
   it("says_it_is_connecting_before_the_first_state", () => {
     setup(null);
     expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
@@ -207,16 +310,16 @@ describe("Dashboard", () => {
   it("clicking_a_card_opens_all_agents_with_that_row_selected", async () => {
     const user = setup();
     const card = within(section("Needs you")).getAllByRole("article")[0];
-    await user.click(within(card).getByRole("button", { name: "Reply…" }));
+    await user.click(card);
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
     expect(useAppStore.getState().view).toEqual({ kind: "all" });
   });
 
-  it("a_card_reply_clears_a_saved_search_that_filters_the_row_out", async () => {
+  it("a_card_click_clears_a_saved_search_that_filters_the_row_out", async () => {
     const user = setup();
     useAppStore.setState({ query: "no such agent" });
     const card = within(section("Needs you")).getAllByRole("article")[0];
-    await user.click(within(card).getByRole("button", { name: "Reply…" }));
+    await user.click(card);
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
     expect(useAppStore.getState().query).toBe("");
   });
@@ -227,7 +330,7 @@ describe("Dashboard", () => {
     terminalTab();
     const user = setup(defaultState(), { narrow: true, visible: true });
     const card = within(section("Needs you")).getAllByRole("article")[0];
-    await user.click(within(card).getByRole("button", { name: "Reply…" }));
+    await user.click(card);
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
     expect(useAppStore.getState().view).toEqual({ kind: "all" });
     expect(useTerminalStore.getState().activeKey).toBe(HOME);
@@ -281,6 +384,8 @@ describe("Dashboard", () => {
           state: "live",
           error: null,
           termId: null,
+          exitCode: null,
+          attempts: 0,
         },
       ],
       activeKey: HOME,
@@ -338,8 +443,19 @@ describe("Dashboard", () => {
   it("blocked_the_longest_shows_the_age_the_name_and_the_workbox", () => {
     setup();
     const t = tile("Blocked the longest");
-    expect(t).toHaveTextContent("2m");
+    // The number and its unit are separate parts of the tile.
+    expect(t.querySelector(".tile-num")).toHaveTextContent("2");
+    expect(t.querySelector(".tile-unit")).toHaveTextContent("min");
+    expect(t).toHaveTextContent("2 min");
     expect(within(t).getByText("planner on buildbox")).toBeInTheDocument();
+  });
+
+  it("blocked_the_longest_shows_a_dash_when_the_blocked_age_is_unknown", () => {
+    setup(appState(machine("buildbox", undefined, { ages: {} })));
+    const t = tile("Blocked the longest");
+    expect(t.querySelector(".tile-num")).toHaveTextContent("—");
+    expect(t).not.toHaveTextContent("None");
+    expect(within(t).getByText(/ on buildbox$/)).toBeInTheDocument();
   });
 
   it("blocked_the_longest_shows_none_when_nobody_is_blocked", () => {

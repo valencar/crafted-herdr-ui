@@ -33,8 +33,13 @@ const SETTINGS: Settings = {
   dashboard_split: false,
   dashboard_split_width: 420,
   terminal_font_size: 13,
+  terminal_font: "hack",
   sidebar_collapsed: false,
   row_density: "comfortable",
+  theme: "dark",
+  new_session_kind: null,
+  new_session_hidden_kinds: [],
+  new_session_hide_shell: false,
 };
 const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();

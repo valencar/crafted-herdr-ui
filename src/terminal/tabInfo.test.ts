@@ -12,6 +12,8 @@ function tab(over: Partial<TermTab> = {}): TermTab {
     state: "live",
     error: null,
     termId: 1,
+    exitCode: null,
+    attempts: 0,
     ...over,
   };
 }

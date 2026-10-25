@@ -1,13 +1,26 @@
+import { Kbd } from "../components/Kbd";
+import { HealthDot } from "../components/StatusDot";
+import { formatShortcut, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { KindBadge } from "../components/KindBadge";
 import { StoreToast } from "../components/Toast";
 import type { GroupBy } from "../lib/bindings/GroupBy";
 import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
 import type { OpenMode } from "../lib/bindings/OpenMode";
 import type { RowDensity } from "../lib/bindings/RowDensity";
+import type { Theme } from "../lib/bindings/Theme";
 import type { AttachMode } from "../lib/bindings/AttachMode";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
+import type { TerminalFont } from "../lib/bindings/TerminalFont";
 import type { TerminalId } from "../lib/bindings/TerminalId";
 import type { TerminalList } from "../lib/bindings/TerminalList";
 import {
@@ -16,7 +29,9 @@ import {
   actionErrorMessage,
 } from "../lib/format";
 import { invokeTyped, toActionError } from "../lib/ipc";
+import { useTheme } from "../lib/useTheme";
 import { useAppStore } from "../store/appStore";
+import { TERMINAL_FONTS } from "../terminal/terminalFonts";
 
 type SectionId =
   | "general"
@@ -85,17 +100,17 @@ const TERMINALS: TerminalId[] = [
 const MIN_INTERVAL_SECONDS = 1;
 const TEMPLATE_EXAMPLE = "open -na Ghostty --args -e {attach}";
 
-const SHORTCUTS: [keys: string, what: string][] = [
-  ["⌘K", "Search and jump"],
-  ["⌘N", "New session"],
-  ["⌘J", "Next agent that needs you"],
-  ["⌘\\", "Move the terminal panel between the bottom and the right"],
-  ["⌘B", "Collapse or expand the sidebar"],
-  ["⌘↩", "Open the selected session"],
-  ["⌘,", "Settings"],
-  ["⌘R", "Refresh now"],
-  ["↑ ↓", "Move the selection"],
-  ["⌫", "Close the selected session (asks first)"],
+const SHORTCUTS: [keys: ShortcutId | { keys: string }, what: string][] = [
+  ["palette", "Search and jump"],
+  ["new-session", "New session"],
+  ["next-needs-you", "Next agent that needs you"],
+  ["toggle-split", "Dashboard beside terminal"],
+  ["toggle-sidebar", "Collapse or expand the sidebar"],
+  ["open-selected", "Open the selected session"],
+  ["settings", "Settings"],
+  ["refresh", "Refresh now"],
+  [{ keys: "↑ ↓" }, "Move the selection"],
+  [{ keys: "⌫" }, "Close the selected session (asks first)"],
 ];
 
 type Update = (patch: Partial<SettingsData>) => Promise<void>;
@@ -105,19 +120,33 @@ function Check({
   hint,
   checked,
   onChange,
+  disabled,
+  describedBy,
+  badge,
 }: {
   label: string;
   hint?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  describedBy?: string;
+  /** A kind badge drawn before the label (`null` is Plain shell); hidden from screen readers. */
+  badge?: { kind: string | null };
 }) {
   return (
     <label className="check settings-check">
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
+        aria-describedby={describedBy}
         onChange={(e) => onChange(e.target.checked)}
       />
+      {badge && (
+        <span aria-hidden="true">
+          <KindBadge kind={badge.kind} named />
+        </span>
+      )}
       <span className="settings-check-text">
         {label}
         {hint && <span className="muted settings-hint">{hint}</span>}
@@ -129,10 +158,13 @@ function Check({
 function Field({
   id,
   label,
+  hint,
   children,
 }: {
   id: string;
   label: ReactNode;
+  /** Shown under the control; the control points at it with `aria-describedby={`${id}-hint`}`. */
+  hint?: string;
   children: ReactNode;
 }) {
   return (
@@ -141,6 +173,11 @@ function Field({
         {label}
       </label>
       {children}
+      {hint && (
+        <span id={`${id}-hint`} className="muted settings-hint">
+          {hint}
+        </span>
+      )}
     </div>
   );
 }
@@ -190,6 +227,125 @@ function SecondsField({
   );
 }
 
+/** Which Run options the New session sheet offers: checked = shown, and at least one stays. */
+function NewSessionOptions({
+  settings,
+  update,
+}: {
+  settings: SettingsData;
+  update: Update;
+}) {
+  const labelId = useId();
+  const stayId = useId();
+  // `null` while loading; a failed or empty list means herdr offers no agent kinds.
+  const [kinds, setKinds] = useState<string[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    invokeTyped("list_agent_kinds")
+      .then((list) => {
+        if (!cancelled) setKinds(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setKinds([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // What the boxes show while saves are in flight: the saved value is stale until the last one
+  // comes back, and a quick second click must build on the first.
+  const [optimistic, setOptimistic] = useState<{
+    hidden: string[];
+    hideShell: boolean;
+  } | null>(null);
+  const latest = useRef(optimistic);
+  const inFlight = useRef(0);
+  const hidden = optimistic?.hidden ?? settings.new_session_hidden_kinds;
+  const hideShell = optimistic?.hideShell ?? settings.new_session_hide_shell;
+
+  const noKinds = kinds !== null && kinds.length === 0;
+  const installed = (kinds ?? []).map((k) => ({
+    kind: k,
+    on: !hidden.includes(k),
+  }));
+  // With no installed kind shown, the sheet offers Plain shell whatever is saved.
+  const shellOn = !installed.some((o) => o.on) || !hideShell;
+  const options: { kind: string | null; on: boolean }[] = [
+    ...installed,
+    { kind: null, on: shellOn },
+  ];
+  const onCount = options.filter((o) => o.on).length;
+  const lastOne = kinds !== null && onCount === 1;
+
+  const toggle = (kind: string | null, on: boolean) => {
+    const base = latest.current ?? { hidden, hideShell };
+    const next =
+      kind === null
+        ? { ...base, hideShell: !on }
+        : {
+            ...base,
+            // Kinds that are no longer installed stay in the list.
+            hidden: on
+              ? base.hidden.filter((k) => k !== kind)
+              : [...base.hidden, kind],
+          };
+    latest.current = next;
+    setOptimistic(next);
+    inFlight.current += 1;
+    void update(
+      kind === null
+        ? { new_session_hide_shell: next.hideShell }
+        : { new_session_hidden_kinds: next.hidden },
+    ).finally(() => {
+      inFlight.current -= 1;
+      if (inFlight.current === 0) {
+        // The last save is back (or failed): the boxes follow the saved settings again.
+        latest.current = null;
+        setOptimistic(null);
+      }
+    });
+  };
+
+  return (
+    <div role="group" aria-labelledby={labelId} className="settings-fieldset">
+      <div id={labelId} className="settings-label">
+        New session options
+      </div>
+      <p className="muted settings-hint">
+        Choose what the Run list in New session offers.
+      </p>
+      {kinds === null ? (
+        <p className="muted settings-hint">Loading agent kinds…</p>
+      ) : (
+        <>
+          <div className="settings-options">
+            {options.map(({ kind, on }) => (
+              <Check
+                key={kind ?? "shell"}
+                label={kind ?? "Plain shell"}
+                badge={{ kind }}
+                checked={on}
+                disabled={lastOne && on}
+                describedBy={lastOne && on ? stayId : undefined}
+                onChange={(next) => toggle(kind, next)}
+              />
+            ))}
+          </div>
+          {noKinds && (
+            <p className="muted settings-hint">herdr listed no agent kinds.</p>
+          )}
+          {lastOne && (
+            <p id={stayId} className="muted settings-hint">
+              At least one option stays.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function General({
   settings,
   update,
@@ -218,6 +374,7 @@ function General({
         checked={settings.open_after_create}
         onChange={(open_after_create) => void update({ open_after_create })}
       />
+      <NewSessionOptions settings={settings} update={update} />
       <div className="settings-pair">
         <SecondsField
           key={`visible-${settings.poll_interval_visible_ms}`}
@@ -316,6 +473,7 @@ function TerminalSection({
   const targetId = useId();
   const whereId = useId();
   const attachId = useId();
+  const fontId = useId();
   useEffect(() => {
     let cancelled = false;
     invokeTyped("get_terminals")
@@ -374,6 +532,28 @@ function TerminalSection({
           ))}
         </div>
       </div>
+
+      <Field
+        id={fontId}
+        label="Terminal font"
+        hint="Font for the terminal tabs in the main window"
+      >
+        <select
+          id={fontId}
+          className="field"
+          aria-describedby={`${fontId}-hint`}
+          value={settings.terminal_font}
+          onChange={(e) =>
+            void update({ terminal_font: e.target.value as TerminalFont })
+          }
+        >
+          {TERMINAL_FONTS.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </Field>
 
       <fieldset className="settings-fieldset">
         <legend className="settings-label">Open sessions in</legend>
@@ -469,9 +649,36 @@ function Appearance({
   settings: SettingsData;
   update: Update;
 }) {
+  const themeId = useId();
   const densityId = useId();
   return (
     <div className="settings-stack">
+      <div role="group" aria-labelledby={themeId} className="settings-fieldset">
+        <div id={themeId} className="settings-label">
+          Theme
+        </div>
+        <div className="segmented settings-segmented">
+          {(
+            [
+              ["system", "System"],
+              ["dark", "Dark"],
+              ["light", "Light"],
+            ] as [Theme, string][]
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={settings.theme === value}
+              onClick={() => void update({ theme: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="muted settings-hint">
+          System follows your Mac’s appearance.
+        </p>
+      </div>
       <div
         role="group"
         aria-labelledby={densityId}
@@ -527,7 +734,7 @@ function Workboxes() {
                 </span>
               </span>
               <span className="health" data-health={m.health.kind}>
-                <span className="dot" aria-hidden="true" />
+                <HealthDot health={m.health} />
                 {HEALTH_LABEL[m.health.kind]}
               </span>
               <input
@@ -613,7 +820,13 @@ function HerdrCli({
           className="health"
           data-health={status?.path ? "online" : "attention"}
         >
-          <span className="dot" aria-hidden="true" />
+          <HealthDot
+            health={
+              status?.path
+                ? { kind: "online" }
+                : { kind: "attention", error: "" }
+            }
+          />
           <span className="sr-only">
             {status?.path ? "Found" : "Not found"}
           </span>
@@ -678,15 +891,15 @@ function Shortcuts({
     <div className="settings-stack">
       <ul className="settings-list">
         {SHORTCUTS.map(([keys, what]) => (
-          <li key={keys} className="settings-list-row">
+          <li key={what} className="settings-list-row">
             <span className="settings-list-text">{what}</span>
-            <kbd>{keys}</kbd>
+            {typeof keys === "string" ? <Kbd id={keys} /> : <Kbd {...keys} />}
           </li>
         ))}
       </ul>
       <Check
         label="Show or hide Crafted Herdr from anywhere"
-        hint="⌃⌥⌘H, even when another app is in front."
+        hint={`${formatShortcut("global-show")}, even when another app is in front.`}
         checked={settings.global_shortcut_enabled}
         onChange={(global_shortcut_enabled) =>
           void update({ global_shortcut_enabled }).then(refresh)
@@ -694,7 +907,7 @@ function Shortcuts({
       />
       {settings.global_shortcut_enabled && status?.error && (
         <p className="settings-warn" role="status">
-          Couldn’t register ⌃⌥⌘H (another app may be using it)
+          {`Couldn’t register ${formatShortcut("global-show")} (another app may be using it)`}
         </p>
       )}
     </div>
@@ -703,6 +916,7 @@ function Shortcuts({
 
 /** The Settings window (spec section 9.5): six sections, each change saved as it is made. */
 export function Settings() {
+  useTheme();
   const settings = useAppStore((s) => s.settings);
   const setSettings = useAppStore((s) => s.setSettings);
   const [section, setSection] = useState<SectionId>("general");

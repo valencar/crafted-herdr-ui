@@ -5,6 +5,7 @@
 //! its own reads it, so nothing here ever calls back into the `Poller` from inside its emit
 //! (which runs under the poller's core lock).
 
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tauri::image::Image;
@@ -17,8 +18,10 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
 use crate::herdr::model::AgentStatus;
+use crate::menu;
 use crate::now_ms;
 use crate::poller::Poller;
+use crate::settings::{SharedSettings, Theme};
 use crate::state::{AppState, Health};
 
 pub const MAIN_WINDOW: &str = "main";
@@ -171,6 +174,21 @@ pub fn show_main_new_session<R: Runtime>(app: &AppHandle<R>) {
     let _ = app.emit_to(MAIN_WINDOW, NEW_SESSION_EVENT, ());
 }
 
+/// The Settings window's native background before its page paints: the `--panel-2` token of
+/// the dark or the light theme. `System` follows the OS appearance.
+pub fn settings_background(theme: Theme, os_is_dark: bool) -> tauri::window::Color {
+    let dark = match theme {
+        Theme::System => os_is_dark,
+        Theme::Dark => true,
+        Theme::Light => false,
+    };
+    if dark {
+        tauri::window::Color(18, 19, 23, 255)
+    } else {
+        tauri::window::Color(252, 252, 253, 255)
+    }
+}
+
 /// Opens the Settings window, or brings it to the front if it is already open.
 pub fn open_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     hide_popover(app);
@@ -179,6 +197,16 @@ pub fn open_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         window.unminimize()?;
         return window.set_focus();
     }
+    // Matching the saved theme avoids a dark flash when a light window opens. The main window's
+    // theme is the OS appearance whenever the app is not pinned to a fixed theme.
+    let theme = app
+        .try_state::<SharedSettings>()
+        .map(|s| s.get().theme)
+        .unwrap_or_default();
+    let os_is_dark = app
+        .get_webview_window(MAIN_WINDOW)
+        .and_then(|w| w.theme().ok())
+        .is_none_or(|t| t == tauri::Theme::Dark);
     WebviewWindowBuilder::new(
         app,
         SETTINGS_WINDOW,
@@ -189,7 +217,7 @@ pub fn open_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     .resizable(false)
     .maximizable(false)
     // The panel color of tokens.css, so the window is not white before the page paints.
-    .background_color(tauri::window::Color(18, 19, 23, 255))
+    .background_color(settings_background(theme, os_is_dark))
     .center()
     .build()?;
     Ok(())
@@ -326,12 +354,16 @@ pub fn start_badge<R: Runtime>(tray: TrayIcon<R>, state: watch::Receiver<AppStat
 
 // ---------- the global shortcut ----------
 
-/// ⌃⌥⌘H.
+/// ⌃⌥⌘H: the `global-show` entry of the shortcut table.
 pub fn global_shortcut() -> Shortcut {
-    Shortcut::new(
-        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
-        Code::KeyH,
-    )
+    menu::accelerator("global-show")
+        .and_then(|accelerator| Shortcut::from_str(&accelerator).ok())
+        .unwrap_or_else(|| {
+            Shortcut::new(
+                Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
+                Code::KeyH,
+            )
+        })
 }
 
 /// Registers or releases ⌃⌥⌘H. Registering twice, or releasing what was never registered, is
@@ -353,6 +385,41 @@ pub fn set_global_shortcut<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_window_background_follows_the_saved_theme() {
+        let dark = tauri::window::Color(18, 19, 23, 255);
+        let light = tauri::window::Color(252, 252, 253, 255);
+        for os_is_dark in [true, false] {
+            assert_eq!(settings_background(Theme::Dark, os_is_dark), dark);
+            assert_eq!(settings_background(Theme::Light, os_is_dark), light);
+        }
+        assert_eq!(settings_background(Theme::System, true), dark);
+        assert_eq!(settings_background(Theme::System, false), light);
+    }
+
+    #[test]
+    fn global_show_parses_without_the_fallback() {
+        let accelerator = menu::accelerator("global-show").expect("in the table");
+        assert_eq!(
+            Shortcut::from_str(&accelerator).expect("parses"),
+            Shortcut::new(
+                Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
+                Code::KeyH,
+            )
+        );
+    }
+
+    #[test]
+    fn global_shortcut_unchanged() {
+        assert_eq!(
+            global_shortcut(),
+            Shortcut::new(
+                Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
+                Code::KeyH,
+            )
+        );
+    }
     use crate::herdr::model::{Snapshot, parse_snapshot};
     use crate::state::MachineView;
     use std::collections::HashMap;

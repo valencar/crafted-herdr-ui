@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyScore } from "./fuzzy";
+import { fuzzyMatch, fuzzyScore } from "./fuzzy";
 
 describe("fuzzyScore", () => {
   it("matches_a_subsequence_across_words", () => {
@@ -45,5 +45,40 @@ describe("fuzzyScore", () => {
 
   it("matches_everything_for_an_empty_query", () => {
     expect(fuzzyScore("", "anything")).not.toBeNull();
+  });
+});
+
+describe("fuzzyMatch", () => {
+  it("match_positions", () => {
+    expect(fuzzyMatch("mig", "migrate-db")?.positions).toEqual([0, 1, 2]);
+    expect(fuzzyMatch("md", "migrate-db")?.positions).toEqual([0, 8]);
+  });
+
+  it("is_null_when_nothing_matches_and_scores_like_fuzzy_score", () => {
+    expect(fuzzyMatch("xb", "buildbox")).toBeNull();
+    expect(fuzzyMatch("wa", "web-app")?.score).toBe(
+      fuzzyScore("wa", "web-app"),
+    );
+    expect(fuzzyMatch("", "anything")?.positions).toEqual([]);
+  });
+
+  it("positions_are_code_point_indexes_into_the_original_text", () => {
+    // The emoji is two UTF-16 units but one code point.
+    expect(fuzzyMatch("api", "🔧 api-service")?.positions).toEqual([2, 3, 4]);
+  });
+
+  it("positions_survive_a_character_whose_lowercase_is_longer", () => {
+    // "İ".toLowerCase() is two code points; "d" is still the second original character.
+    expect(fuzzyMatch("d", "İd")?.positions).toEqual([1]);
+    expect(fuzzyMatch("id", "İd")?.positions).toEqual([0, 1]);
+  });
+
+  it("a_label_matches_its_own_characters_typed_as_the_query", () => {
+    // Whole-string lowercase would turn "İ" into "i" plus U+0307 and a final "Σ" into "ς".
+    expect(fuzzyMatch("İd", "İd")?.positions).toEqual([0, 1]);
+    expect(fuzzyMatch("İ", "İstanbul")?.positions).toEqual([0]);
+    expect(fuzzyMatch("ΟΔΟΣ", "ΟΔΟΣ")?.positions).toEqual([0, 1, 2, 3]);
+    expect(fuzzyMatch("οδος", "ΟΔΟΣ")?.positions).toEqual([0, 1, 2, 3]);
+    expect(fuzzyMatch("Σ", "οδοσ")?.positions).toEqual([3]);
   });
 });

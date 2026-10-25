@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { shortPath, STATUS_LABEL } from "../lib/format";
 import { isNeedsYou, toRows, type Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
+import type { DotStatus } from "../components/StatusDot";
 import type { TermTab } from "./terminalStore";
 
 /** The agent rows by key, for matching a tab to the pane it shows. */
@@ -44,7 +45,7 @@ export function tabName(tab: TermTab, row: Row | undefined): string {
 export function tabDotStatus(
   tab: TermTab,
   row: Row | undefined,
-): string | undefined {
+): DotStatus | undefined {
   return tab.state === "live" ? row?.status : tab.state;
 }
 

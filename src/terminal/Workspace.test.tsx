@@ -36,7 +36,12 @@ type FakeHandle = {
 
 const h = vi.hoisted(() => ({
   handles: new Map<string, FakeHandle>(),
-  views: [] as { tabKey: string; active: boolean; fontSize: number }[],
+  views: [] as {
+    tabKey: string;
+    active: boolean;
+    fontSize: number;
+    font: string;
+  }[],
 }));
 
 // The xterm terminal has its own tests; here a view is a box that records how it was asked
@@ -46,14 +51,16 @@ vi.mock("./TerminalView", () => ({
     tab,
     active,
     fontSize,
+    font,
     ref,
   }: {
     tab: TermTab;
     active: boolean;
     fontSize: number;
+    font: string;
     ref?: Ref<TerminalHandle>;
   }) => {
-    h.views.push({ tabKey: tab.tabKey, active, fontSize });
+    h.views.push({ tabKey: tab.tabKey, active, fontSize, font });
     const handle = handleFor(tab.tabKey);
     useImperativeHandle(ref, () => handle, [handle]);
     return <div data-testid={`view-${tab.tabKey}`} hidden={!active} />;
@@ -108,6 +115,7 @@ const fixture = raw.result.snapshot as unknown as Snapshot;
 
 const SETTINGS = {
   terminal_font_size: 13,
+  terminal_font: "hack",
   dashboard_split: false,
   dashboard_split_width: 420,
 } as Settings;
@@ -309,6 +317,22 @@ describe("Workspace", () => {
     open("w1:p1", "api-service");
     render(<Workspace>{home}</Workspace>);
     expect(h.views[h.views.length - 1]).toMatchObject({ fontSize: 17 });
+  });
+
+  it("gives the views the saved terminal font, Hack when there are no settings", () => {
+    useAppStore.setState({
+      settings: { ...SETTINGS, terminal_font: "jetbrains_mono" },
+    });
+    open("w1:p1", "api-service");
+    const { unmount } = render(<Workspace>{home}</Workspace>);
+    expect(h.views[h.views.length - 1]).toMatchObject({
+      font: "jetbrains_mono",
+    });
+    unmount();
+    h.views.length = 0;
+    useAppStore.setState({ settings: null });
+    render(<Workspace>{home}</Workspace>);
+    expect(h.views[h.views.length - 1]).toMatchObject({ font: "hack" });
   });
 
   describe("split column", () => {

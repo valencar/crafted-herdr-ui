@@ -4,7 +4,9 @@ import type { GroupBy } from "./GroupBy";
 import type { OpenMode } from "./OpenMode";
 import type { OpenTarget } from "./OpenTarget";
 import type { RowDensity } from "./RowDensity";
+import type { TerminalFont } from "./TerminalFont";
 import type { TerminalId } from "./TerminalId";
+import type { Theme } from "./Theme";
 
 export type Settings = { 
 /**
@@ -34,4 +36,26 @@ dashboard_split: boolean,
 /**
  * The width of that column, in points.
  */
-dashboard_split_width: number, terminal_font_size: number, sidebar_collapsed: boolean, row_density: RowDensity, };
+dashboard_split_width: number, terminal_font_size: number, 
+/**
+ * Which bundled font the terminal uses. An old settings file has none; it loads as Hack.
+ */
+terminal_font: TerminalFont, sidebar_collapsed: boolean, row_density: RowDensity, 
+/**
+ * An old settings file has no `theme`; it loads as dark.
+ */
+theme: Theme, 
+/**
+ * The Run choice the New session sheet starts on: the agent kind of the last session
+ * created, or `None` for a plain shell.
+ */
+new_session_kind: string | null, 
+/**
+ * Agent kinds the New session sheet leaves out. A hidden list, so a newly installed kind
+ * shows up on its own.
+ */
+new_session_hidden_kinds: Array<string>, 
+/**
+ * Whether the New session sheet leaves out Plain shell.
+ */
+new_session_hide_shell: boolean, };

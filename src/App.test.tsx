@@ -42,6 +42,7 @@ const ipc = vi.hoisted(() => ({
   onNewSession: vi.fn(),
   onMenu: vi.fn(),
   invokeTyped: vi.fn(),
+  setWindowTheme: vi.fn(),
   toActionError: (e: unknown) => e,
 }));
 vi.mock("./lib/ipc", () => ipc);
@@ -78,6 +79,7 @@ afterEach(() => {
     sheet: null,
     activityOpen: false,
     paletteOpen: false,
+    shortcutsOpen: false,
     dialogOpen: 0,
   });
   useTerminalStore.setState({
@@ -232,6 +234,7 @@ const SETTINGS = {
   dashboard_split: false,
   dashboard_split_width: 420,
   terminal_font_size: 13,
+  terminal_font: "hack",
 };
 
 /** The callback the app registered for an event, by the ipc helper's mock. */
@@ -437,6 +440,10 @@ it("opens the tab but leaves the sheet alone when focus-row or open-row arrives 
     settings: { open_target: "app" } as unknown as Settings,
   });
   listBuildbox();
+  // The sheet lists agent kinds; the default mock answers every command with an object.
+  ipc.invokeTyped.mockImplementation(async (name: string) =>
+    name === "list_agent_kinds" ? [] : { installed: [], default: "ghostty" },
+  );
   render(<App />);
   await waitFor(() => expect(ipc.onOpenRow).toHaveBeenCalled());
   await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
@@ -492,6 +499,25 @@ describe("menu events", () => {
     fireEvent.keyDown(palette, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(useAppStore.getState().dialogOpen).toBe(0);
+  });
+
+  it("shortcuts opens the shortcuts sheet, and Esc closes it", async () => {
+    render(<App />);
+    const search = await screen.findByRole("searchbox");
+    search.focus();
+    await menu("shortcuts");
+    const sheet = await screen.findByRole("dialog", {
+      name: "Keyboard shortcuts",
+    });
+    expect(screen.getByLabelText("Filter shortcuts")).toHaveFocus();
+    expect(useAppStore.getState().dialogOpen).toBe(1);
+    // A second ⌘/ while it is open does nothing.
+    await menu("shortcuts");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.keyDown(sheet, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(useAppStore.getState().shortcutsOpen).toBe(false);
+    expect(search).toHaveFocus();
   });
 
   it("menu events are ignored while a sheet or dialog is open", async () => {
@@ -1633,19 +1659,27 @@ describe("the window chrome", () => {
       ).not.toHaveClass("is-dim");
     });
 
-    it("gives_each_project_dot_its_status_as_a_title", async () => {
+    it("gives_each_project_dot_its_status_in_words", async () => {
       listBoxes();
       render(<App />);
       const sidebar = await screen.findByRole("navigation", {
         name: "Sidebar",
       });
       const dots = [
-        ...sidebar.querySelectorAll<HTMLElement>(".dot[data-status]"),
+        ...sidebar.querySelectorAll<HTMLElement>(".sdot[data-status]"),
       ];
       expect(dots.length).toBeGreaterThan(0);
       for (const dot of dots) {
-        expect(dot.title).toMatch(
-          /^(Needs input|Done, unseen|Working|Idle|Unknown|Shell)$/,
+        expect(dot).not.toHaveAttribute("title");
+      }
+      // The words stay in the row's text (hidden visually), so a status is never color-only.
+      const words = [
+        ...sidebar.querySelectorAll<HTMLElement>(".nav-item .sr-only"),
+      ];
+      expect(words.length).toBeGreaterThan(0);
+      for (const w of words) {
+        expect(w.textContent).toMatch(
+          /^(Needs input|Done, unseen|Working|Idle|Unknown|Shell): $/,
         );
       }
     });

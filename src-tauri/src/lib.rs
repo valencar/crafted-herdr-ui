@@ -123,6 +123,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(poller.clone());
     app.manage(locator);
     app.manage(PopoverGuard::default());
+    app.manage(notify::VisibleRow::default());
     let shared = SharedSettings::new(settings.clone());
     app.manage(shared.clone());
 
@@ -304,6 +305,7 @@ pub fn run() {
             commands::term_resize,
             commands::term_close,
             commands::show_main_open_row,
+            commands::set_visible_row,
         ])
         .menu(menu::build)
         .on_menu_event(menu::on_event)

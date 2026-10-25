@@ -1,9 +1,11 @@
 import { useEffect, useMemo } from "react";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { AppSidebar } from "./components/AppSidebar";
+import { ClosePaneHost } from "./components/ClosePaneHost";
 import { CommandPalette } from "./components/CommandPalette";
 import { Header } from "./components/Header";
 import { VersionBanner } from "./components/HomeNotices";
+import { ShortcutsSheet } from "./components/ShortcutsSheet";
 import { StoreToast } from "./components/Toast";
 import { toRows } from "./lib/grouping";
 import { onFocusRow, onMenu, onNewSession, onOpenRow } from "./lib/ipc";
@@ -15,6 +17,8 @@ import {
   useTerminals,
 } from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
+import { useTheme } from "./lib/useTheme";
+import { useVisibleRowReport } from "./lib/useVisibleRowReport";
 import { AddWorkbox } from "./screens/AddWorkbox";
 import { AllAgents } from "./screens/AllAgents";
 import { Dashboard } from "./screens/Dashboard";
@@ -37,6 +41,8 @@ function App() {
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
   const paletteOpen = useAppStore((s) => s.paletteOpen);
   const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
+  const shortcutsOpen = useAppStore((s) => s.shortcutsOpen);
+  const setShortcutsOpen = useAppStore((s) => s.setShortcutsOpen);
   const herdrVersion = useAppStore((s) => s.state?.herdr_version ?? null);
   const compact = useAppStore((s) => s.settings?.row_density === "compact");
   const { current: terminal, installed } = useTerminals();
@@ -45,6 +51,8 @@ function App() {
 
   useStateSync();
   useSettingsSync();
+  useTheme();
+  useVisibleRowReport();
 
   // A just-created session is selected and opened once the state lists it, from here so it
   // works on every Home screen and under a terminal tab.
@@ -158,6 +166,10 @@ function App() {
       )}
       {sheet === "add-workbox" && <AddWorkbox />}
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
+      {shortcutsOpen && (
+        <ShortcutsSheet onClose={() => setShortcutsOpen(false)} />
+      )}
+      <ClosePaneHost />
       {activityOpen && (
         <ActivityDrawer
           machines={machines ?? []}

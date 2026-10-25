@@ -5,9 +5,10 @@
 //! state comes from a `watch` channel the poller's emit callback fills, never from the poller,
 //! which holds its core lock while it emits.
 
+use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_notification::{ActionPerformed, NotificationExt};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
@@ -25,6 +26,18 @@ const ROW_KEY_EXTRA: &str = "row_key";
 /// How long to wait for the state to catch up with a transition. The poller broadcasts the
 /// transition just before it publishes the state that shows it.
 const SETTLE: Duration = Duration::from_millis(500);
+
+/// The row the main window is showing in a terminal tab right now (`<machine id>::<pane id>`),
+/// as the UI last reported it with `set_visible_row`; `None` on Home, a full-UI tab or a hidden
+/// page. Whether the window also has focus is read when a notification is about to show.
+#[derive(Default)]
+pub struct VisibleRow(pub Mutex<Option<String>>);
+
+/// Whether a notification for `row_key` is pointless: the user is looking at that pane's tab in
+/// a focused main window.
+pub fn should_skip(main_focused: bool, visible: Option<&str>, row_key: &str) -> bool {
+    main_focused && visible == Some(row_key)
+}
 
 /// What to show. `row_key` is `<machine id>::<pane id>`, the UI's key for the row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,12 +161,14 @@ async fn state_after(
 }
 
 /// Shows a notification for every transition the user wants to hear about, until the
-/// transition channel closes. `state` is the latest `AppState`; `show` delivers one.
+/// transition channel closes. `state` is the latest `AppState`; `skip` says whether the user is
+/// already looking at a row (given its key), which drops the notification; `show` delivers one.
 pub async fn run(
     mut transitions: broadcast::Receiver<Transition>,
     mut state: watch::Receiver<AppState>,
     settings: SharedSettings,
     settle: Duration,
+    skip: impl Fn(&str) -> bool,
     show: impl Fn(NotificationText),
 ) {
     loop {
@@ -168,7 +183,9 @@ pub async fn run(
             continue;
         }
         let latest = state_after(&mut state, &transition, settle).await;
-        if let Some(text) = notification_for(&transition, &latest, &current) {
+        if let Some(text) = notification_for(&transition, &latest, &current)
+            && !skip(&text.row_key)
+        {
             show(text);
         }
     }
@@ -205,11 +222,23 @@ pub fn start<R: Runtime>(
         eprintln!("could not listen for notification clicks: {e}");
     }
     let shower = app.clone();
+    let looker = app.clone();
     tauri::async_runtime::spawn(run(
         poller.subscribe(),
         state,
         settings,
         SETTLE,
+        move |row_key| {
+            let focused = looker
+                .get_webview_window(crate::tray::MAIN_WINDOW)
+                .is_some_and(|w| w.is_focused().unwrap_or(false));
+            let visible = looker.try_state::<VisibleRow>().and_then(|v| {
+                v.0.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
+            });
+            should_skip(focused, visible.as_deref(), row_key)
+        },
         move |text| {
             let shown = shower
                 .notification()
@@ -392,6 +421,7 @@ mod tests {
             state_rx,
             SharedSettings::new(settings),
             Duration::from_millis(400),
+            |_| false,
             move |text| sink.lock().unwrap().push(text),
         ));
         tokio::task::spawn_blocking(move || feed(tx, state_tx))
@@ -425,6 +455,52 @@ mod tests {
         .await;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].title, "planner needs you");
+    }
+
+    #[test]
+    fn skips_only_the_visible_row_while_focused() {
+        assert!(should_skip(true, Some("m::p1"), "m::p1"));
+        assert!(!should_skip(false, Some("m::p1"), "m::p1"));
+        assert!(!should_skip(true, Some("m::p2"), "m::p1"));
+        // Home (or a full-UI tab) is active: nothing is being looked at.
+        assert!(!should_skip(true, None, "m::p1"));
+    }
+
+    #[tokio::test]
+    async fn run_drops_skipped_notifications() {
+        let state = state_with(snapshot(AgentStatus::Blocked));
+        let (tx, rx) = broadcast::channel(8);
+        let (state_tx, state_rx) = watch::channel(state);
+        let out: Arc<Mutex<Vec<NotificationText>>> = Arc::default();
+        let sink = out.clone();
+        let task = tokio::spawn(run(
+            rx,
+            state_rx,
+            SharedSettings::new(Settings::default()),
+            Duration::from_millis(400),
+            |row_key| row_key == "buildbox::w1:p1",
+            move |text| sink.lock().unwrap().push(text),
+        ));
+        tx.send(transition(
+            "w1:p1",
+            "term-1",
+            AgentStatus::Working,
+            AgentStatus::Blocked,
+        ))
+        .unwrap();
+        tx.send(transition(
+            "w1:p2",
+            "term-2",
+            AgentStatus::Working,
+            AgentStatus::Done,
+        ))
+        .unwrap();
+        drop(tx);
+        task.await.unwrap();
+        drop(state_tx);
+        let out = Arc::try_unwrap(out).unwrap().into_inner().unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].row_key, "buildbox::w1:p2");
     }
 
     #[tokio::test]

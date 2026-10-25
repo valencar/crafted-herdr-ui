@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isKeyForMenu } from "./uiHelpers";
+import { focusReplyBox, isKeyForMenu, REPLY_BOX_ID } from "./uiHelpers";
 
 describe("isKeyForMenu", () => {
   let root: HTMLElement;
@@ -50,5 +50,26 @@ describe("isKeyForMenu", () => {
   it("treats a target that is not a node (window, none) as no control's, so the menu keeps it", () => {
     expect(isKeyForMenu(root, key(window))).toBe(true);
     expect(isKeyForMenu(root, key(null))).toBe(true);
+  });
+});
+
+describe("focusReplyBox", () => {
+  afterEach(() => {
+    document.getElementById(REPLY_BOX_ID)?.remove();
+  });
+
+  it("focuses_the_inspectors_reply_box", () => {
+    expect(focusReplyBox()).toBe(false);
+    const input = document.body.appendChild(document.createElement("input"));
+    input.id = REPLY_BOX_ID;
+    expect(focusReplyBox()).toBe(true);
+    expect(input).toHaveFocus();
+  });
+
+  it("does_not_pretend_to_focus_a_disabled_box", () => {
+    const input = document.body.appendChild(document.createElement("input"));
+    input.id = REPLY_BOX_ID;
+    input.disabled = true;
+    expect(focusReplyBox()).toBe(false);
   });
 });

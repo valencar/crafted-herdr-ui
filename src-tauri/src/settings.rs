@@ -64,6 +64,31 @@ pub enum RowDensity {
     Compact,
 }
 
+/// Which color theme the windows use. `System` follows the Mac's appearance; the default is
+/// `Dark`, so nobody's app changes look on upgrade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum Theme {
+    System,
+    #[default]
+    Dark,
+    Light,
+}
+
+/// The font the in-app terminal draws with. All four are bundled with the app; the default is
+/// `Hack`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum TerminalFont {
+    #[default]
+    Hack,
+    IbmPlexMono,
+    GeistMono,
+    JetbrainsMono,
+}
+
 /// The Dashboard column's width in points when it sits beside a terminal.
 pub const SPLIT_WIDTH_RANGE: std::ops::RangeInclusive<u32> = 360..=1200;
 pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=24;
@@ -97,8 +122,25 @@ pub struct Settings {
     /// The width of that column, in points.
     pub dashboard_split_width: u32,
     pub terminal_font_size: u8,
+    /// Which bundled font the terminal uses. An old settings file has none; it loads as Hack.
+    #[serde(default)]
+    pub terminal_font: TerminalFont,
     pub sidebar_collapsed: bool,
     pub row_density: RowDensity,
+    /// An old settings file has no `theme`; it loads as dark.
+    #[serde(default)]
+    pub theme: Theme,
+    /// The Run choice the New session sheet starts on: the agent kind of the last session
+    /// created, or `None` for a plain shell.
+    #[serde(default)]
+    pub new_session_kind: Option<String>,
+    /// Agent kinds the New session sheet leaves out. A hidden list, so a newly installed kind
+    /// shows up on its own.
+    #[serde(default)]
+    pub new_session_hidden_kinds: Vec<String>,
+    /// Whether the New session sheet leaves out Plain shell.
+    #[serde(default)]
+    pub new_session_hide_shell: bool,
 }
 
 impl Default for Settings {
@@ -120,8 +162,13 @@ impl Default for Settings {
             dashboard_split: false,
             dashboard_split_width: 420,
             terminal_font_size: 13,
+            terminal_font: TerminalFont::default(),
             sidebar_collapsed: false,
             row_density: RowDensity::default(),
+            theme: Theme::default(),
+            new_session_kind: None,
+            new_session_hidden_kinds: Vec::new(),
+            new_session_hide_shell: false,
         }
     }
 }
@@ -151,6 +198,12 @@ impl Settings {
             .take()
             .map(|p| p.trim().to_owned())
             .filter(|p| !p.is_empty());
+        let mut seen = std::collections::HashSet::new();
+        self.new_session_hidden_kinds = std::mem::take(&mut self.new_session_hidden_kinds)
+            .into_iter()
+            .map(|k| k.trim().to_owned())
+            .filter(|k| !k.is_empty() && seen.insert(k.clone()))
+            .collect();
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -424,8 +477,13 @@ mod tests {
         assert!(!s.dashboard_split);
         assert_eq!(s.dashboard_split_width, 420);
         assert_eq!(s.terminal_font_size, 13);
+        assert_eq!(s.terminal_font, TerminalFont::Hack);
         assert!(!s.sidebar_collapsed);
         assert_eq!(s.row_density, RowDensity::Comfortable);
+        assert_eq!(s.theme, Theme::Dark);
+        assert_eq!(s.new_session_kind, None);
+        assert!(s.new_session_hidden_kinds.is_empty());
+        assert!(!s.new_session_hide_shell);
         // The keys are exactly the spec's (section 8.8) plus `open_after_create` and the v0.2
         // terminal and layout keys.
         let keys: std::collections::BTreeSet<_> = serde_json::to_value(&s)
@@ -452,8 +510,13 @@ mod tests {
             "dashboard_split",
             "dashboard_split_width",
             "terminal_font_size",
+            "terminal_font",
             "sidebar_collapsed",
             "row_density",
+            "theme",
+            "new_session_kind",
+            "new_session_hidden_kinds",
+            "new_session_hide_shell",
         ]
         .map(String::from)
         .into();
@@ -504,6 +567,165 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(read, expected);
+    }
+
+    #[test]
+    fn theme_defaults_to_dark() {
+        assert_eq!(Theme::default(), Theme::Dark);
+        assert_eq!(Settings::default().theme, Theme::Dark);
+    }
+
+    #[test]
+    fn settings_without_theme_load_as_dark() {
+        // A settings file written before v0.7 has no `theme` key at all.
+        let read = Settings::from_entries([
+            ("row_density".to_owned(), json!("compact")),
+            ("notify_done".to_owned(), json!(false)),
+        ]);
+        assert_eq!(read.theme, Theme::Dark);
+        let mut all = match serde_json::to_value(Settings::default()).unwrap() {
+            Value::Object(all) => all,
+            _ => unreachable!(),
+        };
+        all.remove("theme");
+        let parsed: Settings = serde_json::from_value(Value::Object(all)).unwrap();
+        assert_eq!(parsed.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn settings_without_new_session_kind_load_as_none() {
+        let read = Settings::from_entries([("notify_done".to_owned(), json!(false))]);
+        assert_eq!(read.new_session_kind, None);
+        let mut all = match serde_json::to_value(Settings::default()).unwrap() {
+            Value::Object(all) => all,
+            _ => unreachable!(),
+        };
+        all.remove("new_session_kind");
+        let parsed: Settings = serde_json::from_value(Value::Object(all)).unwrap();
+        assert_eq!(parsed.new_session_kind, None);
+    }
+
+    #[test]
+    fn a_patch_sets_and_clears_the_new_session_kind() {
+        let set = Settings::default()
+            .merged(&json!({"new_session_kind": "claude"}))
+            .unwrap();
+        assert_eq!(set.new_session_kind.as_deref(), Some("claude"));
+        let cleared = set.merged(&json!({"new_session_kind": null})).unwrap();
+        assert_eq!(cleared.new_session_kind, None);
+        let read = Settings::from_entries(set.to_entries());
+        assert_eq!(read.new_session_kind.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn settings_without_the_run_option_keys_load_the_defaults() {
+        let read = Settings::from_entries([("notify_done".to_owned(), json!(false))]);
+        assert!(read.new_session_hidden_kinds.is_empty());
+        assert!(!read.new_session_hide_shell);
+        let mut all = match serde_json::to_value(Settings::default()).unwrap() {
+            Value::Object(all) => all,
+            _ => unreachable!(),
+        };
+        all.remove("new_session_hidden_kinds");
+        all.remove("new_session_hide_shell");
+        let parsed: Settings = serde_json::from_value(Value::Object(all)).unwrap();
+        assert!(parsed.new_session_hidden_kinds.is_empty());
+        assert!(!parsed.new_session_hide_shell);
+    }
+
+    #[test]
+    fn a_patch_sets_the_run_options_and_they_round_trip() {
+        let set = Settings::default()
+            .merged(&json!({
+                "new_session_hidden_kinds": ["codex", "gemini"],
+                "new_session_hide_shell": true
+            }))
+            .unwrap();
+        assert_eq!(set.new_session_hidden_kinds, ["codex", "gemini"]);
+        assert!(set.new_session_hide_shell);
+        assert_eq!(Settings::from_entries(set.to_entries()), set);
+        let cleared = set
+            .merged(&json!({"new_session_hidden_kinds": [], "new_session_hide_shell": false}))
+            .unwrap();
+        assert!(cleared.new_session_hidden_kinds.is_empty());
+        assert!(!cleared.new_session_hide_shell);
+        assert!(
+            Settings::default()
+                .merged(&json!({"new_session_hidden_kinds": "codex"}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn hidden_kinds_drop_blanks_and_duplicates_keeping_order() {
+        let s = Settings::default()
+            .merged(&json!({"new_session_hidden_kinds": [" codex ", "", "  ", "claude", "codex", "claude"]}))
+            .unwrap();
+        assert_eq!(s.new_session_hidden_kinds, ["codex", "claude"]);
+    }
+
+    #[test]
+    fn theme_round_trips_lowercase() {
+        let light: Theme = serde_json::from_value(json!("light")).unwrap();
+        assert_eq!(light, Theme::Light);
+        assert_eq!(serde_json::to_value(light).unwrap(), json!("light"));
+        let s = Settings::default()
+            .merged(&json!({"theme": "system"}))
+            .unwrap();
+        assert_eq!(s.theme, Theme::System);
+        assert!(
+            Settings::default()
+                .merged(&json!({"theme": "blue"}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn terminal_font_defaults_to_hack() {
+        assert_eq!(TerminalFont::default(), TerminalFont::Hack);
+        assert_eq!(Settings::default().terminal_font, TerminalFont::Hack);
+        // A settings file written before this key existed loads as Hack.
+        let read = Settings::from_entries([("notify_done".to_owned(), json!(false))]);
+        assert_eq!(read.terminal_font, TerminalFont::Hack);
+        let mut all = match serde_json::to_value(Settings::default()).unwrap() {
+            Value::Object(all) => all,
+            _ => unreachable!(),
+        };
+        all.remove("terminal_font");
+        let parsed: Settings = serde_json::from_value(Value::Object(all)).unwrap();
+        assert_eq!(parsed.terminal_font, TerminalFont::Hack);
+    }
+
+    #[test]
+    fn terminal_font_round_trips_snake_case() {
+        for (font, name) in [
+            (TerminalFont::Hack, "hack"),
+            (TerminalFont::IbmPlexMono, "ibm_plex_mono"),
+            (TerminalFont::GeistMono, "geist_mono"),
+            (TerminalFont::JetbrainsMono, "jetbrains_mono"),
+        ] {
+            assert_eq!(serde_json::to_value(font).unwrap(), json!(name));
+            let set = Settings::default()
+                .merged(&json!({"terminal_font": name}))
+                .unwrap();
+            assert_eq!(set.terminal_font, font);
+            assert_eq!(Settings::from_entries(set.to_entries()), set);
+        }
+        assert!(
+            Settings::default()
+                .merged(&json!({"terminal_font": "comic_sans"}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn an_unknown_stored_terminal_font_loads_as_the_default() {
+        let read = Settings::from_entries([
+            ("terminal_font".to_owned(), json!("comic_sans")),
+            ("notify_done".to_owned(), json!(false)),
+        ]);
+        assert_eq!(read.terminal_font, TerminalFont::Hack);
+        assert!(!read.notify_done);
     }
 
     #[test]
