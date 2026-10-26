@@ -18,7 +18,7 @@ type FakeTerm = {
   write: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
-  keyHandler: ((e: { metaKey: boolean }) => boolean) | null;
+  keyHandler: ((e: Partial<KeyboardEvent>) => boolean) | null;
   dataHandler: ((d: string) => void) | null;
   /** The fake selection ("" for none). Setting it fires nothing; see `open` in the fake. */
   selection: string;
@@ -1342,8 +1342,83 @@ describe("TerminalView", () => {
   it("lets_command_shortcuts_through_to_the_menu", async () => {
     render(<Harness />);
     await flush();
-    expect(term().keyHandler?.({ metaKey: true })).toBe(false);
-    expect(term().keyHandler?.({ metaKey: false })).toBe(true);
+    const event = { type: "keydown", key: "k", preventDefault: vi.fn() };
+    expect(term().keyHandler?.({ ...event, metaKey: true })).toBe(false);
+    expect(term().keyHandler?.({ ...event, metaKey: false })).toBe(true);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  describe("⌘C", () => {
+    /** A key event as xterm hands it to the custom handler. */
+    const key = (init: Partial<KeyboardEvent>) => {
+      const preventDefault = vi.fn();
+      const event = {
+        type: "keydown",
+        key: "c",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        preventDefault,
+        ...init,
+      };
+      return { event, preventDefault };
+    };
+    const settle = () =>
+      act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      });
+
+    it("copies_the_selection_and_toasts_Copied", async () => {
+      render(<Harness />);
+      await flush();
+      term().selection = "cargo build";
+      const { event, preventDefault } = key({});
+      expect(term().keyHandler?.(event)).toBe(false);
+      await settle();
+      expect(copy).toHaveBeenCalledTimes(1);
+      expect(copy).toHaveBeenCalledWith("cargo build");
+      expect(useAppStore.getState().toast).toBe("Copied");
+      // Handled here, so the (disabled) menu item never also sees it.
+      expect(preventDefault).toHaveBeenCalled();
+    });
+
+    it("copies_once_per_press_not_again_on_key_up", async () => {
+      render(<Harness />);
+      await flush();
+      term().selection = "cargo build";
+      term().keyHandler?.(key({}).event);
+      term().keyHandler?.(key({ type: "keyup" }).event);
+      await settle();
+      expect(copy).toHaveBeenCalledTimes(1);
+    });
+
+    it("does_nothing_without_a_selection", async () => {
+      render(<Harness />);
+      await flush();
+      const { event, preventDefault } = key({});
+      expect(term().keyHandler?.(event)).toBe(false);
+      await settle();
+      expect(copy).not.toHaveBeenCalled();
+      expect(preventDefault).not.toHaveBeenCalled();
+    });
+
+    it("leaves_other_command_c_chords_to_the_menu", async () => {
+      render(<Harness />);
+      await flush();
+      term().selection = "cargo build";
+      for (const init of [
+        { shiftKey: true },
+        { altKey: true },
+        { ctrlKey: true },
+      ]) {
+        const { event, preventDefault } = key(init);
+        expect(term().keyHandler?.(event)).toBe(false);
+        expect(preventDefault).not.toHaveBeenCalled();
+      }
+      await settle();
+      expect(copy).not.toHaveBeenCalled();
+    });
   });
 
   it("still_works_when_webgl_is_unavailable", async () => {
