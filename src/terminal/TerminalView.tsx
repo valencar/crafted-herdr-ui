@@ -114,8 +114,19 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     // OSC 52: a program (herdr copying its own selection) can write the Mac clipboard, never read
     // it, and a query is never answered.
     registerOscClipboard(term, () => activeRef.current);
-    // ⌘ shortcuts belong to the menu, not to the program in the terminal.
-    term.attachCustomKeyEventHandler((e) => !e.metaKey);
+    // ⌘ shortcuts belong to the menu, not to the program in the terminal. Except ⌘C with a
+    // selection: xterm's selection is drawn, not a DOM range, so WebKit keeps Edit > Copy
+    // disabled and the key would do nothing. Copied here, and kept from the menu.
+    term.attachCustomKeyEventHandler((e) => {
+      if (!e.metaKey) return true;
+      const plainC =
+        e.key.toLowerCase() === "c" && !e.shiftKey && !e.altKey && !e.ctrlKey;
+      if (e.type === "keydown" && plainC && term.hasSelection()) {
+        e.preventDefault();
+        void copyFromTerminal(term.getSelection());
+      }
+      return false;
+    });
     // Copy on select, like herdr does: a drag (or a double or triple click) that changed xterm's
     // selection copies it when the button is released. xterm 6.0.0 fires `onSelectionChange` for
     // a mouse selection in one place only, its own document `mouseup` listener, which it adds at
