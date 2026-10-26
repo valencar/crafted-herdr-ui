@@ -233,6 +233,8 @@ beforeEach(() => {
   let next = 7;
   open.mockReset().mockImplementation(async (_target, _c, _r, onEvent) => {
     emitters.push(onEvent);
+    // A working attach draws at once.
+    onEvent({ kind: "data", data: "herdr" });
     return next++;
   });
   useAppStore.setState({ toast: null });
@@ -675,6 +677,77 @@ describe("TerminalView", () => {
     expect(term().write).toHaveBeenCalledWith("again");
   });
 
+  describe("a session that has not printed yet", () => {
+    // ssh still connecting: the session runs, nothing has come back.
+    beforeEach(() => {
+      let next = 7;
+      open.mockImplementation(async (_target, _c, _r, onEvent) => {
+        emitters.push(onEvent);
+        return next++;
+      });
+    });
+
+    it("is_opening_until_its_first_output_then_live", async () => {
+      render(<Harness />);
+      await flush();
+      // ssh may still be connecting: the session exists, but nothing has come back.
+      expect(tabState()).toMatchObject({ state: "opening", termId: 7 });
+      emit({ kind: "data", data: "herdr" });
+      expect(tabState()).toMatchObject({ state: "live", termId: 7 });
+    });
+
+    it("takes_keystrokes_already", async () => {
+      render(<Harness />);
+      await flush();
+      act(() => term().dataHandler?.("yes\r"));
+      await flush();
+      expect(invoke).toHaveBeenCalledWith("term_write", {
+        id: 7,
+        data: "yes\r",
+      });
+    });
+
+    it("counts_output_that_arrives_before_the_open_returns", async () => {
+      open.mockReset().mockImplementation(async (_t, _c, _r, onEvent) => {
+        emitters.push(onEvent);
+        onEvent({ kind: "data", data: "herdr" });
+        return 7;
+      });
+      render(<Harness />);
+      await flush();
+      expect(tabState()).toMatchObject({ state: "live", termId: 7 });
+    });
+
+    it("keeps_the_Reattaching_bar_with_Close_tab_while_a_reattach_connects", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "data", data: "herdr" });
+      emit({ kind: "exit", code: 255 });
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      // The network is still down: ssh runs, but the tab is not left blank.
+      expect(screen.getByText("Reattaching…")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Reattach" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Close tab" })).toBeEnabled();
+      emit({ kind: "data", data: "herdr" });
+      expect(screen.queryByText("Reattaching…")).toBeNull();
+      expect(tabState().state).toBe("live");
+    });
+
+    it("Close_tab_while_a_reattach_connects_ends_that_session", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 255 });
+      await user.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      await user.click(screen.getByRole("button", { name: "Close tab" }));
+      expect(useTerminalStore.getState().tabs).toEqual([]);
+      expect(invoke).toHaveBeenCalledWith("term_close", { id: 8 });
+    });
+  });
+
   it("Close_tab_on_the_detached_overlay_removes_the_tab", async () => {
     const user = userEvent.setup();
     render(<Harness />);
@@ -692,6 +765,7 @@ describe("TerminalView", () => {
     });
     open.mockImplementation(async (_t, _c, _r, onEvent) => {
       emitters.push(onEvent);
+      onEvent({ kind: "data", data: "herdr" });
       return 21;
     });
     render(<Harness />);
@@ -1054,8 +1128,9 @@ describe("TerminalView", () => {
       emit({ kind: "exit", code: 1 });
       let finish: (id: number) => void = () => {};
       open.mockImplementationOnce(
-        () =>
+        (_target, _c, _r, onEvent) =>
           new Promise<number>((resolve) => {
+            emitters.push(onEvent);
             finish = resolve;
           }),
       );
@@ -1066,7 +1141,11 @@ describe("TerminalView", () => {
       }
       // A hung open always has a way out.
       expect(screen.getByRole("button", { name: "Close tab" })).toBeEnabled();
+      // Started, but nothing back yet (ssh still connecting): still reattaching.
       await act(async () => finish(60));
+      expect(screen.getByText("Reattaching…")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close tab" })).toBeEnabled();
+      emit({ kind: "data", data: "herdr" });
       expect(screen.queryByText("Reattaching…")).toBeNull();
     });
 
