@@ -45,6 +45,12 @@ describe("app.css", () => {
     expect(z(".toast")).toBeGreaterThan(z(".scrim"));
   });
 
+  it("keeps_xterms_layers_under_the_session_ended_bar", () => {
+    // xterm's WebGL link layer carries an inline `z-index: 2` and spans every row, the bar's
+    // too; without a stacking context of its own the host lets it take the bar's clicks.
+    expect(rule(".term-host")).toMatch(/isolation:\s*isolate/);
+  });
+
   it("keeps_the_command_palette_on_the_scrim_above_the_panel_and_below_the_drawer", () => {
     // The palette renders inside `.scrim`; its own modifier must not lower the stacking.
     expect(rule(".palette-scrim")).not.toMatch(/z-index/);

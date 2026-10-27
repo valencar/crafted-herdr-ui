@@ -1943,9 +1943,12 @@ select.field {
 .term-view[hidden] {
   display: none;
 }
+/* Its own stacking context keeps xterm's z-indexed layers (the WebGL link layer is z-index 2 and
+   spans every row) inside the host, so the bar docked over the last rows gets the clicks. */
 .term-host {
   position: absolute;
   inset: 0;
+  isolation: isolate;
 }
 /* The padding sits on xterm's own element so the fit addon subtracts it. */
 .term-host .xterm {

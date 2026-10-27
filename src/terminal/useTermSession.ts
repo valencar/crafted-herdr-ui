@@ -66,11 +66,20 @@ export function useTermSession(
     });
     sentSize.current = { cols: term.cols, rows: term.rows };
     let exited = false;
+    // A session is live once it has printed: ssh can sit connecting to a box that is down for a
+    // minute or more, and until then the tab stays "opening" (a reattach keeps its bar).
+    let printed = false;
     try {
       const id = await openTerm(target, term.cols, term.rows, (e) => {
         if (mine !== generation.current) return;
         if (e.kind === "data") {
           term.write(e.data);
+          if (!printed) {
+            printed = true;
+            // Before the open returns there is no id yet; the open goes live itself then.
+            if (idRef.current !== null)
+              useTerminalStore.getState().updateTab(tabKey, { state: "live" });
+          }
           return;
         }
         exited = true;
@@ -95,9 +104,13 @@ export function useTermSession(
       if (exited) return;
       idRef.current = id;
       writer.current = { id, busy: false, pending: "" };
+      // Keystrokes go through from here (an ssh prompt is output, so it is live by then anyway).
       useTerminalStore
         .getState()
-        .updateTab(tabKey, { state: "live", termId: id });
+        .updateTab(
+          tabKey,
+          printed ? { state: "live", termId: id } : { termId: id },
+        );
       // The terminal may have been resized while the session was starting.
       resize(term.cols, term.rows);
     } catch (e) {
