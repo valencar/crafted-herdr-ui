@@ -328,6 +328,27 @@ describe("sidebar hint slot", () => {
     expect(ruleWith(".nav-slot-rest")).toContain("transition: opacity");
     expect(ruleWith(".nav-slot-rest")).toContain("var(--dur-fast)");
   });
+
+  it("sidebar_selection_uses_the_workbox_tint", () => {
+    for (const selector of [
+      '.nav-box .nav-item[aria-current="page"]',
+      '.nav-box .nav-term[aria-current="page"]',
+      '.rail-item[aria-current="page"]',
+      '.rail-item[data-on="true"]',
+    ]) {
+      expect(rule(selector), selector).toMatch(/background:\s*var\(--wb-fill/);
+    }
+    const stripe = rule(".nav-box .nav-term::before");
+    expect(stripe).toMatch(/width:\s*2px/);
+    expect(stripe).toContain("var(--wb)");
+  });
+
+  it("workbox_tile_is_a_solid_workbox_square", () => {
+    const tile = rule(".wb-tile");
+    expect(tile).toContain("background: var(--wb)");
+    expect(tile).toContain("color: var(--on-wb)");
+    expect(rule('.wb-tile[data-size="sm"]')).toMatch(/width:\s*16px/);
+  });
 });
 
 describe("home screens", () => {

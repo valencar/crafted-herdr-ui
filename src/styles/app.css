@@ -573,6 +573,7 @@ kbd {
   gap: 2px;
 }
 .nav-term {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -596,6 +597,27 @@ kbd {
 .nav-term[aria-current="page"] {
   background: var(--selected);
   color: var(--text);
+}
+/* The workbox's color as a rail down the left of its nested terminals. */
+.nav-box .nav-term::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--wb);
+  opacity: 0.45;
+}
+.nav-box .nav-term[aria-current="page"]::before {
+  opacity: 1;
+}
+.nav-box .nav-item[aria-current="page"] {
+  background: var(--wb-fill);
+}
+.nav-box .nav-term[aria-current="page"] {
+  background: var(--wb-fill);
 }
 .nav-term .mono {
   flex: 1;
@@ -2934,11 +2956,57 @@ select.field {
 .rail-item[aria-current="page"] {
   background: var(--selected);
 }
+/* The Dashboard's rail item has no workbox color, so it keeps the neutral selection. */
+.rail-item[aria-current="page"] {
+  background: var(--wb-fill, var(--selected));
+}
+.rail-item[data-on="true"] {
+  background: var(--wb-fill, var(--selected));
+}
 .rail-item.is-dim {
   opacity: 0.5;
 }
 .rail-needs {
   margin-bottom: 8px;
+}
+/* A workbox's tile: its letter on its solid color; the health dot sits on a corner. */
+.wb-tile {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--wb);
+  color: var(--on-wb);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  line-height: 1;
+}
+.wb-tile[data-size="sm"] {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: var(--fs-hint);
+}
+.wb-tile-health {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: flex;
+  padding: 1.5px;
+  border-radius: 50%;
+  background: var(--bg-sidebar);
+}
+.density-compact .wb-tile {
+  width: 18px;
+  height: 18px;
+}
+.density-compact .wb-tile[data-size="sm"] {
+  width: 14px;
+  height: 14px;
 }
 .rail-icon {
   font-family: var(--font-mono);
