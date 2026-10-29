@@ -190,6 +190,26 @@ describe("WorkboxColorMenu", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it("the_rows_tooltip_stands_down_while_its_menu_is_open", () => {
+    vi.useFakeTimers();
+    try {
+      renderSidebar();
+      const row = screen.getByRole("button", { name: /^buildbox/ });
+      fireEvent.pointerEnter(row);
+      fireEvent.pointerDown(row);
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+      // The pointer goes onto the menu and back over the row.
+      fireEvent.pointerLeave(row);
+      fireEvent.pointerEnter(row);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(document.querySelector(".tooltip")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a_press_outside_closes_it", async () => {
     const user = userEvent.setup();
     renderSidebar();

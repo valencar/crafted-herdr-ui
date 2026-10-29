@@ -86,7 +86,8 @@ type Open = { machineId: string; label: string; at: Point; from: HTMLElement };
 
 /**
  * The state behind a right-click Color menu. `onContextMenu(machineId, label)` gives a row its
- * handler (it stops the system menu); render `menu` once beside the rows.
+ * handler (it stops the system menu); render `menu` once beside the rows. `openId` is for a
+ * row's `Tooltip` `disabled` flag.
  */
 export function useWorkboxColorMenu(): {
   onContextMenu: (
@@ -94,6 +95,8 @@ export function useWorkboxColorMenu(): {
     label: string,
   ) => (e: MouseEvent<HTMLElement>) => void;
   menu: ReactNode;
+  /** The workbox whose menu is open, so its row's tooltip can stand down. */
+  openId: string | null;
 } {
   const [open, setOpen] = useState<Open | null>(null);
   const onContextMenu = useCallback(
@@ -118,5 +121,5 @@ export function useWorkboxColorMenu(): {
       onClose={() => setOpen(null)}
     />
   );
-  return { onContextMenu, menu };
+  return { onContextMenu, menu, openId: open?.machineId ?? null };
 }

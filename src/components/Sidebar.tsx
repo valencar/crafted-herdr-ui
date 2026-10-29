@@ -315,7 +315,10 @@ export function Sidebar({
       </div>
       {machines.map((m) => (
         <WorkboxBox key={m.id} machineId={m.id}>
-          <Tooltip label={`${m.label}: ${HEALTH_LABEL[m.health.kind]}`}>
+          <Tooltip
+            label={`${m.label}: ${HEALTH_LABEL[m.health.kind]}`}
+            disabled={colorMenu.openId === m.id}
+          >
             <button
               type="button"
               className={`nav-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
