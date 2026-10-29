@@ -263,3 +263,54 @@ describe("serialized color writes", () => {
     });
   });
 });
+
+describe("useAutoPickColors after a failed save", () => {
+  const push = (...ids: string[]) =>
+    act(async () => useAppStore.setState({ state: stateWith(...ids) }));
+
+  it("a_later_push_retries_after_a_failed_save", async () => {
+    holdSaves();
+    useAppStore.setState({
+      state: stateWith("local", "buildbox"),
+      settings: settingsWith({}),
+    });
+    render(<Probe />);
+    expect(held).toHaveLength(1);
+    await settle(0, "reject");
+    expect(held).toHaveLength(1);
+    await push("local", "buildbox");
+    expect(held).toHaveLength(2);
+    expect(sentColors(1)).toEqual({ local: "violet", buildbox: "pink" });
+    await settle(1);
+    expect(storedColors()).toEqual({ local: "violet", buildbox: "pink" });
+    // Saved: further pushes send nothing.
+    await push("local", "buildbox");
+    expect(held).toHaveLength(2);
+  });
+
+  it("a_save_that_keeps_failing_is_not_retried_on_every_push", async () => {
+    const showToast = vi.fn();
+    useAppStore.setState({
+      state: stateWith("local", "buildbox"),
+      settings: settingsWith({}),
+      showToast,
+    });
+    invoke.mockImplementation(() =>
+      Promise.reject({ kind: "invalid", message: "disk full" }),
+    );
+    await act(async () => {
+      render(<Probe />);
+    });
+    for (let i = 0; i < 5; i++) await push("local", "buildbox");
+    // The first try and one retry; then it waits for something to change.
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(showToast).toHaveBeenCalledTimes(2);
+    // A change (here a new workbox) tries again, and so does a new saved map.
+    await push("local", "buildbox", "gpubox");
+    expect(invoke).toHaveBeenCalledTimes(3);
+    await act(async () =>
+      useAppStore.setState({ settings: settingsWith({ local: "violet" }) }),
+    );
+    expect(invoke).toHaveBeenCalledTimes(4);
+  });
+});

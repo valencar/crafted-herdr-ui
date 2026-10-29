@@ -56,26 +56,44 @@ function writeColors(
   });
 }
 
+/** How many times one unchanged map is tried before the hook waits for a change. */
+const AUTO_PICK_TRIES = 2;
+
 /**
  * Saves the auto-picked colors, so a workbox keeps its color from then on. Mounted once, by the
  * main window. It waits for the settings, and does not send a map again while the same one is
  * still on its way.
+ *
+ * A failed save clears that marker, so the next push (or change of the saved map) tries again; a
+ * write that was only slow to come good still lands. A map that has failed `AUTO_PICK_TRIES` times
+ * in a row, with the saved colors still the same, is left alone until the map or the saved colors
+ * change, so a write that keeps failing does not toast on every state push.
  */
 export function useAutoPickColors(): void {
   const resolved = useResolvedColors();
   const saved = useAppStore((s) => s.settings?.workbox_colors);
   const sent = useRef<ColorMap | null>(null);
+  const tries = useRef<{ map: ColorMap; saved: unknown; n: number } | null>(
+    null,
+  );
 
   useEffect(() => {
     if (resolved === null || saved === undefined) return;
     if (sameMap(resolved, saved)) {
       sent.current = null;
+      tries.current = null;
       return;
     }
     if (sent.current && sameMap(sent.current, resolved)) return;
+    const last = tries.current;
+    const again = last && last.saved === saved && sameMap(last.map, resolved);
+    if (again && last.n >= AUTO_PICK_TRIES) return;
     sent.current = resolved;
+    tries.current = { map: resolved, saved, n: again ? last.n + 1 : 1 };
     // Only fills in the missing ones, so a pick that landed in the meantime stays.
-    void writeColors((current) => current);
+    void writeColors((current) => current).then((result) => {
+      if (result === "failed" && sent.current === resolved) sent.current = null;
+    });
   }, [resolved, saved]);
 }
 
