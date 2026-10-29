@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
+import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { CommandPalette } from "../components/CommandPalette";
 import { useAppStore } from "../store/appStore";
@@ -109,6 +110,22 @@ describe("TabStrip", () => {
         { name: /^buildbox,/ },
       ),
     ).toHaveAttribute("aria-current", "true");
+  });
+
+  it("session_row_carries_the_active_workbox_color", () => {
+    useAppStore.setState({
+      settings: {
+        workbox_colors: { buildbox: "cyan", gpubox: "pink" },
+      } as unknown as Settings,
+    });
+    open("buildbox", "w1:p1", "planner");
+    open("gpubox", "w1:p1", "tester");
+    act(() => useTerminalStore.getState().activate("buildbox::w1:p1"));
+    render(<TabStrip />);
+    const row = () => screen.getByRole("navigation", { name: "Tabs" });
+    expect(row()).toHaveAttribute("data-wb-color", "cyan");
+    act(() => useTerminalStore.getState().activate("gpubox::w1:p1"));
+    expect(row()).toHaveAttribute("data-wb-color", "pink");
   });
 
   it("clicking_another_workbox_swaps_the_session_row", async () => {

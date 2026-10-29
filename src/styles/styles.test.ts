@@ -137,14 +137,27 @@ describe("app.css", () => {
     // The variable a rule paints its background with.
     const background = (selector: string) =>
       /background:\s*(var\(--[a-z0-9-]+\))\s*;/.exec(rule(selector))?.[1];
-    expect(background('.wb-tab[data-active="true"]')).toBeDefined();
-    expect(background('.wb-tab[data-active="true"]')).toBe(
-      background(".session-row"),
-    );
+    // The active workbox tab and the session row both take the workbox's tint.
+    expect(background('.wb-tab[data-active="true"]')).toBe("var(--wb-fill)");
+    expect(background(".session-row")).toBe("var(--wb-fill)");
     expect(background('.session-tab[data-active="true"]')).toBeDefined();
     expect(background('.session-tab[data-active="true"]')).toBe(
       background(".context-bar"),
     );
+  });
+
+  it("active_session_tab_has_the_workbox_accent_line", () => {
+    expect(rule('.session-tab[data-active="true"]')).toMatch(
+      /box-shadow:\s*inset 0 2px 0 var\(--wb\)/,
+    );
+  });
+
+  it("inverted_corners_follow_the_fill", () => {
+    for (const pseudo of ["before", "after"]) {
+      expect(rule(`.wb-tab[data-active="true"]::${pseudo}`)).toContain(
+        "var(--wb-fill) 10.5px",
+      );
+    }
   });
 
   it("a_needs_input_session_tab_still_shows_a_hover_fill", () => {
