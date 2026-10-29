@@ -44,7 +44,20 @@ describe("assignColors", () => {
   it("wraps_to_least_used_after_eight", () => {
     const saved: Record<string, WorkboxColor> = { extra: "violet" };
     WORKBOX_COLORS.forEach((c, i) => (saved[`box${i}`] = c));
-    expect(assignColors(["staging"], saved).staging).toBe("pink");
+    const listed = [...Object.keys(saved), "staging"];
+    expect(assignColors(listed, saved).staging).toBe("pink");
+  });
+
+  it("stale_entries_do_not_use_up_colors", () => {
+    // Eight stale entries use seven colors (violet twice); only purple is free by count.
+    const saved: Record<string, WorkboxColor> = {};
+    [...WORKBOX_COLORS.slice(0, 7), "violet" as const].forEach(
+      (c, i) => (saved[`gone${i}`] = c),
+    );
+    const result = assignColors(["staging"], saved);
+    expect(result.staging).toBe("violet");
+    // Still kept: a workbox that comes back gets its old color.
+    expect(result).toMatchObject(saved);
   });
 
   it("ignores_a_missing_entry_in_a_saved_map", () => {

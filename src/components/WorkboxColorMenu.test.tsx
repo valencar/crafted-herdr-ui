@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
+import { SessionRow } from "../terminal/SessionRow";
 import { WorkboxRow } from "../terminal/WorkboxRow";
 import { groupTabs } from "../terminal/tabOrder";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
@@ -168,11 +169,47 @@ describe("WorkboxColorMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("context_menu_on_the_home_tab_is_untouched", () => {
+    openTab("buildbox", "w1:p1", "planner");
+    renderTabRow();
+    const notPrevented = fireEvent.contextMenu(
+      screen.getByRole("button", { name: "Home" }),
+    );
+    expect(notPrevented).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   it("context_menu_on_a_session_tab_is_untouched", () => {
     // Session tabs live in SessionRow; only the workbox row's tabs offer colors.
     openTab("buildbox", "w1:p1", "planner");
-    renderTabRow();
-    fireEvent.contextMenu(screen.getByRole("button", { name: "Home" }));
+    const groups = groupTabs(useTerminalStore.getState().tabs, machines);
+    render(<SessionRow group={groups[0]} groups={groups} rows={new Map()} />);
+    const tab = document.querySelector<HTMLElement>(".session-tab-main");
+    expect(tab).not.toBeNull();
+    const notPrevented = fireEvent.contextMenu(tab!, { clientX: 5, clientY: 5 });
+    expect(notPrevented).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("collapsing_the_sidebar_leaves_no_menu_to_come_back", () => {
+    renderSidebar();
+    fireEvent.contextMenu(screen.getByRole("button", { name: /^buildbox/ }), {
+      clientX: 10,
+      clientY: 10,
+    });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    const setCollapsed = (sidebar_collapsed: boolean) =>
+      act(() =>
+        useAppStore.setState({
+          settings: {
+            sidebar_collapsed,
+            workbox_colors: { buildbox: "lime", gpubox: "pink" },
+          } as unknown as Settings,
+        }),
+      );
+    setCollapsed(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+    setCollapsed(false);
     expect(screen.queryByRole("menu")).toBeNull();
   });
 

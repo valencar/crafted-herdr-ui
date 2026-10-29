@@ -304,7 +304,7 @@ UI polish: motion, status shapes, the ⋯ menu, palette actions, the ⌘/ sheet,
 
 Workbox colors and agent logos. Use generic data (buildbox, gpubox, staging; api-service, web-app, infra).
 
-- [ ] All 8 colors (violet, pink, lime, cyan, yellow, magenta, leaf, purple) in Dark, Light and System: set each on a workbox from the picker and switch the theme live, in the main window and the menu bar popover.
+- [ ] All 8 colors (violet, pink, lime, cyan, yellow, magenta, leaf, purple) in Dark, Light and System: set each on a workbox from the picker and switch the theme live in the main window.
 - [ ] The tile letter and the tinted text are readable on every color, in both themes.
 - [ ] The collapsed rail (⌘B) marks the active tab's workbox.
 - [ ] Switching workboxes retints both tab rows with no flicker after the settings load, and a workbox never switches from one color to another; a brief neutral frame at startup is fine.
@@ -318,5 +318,7 @@ Workbox colors and agent logos. Use generic data (buildbox, gpubox, staging; api
 - [ ] The 2 px rail beside a workbox's nested tabs lines up under the tile.
 - [ ] The health-dot ring on a hovered workbox tab: there may be a faint halo; judge whether it is acceptable.
 - [ ] An active tab that needs input shows the orange edge, not the workbox line. This is intended.
+- [ ] Yellow next to the orange needs-you badge and edge: a yellow workbox must not read as orange (check a yellow tile beside a blocked agent's badge, in both themes).
+- [ ] The health-dot ring on the selected (tinted) sidebar workbox row: the ring takes the row's tint and shows no mismatched halo.
 - [ ] The agent badge (logo) in the New session and Settings options, and in agent rows, the Inspector and the context bar: rows keep their height and the chip is not split when it wraps.
 - [ ] Codex still shows "CX". This is intended: there is no licensed mark.

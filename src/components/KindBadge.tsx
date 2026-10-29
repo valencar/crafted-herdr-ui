@@ -9,9 +9,15 @@ const MONOGRAM: Record<string, string> = {
   cursor: "CU",
 };
 
+/** Whether `key` is the object's own, so "constructor" and the like never read an inherited one. */
+const own = (obj: object, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(obj, key);
+
 function monogram(kind: string | null): string {
   if (kind === null) return "$_";
-  return MONOGRAM[kind] ?? kind.slice(0, 2).toUpperCase();
+  return own(MONOGRAM, kind)
+    ? MONOGRAM[kind]
+    : kind.slice(0, 2).toUpperCase();
 }
 
 /**
@@ -25,7 +31,11 @@ export function KindBadge({
   kind: string | null;
   named?: boolean;
 }) {
-  const logo = kind === null ? undefined : AGENT_LOGOS[kind];
+  // Own keys only: a kind named "constructor" must not find Object's method.
+  const logo =
+    kind !== null && own(AGENT_LOGOS, kind)
+      ? AGENT_LOGOS[kind]
+      : undefined;
   return (
     <Tooltip label={kind ?? "shell"}>
       <span className="kind">

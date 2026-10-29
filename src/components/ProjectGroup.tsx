@@ -1,11 +1,14 @@
 import { useId, type ReactNode } from "react";
 import { shortPath } from "../lib/format";
 import type { Group } from "../lib/grouping";
+import { WorkboxTile } from "./WorkboxTile";
 
 type Props = {
   group: Group;
   /** Show "+ Session" (project view only). */
   showSession: boolean;
+  /** Show the group's workbox tile before its name (the group-by-workbox view). */
+  showTile?: boolean;
   onNewSession: () => void;
   children: ReactNode;
 };
@@ -14,6 +17,7 @@ type Props = {
 export function ProjectGroup({
   group,
   showSession,
+  showTile = false,
   onNewSession,
   children,
 }: Props) {
@@ -27,6 +31,13 @@ export function ProjectGroup({
       aria-labelledby={headingId}
     >
       <div className="group-head">
+        {showTile && (
+          <WorkboxTile
+            machineId={group.machineId}
+            label={group.name}
+            size="sm"
+          />
+        )}
         <h3 id={headingId} className="group-name">
           {group.name}
         </h3>

@@ -19,9 +19,9 @@ export type SavedColors = Partial<Record<string, WorkboxColor>>;
 
 /**
  * `saved` plus one new entry per id without one. The local machine is assigned first, then the
- * rest in the given order. A new id gets the first palette color no entry uses; once all are
- * used, the least-used one (ties go to palette order). Entries for ids that are not listed are
- * kept, so removing a workbox never recolors another.
+ * rest in the given order. A new id gets the first palette color no listed id uses; once all are
+ * used, the least-used one (ties go to palette order). Only listed ids count as using a color.
+ * Entries for ids that are not listed are kept, so removing a workbox never recolors another.
  */
 export function assignColors(
   machineIds: string[],
@@ -29,10 +29,12 @@ export function assignColors(
 ): Record<string, WorkboxColor> {
   const result: Record<string, WorkboxColor> = {};
   const uses = new Map<WorkboxColor, number>(WORKBOX_COLORS.map((c) => [c, 0]));
+  const listed = new Set(machineIds);
   for (const [id, color] of Object.entries(saved)) {
     if (color === undefined) continue;
     result[id] = color;
-    uses.set(color, (uses.get(color) ?? 0) + 1);
+    // An entry for a workbox that is gone is kept but does not use up its color.
+    if (listed.has(id)) uses.set(color, (uses.get(color) ?? 0) + 1);
   }
   const ordered = machineIds.includes("local")
     ? ["local", ...machineIds.filter((id) => id !== "local")]

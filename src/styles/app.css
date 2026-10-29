@@ -3003,9 +3003,6 @@ select.field {
 .rail-item:hover {
   background: var(--nav-hover);
 }
-.rail-item[aria-current="page"] {
-  background: var(--selected);
-}
 /* The Dashboard's rail item has no workbox color, so it keeps the neutral selection. */
 .rail-item[aria-current="page"] {
   background: var(--wb-fill, var(--selected));

@@ -95,6 +95,8 @@ export function useWorkboxColorMenu(): {
     label: string,
   ) => (e: MouseEvent<HTMLElement>) => void;
   menu: ReactNode;
+  /** Closes the menu if one is open. */
+  close: () => void;
   /** The workbox whose menu is open, so its row's tooltip can stand down. */
   openId: string | null;
 } {
@@ -111,6 +113,7 @@ export function useWorkboxColorMenu(): {
     },
     [],
   );
+  const close = useCallback(() => setOpen(null), []);
   const menu = open && (
     <WorkboxColorMenu
       key={`${open.machineId}:${open.at.x}:${open.at.y}`}
@@ -118,8 +121,8 @@ export function useWorkboxColorMenu(): {
       label={open.label}
       at={open.at}
       returnTo={open.from}
-      onClose={() => setOpen(null)}
+      onClose={close}
     />
   );
-  return { onContextMenu, menu, openId: open?.machineId ?? null };
+  return { onContextMenu, menu, close, openId: open?.machineId ?? null };
 }

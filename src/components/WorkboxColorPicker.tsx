@@ -76,7 +76,14 @@ export function WorkboxColorPicker({
   const toggle = () => {
     if (!open) {
       const r = buttonRef.current?.getBoundingClientRect();
-      if (r) setPlace({ ...PINNED, left: r.left, top: r.bottom + 4 });
+      // Right-aligned under the button: it sits at the right of the Workbox screen's title.
+      if (r) {
+        setPlace({
+          ...PINNED,
+          right: window.innerWidth - r.right,
+          top: r.bottom + 4,
+        });
+      }
     }
     setOpen(!open);
   };

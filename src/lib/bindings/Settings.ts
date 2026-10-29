@@ -62,6 +62,6 @@ new_session_hidden_kinds: Array<string>,
 new_session_hide_shell: boolean, 
 /**
  * The color picked for each workbox, keyed by machine profile id. A workbox with no entry
- * has no color.
+ * is given one automatically.
  */
 workbox_colors: { [key in string]: WorkboxColor }, };

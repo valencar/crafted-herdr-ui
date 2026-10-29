@@ -90,6 +90,39 @@ describe("WorkboxColorPicker", () => {
     expect(checked.map((i) => i.getAttribute("aria-label"))).toEqual(["Lime"]);
   });
 
+  it("opens_right_aligned_under_the_button", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, "innerWidth", {
+      value: 800,
+      configurable: true,
+    });
+    const realRect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const isButton = this.classList.contains("wb-color-btn");
+      return {
+        left: isButton ? 700 : 0,
+        right: isButton ? 780 : 0,
+        top: isButton ? 40 : 0,
+        bottom: isButton ? 70 : 0,
+        width: 0,
+        height: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      };
+    };
+    try {
+      render(<WorkboxColorPicker machineId="buildbox" label="buildbox" />);
+      const menu = await openMenu(user);
+      // The menu's right edge meets the button's (800 - 780), so it opens leftward.
+      expect(menu.style.right).toBe("20px");
+      expect(menu.style.left).toBe("auto");
+      expect(menu.style.top).toBe("74px");
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = realRect;
+    }
+  });
+
   it("choosing_a_swatch_saves_the_full_map", async () => {
     const user = userEvent.setup();
     render(<WorkboxColorPicker machineId="buildbox" label="buildbox" />);

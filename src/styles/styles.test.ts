@@ -21,6 +21,19 @@ function rule(selector: string): string {
 }
 
 describe("app.css", () => {
+  it("keeps_the_home_tab_neutral_by_pinning_its_fill_to_the_selection", () => {
+    // The Home tab sits in the tab row but is no workbox: its join reads --selected.
+    expect(rule(".wb-tab-home")).toMatch(/--wb-fill:\s*var\(--selected\)/);
+  });
+
+  it("styles_a_current_rail_item_once_with_the_workbox_fill", () => {
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(
+      (m) => m[1].trim() === '.rail-item[aria-current="page"]',
+    );
+    expect(rules).toHaveLength(1);
+    expect(rules[0][2]).toMatch(/var\(--wb-fill,\s*var\(--selected\)\)/);
+  });
+
   it("keeps_a_kind_logo_inline_so_a_wrapped_badge_is_not_split", () => {
     const body = rule(".kind svg");
     expect(body).not.toMatch(/display:\s*block/);

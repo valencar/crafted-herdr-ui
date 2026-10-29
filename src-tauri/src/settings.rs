@@ -158,7 +158,7 @@ pub struct Settings {
     #[serde(default)]
     pub new_session_hide_shell: bool,
     /// The color picked for each workbox, keyed by machine profile id. A workbox with no entry
-    /// has no color.
+    /// is given one automatically.
     #[serde(default)]
     pub workbox_colors: BTreeMap<String, WorkboxColor>,
 }
@@ -288,7 +288,7 @@ fn keep_valid_colors(value: Value) -> Value {
     };
     Value::Object(
         map.into_iter()
-            .filter(|(_, color)| serde_json::from_value::<WorkboxColor>(color.clone()).is_ok())
+            .filter(|(_, color)| WorkboxColor::deserialize(color).is_ok())
             .collect(),
     )
 }

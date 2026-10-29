@@ -237,6 +237,7 @@ export function AllAgents() {
                   key={g.key}
                   group={g}
                   showSession={groupBy === "project"}
+                  showTile={groupBy === "workbox"}
                   onNewSession={() =>
                     openNewSession({
                       machineId: g.machineId,

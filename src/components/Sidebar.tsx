@@ -189,6 +189,10 @@ export function Sidebar({
   }, [activeKey, dashboardActive, activeWorkbox]);
   const [allProjects, setAllProjects] = useState(false);
   const colorMenu = useWorkboxColorMenu();
+  const closeColorMenu = colorMenu.close;
+  // The menu is drawn only by the expanded sidebar. Collapsing (or expanding) drops it, so it
+  // does not come back later from the state it left behind.
+  useEffect(() => closeColorMenu(), [collapsed, closeColorMenu]);
   const hidden = Math.max(0, projects.length - PROJECTS_SHOWN);
   const shownProjects = allProjects
     ? projects

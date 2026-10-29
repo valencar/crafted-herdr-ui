@@ -23,6 +23,18 @@ describe("KindBadge", () => {
     }
   });
 
+  it("a_kind_named_like_an_inherited_object_key_gets_the_monogram", () => {
+    for (const kind of ["constructor", "toString", "__proto__"]) {
+      const { container, unmount } = render(<KindBadge kind={kind} />);
+      expect(container.querySelector("svg"), kind).toBeNull();
+      expect(
+        screen.getByText(kind.slice(0, 2).toUpperCase()),
+        kind,
+      ).toHaveAttribute("aria-hidden", "true");
+      unmount();
+    }
+  });
+
   it("unknown_kind_keeps_the_monogram", () => {
     const { container } = render(<KindBadge kind="newagent" />);
     expect(screen.getByText("NE")).toHaveAttribute("aria-hidden", "true");

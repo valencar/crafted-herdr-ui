@@ -320,6 +320,35 @@ describe("AllAgents", () => {
     ]);
   });
 
+  it("only_the_workbox_grouping_puts_a_tile_in_the_group_header", async () => {
+    const user = setup();
+    const tiles = () =>
+      [...document.querySelectorAll(".group-head .wb-tile")].map((t) => [
+        t.getAttribute("data-size"),
+        t.getAttribute("aria-hidden"),
+        t.textContent,
+      ]);
+    expect(tiles()).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Workbox" }));
+    expect(tiles()).toEqual([
+      ["sm", "true", "B"],
+      ["sm", "true", "G"],
+    ]);
+    // The header's name is unchanged: the tile is hidden from it.
+    expect(
+      screen
+        .getAllByRole("heading", { level: 3 })
+        .map((h) => h.textContent),
+    ).toEqual(["buildbox", "gpubox"]);
+    expect(
+      screen.getByRole("region", { name: "buildbox" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Status" }));
+    expect(tiles()).toEqual([]);
+  });
+
   it("open_button_invokes_openSession_with_machine_and_terminal_id", async () => {
     const user = setup();
     await user.click(
