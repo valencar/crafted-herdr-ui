@@ -600,7 +600,7 @@ describe("NewSession form", () => {
     await group.findByRole("radio", { name: "claude" });
     expect(
       group.getAllByRole("radio").map((r) => r.closest("label")!.textContent),
-    ).toEqual(["CCclaude", "CXcodex", "$_Plain shell"]);
+    ).toEqual(["claude", "CXcodex", "$_Plain shell"]);
     expect(group.getByRole("radio", { name: "Plain shell" })).toBeChecked();
   });
 

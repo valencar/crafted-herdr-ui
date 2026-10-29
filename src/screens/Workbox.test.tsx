@@ -151,7 +151,7 @@ describe("Workbox", () => {
     const main = within(api).getByRole("group", { name: "Tab main" });
     expect(within(main).getByText("2 sessions")).toBeInTheDocument();
     const planner = within(main).getByRole("button", { name: /planner/ });
-    expect(within(planner).getByText("CC")).toBeInTheDocument();
+    expect(within(planner).getByText("claude")).toBeInTheDocument();
     expect(within(planner).getByText("planner")).toBeInTheDocument();
     expect(within(planner).getByText("Needs input")).toBeInTheDocument();
     expect(within(planner).getByText("w1:p1")).toBeInTheDocument();
