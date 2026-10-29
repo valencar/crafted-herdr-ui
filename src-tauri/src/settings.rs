@@ -4,6 +4,7 @@
 //! patch and validates the result, so a bad patch changes nothing. The values live in
 //! `settings.json` (tauri-plugin-store), one top-level key per field.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
@@ -76,6 +77,21 @@ pub enum Theme {
     Light,
 }
 
+/// The accent a workbox (machine) is tagged with in the sidebar and tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum WorkboxColor {
+    Violet,
+    Pink,
+    Lime,
+    Cyan,
+    Yellow,
+    Magenta,
+    Leaf,
+    Purple,
+}
+
 /// The font the in-app terminal draws with. All four are bundled with the app; the default is
 /// `Hack`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
@@ -141,6 +157,10 @@ pub struct Settings {
     /// Whether the New session sheet leaves out Plain shell.
     #[serde(default)]
     pub new_session_hide_shell: bool,
+    /// The color picked for each workbox, keyed by machine profile id. A workbox with no entry
+    /// has no color.
+    #[serde(default)]
+    pub workbox_colors: BTreeMap<String, WorkboxColor>,
 }
 
 impl Default for Settings {
@@ -169,6 +189,7 @@ impl Default for Settings {
             new_session_kind: None,
             new_session_hidden_kinds: Vec::new(),
             new_session_hide_shell: false,
+            workbox_colors: BTreeMap::new(),
         }
     }
 }
@@ -240,6 +261,11 @@ impl Settings {
         entries
             .into_iter()
             .fold(Settings::default(), |settings, (key, value)| {
+                let value = if key == "workbox_colors" {
+                    keep_valid_colors(value)
+                } else {
+                    value
+                };
                 let one = Value::Object(Map::from_iter([(key, value)]));
                 settings.merged(&one).unwrap_or(settings)
             })
@@ -252,6 +278,19 @@ impl Settings {
             _ => Vec::new(),
         }
     }
+}
+
+/// A stored `workbox_colors` value without its bad entries: an entry whose value is not a known
+/// color is dropped on its own, and a value that is not an object becomes an empty map.
+fn keep_valid_colors(value: Value) -> Value {
+    let Value::Object(map) = value else {
+        return Value::Object(Map::new());
+    };
+    Value::Object(
+        map.into_iter()
+            .filter(|(_, color)| serde_json::from_value::<WorkboxColor>(color.clone()).is_ok())
+            .collect(),
+    )
 }
 
 /// The settings every part of the app reads. Cheap to clone; all clones share one value.
@@ -484,6 +523,7 @@ mod tests {
         assert_eq!(s.new_session_kind, None);
         assert!(s.new_session_hidden_kinds.is_empty());
         assert!(!s.new_session_hide_shell);
+        assert!(s.workbox_colors.is_empty());
         // The keys are exactly the spec's (section 8.8) plus `open_after_create` and the v0.2
         // terminal and layout keys.
         let keys: std::collections::BTreeSet<_> = serde_json::to_value(&s)
@@ -517,6 +557,7 @@ mod tests {
             "new_session_kind",
             "new_session_hidden_kinds",
             "new_session_hide_shell",
+            "workbox_colors",
         ]
         .map(String::from)
         .into();
@@ -678,6 +719,47 @@ mod tests {
                 .merged(&json!({"theme": "blue"}))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn workbox_colors_round_trip() {
+        let set = Settings::default()
+            .merged(&json!({"workbox_colors": {"local": "violet", "buildbox": "pink"}}))
+            .unwrap();
+        assert_eq!(set.workbox_colors.len(), 2);
+        assert_eq!(set.workbox_colors["local"], WorkboxColor::Violet);
+        assert_eq!(set.workbox_colors["buildbox"], WorkboxColor::Pink);
+        assert_eq!(Settings::from_entries(set.to_entries()), set);
+    }
+
+    #[test]
+    fn old_file_without_workbox_colors_loads_empty() {
+        let mut entries = Settings::default().to_entries();
+        entries.retain(|(k, _)| k != "workbox_colors");
+        let read = Settings::from_entries(entries);
+        assert!(read.workbox_colors.is_empty());
+    }
+
+    #[test]
+    fn set_settings_rejects_unknown_color() {
+        assert!(
+            Settings::default()
+                .merged(&json!({"workbox_colors": {"local": "orange"}}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn bad_color_entry_drops_only_that_entry() {
+        let read = Settings::from_entries([(
+            "workbox_colors".to_owned(),
+            json!({"local": "violet", "buildbox": "orange", "gpubox": 3}),
+        )]);
+        let expected = BTreeMap::from([("local".to_owned(), WorkboxColor::Violet)]);
+        assert_eq!(read.workbox_colors, expected);
+        let not_an_object =
+            Settings::from_entries([("workbox_colors".to_owned(), json!(["violet"]))]);
+        assert!(not_an_object.workbox_colors.is_empty());
     }
 
     #[test]
