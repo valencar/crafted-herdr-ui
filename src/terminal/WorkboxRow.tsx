@@ -1,7 +1,8 @@
 import { StatusDot } from "../components/StatusDot";
+import { useWorkboxColorMenu } from "../components/WorkboxColorMenu";
 import { WorkboxTile } from "../components/WorkboxTile";
 import { Tooltip } from "../components/Tooltip";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MouseEvent } from "react";
 import { HEALTH_LABEL, plural } from "../lib/format";
 import { useWorkboxColor } from "../lib/workboxColors";
 import type { Row } from "../lib/grouping";
@@ -48,6 +49,7 @@ export function WorkboxRow({
   const activate = useTerminalStore((s) => s.activate);
   const activateMachine = useTerminalStore((s) => s.activateMachine);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const colorMenu = useWorkboxColorMenu();
 
   // The active tab is always in view.
   useEffect(() => {
@@ -79,9 +81,16 @@ export function WorkboxRow({
             needs={countNeeds(group.tabs, rows)}
             active={group.machineId === activeMachineId}
             onActivate={() => activateMachine(group.machineId)}
+            onContextMenu={
+              // A stray group has no machine in the list, so no color to change.
+              group.machine
+                ? colorMenu.onContextMenu(group.machineId, group.label)
+                : undefined
+            }
           />
         ))}
       </div>
+      {colorMenu.menu}
     </nav>
   );
 }
@@ -96,11 +105,13 @@ function WorkboxTab({
   needs,
   active,
   onActivate,
+  onContextMenu,
 }: {
   group: TabGroup;
   needs: number;
   active: boolean;
   onActivate: () => void;
+  onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
 }) {
   const color = useWorkboxColor(group.machine ? group.machineId : null);
   const health = group.machine?.health;
@@ -116,6 +127,7 @@ function WorkboxTab({
         needs > 0 ? `, ${needs} needs input` : ""
       }`}
       onClick={onActivate}
+      onContextMenu={onContextMenu}
     >
       <span
         className="health"

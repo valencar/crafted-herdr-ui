@@ -1,6 +1,7 @@
 import { Kbd } from "./Kbd";
 import { HealthDot, StatusDot } from "./StatusDot";
 import { Tooltip } from "./Tooltip";
+import { useWorkboxColorMenu } from "./WorkboxColorMenu";
 import { WorkboxTile } from "./WorkboxTile";
 import { tabShortcutId, type ShortcutId } from "../lib/shortcuts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -187,6 +188,7 @@ export function Sidebar({
     row?.scrollIntoView?.({ block: "nearest" });
   }, [activeKey, dashboardActive, activeWorkbox]);
   const [allProjects, setAllProjects] = useState(false);
+  const colorMenu = useWorkboxColorMenu();
   const hidden = Math.max(0, projects.length - PROJECTS_SHOWN);
   const shownProjects = allProjects
     ? projects
@@ -319,6 +321,7 @@ export function Sidebar({
               className={`nav-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
               aria-current={m.id === activeWorkbox ? "page" : undefined}
               onClick={() => onWorkbox(m.id)}
+              onContextMenu={colorMenu.onContextMenu(m.id, m.label)}
             >
               <WorkboxTile machineId={m.id} label={m.label} health={m.health} />
               <span className="nav-label">{m.label}</span>
@@ -411,6 +414,7 @@ export function Sidebar({
           <HintSlot shortcut="toggle-sidebar" />
         </button>
       </div>
+      {colorMenu.menu}
     </nav>
   );
 }
