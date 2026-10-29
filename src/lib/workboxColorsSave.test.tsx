@@ -59,6 +59,29 @@ describe("useAutoPickColors", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("saves_prototype_named_ids_and_settles", () => {
+    useAppStore.setState({
+      state: stateWith("local", "constructor", "__proto__"),
+      settings: settingsWith({}),
+    });
+    render(<Probe />);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    const patch = invoke.mock.calls[0][1] as {
+      patch: { workbox_colors: Record<string, WorkboxColor> };
+    };
+    const sent = JSON.stringify(patch.patch.workbox_colors);
+    expect(sent).toBe(
+      '{"local":"violet","constructor":"pink","__proto__":"lime"}',
+    );
+    // The saved result comes back as parsed JSON, with `__proto__` as an own key: nothing to resend.
+    act(() =>
+      useAppStore.setState({
+        settings: { workbox_colors: JSON.parse(sent) } as unknown as Settings,
+      }),
+    );
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("saves_nothing_when_all_assigned", () => {
     useAppStore.setState({
       state: stateWith("local", "buildbox"),

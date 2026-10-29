@@ -2,14 +2,15 @@ import { useEffect, useRef } from "react";
 import { useAppStore } from "../store/appStore";
 import type { WorkboxColor } from "./bindings/WorkboxColor";
 import { saveSettings } from "./uiHelpers";
-import { resolveColors, useResolvedColors } from "./workboxColors";
+import { hasOwn, resolveColors, useResolvedColors } from "./workboxColors";
 
 type ColorMap = Record<string, WorkboxColor>;
 
 function sameMap(a: ColorMap, b: ColorMap): boolean {
   const keys = Object.keys(a);
   return (
-    keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
+    keys.length === Object.keys(b).length &&
+    keys.every((k) => hasOwn(b, k) && a[k] === b[k])
   );
 }
 

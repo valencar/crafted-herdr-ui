@@ -18,16 +18,25 @@ export const WORKBOX_COLORS: readonly WorkboxColor[] = [
 export type SavedColors = Partial<Record<string, WorkboxColor>>;
 
 /**
+ * Own-key check (`Object.hasOwn` needs ES2022; the tsconfig lib is ES2020). A machine id is
+ * user data, so `constructor`, `toString` and `__proto__` are ordinary keys, never inherited ones.
+ */
+export function hasOwn(map: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(map, key);
+}
+
+/**
  * `saved` plus one new entry per id without one. The local machine is assigned first, then the
  * rest in the given order. A new id gets the first palette color no listed id uses; once all are
  * used, the least-used one (ties go to palette order). Only listed ids count as using a color.
  * Entries for ids that are not listed are kept, so removing a workbox never recolors another.
+ * The result has no prototype, so every id (even `__proto__`) is a plain key.
  */
 export function assignColors(
   machineIds: string[],
   saved: SavedColors,
 ): Record<string, WorkboxColor> {
-  const result: Record<string, WorkboxColor> = {};
+  const result: Record<string, WorkboxColor> = Object.create(null);
   const uses = new Map<WorkboxColor, number>(WORKBOX_COLORS.map((c) => [c, 0]));
   const listed = new Set(machineIds);
   for (const [id, color] of Object.entries(saved)) {
@@ -40,7 +49,7 @@ export function assignColors(
     ? ["local", ...machineIds.filter((id) => id !== "local")]
     : machineIds;
   for (const id of ordered) {
-    if (id in result) continue;
+    if (hasOwn(result, id)) continue;
     let pick = WORKBOX_COLORS[0];
     let fewest = uses.get(pick) ?? 0;
     for (const color of WORKBOX_COLORS) {
@@ -102,5 +111,5 @@ export function useWorkboxColor(
   const machines = useAppStore((s) => s.state?.machines);
   if (machineId === null || resolved === null) return "none";
   if (!machines?.some((m) => m.id === machineId)) return "none";
-  return resolved[machineId] ?? "none";
+  return hasOwn(resolved, machineId) ? resolved[machineId] : "none";
 }
