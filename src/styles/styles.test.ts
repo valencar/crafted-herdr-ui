@@ -21,6 +21,14 @@ function rule(selector: string): string {
 }
 
 describe("app.css", () => {
+  it("keeps_a_kind_logo_inline_so_a_wrapped_badge_is_not_split", () => {
+    const body = rule(".kind svg");
+    expect(body).not.toMatch(/display:\s*block/);
+    expect(body).toMatch(/display:\s*inline-block/);
+    expect(body).toMatch(/vertical-align:\s*middle/);
+    expect(body).not.toMatch(/margin/);
+  });
+
   it("keeps_the_row_focus_ring_inside_the_clipped_group_card", () => {
     // `.group` clips its overflow, so the ring must be drawn inside the row.
     expect(rule(".group")).toContain("overflow: hidden");

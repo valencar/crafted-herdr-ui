@@ -1056,12 +1056,13 @@ kbd {
   border: 1px solid var(--border-strong);
   border-radius: 5px;
 }
-/* A logo sits inside the monogram's footprint: 14px tall, centred in one text line. */
+/* A logo sits inside the monogram's footprint: 14px, inline so it also works in a wrapper span
+   (New session, Settings), where `.kind` is inline and a block child would split it. */
 .kind svg {
-  display: block;
+  display: inline-block;
+  vertical-align: middle;
   width: 14px;
   height: 14px;
-  margin: calc((var(--fs-hint) * var(--line-height) - 14px) / 2) auto;
 }
 
 /* ---------- command box, dialog, toast ---------- */
