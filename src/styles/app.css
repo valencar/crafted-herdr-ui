@@ -608,7 +608,7 @@ kbd {
   width: 2px;
   border-radius: 1px;
   background: var(--wb);
-  opacity: 0.45;
+  opacity: 0.6;
 }
 .nav-box .nav-term[aria-current="page"]::before {
   opacity: 1;

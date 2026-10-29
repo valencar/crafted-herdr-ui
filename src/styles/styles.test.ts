@@ -341,6 +341,11 @@ describe("sidebar hint slot", () => {
     const stripe = rule(".nav-box .nav-term::before");
     expect(stripe).toMatch(/width:\s*2px/);
     expect(stripe).toContain("var(--wb)");
+    // About 60% strength at rest; the current tab's rail is solid.
+    expect(stripe).toMatch(/opacity:\s*0\.6\b/);
+    expect(rule('.nav-box .nav-term[aria-current="page"]::before')).toMatch(
+      /opacity:\s*1\b/,
+    );
   });
 
   it("workbox_tile_is_a_solid_workbox_square", () => {
