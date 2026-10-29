@@ -25,12 +25,15 @@ let pending = 0;
 let tail: Promise<unknown> = Promise.resolve();
 
 function enqueue<T>(task: () => Promise<T>): Promise<T> {
-  const run = pending === 0 ? task() : tail.then(task);
+  const idle = pending === 0;
   pending += 1;
-  // `task` never rejects (see `writeColors`), so a failed write cannot block the ones behind it.
-  tail = run.finally(() => {
+  const run = idle ? task() : tail.then(task);
+  // `tail` is settled by `done` whether `task` resolved or rejected, so it never rejects and one
+  // failed write cannot drop the ones queued behind it.
+  const done = () => {
     pending -= 1;
-  });
+  };
+  tail = run.then(done, done);
   return run;
 }
 
@@ -42,17 +45,23 @@ function writeColors(
   change: (current: ColorMap) => ColorMap,
 ): Promise<WriteResult> {
   return enqueue(async () => {
-    const { settings, state } = useAppStore.getState();
-    if (!settings) return "skipped";
-    const current = resolveColors(
-      settings.workbox_colors,
-      state?.machines ?? [],
-    );
-    const next = change(current);
-    if (sameMap(next, settings.workbox_colors as ColorMap)) return "skipped";
-    return (await saveSettingsAndWait({ workbox_colors: next }))
-      ? "saved"
-      : "failed";
+    try {
+      const { settings, state } = useAppStore.getState();
+      if (!settings) return "skipped";
+      const current = resolveColors(
+        settings.workbox_colors,
+        state?.machines ?? [],
+      );
+      const next = change(current);
+      if (sameMap(next, settings.workbox_colors as ColorMap)) return "skipped";
+      return (await saveSettingsAndWait({ workbox_colors: next }))
+        ? "saved"
+        : "failed";
+    } catch (e) {
+      // Not a refused save (`saveSettingsAndWait` reports those), but a throw in the write itself.
+      useAppStore.getState().reportError(e);
+      return "failed";
+    }
   });
 }
 

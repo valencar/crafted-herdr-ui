@@ -1,5 +1,5 @@
 import { act, render } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../store/appStore";
 import type { AppState } from "./bindings/AppState";
 import type { Settings } from "./bindings/Settings";
@@ -65,6 +65,14 @@ beforeEach(() => {
     .mockImplementation(((_: string, args: { patch: Partial<Settings> }) =>
       Promise.resolve(merged(args.patch))) as never);
   useAppStore.setState({ state: null, settings: null, toast: null });
+});
+
+afterEach(async () => {
+  // Settle what a test left held (a settled save starts the queued one behind it, which is held
+  // in turn), so a failing test cannot leave the shared write queue stuck for the next one.
+  for (let i = 0; i < held.length; i++)
+    await act(async () => held[i].resolve());
+  held = [];
 });
 
 describe("useAutoPickColors", () => {
@@ -262,6 +270,39 @@ describe("serialized color writes", () => {
       gpubox: "yellow",
     });
   });
+
+  it("a_write_that_throws_does_not_stall_later_ones", async () => {
+    useAppStore.setState({
+      state: stateWith("local", "buildbox", "gpubox"),
+      settings: settingsWith({
+        local: "violet",
+        buildbox: "pink",
+        gpubox: "lime",
+      }),
+    });
+    // The first write throws (not a rejected save, a throw in the write itself); the second is
+    // already queued behind it.
+    invoke.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    setWorkboxColor("buildbox", "cyan");
+    setWorkboxColor("gpubox", "yellow");
+    expect(held).toHaveLength(0);
+    await act(async () => {});
+    expect(useAppStore.getState().toast).not.toBeNull();
+    expect(held).toHaveLength(1);
+    expect(sentColors(0)).toEqual({
+      local: "violet",
+      buildbox: "pink",
+      gpubox: "yellow",
+    });
+    await settle(0);
+    expect(storedColors()).toEqual({
+      local: "violet",
+      buildbox: "pink",
+      gpubox: "yellow",
+    });
+  });
 });
 
 describe("useAutoPickColors after a failed save", () => {
@@ -305,12 +346,28 @@ describe("useAutoPickColors after a failed save", () => {
     // The first try and one retry; then it waits for something to change.
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(showToast).toHaveBeenCalledTimes(2);
-    // A change (here a new workbox) tries again, and so does a new saved map.
+    // A change (here a new workbox) tries again.
     await push("local", "buildbox", "gpubox");
     expect(invoke).toHaveBeenCalledTimes(3);
+  });
+
+  it("new_saved_colors_try_a_given_up_map_again", async () => {
+    useAppStore.setState({
+      state: stateWith("local", "buildbox"),
+      settings: settingsWith({}),
+    });
+    invoke.mockImplementation(() =>
+      Promise.reject({ kind: "invalid", message: "disk full" }),
+    );
+    await act(async () => {
+      render(<Probe />);
+    });
+    for (let i = 0; i < 3; i++) await push("local", "buildbox");
+    expect(invoke).toHaveBeenCalledTimes(2);
+    // The saved map changes (another save went through) but the resolved map is the same one.
     await act(async () =>
       useAppStore.setState({ settings: settingsWith({ local: "violet" }) }),
     );
-    expect(invoke).toHaveBeenCalledTimes(4);
+    expect(invoke).toHaveBeenCalledTimes(3);
   });
 });
