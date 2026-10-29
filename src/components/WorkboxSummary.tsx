@@ -3,6 +3,7 @@ import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { formatChecked, formatStaleness } from "../lib/format";
 import { useNow } from "../lib/useNow";
+import { WorkboxColorPicker } from "./WorkboxColorPicker";
 import { ReconnectBox } from "./ReconnectBox";
 import { WorkboxTile } from "./WorkboxTile";
 
@@ -91,6 +92,7 @@ export function WorkboxSummary({
           <span className="health-badge" data-health={health.kind}>
             {HEALTH_BADGE[health.kind]}
           </span>
+          <WorkboxColorPicker machineId={machine.id} label={machine.label} />
         </div>
         <span className="mono muted workbox-meta">{meta}</span>
         {health.kind === "attention" && (

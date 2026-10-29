@@ -14,7 +14,7 @@ export const PINNED: CSSProperties = {
 };
 
 type Options = {
-  /** The element holding the `role="menuitem"` buttons; the arrow keys move within it. */
+  /** The element holding the `role="menuitem"` (or `menuitemradio`) buttons; the arrow keys move within it. */
   items: RefObject<HTMLElement | null>;
   /** True for a node that belongs to the menu: its items and the button that opened it. */
   contains: (target: Node) => boolean;
@@ -51,7 +51,7 @@ export function useMenuBehavior(
     if (!open) return;
     const items = () => [
       ...(latest.current.items.current?.querySelectorAll<HTMLElement>(
-        '[role="menuitem"]',
+        '[role="menuitem"], [role="menuitemradio"]',
       ) ?? []),
     ];
     const inside = (target: EventTarget | null) =>

@@ -1430,6 +1430,42 @@ select.field {
   align-items: center;
   gap: 10px;
 }
+.workbox-title .wb-color-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The palette menu: a 4 by 2 grid of swatches (the same squares as a workbox tile). */
+.menu.wb-color-menu {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 6px;
+  padding: 8px;
+}
+.wb-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 7px;
+  background: var(--wb);
+  color: var(--on-wb);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+.wb-swatch:hover {
+  border-color: var(--border-strong);
+}
+.wb-swatch:focus-visible,
+.wb-swatch[aria-checked="true"] {
+  border-color: var(--text);
+}
 .workbox-meta {
   font-size: var(--fs-meta);
   color: var(--text-4);
