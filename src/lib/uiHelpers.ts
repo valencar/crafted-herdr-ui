@@ -168,10 +168,28 @@ export function openInstallPage(): Promise<void> {
   return openUrl(INSTALL_URL);
 }
 
+/**
+ * `saveSettings` for a caller that must wait its turn: resolves `true` once the store has the
+ * saved result, `false` once a failure has gone to the toast. It never rejects.
+ */
+export function saveSettingsAndWait(
+  patch: Partial<Settings>,
+): Promise<boolean> {
+  const { setSettings, reportError } = useAppStore.getState();
+  return invokeTyped("set_settings", { patch })
+    .then((saved) => {
+      setSettings(saved);
+      return true;
+    })
+    .catch((e: unknown) => {
+      reportError(e);
+      return false;
+    });
+}
+
 /** Saves part of the settings; the store follows the saved result, and a failure goes to the toast. */
 export function saveSettings(patch: Partial<Settings>): void {
-  const { setSettings, reportError } = useAppStore.getState();
-  invokeTyped("set_settings", { patch }).then(setSettings).catch(reportError);
+  void saveSettingsAndWait(patch);
 }
 
 /** Collapses the sidebar to its rail, or brings the full sidebar back. */

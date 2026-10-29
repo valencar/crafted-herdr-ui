@@ -78,7 +78,15 @@ function renderTabRow() {
 }
 
 beforeEach(() => {
-  invoke.mockReset().mockReturnValue(new Promise(() => {}));
+  // A save succeeds at once, so one test's write never holds up the next test's (writes are queued).
+  invoke.mockReset().mockImplementation(((
+    _: string,
+    args: { patch: Partial<Settings> },
+  ) =>
+    Promise.resolve({
+      ...useAppStore.getState().settings,
+      ...args.patch,
+    })) as never);
   useTerminalStore.setState({
     tabs: [],
     activeKey: HOME,
@@ -186,7 +194,10 @@ describe("WorkboxColorMenu", () => {
     render(<SessionRow group={groups[0]} groups={groups} rows={new Map()} />);
     const tab = document.querySelector<HTMLElement>(".session-tab-main");
     expect(tab).not.toBeNull();
-    const notPrevented = fireEvent.contextMenu(tab!, { clientX: 5, clientY: 5 });
+    const notPrevented = fireEvent.contextMenu(tab!, {
+      clientX: 5,
+      clientY: 5,
+    });
     expect(notPrevented).toBe(true);
     expect(screen.queryByRole("menu")).toBeNull();
   });

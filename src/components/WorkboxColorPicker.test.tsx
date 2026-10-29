@@ -29,7 +29,15 @@ function machine(id: string): MachineView {
 }
 
 beforeEach(() => {
-  invoke.mockReset().mockReturnValue(new Promise(() => {}));
+  // A save succeeds at once, so one test's write never holds up the next test's (writes are queued).
+  invoke.mockReset().mockImplementation(((
+    _: string,
+    args: { patch: Partial<Settings> },
+  ) =>
+    Promise.resolve({
+      ...useAppStore.getState().settings,
+      ...args.patch,
+    })) as never);
   useAppStore.setState({
     state: {
       machines: [machine("local"), machine("buildbox")],
