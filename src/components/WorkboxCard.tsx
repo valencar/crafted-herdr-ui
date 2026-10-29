@@ -1,6 +1,7 @@
 import { Skeleton } from "./Skeleton";
 import { legendText, StatusBar } from "./StatusBar";
 import { HealthDot } from "./StatusDot";
+import { WorkboxTile } from "./WorkboxTile";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { statusCounts } from "../lib/dashboard";
 import {
@@ -48,9 +49,12 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
       aria-busy={pending || undefined}
     >
       <div className="wb-card-head">
-        <h3 id={headingId} className="wb-card-name mono">
-          {machine.label}
-        </h3>
+        <div className="wb-card-id">
+          <WorkboxTile size="sm" machineId={machine.id} label={machine.label} />
+          <h3 id={headingId} className="wb-card-name mono">
+            {machine.label}
+          </h3>
+        </div>
         <span className="health" data-health={kind}>
           <HealthDot health={machine.health} />
           {HEALTH_LABEL[kind]}

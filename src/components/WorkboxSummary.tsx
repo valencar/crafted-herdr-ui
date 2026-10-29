@@ -4,6 +4,7 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import { formatChecked, formatStaleness } from "../lib/format";
 import { useNow } from "../lib/useNow";
 import { ReconnectBox } from "./ReconnectBox";
+import { WorkboxTile } from "./WorkboxTile";
 
 export type Counts = {
   workspaces: number;
@@ -83,6 +84,7 @@ export function WorkboxSummary({
     <section className="workbox-summary" aria-labelledby={headingId}>
       <div className="workbox-id">
         <div className="workbox-title">
+          <WorkboxTile size="sm" machineId={machine.id} label={machine.label} />
           <h1 id={headingId} className="section-title">
             {machine.label}
           </h1>

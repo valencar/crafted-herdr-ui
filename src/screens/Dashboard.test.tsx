@@ -143,6 +143,27 @@ afterEach(() => {
 });
 
 describe("Dashboard", () => {
+  it("card_head_shows_tile", () => {
+    useAppStore.setState({
+      settings: {
+        open_target: "external",
+        workbox_colors: { buildbox: "cyan" },
+      } as unknown as Settings,
+    });
+    setup();
+    const head = document.querySelector(".wb-card .wb-card-head")!;
+    const tile = head.querySelector(".wb-tile");
+    expect(tile).toHaveAttribute("data-wb-color", "cyan");
+    expect(tile).toHaveAttribute("data-size", "sm");
+    expect(tile).toHaveAttribute("aria-hidden", "true");
+    expect(tile).toHaveTextContent("B");
+    // The heading keeps its own name; the tile adds no health dot of its own.
+    expect(within(head as HTMLElement).getByRole("heading")).toHaveTextContent(
+      /^buildbox$/,
+    );
+    expect(tile!.querySelector(".sdot")).toBeNull();
+  });
+
   it("first_load_shows_a_skeleton", () => {
     setup(null);
     const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;

@@ -3272,6 +3272,12 @@ select.field {
   justify-content: space-between;
   gap: 8px;
 }
+.wb-card-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .wb-card-name {
   margin: 0;
   font-size: var(--fs-body);

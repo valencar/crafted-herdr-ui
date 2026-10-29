@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AppState } from "../lib/bindings/AppState";
+import type { Settings } from "../lib/bindings/Settings";
 import type { Row } from "../lib/grouping";
 import { isInTerminal } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
@@ -67,7 +69,7 @@ beforeEach(() => {
         : null,
     );
   vi.mocked(openRow).mockReset();
-  useAppStore.setState({ settings: null, dialogOpen: 0 });
+  useAppStore.setState({ settings: null, state: null, dialogOpen: 0 });
   useTerminalStore.setState({
     tabs: [paneTab, fullTab],
     activeKey: paneTab.tabKey,
@@ -118,6 +120,29 @@ describe("ContextBar", () => {
     expect(
       screen.getByRole("button", { name: "More actions" }),
     ).toBeInTheDocument();
+  });
+
+  it("context_bar_shows_workbox_tile", () => {
+    useAppStore.setState({
+      state: { machines: [{ id: "buildbox" }] } as unknown as AppState,
+      settings: { workbox_colors: { buildbox: "pink" } } as unknown as Settings,
+    });
+    const { container } = render(
+      <ContextBar tab={paneTab} row={row} onFind={() => {}} />,
+    );
+    const bar = container.querySelector(".context-bar")!;
+    const tile = bar.querySelector(".wb-tile");
+    expect(tile).toHaveAttribute("data-wb-color", "pink");
+    expect(tile).toHaveAttribute("data-size", "sm");
+    expect(tile).toHaveAttribute("aria-hidden", "true");
+    expect(tile).toHaveTextContent("B");
+    // The visible text is unchanged: the tile sits beside the line, not in it.
+    expect(bar.querySelector(".mono.muted")).toHaveTextContent(
+      "~/projects/api-service · buildbox",
+    );
+    expect(bar.querySelector(".mono.muted")!.textContent).toBe(
+      "~/projects/api-service · buildbox",
+    );
   });
 
   it("find_calls_on_find", async () => {

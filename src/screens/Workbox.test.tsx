@@ -120,6 +120,23 @@ afterEach(() => {
 });
 
 describe("Workbox", () => {
+  it("summary_heading_shows_tile", () => {
+    useAppStore.setState({
+      settings: {
+        open_target: "external",
+        workbox_colors: { buildbox: "lime" },
+      } as unknown as Settings,
+    });
+    setup();
+    const heading = screen.getByRole("heading", { level: 1, name: "buildbox" });
+    const tile = heading.parentElement!.querySelector(".wb-tile");
+    expect(tile).toHaveAttribute("data-wb-color", "lime");
+    expect(tile).toHaveAttribute("data-size", "sm");
+    expect(tile).toHaveAttribute("aria-hidden", "true");
+    expect(tile).toHaveTextContent("B");
+    expect(heading).toHaveTextContent(/^buildbox$/);
+  });
+
   it("renders_tabs_with_pane_boxes", async () => {
     setup();
     const api = workspace("api-service");
