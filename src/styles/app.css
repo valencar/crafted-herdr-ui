@@ -3222,3 +3222,37 @@ select.field {
 .dashboard.is-narrow .wb-cards {
   grid-template-columns: 1fr;
 }
+
+/* Workbox colors. `data-wb-color` goes on any element (tile, nav box, rail item, tab, session
+   row); it and its descendants read var(--wb) for the solid color and var(--wb-fill) for the
+   tint. `none` is the neutral for strays and unknown workboxes. */
+[data-wb-color="violet"] {
+  --wb: var(--wb-violet);
+}
+[data-wb-color="pink"] {
+  --wb: var(--wb-pink);
+}
+[data-wb-color="lime"] {
+  --wb: var(--wb-lime);
+}
+[data-wb-color="cyan"] {
+  --wb: var(--wb-cyan);
+}
+[data-wb-color="yellow"] {
+  --wb: var(--wb-yellow);
+}
+[data-wb-color="magenta"] {
+  --wb: var(--wb-magenta);
+}
+[data-wb-color="leaf"] {
+  --wb: var(--wb-leaf);
+}
+[data-wb-color="purple"] {
+  --wb: var(--wb-purple);
+}
+[data-wb-color="none"] {
+  --wb: var(--wb-none);
+}
+[data-wb-color] {
+  --wb-fill: color-mix(in srgb, var(--wb) var(--wb-mix), var(--bg));
+}

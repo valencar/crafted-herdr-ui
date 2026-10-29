@@ -816,3 +816,121 @@ describe("light theme", () => {
     expect(g / r).toBeLessThan(0.65);
   });
 });
+
+// ---------- workbox colors ----------
+
+const WB_NAMES = [
+  "violet",
+  "pink",
+  "lime",
+  "cyan",
+  "yellow",
+  "magenta",
+  "leaf",
+  "purple",
+];
+/** HSL hue in degrees (0-360) of a `#rrggbb` colour. */
+function hue([r, g, b]: Rgb): number {
+  const [R, G, B] = [r / 255, g / 255, b / 255];
+  const max = Math.max(R, G, B);
+  const d = max - Math.min(R, G, B);
+  if (d === 0) return 0;
+  const sector =
+    max === R
+      ? ((G - B) / d) % 6
+      : max === G
+        ? (B - R) / d + 2
+        : (R - G) / d + 4;
+  return (sector * 60 + 360) % 360;
+}
+/** The shorter way round the colour wheel, in degrees. */
+const hueGap = (a: number, b: number) => {
+  const d = Math.abs(a - b) % 360;
+  return Math.min(d, 360 - d);
+};
+
+describe("workbox colors", () => {
+  const themes: Array<[string, Record<string, string>]> = [
+    ["dark", dark],
+    ["light", light],
+  ];
+
+  it("defines_the_workbox_palette_in_both_themes", () => {
+    for (const [theme, block] of themes) {
+      for (const token of [
+        ...WB_NAMES.map((n) => `--wb-${n}`),
+        "--wb-none",
+        "--on-wb",
+        "--wb-mix",
+      ]) {
+        expect(block[token], `${token} in ${theme}`).toBeDefined();
+      }
+      expect(block["--wb-mix"], theme).toMatch(/^\d+%$/);
+    }
+    expect(dark["--wb-mix"]).toBe("22%");
+    expect(light["--wb-mix"]).toBe("16%");
+  });
+
+  it("workbox_palette_meets_contrast", () => {
+    for (const [theme, block] of themes) {
+      const c = (token: string) => parseHex(block[token]);
+      const mix = parseInt(block["--wb-mix"], 10);
+      for (const name of [...WB_NAMES, "none"]) {
+        const wb = c(`--wb-${name}`);
+        expect(
+          ratio(c("--on-wb"), wb),
+          `${theme}: --on-wb on --wb-${name}`,
+        ).toBeGreaterThanOrEqual(4.5);
+        for (const surface of ["--bg", "--panel"]) {
+          const under = tint(wb, c(surface), mix);
+          for (const text of ["--text", "--text-2", "--text-3"]) {
+            expect(
+              ratio(c(text), under),
+              `${theme}: ${text} on ${mix}% --wb-${name} over ${surface}`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+      }
+    }
+  });
+
+  it("workbox_colors_stay_clear_of_status_hues", () => {
+    const status = [
+      "--st-needs",
+      "--st-working",
+      "--st-done",
+      "--online",
+      "--danger",
+    ];
+    for (const [theme, block] of themes) {
+      const hueOf = (token: string) => hue(parseHex(block[token]));
+      for (const name of WB_NAMES) {
+        for (const other of status) {
+          expect(
+            hueGap(hueOf(`--wb-${name}`), hueOf(other)),
+            `${theme}: --wb-${name} vs ${other}`,
+          ).toBeGreaterThanOrEqual(20);
+        }
+      }
+      for (const a of WB_NAMES) {
+        for (const b of WB_NAMES.filter((n) => n > a)) {
+          expect(
+            hueGap(hueOf(`--wb-${a}`), hueOf(`--wb-${b}`)),
+            `${theme}: --wb-${a} vs --wb-${b}`,
+          ).toBeGreaterThanOrEqual(15);
+        }
+      }
+    }
+  });
+
+  it("maps_every_workbox_color_name", () => {
+    for (const name of [...WB_NAMES, "none"]) {
+      expect(rule(`[data-wb-color="${name}"]`)).toMatch(
+        new RegExp(`--wb:\\s*var\\(--wb-${name}\\)`),
+      );
+    }
+    expect(rule("[data-wb-color]")).toMatch(
+      /--wb-fill:\s*color-mix\(in srgb,\s*var\(--wb\)\s*var\(--wb-mix\),\s*var\(--bg\)\)/,
+    );
+  });
+});
