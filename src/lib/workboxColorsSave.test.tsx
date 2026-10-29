@@ -238,6 +238,9 @@ describe("serialized color writes", () => {
       buildbox: "cyan",
       gpubox: "pink",
     });
+    // The auto-pick queued again when the pick landed; it now matches what is stored, so it is skipped.
+    await act(async () => {});
+    expect(held).toHaveLength(2);
   });
 
   it("a_failed_save_does_not_stall_later_ones", async () => {
