@@ -299,3 +299,24 @@ UI polish: motion, status shapes, the ⋯ menu, palette actions, the ⌘/ sheet,
 - [ ] Text weight: body text, labels and terminal output read at normal Mac weight in both themes, not thin (the font smoothing override is gone); compare with another Mac app side by side.
 - [ ] Hidden tab cell size on macOS 13.0 to 13.2 (older WebKit measures cells with the DOM, not an OffscreenCanvas; skip this on 13.3 and later): open two terminal tabs, switch to the second, change Settings > Terminal > Terminal font, switch back to the first. Its columns line up, text isn't clipped or spaced for the old font, and a resize (or Reattach) fixes it if not. Known gap: its first refit after being shown may use the old font's cell size.
 - [ ] PR preview DMG: install the DMG from a pull request's CI run (the `preview` job summary), run the first-launch steps from the README, and work through this section on it.
+
+## v0.8
+
+Workbox colors and agent logos. Use generic data (buildbox, gpubox, staging; api-service, web-app, infra).
+
+- [ ] All 8 colors (violet, pink, lime, cyan, yellow, magenta, leaf, purple) in Dark, Light and System: set each on a workbox from the picker and switch the theme live, in the main window and the menu bar popover.
+- [ ] The tile letter and the tinted text are readable on every color, in both themes.
+- [ ] The collapsed rail (⌘B) marks the active tab's workbox.
+- [ ] Switching workboxes retints both tab rows with no flicker, and on first launch the first frame is already tinted.
+- [ ] A fresh install (no `workbox_colors` in settings) assigns colors once, Local first, and the same colors are there after a restart.
+- [ ] Removing a workbox recolors nobody.
+- [ ] The picker and the right-click menu (the sidebar workbox row and the workbox tab), by mouse and by keyboard: arrows, Home, End, Enter and Escape work, focus goes back to where it was, and no tooltip shows over the open menu.
+- [ ] Agent logos are crisp at 1x and 2x and in both themes.
+- [ ] Violet next to the blue "working" ring, and violet next to purple, side by side in both themes: they read as different.
+- [ ] The light-theme tint is 10%: the active workbox band is visible enough.
+- [ ] The collapsed rail: the health dot overlaps the tile's corner with no ring; an online dot is visible on the lime and leaf tiles.
+- [ ] The 2 px rail beside a workbox's nested tabs lines up under the tile.
+- [ ] The health-dot ring on a hovered workbox tab: there may be a faint halo; judge whether it is acceptable.
+- [ ] An active tab that needs input shows the orange edge, not the workbox line. This is intended.
+- [ ] The agent badge (logo) in the New session and Settings options, and in agent rows, the Inspector and the context bar: rows keep their height and the chip is not split when it wraps.
+- [ ] Codex still shows "CX". This is intended: there is no licensed mark.
