@@ -3226,6 +3226,10 @@ select.field {
 /* Workbox colors. `data-wb-color` goes on any element (tile, nav box, rail item, tab, session
    row); it and its descendants read var(--wb) for the solid color and var(--wb-fill) for the
    tint. `none` is the neutral for strays and unknown workboxes. */
+/* An unknown value is neutral: this comes first, so the named rules (same specificity) win. */
+[data-wb-color] {
+  --wb: var(--wb-none);
+}
 [data-wb-color="violet"] {
   --wb: var(--wb-violet);
 }

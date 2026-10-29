@@ -867,8 +867,8 @@ describe("workbox colors", () => {
       }
       expect(block["--wb-mix"], theme).toMatch(/^\d+%$/);
     }
-    expect(dark["--wb-mix"]).toBe("22%");
-    expect(light["--wb-mix"]).toBe("16%");
+    expect(dark["--wb-mix"]).toBe("18%");
+    expect(light["--wb-mix"]).toBe("10%");
   });
 
   it("workbox_palette_meets_contrast", () => {
@@ -883,7 +883,13 @@ describe("workbox colors", () => {
         ).toBeGreaterThanOrEqual(4.5);
         for (const surface of ["--bg", "--panel"]) {
           const under = tint(wb, c(surface), mix);
-          for (const text of ["--text", "--text-2", "--text-3"]) {
+          for (const text of [
+            "--text",
+            "--text-2",
+            "--text-3",
+            "--text-4",
+            "--muted",
+          ]) {
             expect(
               ratio(c(text), under),
               `${theme}: ${text} on ${mix}% --wb-${name} over ${surface}`,
@@ -927,6 +933,16 @@ describe("workbox colors", () => {
     for (const name of [...WB_NAMES, "none"]) {
       expect(rule(`[data-wb-color="${name}"]`)).toMatch(
         new RegExp(`--wb:\\s*var\\(--wb-${name}\\)`),
+      );
+    }
+    // An unknown value falls back to the neutral: the bare rule precedes every named one.
+    const bare = css.search(
+      /\[data-wb-color\]\s*\{\s*--wb:\s*var\(--wb-none\)/,
+    );
+    expect(bare).toBeGreaterThan(-1);
+    for (const name of [...WB_NAMES, "none"]) {
+      expect(css.indexOf(`[data-wb-color="${name}"]`), name).toBeGreaterThan(
+        bare,
       );
     }
     expect(rule("[data-wb-color]")).toMatch(

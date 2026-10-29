@@ -74,7 +74,8 @@
 
   /* workbox colors: each workbox is painted one of these (tile, tab and row accents). --wb-none
      is the neutral for strays and unknown ones; --on-wb is the letter on a solid tile;
-     --wb-mix is how much of the color a tint takes. Hues stay 20 degrees clear of the status
+     --wb-mix is how much of the color a tint takes (low enough that --text-4 and --muted still
+     reach 4.5:1 on the tint). Hues stay 20 degrees clear of the status
      colors; styles.test.ts checks contrast and spacing. */
   --wb-violet: #998bfa;
   --wb-pink: #f07ab8;
@@ -86,7 +87,7 @@
   --wb-purple: #bf8cf0;
   --wb-none: #8a8d96;
   --on-wb: #0b0c0e;
-  --wb-mix: 22%;
+  --wb-mix: 18%;
 
   /* shape */
   --radius-s: 6px;
@@ -180,7 +181,7 @@
   --wb-purple: #9040d0;
   --wb-none: #6b6e76;
   --on-wb: #ffffff;
-  --wb-mix: 16%;
+  --wb-mix: 10%;
 
   /* terminal: the 16 ANSI colors on the light background. 1-6 and 9-14 are at least 4.5:1,
      7, 8 and 15 at least 3:1; the bright ones are the livelier of each pair. */
