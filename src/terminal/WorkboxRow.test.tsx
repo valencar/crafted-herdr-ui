@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
+import type { Settings } from "../lib/bindings/Settings";
 import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
 import { useRowsByKey } from "./tabInfo";
@@ -66,6 +67,9 @@ beforeEach(() => {
     sheet: null,
     sheetPrefill: null,
     view: { kind: "dashboard" },
+    settings: {
+      workbox_colors: { buildbox: "cyan", gpubox: "pink" },
+    } as unknown as Settings,
   });
 });
 afterEach(reset);
@@ -131,6 +135,58 @@ describe("WorkboxRow", () => {
       "aria-hidden",
       "true",
     );
+  });
+
+  it("workbox_tab_shows_tile_with_health", () => {
+    open("buildbox", "w1:p2", "infra");
+    render(<Harness />);
+    const tab = screen.getByRole("button", { name: "buildbox, Online, 1 tab" });
+    const tile = tab.querySelector(".wb-tile");
+    expect(tile).toHaveAttribute("data-size", "sm");
+    expect(tile).toHaveAttribute("aria-hidden", "true");
+    expect(tile).toHaveTextContent("B");
+    expect(tile?.querySelector(".wb-tile-health .sdot")).not.toBeNull();
+    expect(tab.querySelector(".health")).toHaveAttribute(
+      "data-health",
+      "online",
+    );
+  });
+
+  it("workbox_tab_carries_its_color", () => {
+    open("buildbox", "w1:p1", "planner");
+    open("gpubox", "w1:p1", "tester");
+    render(<Harness />);
+    expect(screen.getByRole("button", { name: /^buildbox,/ })).toHaveAttribute(
+      "data-wb-color",
+      "cyan",
+    );
+    expect(screen.getByRole("button", { name: /^gpubox,/ })).toHaveAttribute(
+      "data-wb-color",
+      "pink",
+    );
+  });
+
+  it("stray_group_is_neutral", () => {
+    open("staging", "w1:p1", "tester");
+    render(<Harness />);
+    const tab = screen.getByRole("button", { name: /^staging,/ });
+    expect(tab).toHaveAttribute("data-wb-color", "none");
+    expect(tab.querySelector(".wb-tile")).toHaveAttribute(
+      "data-wb-color",
+      "none",
+    );
+    expect(tab.querySelector(".health")).toHaveAttribute(
+      "data-health",
+      "unknown",
+    );
+  });
+
+  it("home_tab_has_no_workbox_color", () => {
+    open("buildbox", "w1:p1", "planner");
+    render(<Harness />);
+    const home = within(nav()).getByRole("button", { name: "Home" });
+    expect(home).not.toHaveAttribute("data-wb-color");
+    expect(home.querySelector(".wb-tile")).toBeNull();
   });
 
   it("needs_badge_counts_blocked_tabs_and_names_them", () => {

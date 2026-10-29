@@ -1,12 +1,15 @@
 import { Kbd } from "./Kbd";
 import { HealthDot, StatusDot } from "./StatusDot";
 import { Tooltip } from "./Tooltip";
+import { useWorkboxColorMenu } from "./WorkboxColorMenu";
+import { WorkboxTile } from "./WorkboxTile";
 import { tabShortcutId, type ShortcutId } from "../lib/shortcuts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Group } from "../lib/grouping";
 import { toggleSidebar } from "../lib/uiHelpers";
+import { useWorkboxColor } from "../lib/workboxColors";
 import { useAppStore } from "../store/appStore";
 import { HomeIcon } from "../terminal/HomeIcon";
 import {
@@ -41,6 +44,60 @@ function HintSlot({
         </span>
       )}
     </span>
+  );
+}
+
+/** A workbox's block in the list: it and everything nested in it read the workbox's color. */
+function WorkboxBox({
+  machineId,
+  children,
+}: {
+  machineId: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="nav-box" data-wb-color={useWorkboxColor(machineId)}>
+      {children}
+    </div>
+  );
+}
+
+/** A workbox's item on the collapsed rail: its tile, its health dot, tinted while it is in use. */
+function RailWorkbox({
+  machine: m,
+  current,
+  on,
+  onOpen,
+}: {
+  machine: MachineView;
+  current: boolean;
+  /** Whether the open screen or the active terminal tab belongs to this workbox. */
+  on: boolean;
+  onOpen: () => void;
+}) {
+  const color = useWorkboxColor(m.id);
+  const label = `${m.label}: ${HEALTH_LABEL[m.health.kind]}`;
+  return (
+    <Tooltip label={label}>
+      <button
+        type="button"
+        className={`rail-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
+        aria-label={label}
+        aria-current={current ? "page" : undefined}
+        data-on={on ? "true" : undefined}
+        data-wb-color={color}
+        onClick={onOpen}
+      >
+        <WorkboxTile machineId={m.id} label={m.label} />
+        <span
+          className="health rail-health"
+          data-health={m.health.kind}
+          aria-hidden="true"
+        >
+          <HealthDot health={m.health} live />
+        </span>
+      </button>
+    </Tooltip>
   );
 }
 
@@ -104,6 +161,8 @@ export function Sidebar({
   const tabs = useTerminalStore((s) => s.tabs);
   const activeKey = useTerminalStore((s) => s.activeKey);
   const activate = useTerminalStore((s) => s.activate);
+  const activeTabMachine =
+    tabs.find((t) => t.tabKey === activeKey)?.target.machineId ?? null;
   const rows = useRowsByKey();
   const tabsByMachine = useMemo(
     () => new Map(groupTabs(tabs, machines).map((g) => [g.machineId, g.tabs])),
@@ -129,6 +188,11 @@ export function Sidebar({
     row?.scrollIntoView?.({ block: "nearest" });
   }, [activeKey, dashboardActive, activeWorkbox]);
   const [allProjects, setAllProjects] = useState(false);
+  const colorMenu = useWorkboxColorMenu();
+  const closeColorMenu = colorMenu.close;
+  // The menu is drawn only by the expanded sidebar. Collapsing (or expanding) drops it, so it
+  // does not come back later from the state it left behind.
+  useEffect(() => closeColorMenu(), [collapsed, closeColorMenu]);
   const hidden = Math.max(0, projects.length - PROJECTS_SHOWN);
   const shownProjects = allProjects
     ? projects
@@ -165,31 +229,15 @@ export function Sidebar({
             </span>
           </button>
         </Tooltip>
-        {machines.map((m) => {
-          const label = `${m.label}: ${HEALTH_LABEL[m.health.kind]}`;
-          return (
-            <Tooltip key={m.id} label={label}>
-              <button
-                type="button"
-                className={`rail-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
-                aria-label={label}
-                aria-current={m.id === activeWorkbox ? "page" : undefined}
-                onClick={() => onWorkbox(m.id)}
-              >
-                <span className="rail-icon" aria-hidden="true">
-                  {m.label.slice(0, 1).toUpperCase()}
-                </span>
-                <span
-                  className="health rail-health"
-                  data-health={m.health.kind}
-                  aria-hidden="true"
-                >
-                  <HealthDot health={m.health} live />
-                </span>
-              </button>
-            </Tooltip>
-          );
-        })}
+        {machines.map((m) => (
+          <RailWorkbox
+            key={m.id}
+            machine={m}
+            current={m.id === activeWorkbox}
+            on={m.id === activeWorkbox || m.id === activeTabMachine}
+            onOpen={() => onWorkbox(m.id)}
+          />
+        ))}
         <Tooltip label="Add workbox">
           <button
             type="button"
@@ -270,17 +318,21 @@ export function Sidebar({
         </button>
       </div>
       {machines.map((m) => (
-        <div className="nav-box" key={m.id}>
-          <Tooltip label={`${m.label}: ${HEALTH_LABEL[m.health.kind]}`}>
+        <WorkboxBox key={m.id} machineId={m.id}>
+          <Tooltip
+            label={`${m.label}: ${HEALTH_LABEL[m.health.kind]}`}
+            disabled={colorMenu.openId === m.id}
+          >
             <button
               type="button"
               className={`nav-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
               aria-current={m.id === activeWorkbox ? "page" : undefined}
               onClick={() => onWorkbox(m.id)}
+              onContextMenu={colorMenu.onContextMenu(m.id, m.label)}
             >
+              <WorkboxTile machineId={m.id} label={m.label} health={m.health} />
               <span className="nav-label">{m.label}</span>
               <span className="health" data-health={m.health.kind}>
-                <HealthDot health={m.health} live />
                 {HEALTH_LABEL[m.health.kind]}
               </span>
               <span className="count">{agentsByMachine.get(m.id) ?? 0}</span>
@@ -306,7 +358,7 @@ export function Sidebar({
               </Tooltip>
             );
           })}
-        </div>
+        </WorkboxBox>
       ))}
       {localOnly && (
         <p className="nav-hint">
@@ -369,6 +421,7 @@ export function Sidebar({
           <HintSlot shortcut="toggle-sidebar" />
         </button>
       </div>
+      {colorMenu.menu}
     </nav>
   );
 }

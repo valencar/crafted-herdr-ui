@@ -55,11 +55,16 @@ type Extra = {
   dashboardActive?: boolean;
   onDashboard?: () => void;
   onWorkbox?: (id: string) => void;
+  activeWorkbox?: string | null;
+  colors?: Record<string, string>;
 };
 
 function renderSidebar(collapsed: boolean, extra: Extra = {}) {
   useAppStore.setState({
-    settings: { sidebar_collapsed: collapsed } as unknown as Settings,
+    settings: {
+      sidebar_collapsed: collapsed,
+      workbox_colors: extra.colors ?? {},
+    } as unknown as Settings,
   });
   return render(
     <Sidebar
@@ -74,7 +79,7 @@ function renderSidebar(collapsed: boolean, extra: Extra = {}) {
       }
       herdrPath="/home/dev/.local/bin/herdr"
       herdrVersion="0.9.4"
-      activeWorkbox={null}
+      activeWorkbox={extra.activeWorkbox ?? null}
       dashboardActive={extra.dashboardActive ?? false}
       onDashboard={extra.onDashboard ?? vi.fn()}
       onJump={vi.fn()}
@@ -404,6 +409,81 @@ describe("Sidebar", () => {
     expect(onDashboard).toHaveBeenCalledTimes(1);
   });
 
+  it("workbox_row_shows_tile_and_keeps_health_word", () => {
+    renderSidebar(false);
+    const nav = screen.getByRole("navigation", { name: "Sidebar" });
+    const row = within(nav).getByRole("button", { name: /^buildbox/ });
+    const tile = row.querySelector(".wb-tile");
+    expect(tile).toHaveTextContent("B");
+    expect(tile?.querySelector(".sdot[data-health]")).toBeInTheDocument();
+    expect(row.querySelector(".health")).toHaveTextContent("Online");
+  });
+
+  it("nav_box_carries_workbox_color", () => {
+    const machines = [withSnapshot("buildbox"), machine("gpubox", "online")];
+    useAppStore.setState({
+      state: {
+        machines,
+        herdr_version: "0.9.4",
+        herdr_path: null,
+        generated_at_ms: 1,
+      },
+    });
+    renderSidebar(false, {
+      machines,
+      colors: { buildbox: "cyan", gpubox: "pink" },
+    });
+    const boxes = [...document.querySelectorAll<HTMLElement>(".nav-box")];
+    expect(boxes.map((b) => b.getAttribute("data-wb-color"))).toEqual([
+      "cyan",
+      "pink",
+    ]);
+  });
+
+  it("rail_marks_the_active_tabs_workbox", () => {
+    const machines = [withSnapshot("buildbox"), machine("gpubox", "online")];
+    useAppStore.setState({
+      state: {
+        machines,
+        herdr_version: "0.9.4",
+        herdr_path: null,
+        generated_at_ms: 1,
+      },
+    });
+    openTab("w1:p1", "agent w1:p1");
+    renderSidebar(true, { machines });
+    const rail = screen.getByRole("navigation", { name: "Sidebar" });
+    expect(
+      within(rail).getByRole("button", { name: /^buildbox/ }),
+    ).toHaveAttribute("data-on", "true");
+    expect(
+      within(rail).getByRole("button", { name: /^gpubox/ }),
+    ).not.toHaveAttribute("data-on");
+    expect(rail.querySelectorAll('[data-on="true"]')).toHaveLength(1);
+  });
+
+  it("rail_marks_the_open_workbox_screen", () => {
+    renderSidebar(true, { activeWorkbox: "gpubox" });
+    const rail = screen.getByRole("navigation", { name: "Sidebar" });
+    expect(
+      within(rail).getByRole("button", { name: /^gpubox/ }),
+    ).toHaveAttribute("data-on", "true");
+    expect(
+      within(rail).getByRole("button", { name: /^buildbox/ }),
+    ).not.toHaveAttribute("data-on");
+  });
+
+  it("rail_item_shows_tile", () => {
+    renderSidebar(true);
+    const rail = screen.getByRole("navigation", { name: "Sidebar" });
+    const item = within(rail).getByRole("button", { name: /^buildbox/ });
+    expect(item).toHaveAttribute("data-wb-color");
+    expect(item.querySelector(".wb-tile")).toHaveTextContent("B");
+    // The tile carries no dot of its own here: the rail's health dot stays.
+    expect(item.querySelector(".wb-tile .sdot")).toBeNull();
+    expect(item.querySelector(".rail-health .sdot")).toBeInTheDocument();
+  });
+
   it("rail_does_not_show_nested_terminals", () => {
     const machines = [withSnapshot("buildbox")];
     openTab("w1:p1", "agent w1:p1");
@@ -535,7 +615,7 @@ describe("Sidebar", () => {
     for (const collapsed of [false, true]) {
       const { unmount } = renderSidebar(collapsed);
       const nav = screen.getByRole("navigation", { name: "Sidebar" });
-      const dots = nav.querySelectorAll(".health .sdot[data-health]");
+      const dots = nav.querySelectorAll(".sdot[data-health]");
       expect(dots).toHaveLength(2);
       for (const dot of dots) expect(dot).toHaveClass("live");
       unmount();

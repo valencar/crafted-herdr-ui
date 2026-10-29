@@ -7,6 +7,7 @@ import type { RowDensity } from "./RowDensity";
 import type { TerminalFont } from "./TerminalFont";
 import type { TerminalId } from "./TerminalId";
 import type { Theme } from "./Theme";
+import type { WorkboxColor } from "./WorkboxColor";
 
 export type Settings = { 
 /**
@@ -58,4 +59,9 @@ new_session_hidden_kinds: Array<string>,
 /**
  * Whether the New session sheet leaves out Plain shell.
  */
-new_session_hide_shell: boolean, };
+new_session_hide_shell: boolean, 
+/**
+ * The color picked for each workbox, keyed by machine profile id. A workbox with no entry
+ * is given one automatically.
+ */
+workbox_colors: { [key in string]: WorkboxColor }, };

@@ -95,6 +95,7 @@ const DEFAULT_SETTINGS: Settings = {
   new_session_kind: null,
   new_session_hidden_kinds: [],
   new_session_hide_shell: false,
+  workbox_colors: {},
 };
 
 /** Settings as loaded, with the Run choice the sheet should start on. */
@@ -599,7 +600,7 @@ describe("NewSession form", () => {
     await group.findByRole("radio", { name: "claude" });
     expect(
       group.getAllByRole("radio").map((r) => r.closest("label")!.textContent),
-    ).toEqual(["CCclaude", "CXcodex", "$_Plain shell"]);
+    ).toEqual(["claude", "CXcodex", "$_Plain shell"]);
     expect(group.getByRole("radio", { name: "Plain shell" })).toBeChecked();
   });
 

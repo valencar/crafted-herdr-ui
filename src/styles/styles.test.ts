@@ -21,6 +21,27 @@ function rule(selector: string): string {
 }
 
 describe("app.css", () => {
+  it("keeps_the_home_tab_neutral_by_pinning_its_fill_to_the_selection", () => {
+    // The Home tab sits in the tab row but is no workbox: its join reads --selected.
+    expect(rule(".wb-tab-home")).toMatch(/--wb-fill:\s*var\(--selected\)/);
+  });
+
+  it("styles_a_current_rail_item_once_with_the_workbox_fill", () => {
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(
+      (m) => m[1].trim() === '.rail-item[aria-current="page"]',
+    );
+    expect(rules).toHaveLength(1);
+    expect(rules[0][2]).toMatch(/var\(--wb-fill,\s*var\(--selected\)\)/);
+  });
+
+  it("keeps_a_kind_logo_inline_so_a_wrapped_badge_is_not_split", () => {
+    const body = rule(".kind svg");
+    expect(body).not.toMatch(/display:\s*block/);
+    expect(body).toMatch(/display:\s*inline-block/);
+    expect(body).toMatch(/vertical-align:\s*middle/);
+    expect(body).not.toMatch(/margin/);
+  });
+
   it("keeps_the_row_focus_ring_inside_the_clipped_group_card", () => {
     // `.group` clips its overflow, so the ring must be drawn inside the row.
     expect(rule(".group")).toContain("overflow: hidden");
@@ -137,14 +158,27 @@ describe("app.css", () => {
     // The variable a rule paints its background with.
     const background = (selector: string) =>
       /background:\s*(var\(--[a-z0-9-]+\))\s*;/.exec(rule(selector))?.[1];
-    expect(background('.wb-tab[data-active="true"]')).toBeDefined();
-    expect(background('.wb-tab[data-active="true"]')).toBe(
-      background(".session-row"),
-    );
+    // The active workbox tab and the session row both take the workbox's tint.
+    expect(background('.wb-tab[data-active="true"]')).toBe("var(--wb-fill)");
+    expect(background(".session-row")).toBe("var(--wb-fill)");
     expect(background('.session-tab[data-active="true"]')).toBeDefined();
     expect(background('.session-tab[data-active="true"]')).toBe(
       background(".context-bar"),
     );
+  });
+
+  it("active_session_tab_has_the_workbox_accent_line", () => {
+    expect(rule('.session-tab[data-active="true"]')).toMatch(
+      /box-shadow:\s*inset 0 2px 0 var\(--wb\)/,
+    );
+  });
+
+  it("inverted_corners_follow_the_fill", () => {
+    for (const pseudo of ["before", "after"]) {
+      expect(rule(`.wb-tab[data-active="true"]::${pseudo}`)).toContain(
+        "var(--wb-fill) 10.5px",
+      );
+    }
   });
 
   it("a_needs_input_session_tab_still_shows_a_hover_fill", () => {
@@ -327,6 +361,32 @@ describe("sidebar hint slot", () => {
     expect(rule(".nav-slot")).toContain("display: inline-grid");
     expect(ruleWith(".nav-slot-rest")).toContain("transition: opacity");
     expect(ruleWith(".nav-slot-rest")).toContain("var(--dur-fast)");
+  });
+
+  it("sidebar_selection_uses_the_workbox_tint", () => {
+    for (const selector of [
+      '.nav-box .nav-item[aria-current="page"]',
+      '.nav-box .nav-term[aria-current="page"]',
+      '.rail-item[aria-current="page"]',
+      '.rail-item[data-on="true"]',
+    ]) {
+      expect(rule(selector), selector).toMatch(/background:\s*var\(--wb-fill/);
+    }
+    const stripe = rule(".nav-box .nav-term::before");
+    expect(stripe).toMatch(/width:\s*2px/);
+    expect(stripe).toContain("var(--wb)");
+    // About 60% strength at rest; the current tab's rail is solid.
+    expect(stripe).toMatch(/opacity:\s*0\.6\b/);
+    expect(rule('.nav-box .nav-term[aria-current="page"]::before')).toMatch(
+      /opacity:\s*1\b/,
+    );
+  });
+
+  it("workbox_tile_is_a_solid_workbox_square", () => {
+    const tile = rule(".wb-tile");
+    expect(tile).toContain("background: var(--wb)");
+    expect(tile).toContain("color: var(--on-wb)");
+    expect(rule('.wb-tile[data-size="sm"]')).toMatch(/width:\s*16px/);
   });
 });
 
@@ -814,5 +874,139 @@ describe("light theme", () => {
     // Orange, not red or yellow: green is a fraction of red.
     expect(g / r).toBeGreaterThan(0.3);
     expect(g / r).toBeLessThan(0.65);
+  });
+});
+
+// ---------- workbox colors ----------
+
+const WB_NAMES = [
+  "violet",
+  "pink",
+  "lime",
+  "cyan",
+  "yellow",
+  "magenta",
+  "leaf",
+  "purple",
+];
+/** HSL hue in degrees (0-360) of a `#rrggbb` colour. */
+function hue([r, g, b]: Rgb): number {
+  const [R, G, B] = [r / 255, g / 255, b / 255];
+  const max = Math.max(R, G, B);
+  const d = max - Math.min(R, G, B);
+  if (d === 0) return 0;
+  const sector =
+    max === R
+      ? ((G - B) / d) % 6
+      : max === G
+        ? (B - R) / d + 2
+        : (R - G) / d + 4;
+  return (sector * 60 + 360) % 360;
+}
+/** The shorter way round the colour wheel, in degrees. */
+const hueGap = (a: number, b: number) => {
+  const d = Math.abs(a - b) % 360;
+  return Math.min(d, 360 - d);
+};
+
+describe("workbox colors", () => {
+  const themes: Array<[string, Record<string, string>]> = [
+    ["dark", dark],
+    ["light", light],
+  ];
+
+  it("defines_the_workbox_palette_in_both_themes", () => {
+    for (const [theme, block] of themes) {
+      for (const token of [
+        ...WB_NAMES.map((n) => `--wb-${n}`),
+        "--wb-none",
+        "--on-wb",
+        "--wb-mix",
+      ]) {
+        expect(block[token], `${token} in ${theme}`).toBeDefined();
+      }
+      expect(block["--wb-mix"], theme).toMatch(/^\d+%$/);
+    }
+    expect(dark["--wb-mix"]).toBe("18%");
+    expect(light["--wb-mix"]).toBe("10%");
+  });
+
+  it("workbox_palette_meets_contrast", () => {
+    for (const [theme, block] of themes) {
+      const c = (token: string) => parseHex(block[token]);
+      const mix = parseInt(block["--wb-mix"], 10);
+      for (const name of [...WB_NAMES, "none"]) {
+        const wb = c(`--wb-${name}`);
+        expect(
+          ratio(c("--on-wb"), wb),
+          `${theme}: --on-wb on --wb-${name}`,
+        ).toBeGreaterThanOrEqual(4.5);
+        for (const surface of ["--bg", "--panel"]) {
+          const under = tint(wb, c(surface), mix);
+          for (const text of [
+            "--text",
+            "--text-2",
+            "--text-3",
+            "--text-4",
+            "--muted",
+          ]) {
+            expect(
+              ratio(c(text), under),
+              `${theme}: ${text} on ${mix}% --wb-${name} over ${surface}`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+      }
+    }
+  });
+
+  it("workbox_colors_stay_clear_of_status_hues", () => {
+    const status = [
+      "--st-needs",
+      "--st-working",
+      "--st-done",
+      "--online",
+      "--danger",
+    ];
+    for (const [theme, block] of themes) {
+      const hueOf = (token: string) => hue(parseHex(block[token]));
+      for (const name of WB_NAMES) {
+        for (const other of status) {
+          expect(
+            hueGap(hueOf(`--wb-${name}`), hueOf(other)),
+            `${theme}: --wb-${name} vs ${other}`,
+          ).toBeGreaterThanOrEqual(20);
+        }
+      }
+      for (const a of WB_NAMES) {
+        for (const b of WB_NAMES.filter((n) => n > a)) {
+          expect(
+            hueGap(hueOf(`--wb-${a}`), hueOf(`--wb-${b}`)),
+            `${theme}: --wb-${a} vs --wb-${b}`,
+          ).toBeGreaterThanOrEqual(15);
+        }
+      }
+    }
+  });
+
+  it("maps_every_workbox_color_name", () => {
+    for (const name of [...WB_NAMES, "none"]) {
+      expect(rule(`[data-wb-color="${name}"]`)).toMatch(
+        new RegExp(`--wb:\\s*var\\(--wb-${name}\\)`),
+      );
+    }
+    // An unknown value falls back to the neutral: the bare rule precedes every named one.
+    const bare = css.search(
+      /\[data-wb-color\]\s*\{\s*--wb:\s*var\(--wb-none\)/,
+    );
+    expect(bare).toBeGreaterThan(-1);
+    for (const name of [...WB_NAMES, "none"]) {
+      expect(css.indexOf(`[data-wb-color="${name}"]`), name).toBeGreaterThan(
+        bare,
+      );
+    }
+    expect(rule("[data-wb-color]")).toMatch(
+      /--wb-fill:\s*color-mix\(in srgb,\s*var\(--wb\)\s*var\(--wb-mix\),\s*var\(--bg\)\)/,
+    );
   });
 });

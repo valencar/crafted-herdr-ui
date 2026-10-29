@@ -72,6 +72,23 @@
   --ansi-14: #b8e4ff;
   --ansi-15: #ececef;
 
+  /* workbox colors: each workbox is painted one of these (tile, tab and row accents). --wb-none
+     is the neutral for strays and unknown ones; --on-wb is the letter on a solid tile;
+     --wb-mix is how much of the color a tint takes (low enough that --text-4 and --muted still
+     reach 4.5:1 on the tint). Hues stay 20 degrees clear of the status
+     colors; styles.test.ts checks contrast and spacing. */
+  --wb-violet: #998bfa;
+  --wb-pink: #f07ab8;
+  --wb-lime: #c3e36b;
+  --wb-cyan: #5fd3d3;
+  --wb-yellow: #e6d35a;
+  --wb-magenta: #e07ae6;
+  --wb-leaf: #8fdc6f;
+  --wb-purple: #bf8cf0;
+  --wb-none: #8a8d96;
+  --on-wb: #0b0c0e;
+  --wb-mix: 18%;
+
   /* shape */
   --radius-s: 6px;
   --radius-m: 8px;
@@ -152,6 +169,19 @@
   /* shadows */
   --shadow: rgb(23 24 27 / 16%);
   --shadow-pop: rgb(23 24 27 / 18%);
+
+  /* workbox colors: deeper variants of the dark hues, so a white letter reads on each */
+  --wb-violet: #6a50d6;
+  --wb-pink: #c2307f;
+  --wb-lime: #5f7a0a;
+  --wb-cyan: #0b7a70;
+  --wb-yellow: #8a6d00;
+  --wb-magenta: #a626b0;
+  --wb-leaf: #2f7d1a;
+  --wb-purple: #9040d0;
+  --wb-none: #6b6e76;
+  --on-wb: #ffffff;
+  --wb-mix: 10%;
 
   /* terminal: the 16 ANSI colors on the light background. 1-6 and 9-14 are at least 4.5:1,
      7, 8 and 15 at least 3:1; the bright ones are the livelier of each pair. */

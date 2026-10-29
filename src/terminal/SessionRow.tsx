@@ -11,6 +11,7 @@ import {
 } from "react";
 import { projectNames, type Row } from "../lib/grouping";
 import { canOpenNewSession } from "../lib/newSessionTarget";
+import { useWorkboxColor } from "../lib/workboxColors";
 import { useAppStore } from "../store/appStore";
 import { AllTabsMenu } from "./AllTabsMenu";
 import {
@@ -48,6 +49,7 @@ export function SessionRow({
   const machines = useAppStore((s) => s.state?.machines ?? NO_MACHINES);
   const openNewSession = useAppStore((s) => s.openNewSession);
 
+  const color = useWorkboxColor(group.machine ? group.machineId : null);
   const projects = useMemo(() => projectNames([...rows.values()]), [rows]);
   const needsCount = groups.reduce((n, g) => n + countNeeds(g.tabs, rows), 0);
 
@@ -94,6 +96,7 @@ export function SessionRow({
     <nav
       className="session-row"
       aria-label="Tabs"
+      data-wb-color={color}
       data-overflowing={overflowing ? "true" : undefined}
       data-dragging={drag.dragging ? "true" : undefined}
     >

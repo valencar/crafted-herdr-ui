@@ -1,7 +1,10 @@
-import { HealthDot, StatusDot } from "../components/StatusDot";
+import { StatusDot } from "../components/StatusDot";
+import { useWorkboxColorMenu } from "../components/WorkboxColorMenu";
+import { WorkboxTile } from "../components/WorkboxTile";
 import { Tooltip } from "../components/Tooltip";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MouseEvent } from "react";
 import { HEALTH_LABEL, plural } from "../lib/format";
+import { useWorkboxColor } from "../lib/workboxColors";
 import type { Row } from "../lib/grouping";
 import { HomeIcon } from "./HomeIcon";
 import { countNeeds } from "./tabInfo";
@@ -46,6 +49,7 @@ export function WorkboxRow({
   const activate = useTerminalStore((s) => s.activate);
   const activateMachine = useTerminalStore((s) => s.activateMachine);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const colorMenu = useWorkboxColorMenu();
 
   // The active tab is always in view.
   useEffect(() => {
@@ -70,48 +74,84 @@ export function WorkboxRow({
           </button>
         </Tooltip>
         <span className="wb-divider" aria-hidden="true" />
-        {groups.map((group) => {
-          const health = group.machine?.health.kind;
-          const count = plural(group.tabs.length, "tab", "tabs");
-          const needs = countNeeds(group.tabs, rows);
-          const active = group.machineId === activeMachineId;
-          return (
-            <button
-              key={group.machineId}
-              type="button"
-              className="wb-tab"
-              data-active={active}
-              aria-current={active ? "true" : undefined}
-              aria-label={`${group.label}, ${health ? HEALTH_LABEL[health] : "Unknown"}, ${count}${
-                needs > 0 ? `, ${needs} needs input` : ""
-              }`}
-              onClick={() => activateMachine(group.machineId)}
-            >
-              <span
-                className="health"
-                data-health={health ?? "unknown"}
-                aria-hidden="true"
-              >
-                {group.machine ? (
-                  <HealthDot health={group.machine.health} live />
-                ) : (
-                  <StatusDot status="unknown" live />
-                )}
-              </span>
-              <span className="mono wb-tab-label">{group.label}</span>
-              <span className="wb-tab-count">{group.tabs.length}</span>
-              {needs > 0 && (
-                <Tooltip label="Needs input">
-                  <span className="wb-tab-needs">
-                    <NeedsIcon />
-                    {needs}
-                  </span>
-                </Tooltip>
-              )}
-            </button>
-          );
-        })}
+        {groups.map((group) => (
+          <WorkboxTab
+            key={group.machineId}
+            group={group}
+            needs={countNeeds(group.tabs, rows)}
+            active={group.machineId === activeMachineId}
+            onActivate={() => activateMachine(group.machineId)}
+            onContextMenu={
+              // A stray group has no machine in the list, so no color to change.
+              group.machine
+                ? colorMenu.onContextMenu(group.machineId, group.label)
+                : undefined
+            }
+          />
+        ))}
       </div>
+      {colorMenu.menu}
     </nav>
+  );
+}
+
+/**
+ * One workbox's tab: its tile (carrying the health dot), name, tab count and needs badge. The
+ * tab carries the workbox's color, so the active one tints the row below it. A stray group (no
+ * machine in the list) is neutral and keeps its plain unknown dot beside the tile.
+ */
+function WorkboxTab({
+  group,
+  needs,
+  active,
+  onActivate,
+  onContextMenu,
+}: {
+  group: TabGroup;
+  needs: number;
+  active: boolean;
+  onActivate: () => void;
+  onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
+}) {
+  const color = useWorkboxColor(group.machine ? group.machineId : null);
+  const health = group.machine?.health;
+  const count = plural(group.tabs.length, "tab", "tabs");
+  return (
+    <button
+      type="button"
+      className="wb-tab"
+      data-active={active}
+      data-wb-color={color}
+      aria-current={active ? "true" : undefined}
+      aria-label={`${group.label}, ${health ? HEALTH_LABEL[health.kind] : "Unknown"}, ${count}${
+        needs > 0 ? `, ${needs} needs input` : ""
+      }`}
+      onClick={onActivate}
+      onContextMenu={onContextMenu}
+    >
+      <span
+        className="health"
+        data-health={health?.kind ?? "unknown"}
+        aria-hidden="true"
+      >
+        <WorkboxTile
+          machineId={group.machine ? group.machineId : null}
+          label={group.label}
+          size="sm"
+          health={health}
+        />
+        {!group.machine && <StatusDot status="unknown" live />}
+      </span>
+      <span className="mono wb-tab-label">{group.label}</span>
+      <span className="wb-tab-count">{group.tabs.length}</span>
+      {needs > 0 && (
+        <Tooltip label="Needs input">
+          <span className="wb-tab-needs">
+            <NeedsIcon />
+            {needs}
+          </span>
+        </Tooltip>
+      )}
+    </button>
   );
 }

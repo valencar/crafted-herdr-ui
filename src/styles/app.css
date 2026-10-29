@@ -573,6 +573,7 @@ kbd {
   gap: 2px;
 }
 .nav-term {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -596,6 +597,27 @@ kbd {
 .nav-term[aria-current="page"] {
   background: var(--selected);
   color: var(--text);
+}
+/* The workbox's color as a rail down the left of its nested terminals. */
+.nav-box .nav-term::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--wb);
+  opacity: 0.6;
+}
+.nav-box .nav-term[aria-current="page"]::before {
+  opacity: 1;
+}
+.nav-box .nav-item[aria-current="page"] {
+  background: var(--wb-fill);
+}
+.nav-box .nav-term[aria-current="page"] {
+  background: var(--wb-fill);
 }
 .nav-term .mono {
   flex: 1;
@@ -1034,6 +1056,14 @@ kbd {
   border: 1px solid var(--border-strong);
   border-radius: 5px;
 }
+/* A logo sits inside the monogram's footprint: 14px, inline so it also works in a wrapper span
+   (New session, Settings), where `.kind` is inline and a block child would split it. */
+.kind svg {
+  display: inline-block;
+  vertical-align: middle;
+  width: 14px;
+  height: 14px;
+}
 
 /* ---------- command box, dialog, toast ---------- */
 
@@ -1407,6 +1437,42 @@ select.field {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.workbox-title .wb-color-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The palette menu: a 4 by 2 grid of swatches (the same squares as a workbox tile). */
+.menu.wb-color-menu {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 6px;
+  padding: 8px;
+}
+.wb-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 7px;
+  background: var(--wb);
+  color: var(--on-wb);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+.wb-swatch:hover {
+  border-color: var(--border-strong);
+}
+.wb-swatch:focus-visible,
+.wb-swatch[aria-checked="true"] {
+  border-color: var(--text);
 }
 .workbox-meta {
   font-size: var(--fs-meta);
@@ -2105,7 +2171,7 @@ select.field {
   display: flex;
   align-items: flex-end;
   height: 54px;
-  background: var(--selected);
+  background: var(--wb-fill);
 }
 /* The scrolling part of a row. The side padding leaves room for the active tab's corners. */
 .wb-row-scroll,
@@ -2220,7 +2286,7 @@ select.field {
   background: var(--segment);
 }
 .wb-tab[data-active="true"] {
-  background: var(--selected);
+  background: var(--wb-fill);
   /* The corners switch at once, so the tab must not fade in beside them. */
   transition: none;
 }
@@ -2228,15 +2294,19 @@ select.field {
   background: radial-gradient(
     circle at 0 0,
     transparent 10px,
-    var(--selected) 10.5px
+    var(--wb-fill) 10.5px
   );
 }
 .wb-tab[data-active="true"]::after {
   background: radial-gradient(
     circle at 100% 0,
     transparent 10px,
-    var(--selected) 10.5px
+    var(--wb-fill) 10.5px
   );
+}
+/* Home belongs to no workbox: its tab joins the neutral Home views row below. */
+.wb-tab-home {
+  --wb-fill: var(--selected);
 }
 .wb-divider {
   flex: 0 0 auto;
@@ -2325,9 +2395,11 @@ select.field {
 }
 .session-tab[data-active="true"] {
   background: var(--panel);
+  /* The workbox's color as a line along the top. */
+  box-shadow: inset 0 2px 0 var(--wb);
   transition: none;
 }
-/* Active, the tab shows an orange top edge instead of the tint. */
+/* Active and needing input, the tab shows an orange top edge instead of the tint. */
 .session-tab[data-active="true"][data-needs="true"] {
   box-shadow: inset 0 2px 0 var(--st-needs);
 }
@@ -2931,14 +3003,64 @@ select.field {
 .rail-item:hover {
   background: var(--nav-hover);
 }
+/* The Dashboard's rail item has no workbox color, so it keeps the neutral selection. */
 .rail-item[aria-current="page"] {
-  background: var(--selected);
+  background: var(--wb-fill, var(--selected));
+}
+.rail-item[data-on="true"] {
+  background: var(--wb-fill, var(--selected));
 }
 .rail-item.is-dim {
   opacity: 0.5;
 }
 .rail-needs {
   margin-bottom: 8px;
+}
+/* A workbox's tile: its letter on its solid color; the health dot sits on a corner. */
+.wb-tile {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--wb);
+  color: var(--on-wb);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  line-height: 1;
+}
+.wb-tile[data-size="sm"] {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: var(--fs-hint);
+}
+.wb-tile-health {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: flex;
+  padding: 1.5px;
+  border-radius: 50%;
+  background: var(--bg-sidebar);
+}
+/* In a workbox tab the dot's ring takes the tab's own background, not the sidebar's. */
+.wb-tab .wb-tile-health {
+  background: var(--bg);
+}
+.wb-tab[data-active="true"] .wb-tile-health {
+  background: var(--wb-fill);
+}
+.density-compact .wb-tile {
+  width: 18px;
+  height: 18px;
+}
+.density-compact .wb-tile[data-size="sm"] {
+  width: 14px;
+  height: 14px;
 }
 .rail-icon {
   font-family: var(--font-mono);
@@ -3191,6 +3313,12 @@ select.field {
   justify-content: space-between;
   gap: 8px;
 }
+.wb-card-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .wb-card-name {
   margin: 0;
   font-size: var(--fs-body);
@@ -3221,4 +3349,42 @@ select.field {
 .dashboard.is-narrow .tiles,
 .dashboard.is-narrow .wb-cards {
   grid-template-columns: 1fr;
+}
+
+/* Workbox colors. `data-wb-color` goes on any element (tile, nav box, rail item, tab, session
+   row); it and its descendants read var(--wb) for the solid color and var(--wb-fill) for the
+   tint. `none` is the neutral for strays and unknown workboxes. */
+/* An unknown value is neutral: this comes first, so the named rules (same specificity) win. */
+[data-wb-color] {
+  --wb: var(--wb-none);
+}
+[data-wb-color="violet"] {
+  --wb: var(--wb-violet);
+}
+[data-wb-color="pink"] {
+  --wb: var(--wb-pink);
+}
+[data-wb-color="lime"] {
+  --wb: var(--wb-lime);
+}
+[data-wb-color="cyan"] {
+  --wb: var(--wb-cyan);
+}
+[data-wb-color="yellow"] {
+  --wb: var(--wb-yellow);
+}
+[data-wb-color="magenta"] {
+  --wb: var(--wb-magenta);
+}
+[data-wb-color="leaf"] {
+  --wb: var(--wb-leaf);
+}
+[data-wb-color="purple"] {
+  --wb: var(--wb-purple);
+}
+[data-wb-color="none"] {
+  --wb: var(--wb-none);
+}
+[data-wb-color] {
+  --wb-fill: color-mix(in srgb, var(--wb) var(--wb-mix), var(--bg));
 }

@@ -2,6 +2,7 @@ import { formatShortcut } from "../lib/shortcuts";
 import { KindBadge } from "../components/KindBadge";
 import { StatusPill } from "../components/StatusPill";
 import { Tooltip } from "../components/Tooltip";
+import { WorkboxTile } from "../components/WorkboxTile";
 import { shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { openRow } from "../lib/openRow";
@@ -42,6 +43,11 @@ export function ContextBar({ tab, row, onFind }: Props) {
         <span className="mono context-title">{row ? row.name : tab.title}</span>
         {row && <StatusPill status={row.status} live />}
         {row && <KindBadge kind={row.kind} />}
+        <WorkboxTile
+          size="sm"
+          machineId={tab.target.machineId}
+          label={tab.machineLabel}
+        />
         <span className="mono muted context-where">
           {row?.folder
             ? `${shortPath(row.folder)} · ${tab.machineLabel}`

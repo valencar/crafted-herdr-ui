@@ -44,6 +44,7 @@ const DEFAULTS: SettingsData = {
   new_session_kind: null,
   new_session_hidden_kinds: [],
   new_session_hide_shell: false,
+  workbox_colors: {},
 };
 
 const HERDR: HerdrStatus = {
@@ -539,7 +540,7 @@ describe("Settings › New session options", () => {
       within(g).getByText("Choose what the Run list in New session offers."),
     ).toBeInTheDocument();
     await within(g).findByRole("checkbox", { name: "claude" });
-    expect(boxes(g)).toEqual(["CCclaude", "CXcodex", "$_Plain shell"]);
+    expect(boxes(g)).toEqual(["claude", "CXcodex", "$_Plain shell"]);
     for (const box of within(g).getAllByRole("checkbox")) {
       expect(box).toBeChecked();
     }

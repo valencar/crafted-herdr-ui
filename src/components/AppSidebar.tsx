@@ -43,7 +43,9 @@ export function AppSidebar() {
       onDashboard={() => {
         showHomeView({ kind: "dashboard" });
       }}
-      activeWorkbox={view.kind === "workbox" ? view.machineId : null}
+      activeWorkbox={
+        activeKey === HOME && view.kind === "workbox" ? view.machineId : null
+      }
       onWorkbox={(id) => {
         showHomeView({ kind: "workbox", machineId: id });
       }}
