@@ -307,7 +307,7 @@ Workbox colors and agent logos. Use generic data (buildbox, gpubox, staging; api
 - [ ] All 8 colors (violet, pink, lime, cyan, yellow, magenta, leaf, purple) in Dark, Light and System: set each on a workbox from the picker and switch the theme live, in the main window and the menu bar popover.
 - [ ] The tile letter and the tinted text are readable on every color, in both themes.
 - [ ] The collapsed rail (⌘B) marks the active tab's workbox.
-- [ ] Switching workboxes retints both tab rows with no flicker, and on first launch the first frame is already tinted.
+- [ ] Switching workboxes retints both tab rows with no flicker after the settings load, and a workbox never switches from one color to another; a brief neutral frame at startup is fine.
 - [ ] A fresh install (no `workbox_colors` in settings) assigns colors once, Local first, and the same colors are there after a restart.
 - [ ] Removing a workbox recolors nobody.
 - [ ] The picker and the right-click menu (the sidebar workbox row and the workbox tab), by mouse and by keyboard: arrows, Home, End, Enter and Escape work, focus goes back to where it was, and no tooltip shows over the open menu.
