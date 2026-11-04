@@ -9,21 +9,27 @@
 # conversation (hello, events.subscribe, machine.list, templates.list, doc.get).
 # Note: every hc command starts a stopped local core (CLAUDE.md rule 5, the stated exception).
 #
-# Point it at the sandbox core, never at a core you care about:
+# It only runs against the sandbox core (CLAUDE.md rule 4), never the person's own:
 #   HC_SESSION=herdr-ui-qa XDG_STATE_HOME=... XDG_CONFIG_HOME=... XDG_RUNTIME_DIR=... scripts/capture-raw-fixtures.sh
-# It refuses to run without HC_SESSION unless HERDR_UI_CAPTURE_DEFAULT=1 is set on purpose.
+# It refuses unless HC_SESSION is exactly herdr-ui-qa and all three XDG variables are set.
+# There is no override: even a read-only connect auto-starts the person's core.
 set -u
 
 root=$(git rev-parse --show-toplevel) || exit 2
 cd "$root" || exit 2
 out="$root/fixtures-raw/hc"
-mkdir -p "$out"
 
-if [ -z "${HC_SESSION:-}" ] && [ "${HERDR_UI_CAPTURE_DEFAULT:-}" != "1" ]; then
-  echo "capture-raw-fixtures: HC_SESSION is not set; refusing to read the default core." >&2
-  echo "Use the sandbox environment (CLAUDE.md rule 4), or set HERDR_UI_CAPTURE_DEFAULT=1 on purpose." >&2
+if [ "${HC_SESSION:-}" != "herdr-ui-qa" ]; then
+  echo "capture-raw-fixtures: HC_SESSION must be exactly herdr-ui-qa (the sandbox core); refusing." >&2
   exit 2
 fi
+for var in XDG_STATE_HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR; do
+  if [ -z "${!var:-}" ]; then
+    echo "capture-raw-fixtures: $var is not set; the sandbox core needs its own state, config and runtime dirs; refusing." >&2
+    exit 2
+  fi
+done
+mkdir -p "$out"
 
 # HC_SOCKET would point hc at some other core whatever HC_SESSION says. The terminal variables
 # make hc act as a child of the terminal this runs in.

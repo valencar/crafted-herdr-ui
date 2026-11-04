@@ -13,7 +13,3 @@
 {"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":null},"seq":41,"terminal":"t16","type":"status"}}
 {"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":1767226008217,"reason":"killed","signal":1},"seq":42,"terminal":"t16","type":"finished"}}
 {"jsonrpc":"2.0","method":"event","params":{"data":{},"seq":43,"terminal":"t16","type":"removed"}}
-{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":null},"seq":44,"terminal":"t6","type":"status"}}
-{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":null,"reason":"signaled","signal":9},"seq":45,"terminal":"t6","type":"lost"}}
-{"jsonrpc":"2.0","method":"event","params":{"data":{"address":"t6","argv":["/bin/sh","-l"],"cols":200,"created_ms":1767225625319,"cwd":"/home/dev/infra","die_with_parent":false,"exit_code":null,"finished_ms":null,"identity":"ghostty","keep":true,"labels":{"herdr-ui-qa":"1"},"name":"infra-shell","notify":true,"parent":null,"pid":4185,"reason":null,"reported":false,"rm":false,"rows":120,"screen":"exact","signal":null,"state":"live","status":null,"status_ms":1767225667719,"template":null,"title":"","turn":0},"seq":46,"terminal":"t6","type":"restarted"}}
-{"jsonrpc":"2.0","method":"event","params":{"data":{"argv":["/bin/sh","-l"],"cwd":"/home/dev/infra","name":"bash","pid":4185},"seq":47,"terminal":"t6","type":"foreground"}}
