@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "pick another with --name",
+      "kind": "name_taken"
+    },
+    "message": "\"devbox\" is already a machine here"
+  }
+}

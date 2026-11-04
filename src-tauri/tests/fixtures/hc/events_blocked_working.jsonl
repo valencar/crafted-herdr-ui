@@ -1,0 +1,3 @@
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":{"app":"github-copilot","msg":"Applying","state":"working","title":"Plan terraform change"}},"seq":29,"terminal":"t3","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":{"app":"github-copilot","kind":"question","msg":"Which workspace?","state":"blocked","title":"Plan terraform change"}},"seq":30,"terminal":"t3","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"state":"blocked","turn":1},"seq":31,"terminal":"t3","type":"turn"}}

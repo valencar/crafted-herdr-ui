@@ -1,0 +1,42 @@
+{
+  "core": {
+    "id": "000000000000000000000000c0de0001",
+    "name": "workstation"
+  },
+  "features": [
+    "framed",
+    "attach",
+    "events"
+  ],
+  "framed": false,
+  "generation": 1,
+  "methods": [
+    "hello",
+    "server.status",
+    "server.stop",
+    "server.restart",
+    "terminal.run",
+    "templates.list",
+    "terminal.list",
+    "terminal.get",
+    "terminal.kill",
+    "terminal.rm",
+    "terminal.label",
+    "terminal.read",
+    "terminal.attach",
+    "terminal.send",
+    "terminal.wait",
+    "terminal.keys",
+    "terminal.interrupt",
+    "terminal.put",
+    "machine.exec",
+    "file.read",
+    "file.write",
+    "file.edit",
+    "events.subscribe",
+    "machine.add",
+    "machine.list",
+    "machine.rm"
+  ],
+  "version": "0.1.2"
+}

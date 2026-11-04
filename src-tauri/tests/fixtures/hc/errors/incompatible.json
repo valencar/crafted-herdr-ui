@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "in a terminal, `hc machine add --via 'dev@edgebox.example' --name <name>` offers to update it",
+      "kind": "incompatible"
+    },
+    "message": "hc on dev@edgebox.example speaks another protocol generation"
+  }
+}

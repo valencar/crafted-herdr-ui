@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":null},"seq":29,"terminal":"t6","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":null,"reason":"signaled","signal":9},"seq":30,"terminal":"t6","type":"lost"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"address":"t6","argv":["/bin/sh","-l"],"cols":200,"created_ms":1767225625319,"cwd":"/home/dev/infra","die_with_parent":false,"exit_code":null,"finished_ms":null,"identity":"ghostty","keep":true,"labels":{"herdr-ui-qa":"1"},"name":"infra-shell","notify":true,"parent":null,"pid":4185,"reason":null,"reported":false,"rm":false,"rows":120,"screen":"exact","signal":null,"state":"live","status":null,"status_ms":1767225667719,"template":null,"title":"","turn":0},"seq":31,"terminal":"t6","type":"restarted"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"argv":["/bin/sh","-l"],"cwd":"/home/dev/infra","name":"bash","pid":4185},"seq":32,"terminal":"t6","type":"foreground"}}
+{"jsonrpc":"2.0","method":"heartbeat","params":{"seq":32}}

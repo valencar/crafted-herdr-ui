@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","method":"event","params":{"data":{"name":"herdr-app","version":1},"seq":29,"type":"doc"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"name":"herdr-app","version":1},"machine":"buildbox","seq":30,"type":"doc"}}

@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "check the program name and cwd",
+      "kind": "spawn_failed"
+    },
+    "message": "cannot start \"no-such-agent\": No such file or directory (os error 2)"
+  }
+}

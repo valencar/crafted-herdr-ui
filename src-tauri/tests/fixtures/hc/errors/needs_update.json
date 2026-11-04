@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "hc machine update edgebox",
+      "kind": "needs_update"
+    },
+    "message": "edgebox's hc speaks another protocol generation"
+  }
+}

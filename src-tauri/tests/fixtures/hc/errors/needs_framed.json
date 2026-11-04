@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "send hello with framed: true first, or use `hc attach`",
+      "kind": "needs_framed"
+    },
+    "message": "attach needs a framed connection"
+  }
+}

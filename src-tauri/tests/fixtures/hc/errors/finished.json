@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "hc read t8",
+      "kind": "finished"
+    },
+    "message": "t8 has finished"
+  }
+}
