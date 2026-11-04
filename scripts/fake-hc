@@ -4,8 +4,9 @@
 // Subcommands:
 //   --version                    prints version.txt, else "hc 0.1.17".
 //   connect [--session S]        a JSON-RPC 2.0 line server on stdin/stdout (see below).
-//   attach [--observe] <address> prints attach_screen.txt then attach_last_line.txt to stderr, then
-//                                exits with attach_exit.txt (default 0).
+//   attach [--observe] <address> prints attach_screen.txt to stdout (the pty) and attach_last_line.txt
+//                                to stderr (ending in exactly one newline), then exits with
+//                                attach_exit.txt (default 0).
 //   machine login|update|add ... prints "ok", exits 0.
 //   anything else                exits 2.
 //
@@ -15,7 +16,8 @@
 //   <method>         -> <method>@<n>.json (n: that method's 1-based call number, counted across
 //                       processes in .counts.json), else <method>.json, else error -32601 not_found.
 // A <method>.json holds the JSON-RPC result only. `{"error":{...}}` is sent as the error, and
-// `{"sleep_ms":N,"result":...}` / `{"sleep_ms":N,"error":...}` waits N ms first.
+// `{"sleep_ms":N,"result":...}` / `{"sleep_ms":N,"error":...}` waits N ms first. `{"exit":true}` makes
+// the process log the request, then exit 0 without replying (the core dying mid-call).
 //   events.subscribe -> answers like any method, then plays events@<n>.jsonl (n: the n-th subscribe),
 //                       else events.jsonl, writing each line verbatim. Only two lines are control:
 //                       {"sleep_ms":N} pauses and {"drop":true} exits 0 at once. After the file ends
@@ -125,6 +127,14 @@ async function reply(id, method) {
   } else {
     n = nextCount(method);
     const fixture = loadFixture(method, n);
+    if (
+      fixture !== null &&
+      typeof fixture === "object" &&
+      Object.keys(fixture).length === 1 &&
+      fixture.exit === true
+    ) {
+      process.exit(0);
+    }
     step = fixture === null ? null : interpret(fixture);
   }
   if (step === null) {
@@ -225,15 +235,12 @@ async function connect() {
 }
 
 function attach() {
-  const screen = readText("attach_screen.txt") ?? "";
-  const lastLine = readText("attach_last_line.txt") ?? "";
-  process.stderr.write(screen + lastLine, () => {
-    const code = Number.parseInt(
-      (readText("attach_exit.txt") ?? "0").trim(),
-      10,
-    );
-    process.exit(Number.isNaN(code) ? 0 : code);
-  });
+  process.stdout.write(readText("attach_screen.txt") ?? "");
+  process.stderr.write(
+    (readText("attach_last_line.txt") ?? "").replace(/\n?$/, "\n"),
+  );
+  const code = Number.parseInt((readText("attach_exit.txt") ?? "0").trim(), 10);
+  process.exitCode = Number.isNaN(code) ? 0 : code; // let both streams flush
 }
 
 switch (argv[0]) {

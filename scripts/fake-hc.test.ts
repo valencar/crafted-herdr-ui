@@ -30,6 +30,8 @@ interface Run {
   stdout: string;
   stderr: string;
   status: number | null;
+  /** Whether the process was still running just before stdin was closed (only with closeAfterMs). */
+  aliveAtClose: boolean;
 }
 
 /** Spawns `fake-hc connect`, writes `requests` (one line each), closes stdin, collects output. */
@@ -46,11 +48,21 @@ function connect(
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
-    child.on("close", (status) => resolve({ stdout, stderr, status }));
+    let aliveAtClose = false;
+    let timer: NodeJS.Timeout | undefined;
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, status, aliveAtClose });
+    });
     child.stdin.on("error", () => {}); // the child may exit (drop) before we finish writing
     for (const r of requests) child.stdin.write(JSON.stringify(r) + "\n");
     if (opts.closeAfterMs === undefined) child.stdin.end();
-    else setTimeout(() => child.stdin.end(), opts.closeAfterMs);
+    else {
+      timer = setTimeout(() => {
+        aliveAtClose = child.exitCode === null && child.signalCode === null;
+        child.stdin.end();
+      }, opts.closeAfterMs);
+    }
   });
 }
 
@@ -204,6 +216,7 @@ describe("fake-hc", () => {
     const first = await connect(dir, [req(1, "events.subscribe")], {
       closeAfterMs: 500,
     });
+    expect(first.aliveAtClose).toBe(true); // the events ended with no drop, so it kept running
     expect(lines(first.stdout)).toEqual([
       { jsonrpc: "2.0", id: 1, result: { seq: 5, terminals: [] } },
       ev(6),
@@ -238,6 +251,7 @@ describe("fake-hc", () => {
         closeAfterMs: 300,
       },
     );
+    expect(r.aliveAtClose).toBe(true);
     expect(lines(r.stdout)).toEqual([
       { jsonrpc: "2.0", id: 1, result: { seq: 1, terminals: [] } },
     ]);
@@ -247,14 +261,37 @@ describe("fake-hc", () => {
   it("attach_prints_screen_last_line_and_exit_code", () => {
     const dir = fixtureDir({
       "attach_screen.txt": "screen text\n",
-      "attach_last_line.txt": "[detached from t7]\n",
+      "attach_last_line.txt": "[detached from t7]", // no trailing newline: fake-hc adds exactly one
       "attach_exit.txt": "3\n",
     });
     const r = sh(dir, "attach", "--observe", "t7");
-    expect(r.stderr).toBe("screen text\n[detached from t7]\n");
-    expect(r.stdout).toBe("");
+    expect(r.stdout).toBe("screen text\n");
+    expect(r.stderr).toBe("[detached from t7]\n");
     expect(r.status).toBe(3);
-    expect(sh(fixtureDir(), "attach", "t7").status).toBe(0);
+    const bare = sh(fixtureDir(), "attach", "t7");
+    expect(bare.status).toBe(0);
+    expect(bare.stdout).toBe("");
+  });
+
+  it("exit_fixture_logs_the_request_then_exits_0_without_replying", async () => {
+    const dir = fixtureDir({
+      "terminals.list@2.json": { exit: true },
+      "terminals.list.json": { ok: true },
+    });
+    const first = await connect(dir, [req(1, "terminals.list")]);
+    expect(lines(first.stdout)).toEqual([
+      { jsonrpc: "2.0", id: 1, result: { ok: true } },
+    ]);
+    const request = req(2, "terminals.list");
+    const second = await connect(dir, [request, req(3, "terminals.list")], {
+      closeAfterMs: 5000,
+    });
+    expect(second.status).toBe(0);
+    expect(second.stdout).toBe("");
+    expect(second.aliveAtClose).toBe(false);
+    const log = readFileSync(join(dir, "calls.log"), "utf8");
+    expect(log).toContain(JSON.stringify(request));
+    expect(log).not.toContain(JSON.stringify(req(3, "terminals.list")));
   });
 
   it("machine_subcommands_print_ok_and_other_argv_exits_2", () => {
