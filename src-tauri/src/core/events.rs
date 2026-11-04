@@ -64,7 +64,7 @@ impl TerminalMap {
                 }
             }
             Notification::Missed { seq, terminals } => {
-                let terminals = terminals.iter().filter_map(parse_terminal).collect();
+                let terminals = parse_terminals(terminals);
                 self.reset(*seq, terminals);
                 applied.missed = true;
                 applied.changed = true;
@@ -114,6 +114,8 @@ impl TerminalMap {
             "removed" => {
                 if let Some(address) = terminal {
                     applied.changed = self.terminals.remove(address).is_some();
+                    // A machine forgotten and added again must not inherit the old count.
+                    self.restarts.remove(address);
                 }
             }
             "labels" => {
@@ -179,10 +181,11 @@ impl TerminalMap {
                         };
                         let word_changed = status.as_ref().map(|s| &s.state)
                             != t.status.as_ref().map(|s| &s.state);
-                        let status_ms = match &status {
-                            None => None,
-                            Some(_) if word_changed => Some(now_ms),
-                            Some(_) => t.status_ms,
+                        // A cleared status keeps its stamp, as the core's own snapshots do.
+                        let status_ms = if status.is_some() && word_changed {
+                            Some(now_ms)
+                        } else {
+                            t.status_ms
                         };
                         applied.changed |= replace(&mut t.status, status);
                         applied.changed |= replace(&mut t.status_ms, status_ms);
@@ -240,6 +243,12 @@ fn exit_code(data: &Value) -> Option<i32> {
 /// A record the core sent; one that doesn't parse is skipped, never fatal.
 fn parse_terminal(v: &Value) -> Option<CoreTerminal> {
     serde_json::from_value(v.clone()).ok()
+}
+
+/// The terminals of a snapshot (`events.subscribe`, `missed`), lenient per record: a malformed
+/// one is skipped and the rest are kept.
+pub(crate) fn parse_terminals(values: &[Value]) -> Vec<CoreTerminal> {
+    values.iter().filter_map(parse_terminal).collect()
 }
 
 #[cfg(test)]
@@ -677,12 +686,12 @@ mod tests {
         assert_eq!(a.statuses, ["t7"]);
         assert_eq!(map.terminals["t7"].status_ms, Some(7_000));
 
-        // Cleared: no status, no stamp, like a snapshot of a terminal that has none.
+        // Cleared: the status goes, the stamp stays (the core's snapshots do the same).
         let cleared = json!({"records": {}, "reported": true, "status": null});
         let a = map.apply(&ev(33, "status", "t7", cleared), 9_000);
         assert!(a.changed);
         let t7 = &map.terminals["t7"];
-        assert_eq!((t7.status.clone(), t7.status_ms), (None, None));
+        assert_eq!((t7.status.clone(), t7.status_ms), (None, Some(7_000)));
         assert!(t7.reported);
     }
 
@@ -848,6 +857,49 @@ mod tests {
         assert!(!a.changed);
         assert_eq!(map.terminals.len(), 11);
         assert_eq!(map.seq, Some(29));
+    }
+
+    #[test]
+    fn removed_prunes_restarts() {
+        let mut map = subscribed();
+        map.restarts.insert("buildbox/t4".into(), 3);
+        let a = map.apply(&ev(29, "removed", "buildbox/t4", json!({})), 0);
+        assert!(a.changed);
+        assert!(!map.restarts.contains_key("buildbox/t4"));
+        // The same address created again starts from zero.
+        let record = json!({"address": "buildbox/t4", "state": "live", "argv": ["sh"],
+            "cwd": "/home/dev", "created_ms": 9});
+        map.apply(&ev(30, "created", "buildbox/t4", record.clone()), 0);
+        map.apply(&ev(31, "restarted", "buildbox/t4", record), 0);
+        assert_eq!(map.restarts["buildbox/t4"], 1);
+    }
+
+    #[test]
+    fn parse_terminals_skips_a_malformed_record() {
+        let v: Value = serde_json::from_str(SUBSCRIBE).unwrap();
+        let mut values = v["terminals"].as_array().unwrap().clone();
+        values.insert(3, json!({"nonsense": true}));
+        values.insert(0, json!("not even an object"));
+        let parsed = parse_terminals(&values);
+        assert_eq!(parsed.len(), 11);
+        assert_eq!(parsed[0].address, "t1");
+        assert!(parse_terminals(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_reset_to_a_lower_seq_takes_events_above_it() {
+        // A restarted core numbers from scratch: the new snapshot's seq rules, not the old one.
+        let mut map = subscribed();
+        assert_eq!(map.seq, Some(28));
+        let terminals = map.terminals.values().cloned().collect();
+        map.reset(3, terminals);
+        assert_eq!(map.seq, Some(3));
+        let dropped = map.apply(&ev(3, "title", "t1", json!({"title": "old"})), 0);
+        assert_eq!(dropped, Applied::default());
+        let applied = map.apply(&ev(4, "title", "t1", json!({"title": "new"})), 0);
+        assert!(applied.changed);
+        assert_eq!(map.terminals["t1"].title.as_deref(), Some("new"));
+        assert_eq!(map.seq, Some(4));
     }
 
     // ---- model parsing ----
