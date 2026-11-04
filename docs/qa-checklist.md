@@ -322,3 +322,9 @@ Workbox colors and agent logos. Use generic data (buildbox, gpubox, staging; api
 - [ ] The health-dot ring on the selected (tinted) sidebar workbox row: the ring takes the row's tint and shows no mismatched halo.
 - [ ] The agent badge (logo) in the New session and Settings options, and in agent rows, the Inspector and the context bar: rows keep their height and the chip is not split when it wraps.
 - [ ] Codex still shows "CX". This is intended: there is no licensed mark.
+
+## v0.9
+
+herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, infra).
+
+- [ ] Lists fill and statuses move against the sandbox core (`HC_SESSION=herdr-ui-qa`, scratch XDG dirs).
