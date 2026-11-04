@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/bindings/AppState";
 import type { CoreStatus } from "../lib/bindings/CoreStatus";
+import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
@@ -55,22 +56,22 @@ const HERDR: CoreStatus = {
   legacy_herdr: null,
 };
 
-function machine(id: string, over: Partial<MachineView> = {}): MachineView {
+function machine(id: string, over: { health?: Health } = {}): MachineView {
   return machineView(
     {
       id,
       name: id === "local" ? "Local" : id,
       target: id === "local" ? null : id,
       isLocal: id === "local",
+      health: over.health,
       lastOkMs: null,
     },
     null,
-    over,
   );
 }
 
 const STATE: AppState = {
-  ...appState([], { herdr_path: HERDR.path }),
+  ...appState([], { path: HERDR.path }),
   machines: [
     machine("local"),
     machine("buildbox"),

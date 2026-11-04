@@ -43,7 +43,7 @@ const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
 const state: AppState = appState(
   [[{ id: "buildbox", target: "buildbox" }, buildboxTerms()]],
-  { herdr_path: "/usr/local/bin/herdr" },
+  { path: "/usr/local/bin/herdr" },
 );
 
 const onClose = vi.fn();

@@ -52,7 +52,7 @@ function machine(
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return { ...buildState([], { generated_at_ms: NOW }), machines };
+  return { ...buildState([], { generatedAtMs: NOW }), machines };
 }
 
 /** The backend's plan, faked: the agent start line exists only for an agent kind. */
@@ -662,7 +662,6 @@ describe("NewSession form", () => {
     const terms = [...Array.from({ length: 9 }, (_, i) => i), 0].map((n, i) =>
       shellTerm({
         address: `w1:p${i + 1}`,
-        terminalId: `term-${i + 1}`,
         folder: `/home/dev/projects/p${n}`,
       }),
     );

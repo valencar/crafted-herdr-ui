@@ -1121,11 +1121,7 @@ it("stops listening for the window events on unmount", async () => {
 
 it("onboarding_when_no_herdr", async () => {
   useAppStore.setState({ view: { kind: "all" } });
-  ipc.getState.mockResolvedValue({
-    ...state,
-    herdr_path: null,
-    herdr_version: null,
-  });
+  ipc.getState.mockResolvedValue(appState([], { path: null, version: null }));
   render(<App />);
   expect(
     await screen.findByRole("heading", { name: "herdr wasn’t found" }),
@@ -1236,8 +1232,7 @@ describe("the window chrome", () => {
 
   function listBoxes(version = "0.9.4", ...machines: MachineView[]) {
     ipc.getState.mockResolvedValue({
-      ...state,
-      herdr_version: version,
+      ...appState([], { version }),
       machines: machines.length ? machines : [box("buildbox"), box("gpubox")],
     });
     ipc.invokeTyped.mockImplementation(async (name: string) =>
@@ -1626,13 +1621,8 @@ describe("the window chrome", () => {
           ...buildboxTerms(),
           shellTerm({
             address: "w9:p9",
-            terminalId: "term-99",
             title: "claude: refactor auth",
             folder: "/home/dev/projects/api-service",
-            workspaceId: "w1",
-            workspaceLabel: "api-service",
-            tabId: "w1:t1",
-            tabLabel: "main",
           }),
         ],
       });
@@ -1782,7 +1772,7 @@ describe("the window chrome", () => {
       expect(screen.queryByRole("status")).toBeNull();
       act(() =>
         useAppStore.setState({
-          state: { ...state, herdr_version: "0.8.8", machines: [] },
+          state: appState([], { version: "0.8.8" }),
         }),
       );
       expect(screen.getByRole("status")).toHaveTextContent("herdr 0.8.8");

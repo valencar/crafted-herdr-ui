@@ -42,7 +42,7 @@ function machine(
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return { ...buildState([], { generated_at_ms: 1_000 }), machines };
+  return { ...buildState([], { generatedAtMs: 1_000 }), machines };
 }
 
 function row(overrides: Partial<Row>): Row {
@@ -264,7 +264,6 @@ describe("groupByProject", () => {
         t.address === "w1:p1"
           ? shellTerm({
               address: t.address,
-              terminalId: t.terminalId,
               folder: t.folder,
               title: "claude: refactor auth",
             })

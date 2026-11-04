@@ -57,7 +57,6 @@ export type AgentTermSpec = {
   tabId: string;
   workspaceLabel: string;
   tabLabel: string;
-  extra: Record<string, unknown>;
 };
 
 export type ShellTermSpec = {
@@ -70,7 +69,6 @@ export type ShellTermSpec = {
   tabId: string;
   workspaceLabel: string;
   tabLabel: string;
-  extra: Record<string, unknown>;
 };
 
 export type TermSpec = AgentTermSpec | ShellTermSpec;
@@ -97,7 +95,6 @@ export function agentTerm(spec: {
   tabId?: string;
   workspaceLabel?: string;
   tabLabel?: string;
-  extra?: Record<string, unknown>;
 }): AgentTermSpec {
   const workspaceId = spec.workspaceId ?? wsOf(spec.address);
   return {
@@ -120,7 +117,6 @@ export function agentTerm(spec: {
     tabId: spec.tabId ?? `${workspaceId}:t1`,
     workspaceLabel: spec.workspaceLabel ?? workspaceId,
     tabLabel: spec.tabLabel ?? spec.tabId ?? `${workspaceId}:t1`,
-    extra: spec.extra ?? {},
   };
 }
 
@@ -134,7 +130,6 @@ export function shellTerm(spec: {
   tabId?: string;
   workspaceLabel?: string;
   tabLabel?: string;
-  extra?: Record<string, unknown>;
 }): ShellTermSpec {
   const workspaceId = spec.workspaceId ?? wsOf(spec.address);
   return {
@@ -147,7 +142,6 @@ export function shellTerm(spec: {
     tabId: spec.tabId ?? `${workspaceId}:t1`,
     workspaceLabel: spec.workspaceLabel ?? workspaceId,
     tabLabel: spec.tabLabel ?? spec.tabId ?? `${workspaceId}:t1`,
-    extra: spec.extra ?? {},
   };
 }
 
@@ -165,7 +159,8 @@ export function machine(spec: MachineSpec): Required<MachineSpec> {
 }
 
 /**
- * The six terminals of `snapshot_buildbox.json`: four agents (`w1:p1` planner, blocked;
+ * The six terminals of `snapshot_buildbox.json` as the UI reads it (not byte for byte: the
+ * tab numbering, `focused` and w1:p2's `cwd` differ): four agents (`w1:p1` planner, blocked;
  * `w1:p2` copilot, working; `w2:p1` tester, done; `w2:p2` claude, idle) and two shells
  * (`w1:p3`, `w2:p3`). `patch` changes terminals by address: any `agentTerm` field of an
  * agent, and the `folder` or `title` of a shell.
@@ -286,7 +281,6 @@ function agentOf(t: AgentTermSpec): Agent {
     revision: 1,
     state_change_seq: 1,
     completion_seq: 0,
-    ...t.extra,
   };
 }
 
@@ -304,7 +298,6 @@ function paneOf(t: TermSpec): Pane {
     agent_status: t.kind === "agent" ? t.status : "unknown",
     focused: false,
     revision: 1,
-    ...t.extra,
   };
 }
 
@@ -356,12 +349,11 @@ function snapshotOf(terms: TermSpec[]): Snapshot {
 
 /**
  * One machine as the UI receives it. `terms` is its terminals; `null` is a machine that has
- * not answered yet (no state to show). `extra` replaces any field of the view.
+ * not answered yet (no state to show).
  */
 export function machineView(
   spec: MachineSpec,
   terms: TermSpec[] | null,
-  extra: Partial<MachineView> = {},
 ): MachineView {
   const m = machine(spec);
   const ages: Record<string, number> = {};
@@ -379,24 +371,28 @@ export function machineView(
     snapshot: terms === null ? null : snapshotOf(terms),
     last_ok_ms: m.lastOkMs,
     ages,
-    ...extra,
   };
 }
 
 /**
- * The state the UI receives. `machines` pairs each machine with its terminals. `extra`
- * replaces any top-level field (`herdr_version`, `herdr_path`, `generated_at_ms`).
+ * The state the UI receives. `machines` pairs each machine with its terminals. `opts` names
+ * the app-level facts a test may need: the path and version of the herdr the app found
+ * (`null` for none) and the time the state was made.
  */
 export function appState(
   machines: Array<[MachineSpec, TermSpec[] | null]>,
-  extra: Partial<AppState> = {},
+  opts: {
+    path?: string | null;
+    version?: string | null;
+    generatedAtMs?: number;
+  } = {},
 ): AppState {
   return {
     machines: machines.map(([m, terms]) => machineView(m, terms)),
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: 1,
-    ...extra,
+    herdr_version: opts.version === undefined ? "0.9.4" : opts.version,
+    herdr_path:
+      opts.path === undefined ? "/home/dev/.local/bin/herdr" : opts.path,
+    generated_at_ms: opts.generatedAtMs ?? 1,
   };
 }
 

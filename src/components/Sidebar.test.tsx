@@ -232,7 +232,7 @@ describe("Sidebar", () => {
   it("each_workbox_shows_its_agent_count", () => {
     useAppStore.setState({
       state: {
-        ...buildState([], { herdr_path: null }),
+        ...buildState([]),
         machines: [withSnapshot("buildbox")],
       },
     });
@@ -246,7 +246,7 @@ describe("Sidebar", () => {
   it("open_tabs_are_nested_under_their_workbox", () => {
     const machines = [withSnapshot("buildbox"), machine("gpubox", "online")];
     useAppStore.setState({
-      state: { ...buildState([], { herdr_path: null }), machines },
+      state: { ...buildState([]), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     openTab("w2:p1", "agent w2:p1");
@@ -291,7 +291,7 @@ describe("Sidebar", () => {
   it("a_tab_without_a_live_session_says_its_state_in_words", () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: { ...buildState([], { herdr_path: null }), machines },
+      state: { ...buildState([]), machines },
     });
     openTab("w2:p2", "agent w2:p2");
     renderSidebar(false, { machines });
@@ -305,7 +305,7 @@ describe("Sidebar", () => {
   it("nested_terminal_marks_the_active_tab_current", () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: { ...buildState([], { herdr_path: null }), machines },
+      state: { ...buildState([]), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     openTab("w2:p1", "agent w2:p1");
@@ -321,7 +321,7 @@ describe("Sidebar", () => {
   it("nested_terminal_activates_its_tab", async () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: { ...buildState([], { herdr_path: null }), machines },
+      state: { ...buildState([]), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     openTab("w2:p1", "agent w2:p1");
@@ -394,7 +394,7 @@ describe("Sidebar", () => {
   it("nav_box_carries_workbox_color", () => {
     const machines = [withSnapshot("buildbox"), machine("gpubox", "online")];
     useAppStore.setState({
-      state: { ...buildState([], { herdr_path: null }), machines },
+      state: { ...buildState([]), machines },
     });
     renderSidebar(false, {
       machines,
@@ -410,7 +410,7 @@ describe("Sidebar", () => {
   it("rail_marks_the_active_tabs_workbox", () => {
     const machines = [withSnapshot("buildbox"), machine("gpubox", "online")];
     useAppStore.setState({
-      state: { ...buildState([], { herdr_path: null }), machines },
+      state: { ...buildState([]), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     renderSidebar(true, { machines });
@@ -470,7 +470,7 @@ describe("Sidebar", () => {
   it("terminal_rows_lead_with_a_live_dot_and_hint_their_tab", () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: { ...buildState([], { herdr_path: null }), machines },
+      state: { ...buildState([]), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     openTab("w2:p1", "agent w2:p1");
@@ -487,7 +487,7 @@ describe("Sidebar", () => {
   it("no_title_attributes", () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: { ...buildState([], { herdr_path: null }), machines },
+      state: { ...buildState([]), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     const projects = [project("api-service")];
@@ -522,7 +522,7 @@ describe("Sidebar", () => {
     try {
       const machines = [withSnapshot("buildbox")];
       useAppStore.setState({
-        state: { ...buildState([], { herdr_path: null }), machines },
+        state: { ...buildState([]), machines },
       });
       openTab("w1:p1", "agent w1:p1");
       openTab("w2:p1", "agent w2:p1");
@@ -589,7 +589,7 @@ describe("Sidebar", () => {
     it("a_terminal_row_tooltip_has_its_title_and_status", () => {
       const machines = [withSnapshot("buildbox")];
       useAppStore.setState({
-        state: { ...buildState([], { herdr_path: null }), machines },
+        state: { ...buildState([]), machines },
       });
       openTab("w1:p1", "a-very-long-agent-title-that-fades-at-the-edge");
       act(() =>

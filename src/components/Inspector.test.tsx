@@ -36,7 +36,7 @@ const machine: MachineView = machineView(
 );
 const rows = toRows(
   appState([[{ id: "buildbox", target: "buildbox" }, buildboxTerms()]], {
-    herdr_path: null,
+    path: null,
   }),
 );
 const rowOf = (key: string) => rows.find((r) => r.key === key)!;

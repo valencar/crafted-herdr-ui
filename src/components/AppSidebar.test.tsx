@@ -17,7 +17,7 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
 
 const state: AppState = appState(
   [[{ id: "buildbox", target: "buildbox" }, buildboxTerms()]],
-  { herdr_path: "/usr/local/bin/herdr" },
+  { path: "/usr/local/bin/herdr" },
 );
 
 beforeEach(() => {

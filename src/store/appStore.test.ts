@@ -27,7 +27,7 @@ describe("appStore", () => {
 
   it("sets each field through its setter", () => {
     const s = useAppStore.getState();
-    const app = appState([], { herdr_version: null, herdr_path: null });
+    const app = appState([]);
     s.setState(app);
     s.select("buildbox::w1:p1");
     s.setGroupBy("status");

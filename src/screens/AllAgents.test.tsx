@@ -88,7 +88,7 @@ function machine(
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return { ...buildState([], { generated_at_ms: NOW }), machines };
+  return { ...buildState([], { generatedAtMs: NOW }), machines };
 }
 
 const defaultState = () => appState(machine("buildbox"), machine("gpubox"));

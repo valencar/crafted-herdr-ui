@@ -95,7 +95,7 @@ beforeEach(() => {
   vi.mocked(openFull).mockReset();
   useAppStore.setState({
     state: appState([[{ id: "buildbox", lastOkMs: null }, null]], {
-      herdr_path: null,
+      path: null,
     }),
   });
 });

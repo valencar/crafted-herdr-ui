@@ -59,7 +59,7 @@ function machine(id: string, terms: TermSpec[] = fixtureTerms()): MachineView {
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return { ...buildState([], { generated_at_ms: NOW }), machines };
+  return { ...buildState([], { generatedAtMs: NOW }), machines };
 }
 
 function setup(state: AppState | null) {
