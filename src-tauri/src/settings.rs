@@ -164,6 +164,10 @@ pub struct Settings {
     /// is given one automatically.
     #[serde(default)]
     pub workbox_colors: BTreeMap<String, WorkboxColor>,
+    /// Workboxes (machine ids) the person hid. A hidden workbox is not shown and does not
+    /// notify; this is an app setting, with no core call behind it.
+    #[serde(default)]
+    pub hidden_workboxes: Vec<String>,
 }
 
 impl Default for Settings {
@@ -193,6 +197,7 @@ impl Default for Settings {
             new_session_hidden_kinds: Vec::new(),
             new_session_hide_shell: false,
             workbox_colors: BTreeMap::new(),
+            hidden_workboxes: Vec::new(),
         }
     }
 }
@@ -227,6 +232,12 @@ impl Settings {
             .into_iter()
             .map(|k| k.trim().to_owned())
             .filter(|k| !k.is_empty() && seen.insert(k.clone()))
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        self.hidden_workboxes = std::mem::take(&mut self.hidden_workboxes)
+            .into_iter()
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty() && seen.insert(id.clone()))
             .collect();
     }
 
@@ -523,6 +534,7 @@ mod tests {
         assert!(s.new_session_hidden_kinds.is_empty());
         assert!(!s.new_session_hide_shell);
         assert!(s.workbox_colors.is_empty());
+        assert!(s.hidden_workboxes.is_empty());
         // The keys are exactly the spec's (section 8.8) plus `open_after_create` and the v0.2
         // terminal and layout keys.
         let keys: std::collections::BTreeSet<_> = serde_json::to_value(&s)
@@ -557,6 +569,7 @@ mod tests {
             "new_session_hidden_kinds",
             "new_session_hide_shell",
             "workbox_colors",
+            "hidden_workboxes",
         ]
         .map(String::from)
         .into();
@@ -718,6 +731,17 @@ mod tests {
                 .merged(&json!({"theme": "blue"}))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn hidden_workboxes_round_trip_and_old_files_load_empty() {
+        let set = Settings::default()
+            .merged(&json!({"hidden_workboxes": [" buildbox ", "gpubox", "buildbox", ""]}))
+            .unwrap();
+        assert_eq!(set.hidden_workboxes, ["buildbox", "gpubox"]);
+        let mut entries = Settings::default().to_entries();
+        entries.retain(|(k, _)| k != "hidden_workboxes");
+        assert!(Settings::from_entries(entries).hidden_workboxes.is_empty());
     }
 
     #[test]

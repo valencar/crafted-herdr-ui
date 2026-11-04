@@ -27,9 +27,11 @@ pub enum CoreError {
     /// The connection dropped while a call was waiting.
     #[error("the connection to herdr-core was lost")]
     Lost,
-    /// The core speaks another protocol generation or lacks a method the app uses.
+    /// The core speaks another protocol generation or lacks a method the app uses. `newer` is
+    /// true when the core is ahead of the app (a newer generation), so the fix is to update the
+    /// app; false for a core that lacks a method, where the fix is to update the core.
     #[error("herdr-core is not compatible: {reason}")]
-    Incompatible { reason: String },
+    Incompatible { reason: String, newer: bool },
     /// Bad JSON or a reply that doesn't match.
     #[error("unexpected reply from herdr-core: {message}")]
     Protocol { message: String },

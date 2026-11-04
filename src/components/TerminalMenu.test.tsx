@@ -53,6 +53,7 @@ const SETTINGS: Settings = {
   new_session_hidden_kinds: [],
   new_session_hide_shell: false,
   workbox_colors: {},
+  hidden_workboxes: [],
 };
 
 function setup(template = "") {

@@ -65,4 +65,9 @@ new_session_hide_shell: boolean,
  * The color picked for each workbox, keyed by machine profile id. A workbox with no entry
  * is given one automatically.
  */
-workbox_colors: { [key in string]: WorkboxColor }, };
+workbox_colors: { [key in string]: WorkboxColor }, 
+/**
+ * Workboxes (machine ids) the person hid. A hidden workbox is not shown and does not
+ * notify; this is an app setting, with no core call behind it.
+ */
+hidden_workboxes: Array<string>, };

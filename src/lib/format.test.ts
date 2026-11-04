@@ -131,7 +131,11 @@ describe("actionErrorMessage", () => {
         hint: null,
       }),
     ).toBe("no terminal");
-    expect(core({ kind: "incompatible", reason: "this core lacks: x" })).toBe(
+    expect(core({
+        kind: "incompatible",
+        reason: "this core lacks: x",
+        newer: false,
+      })).toBe(
       "this core lacks: x",
     );
   });

@@ -4,4 +4,4 @@
  * Errors from talking to herdr-core. Serialized to the UI as a flat object tagged by `kind`,
  * e.g. `{"kind":"rpc","code":"not_found","message":"…","hint":"…"}`.
  */
-export type CoreError = { "kind": "notFound" } | { "kind": "spawn", message: string, } | { "kind": "timeout", method: string, } | { "kind": "rpc", code: string, message: string, hint: string | null, } | { "kind": "lost" } | { "kind": "incompatible", reason: string, } | { "kind": "protocol", message: string, };
+export type CoreError = { "kind": "notFound" } | { "kind": "spawn", message: string, } | { "kind": "timeout", method: string, } | { "kind": "rpc", code: string, message: string, hint: string | null, } | { "kind": "lost" } | { "kind": "incompatible", reason: string, newer: boolean, } | { "kind": "protocol", message: string, };

@@ -84,7 +84,10 @@ pub async fn hello(conn: &Connection) -> Result<HelloInfo, CoreError> {
                 Some(hint) => format!("{message} ({hint})"),
                 None => message,
             };
-            return Err(CoreError::Incompatible { reason });
+            return Err(CoreError::Incompatible {
+                reason,
+                newer: true,
+            });
         }
         other => other?,
     };
@@ -96,6 +99,8 @@ pub async fn hello(conn: &Connection) -> Result<HelloInfo, CoreError> {
                 "this core speaks protocol generation {}, the app needs {GENERATION}",
                 generation.map_or_else(|| "?".to_owned(), |g| g.to_string())
             ),
+            // Only a core ahead of the app is "newer"; an absent or older generation is not.
+            newer: generation.is_some_and(|g| g > GENERATION),
         });
     }
     let strings = |value: Option<&Value>| -> Vec<String> {
@@ -118,6 +123,7 @@ pub async fn hello(conn: &Connection) -> Result<HelloInfo, CoreError> {
     if !missing.is_empty() {
         return Err(CoreError::Incompatible {
             reason: format!("this core lacks: {}", missing.join(", ")),
+            newer: false,
         });
     }
     let text = |pointer: &str| {
@@ -466,10 +472,11 @@ mod tests {
         let old: Value =
             serde_json::from_str(include_str!("../../tests/fixtures/hc/hello_old.json")).unwrap();
         let err = hello_over(Reply::Result(old)).await.unwrap_err();
-        let CoreError::Incompatible { reason } = err else {
+        let CoreError::Incompatible { reason, newer } = err else {
             panic!("expected Incompatible, got {err:?}");
         };
         assert!(reason.contains("terminal.keep"), "{reason}");
+        assert!(!newer, "a missing method is not a newer core");
 
         // Every method the app uses is required, one at a time.
         for method in USES {
@@ -477,7 +484,7 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(
-                matches!(&err, CoreError::Incompatible { reason } if reason.contains(method)),
+                matches!(&err, CoreError::Incompatible { reason, newer: false } if reason.contains(method)),
                 "{method}: {err:?}"
             );
         }
@@ -493,7 +500,13 @@ mod tests {
         h["generation"] = json!(2);
         assert!(matches!(
             hello_over(Reply::Result(h)).await,
-            Err(CoreError::Incompatible { .. })
+            Err(CoreError::Incompatible { newer: true, .. })
+        ));
+        let mut older = hello_result();
+        older["generation"] = json!(0);
+        assert!(matches!(
+            hello_over(Reply::Result(older)).await,
+            Err(CoreError::Incompatible { newer: false, .. })
         ));
     }
 
@@ -506,9 +519,10 @@ mod tests {
         let err = hello_over(Reply::Error(fixture["error"].clone()))
             .await
             .unwrap_err();
-        let CoreError::Incompatible { reason } = err else {
+        let CoreError::Incompatible { reason, newer } = err else {
             panic!("expected Incompatible, got {err:?}");
         };
+        assert!(newer, "an unsupported generation means the core is newer");
         assert!(reason.contains("generation 2"), "{reason}");
         assert!(reason.contains("generation 1"), "{reason}");
 

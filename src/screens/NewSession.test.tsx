@@ -93,6 +93,7 @@ const DEFAULT_SETTINGS: Settings = {
   new_session_hidden_kinds: [],
   new_session_hide_shell: false,
   workbox_colors: {},
+  hidden_workboxes: [],
 };
 
 /** Settings as loaded, with the Run choice the sheet should start on. */
