@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod activity;
+pub mod activity_v2;
 pub mod agents;
 pub mod commands;
 pub mod core;
@@ -14,6 +15,7 @@ pub mod pty;
 pub mod settings;
 pub mod ssh_config;
 pub mod state;
+pub mod sync;
 pub mod terminal;
 pub mod tray;
 
