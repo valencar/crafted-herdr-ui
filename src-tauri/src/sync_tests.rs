@@ -117,6 +117,7 @@ struct Harness {
     emits: Arc<Mutex<Vec<(Instant, AppStateV2)>>>,
     notified: Arc<Mutex<Vec<Transition>>>,
     settings: SharedSettings,
+    activity: Arc<Mutex<ActivityV2>>,
     sync: Option<CoreSync>,
 }
 
@@ -133,6 +134,7 @@ impl Harness {
             emits: Arc::default(),
             notified: Arc::default(),
             settings: SharedSettings::new(Settings::default()),
+            activity: Arc::new(Mutex::new(ActivityV2::new(None))),
             sync: None,
         }
     }
@@ -143,7 +145,7 @@ impl Harness {
         self.sync = Some(CoreSync::start(
             self.client.clone(),
             self.settings.clone(),
-            Arc::new(Mutex::new(ActivityV2::new(None))),
+            self.activity.clone(),
             Arc::new(move |s| lock(&emits).push((Instant::now(), s.clone()))),
             Arc::new(move |t| lock(&notified).push(t)),
         ));
@@ -621,6 +623,130 @@ async fn drop_right_after_an_unknown_name_created_still_emits_backoff_and_stoppe
         lock(&h.emits).last().unwrap().1.core_state,
         CoreState::Ready
     );
+}
+
+#[test]
+fn an_expired_hold_deadline_is_not_reused() {
+    let at = Instant::now();
+    let running = Hold {
+        after_list: 3,
+        until: at + Duration::from_secs(5),
+    };
+    // A hold still running keeps its deadline (names can't extend it), but waits for a newer list.
+    let kept = begin_hold(Some(running), 4, at);
+    assert_eq!(kept.until, running.until);
+    assert_eq!(kept.after_list, 4);
+    // One that ran out is not reused: the new name gets a whole hold of its own.
+    let later = at + Duration::from_secs(6);
+    assert_eq!(begin_hold(Some(running), 4, later).until, later + HOLD_MAX);
+    assert_eq!(begin_hold(None, 4, later).until, later + HOLD_MAX);
+}
+
+#[tokio::test(start_paused = true)]
+async fn forgetting_a_machine_prunes_its_seen_records_after_the_grace() {
+    let h = Harness::new();
+    let mut gone = json_of(MACHINE_LIST);
+    gone["machines"].as_array_mut().unwrap().remove(0);
+    *lock(&h.script.machine_list) = vec![json_of(MACHINE_LIST), gone];
+    let h = h.up().await;
+    let seen = |id: &str, a: &str| lock(&h.activity).peek(id, a);
+    assert_eq!(seen(BUILDBOX, "t2"), Some(0));
+    assert_eq!(seen("local", "t1"), Some(0));
+
+    // Forget it: its terminals are removed, and the next list doesn't have it.
+    for line in &rename_lines(29)[..3] {
+        h.send(&line.to_string());
+    }
+    h.sync().refresh_machines();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(h.state().machines.len(), 5);
+    // Inside the grace a rename could still bring the terminals back: the records stay.
+    assert_eq!(seen(BUILDBOX, "t2"), Some(0));
+
+    // Past it, the next list drops them. Local's stay.
+    wait_alive(&h, 30).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(seen(BUILDBOX, "t2"), None);
+    assert_eq!(seen(BUILDBOX, "t4"), None);
+    assert_eq!(seen("local", "t1"), Some(0));
+}
+
+#[tokio::test(start_paused = true)]
+async fn list_first_rename_keeps_rows_and_seen_state() {
+    let h = Harness::new();
+    // Rename asks for a list right after `machine.rename`: it can say the new name before the
+    // stream's `removed` and `created` arrive.
+    *lock(&h.script.machine_list) =
+        vec![json_of(MACHINE_LIST), list_with_buildbox_named("buildhost")];
+    let h = h.up().await;
+    let n0 = h.emit_count();
+    h.sync().refresh_machines();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The list's name shows at once, on rows that are still there under the old name.
+    let state = h.state();
+    assert_eq!(machine(&state, BUILDBOX).name, "buildhost");
+    assert_eq!(addresses(&state, BUILDBOX), ["t2", "t3", "t4"]);
+    assert!(h.emit_count() > n0);
+
+    // Then the stream catches up. t2 comes back at turn 1 and done: Done while its seen record
+    // (turn 0 at first sight) survives.
+    let mut lines = rename_lines(29);
+    lines[3]["params"]["data"]["turn"] = json!(1);
+    lines[3]["params"]["data"]["status"]["state"] = json!("done");
+    for line in &lines[..3] {
+        h.send(&line.to_string());
+    }
+    settle().await;
+    for line in &lines[3..] {
+        h.send(&line.to_string());
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let state = h.state();
+    assert_eq!(addresses(&state, BUILDBOX), ["t2", "t3", "t4"]);
+    assert_eq!(terminal(&state, BUILDBOX, "t2").status, DisplayStatus::Done);
+    let emits = lock(&h.emits);
+    for (_, s) in emits.iter().skip(n0) {
+        assert_eq!(addresses(s, BUILDBOX), ["t2", "t3", "t4"], "no flicker");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_fast_restart_shows_connecting_then_ready() {
+    let h = Harness::new().up().await;
+    // The core goes away and the very first reconnect (2 s on) works.
+    h.drop_events();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(h.state().core_state, CoreState::Connecting);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 2);
+    assert_eq!(h.state().core_state, CoreState::Ready);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        core_states(&h),
+        [
+            CoreState::Connecting,
+            CoreState::Ready,
+            CoreState::Connecting,
+            CoreState::Ready
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn nothing_is_emitted_after_the_sync_is_dropped() {
+    let mut h = Harness::new().up().await;
+    h.event(29, "title", "t7", json!({"title": "one"}));
+    settle().await;
+    let n0 = h.emit_count();
+    // A second change inside the window leaves a trailing emit pending...
+    h.event(30, "title", "t7", json!({"title": "two"}));
+    settle().await;
+    assert_eq!(h.emit_count(), n0);
+    // ...which must not go out once the sync is gone.
+    drop(h.sync.take());
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(h.emit_count(), n0);
 }
 
 #[tokio::test(start_paused = true)]

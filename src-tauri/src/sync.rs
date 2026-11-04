@@ -258,9 +258,39 @@ struct Model {
     /// Machines whose seen records are not pruned until then: their terminals were just removed,
     /// and may come back under a new name (the machine id stays).
     keep_seen: HashMap<String, Instant>,
+    /// Names machines had before a list renamed them.
+    aliases: Vec<Alias>,
     state: AppStateV2,
     /// The last state handed to `emit`.
     emitted: Option<AppStateV2>,
+}
+
+/// A name a machine had until the list renamed it: the stream still says it until its `removed`
+/// and `created` catch up, and it resolves to the same machine id meanwhile.
+#[derive(Debug, Clone)]
+struct Alias {
+    name: String,
+    id: String,
+    until: Instant,
+}
+
+/// The id of the machine a name belongs to: the list's own names first, then an old name that is
+/// still in use.
+fn machine_id<'a>(
+    machines: &'a [CoreMachine],
+    aliases: &'a [Alias],
+    name: &str,
+) -> Option<&'a str> {
+    machines
+        .iter()
+        .find(|m| m.name == name)
+        .map(|m| m.id.as_str())
+        .or_else(|| {
+            aliases
+                .iter()
+                .find(|a| a.name == name)
+                .map(|a| a.id.as_str())
+        })
 }
 
 /// A state held back for a machine name nobody has resolved yet.
@@ -270,6 +300,18 @@ struct Hold {
     after_list: u64,
     /// The time bound.
     until: Instant,
+}
+
+/// The hold for a name nobody has asked about: the next list to start answers for it. A hold
+/// already running keeps its deadline, so repeated names can't extend it; one that has run out
+/// doesn't count, or a new name in that gap would get no hold at all.
+fn begin_hold(existing: Option<Hold>, lists_started: u64, at: Instant) -> Hold {
+    Hold {
+        after_list: lists_started,
+        until: existing
+            .filter(|hold| hold.until > at)
+            .map_or(at + HOLD_MAX, |hold| hold.until),
+    }
 }
 
 impl Model {
@@ -286,6 +328,8 @@ struct Throttle {
 }
 
 struct Inner {
+    /// Set when `CoreSync` is dropped: the detached timer tasks must not emit after that.
+    closed: AtomicBool,
     client: Arc<CoreClient>,
     settings: SharedSettings,
     activity: Arc<Mutex<ActivityV2>>,
@@ -324,6 +368,7 @@ impl CoreSync {
             generated_at_ms: now_ms(),
         };
         let inner = Arc::new(Inner {
+            closed: AtomicBool::new(false),
             client,
             settings,
             activity,
@@ -343,6 +388,7 @@ impl CoreSync {
                 hold: None,
                 lists_started: 0,
                 keep_seen: HashMap::new(),
+                aliases: Vec::new(),
                 state,
                 emitted: None,
             }),
@@ -432,6 +478,7 @@ impl CoreSync {
 
 impl Drop for CoreSync {
     fn drop(&mut self) {
+        self.inner.closed.store(true, Ordering::SeqCst);
         for task in &self.tasks {
             task.abort();
         }
@@ -441,6 +488,7 @@ impl Drop for CoreSync {
 /// The machine id and view of one terminal, or the machine name the list doesn't know yet.
 fn localize(
     machines: &[CoreMachine],
+    aliases: &[Alias],
     restarts: &std::collections::BTreeMap<String, u32>,
     activity: &mut ActivityV2,
     t: &CoreTerminal,
@@ -448,10 +496,8 @@ fn localize(
     let (machine, local) = split_address(&t.address);
     let id = match machine {
         None => LOCAL.to_owned(),
-        Some(name) => machines
-            .iter()
-            .find(|m| m.name == name)
-            .map(|m| m.id.clone())
+        Some(name) => machine_id(machines, aliases, name)
+            .map(str::to_owned)
             .ok_or_else(|| name.to_owned())?,
     };
     let own_seen = activity.own_seen(&id, local, t.turn);
@@ -510,7 +556,7 @@ impl Inner {
         {
             let mut activity = lock(&self.activity);
             for t in m.map.terminals.values() {
-                match localize(&m.machines, &m.map.restarts, &mut activity, t) {
+                match localize(&m.machines, &m.aliases, &m.map.restarts, &mut activity, t) {
                     Ok((id, view)) => {
                         by_machine.entry(id.clone()).or_default().push(view.clone());
                         views.insert((id, view.address.clone()), view);
@@ -525,6 +571,7 @@ impl Inner {
             // Nor for a machine whose terminals were just removed: a rename removes them all and
             // creates them again under the new name, and the records are by machine id.
             m.keep_seen.retain(|_, until| at < *until);
+            m.aliases.retain(|a| at < a.until);
             if m.map.seq.is_some() && unknown.is_empty() {
                 let online = m.machines.iter().filter(|x| x.state == "connected");
                 for id in std::iter::once(LOCAL).chain(online.map(|x| x.id.as_str())) {
@@ -612,10 +659,7 @@ impl Inner {
         }
         if fresh {
             // The next list to start answers for this name; the time bound is kept once begun.
-            m.hold = Some(Hold {
-                after_list: m.lists_started,
-                until: m.hold.map_or(at + HOLD_MAX, |hold| hold.until),
-            });
+            m.hold = Some(begin_hold(m.hold, m.lists_started, at));
         } else if unknown.is_empty() {
             m.hold = None;
         }
@@ -627,6 +671,9 @@ impl Inner {
     /// `deferred`: a remote terminal was removed, which may be half of a rename, so the emit
     /// waits for the end of the window instead of going out at once.
     fn commit(self: &Arc<Self>, answered: Option<u64>, deferred: bool) {
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
         let (need_list, changed, hold_until) = {
             let mut m = lock(&self.model);
             let need_list = self.rebuild(&mut m, answered);
@@ -704,6 +751,9 @@ impl Inner {
 
     fn emit_now(&self) {
         let _ordered = lock(&self.emit_lock);
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
         let state = {
             let mut m = lock(&self.model);
             if m.holding(Instant::now()) || same_shown(&m.state, m.emitted.as_ref()) {
@@ -734,6 +784,43 @@ impl Inner {
 
     fn online(&self) -> bool {
         lock(&self.model).link == Link::Online
+    }
+
+    /// Takes a new machine list. A machine whose name changed keeps its seen records and its
+    /// terminals meanwhile: the stream still calls it by the old name until its `removed` and
+    /// `created` arrive (Rename asks for a list right after `machine.rename`).
+    fn set_machines(m: &mut Model, machines: Vec<CoreMachine>) {
+        let until = Instant::now() + HOLD_MAX;
+        for new in &machines {
+            if let Some(old) = m.machines.iter().find(|o| o.id == new.id)
+                && old.name != new.name
+            {
+                m.aliases.push(Alias {
+                    name: old.name.clone(),
+                    id: new.id.clone(),
+                    until,
+                });
+                m.keep_seen.insert(new.id.clone(), until);
+            }
+        }
+        m.machines = machines;
+    }
+
+    /// After a good list: forgets the seen records of machines that are gone from it (a forgotten
+    /// workbox), unless their terminals just went away (a rename in progress) or something is
+    /// still held back.
+    fn forget_gone_machines(&self) {
+        let mut guard = lock(&self.model);
+        let m = &mut *guard;
+        let at = Instant::now();
+        m.keep_seen.retain(|_, until| at < *until);
+        if m.holding(at) || !m.asked.is_empty() {
+            return;
+        }
+        let listed: HashSet<&str> = m.machines.iter().map(|x| x.id.as_str()).collect();
+        lock(&self.activity).retain_machines(|id| {
+            id == LOCAL || listed.contains(id) || m.keep_seen.contains_key(id)
+        });
     }
 
     /// Reads `machine.list` (quiet). Its id says when it started, for the hold.
@@ -783,10 +870,14 @@ impl Inner {
             // A failed read keeps the old list; either way it answers for the hold, if it started
             // after the hold did.
             let (id, answer) = self.list_machines().await;
+            let good = answer.is_ok();
             if let Ok(machines) = answer {
-                lock(&self.model).machines = machines;
+                Self::set_machines(&mut lock(&self.model), machines);
             }
             self.commit(Some(id), false);
+            if good {
+                self.forget_gone_machines();
+            }
             lock(&self.activity).maybe_save();
         }
     }
@@ -914,7 +1005,7 @@ impl Inner {
         {
             let mut m = lock(&self.model);
             if let Ok(machines) = list {
-                m.machines = machines;
+                Self::set_machines(&mut m, machines);
             }
             m.link = Link::Online;
             m.core_state = CoreState::Ready;
@@ -974,9 +1065,8 @@ impl Inner {
                     && let (Some(name), _) = split_address(address)
                 {
                     deferred = true;
-                    if let Some(machine) = m.machines.iter().find(|x| x.name == name) {
-                        m.keep_seen
-                            .insert(machine.id.clone(), Instant::now() + HOLD_MAX);
+                    if let Some(id) = machine_id(&m.machines, &m.aliases, name) {
+                        m.keep_seen.insert(id.to_owned(), Instant::now() + HOLD_MAX);
                     }
                 }
                 let applied = m.map.apply(note, now_ms());
@@ -998,7 +1088,8 @@ impl Inner {
                     };
                     let mut activity = lock(&self.activity);
                     // A machine the list doesn't know yet is held back, so it has no view.
-                    let Ok((id, view)) = localize(&m.machines, &m.map.restarts, &mut activity, t)
+                    let Ok((id, view)) =
+                        localize(&m.machines, &m.aliases, &m.map.restarts, &mut activity, t)
                     else {
                         continue;
                     };

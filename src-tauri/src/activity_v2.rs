@@ -134,6 +134,13 @@ impl ActivityV2 {
         self.dirty |= self.own_seen.len() != before;
     }
 
+    /// Forgets every machine for which `keep(machine_id)` is false (a forgotten workbox).
+    pub fn retain_machines(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        let before = self.own_seen.len();
+        self.own_seen.retain(|(machine, _), _| keep(machine));
+        self.dirty |= self.own_seen.len() != before;
+    }
+
     /// Whether `after` is something to notify about. `before` is what the app showed a moment
     /// ago for the terminal, `None` when it showed nothing.
     ///
