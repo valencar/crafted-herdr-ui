@@ -727,9 +727,9 @@ kbd {
   background: var(--text-4);
   border-color: var(--text-4);
 }
-/* Error is the needs shape (a filled dot, a static halo, a pulse while live) in --danger. It is
-   also what a terminal tab whose session failed shows (`TabState`): both mean "look at this".
-   Opening is the first connect and detached a dim dashed ring. */
+/* Error is an agent's status: the needs shape (a filled dot, a static halo, a pulse while live)
+   in --danger. A terminal tab with no live session (`TabState`) draws its own: failed is a
+   static hollow ring in --danger, opening the first connect, detached a dim dashed ring. */
 .sdot[data-status="error"] {
   background: var(--danger);
   border-color: var(--danger);
@@ -743,6 +743,9 @@ kbd {
   background: var(--danger);
   opacity: 0.6;
   animation: st-pulse 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.sdot[data-status="failed"] {
+  border-color: var(--danger);
 }
 /* Ended: a finished terminal. A hollow square, never animated; the shell is a small solid one. */
 .sdot[data-status="ended"] {
@@ -3267,7 +3270,7 @@ select.field {
   background: var(--st-idle);
 }
 .status-bar-seg[data-status="ended"] {
-  background: var(--text-3);
+  background: var(--text-2);
 }
 
 .wb-cards {

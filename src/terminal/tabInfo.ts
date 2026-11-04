@@ -41,12 +41,13 @@ export function tabName(tab: TermTab, row: Row | undefined): string {
     : `${tab.title} on ${tab.machineLabel}`;
 }
 
-/** What the dot's colour stands for: the agent's status while live, else the session state. */
+/** What the dot's colour stands for: the agent's status while live, else the session state (a failed one is `failed`, never an agent's `error`). */
 export function tabDotStatus(
   tab: TermTab,
   row: Row | undefined,
 ): DotStatus | undefined {
-  return tab.state === "live" ? row?.status : tab.state;
+  if (tab.state === "live") return row?.status;
+  return tab.state === "error" ? "failed" : tab.state;
 }
 
 /**

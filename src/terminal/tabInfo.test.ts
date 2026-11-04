@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { rowOf } from "../test/builders";
 import type { Row } from "../lib/grouping";
-import { countNeeds, tabSubline } from "./tabInfo";
+import { countNeeds, tabDotStatus, tabSubline } from "./tabInfo";
 import type { TermTab } from "./terminalStore";
 
 function tab(over: Partial<TermTab> = {}): TermTab {
@@ -89,7 +89,7 @@ describe("countNeeds", () => {
     expect(countNeeds(tabs, rows)).toBe(1);
   });
 
-  it("count_needs_counts_blocked_rows_only", () => {
+  it("count_needs_counts_blocked_and_error_rows_only", () => {
     const rows = new Map<string, Row>([
       ["buildbox::w1:p1", row({ key: "buildbox::w1:p1", status: "blocked" })],
       ["buildbox::w1:p2", row({ key: "buildbox::w1:p2", status: "done" })],
@@ -104,5 +104,21 @@ describe("countNeeds", () => {
       tab({ tabKey: "staging::w1:p1" }), // no row
     ];
     expect(countNeeds(tabs, rows)).toBe(2);
+  });
+});
+
+describe("tabDotStatus", () => {
+  it("a_failed_tab_has_its_own_dot_value_apart_from_an_agent_error", () => {
+    // A failed session is not an agent's Error: it must not draw the needs shape.
+    expect(tabDotStatus(tab({ state: "error" }), undefined)).toBe("failed");
+    expect(
+      tabDotStatus(tab({ state: "error" }), row({ status: "working" })),
+    ).toBe("failed");
+    // A live tab shows its agent's status, and an agent Error stays "error".
+    expect(tabDotStatus(tab({ state: "live" }), row({ status: "error" }))).toBe(
+      "error",
+    );
+    expect(tabDotStatus(tab({ state: "detached" }), row())).toBe("detached");
+    expect(tabDotStatus(tab({ state: "opening" }), row())).toBe("opening");
   });
 });

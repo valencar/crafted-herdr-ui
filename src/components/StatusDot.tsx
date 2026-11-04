@@ -4,9 +4,10 @@ import type { TabState } from "../terminal/terminalStore";
 
 /**
  * What a terminal tab's dot can show: its agent's status, or, while the tab has no live
- * session, the session's state (drawn as the plain hollow ring).
+ * session, the session's state. A failed session is `failed`, not `error`: `error` is an
+ * agent's status and draws the needs shape.
  */
-export type DotStatus = RowStatus | TabState;
+export type DotStatus = RowStatus | Exclude<TabState, "error"> | "failed";
 
 /**
  * An agent status drawn as a small indicator. It is `aria-hidden`: the status words always

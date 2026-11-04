@@ -61,7 +61,8 @@ export type Group = {
 
 export const LOOSE_NAME = "Loose sessions";
 
-const STATUS_ORDER: RowStatus[] = [
+/** Most urgent first: needs-you statuses, then the rest, ended last. */
+export const STATUS_ORDER: RowStatus[] = [
   "blocked",
   "error",
   "done",

@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Group } from "../lib/grouping";
+import type { Group, Row } from "../lib/grouping";
+import { rowOf } from "../test/builders";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { Sidebar } from "./Sidebar";
@@ -356,6 +357,45 @@ describe("Sidebar", () => {
     expect(
       within(nav).getByRole("button", { name: "2 more" }),
     ).toBeInTheDocument();
+  });
+
+  it("a_projects_dot_ranks_error_after_blocked_and_ended_last", () => {
+    const withRows = (name: string, statuses: Row["status"][]): Group => ({
+      ...project(name),
+      rows: statuses.map((status, i) =>
+        rowOf({
+          key: `buildbox::${name}:${i}`,
+          machineId: "buildbox",
+          machineLabel: "buildbox",
+          paneId: `${name}:${i}`,
+          name,
+          status,
+        }),
+      ),
+    });
+    renderSidebar(false, {
+      projects: [
+        withRows("api-service", ["error"]),
+        withRows("web-app", ["working", "error"]),
+        withRows("infra", ["ended", "ended"]),
+      ],
+    });
+    const nav = screen.getByRole("navigation", { name: "Sidebar" });
+    const item = (name: string) =>
+      within(nav)
+        .getByText(name, { selector: ".nav-label" })
+        .closest("button")!;
+    expect(item("api-service")).toHaveTextContent("Error:");
+    expect(item("api-service").querySelector(".sdot")).toHaveAttribute(
+      "data-status",
+      "error",
+    );
+    expect(item("web-app")).toHaveTextContent("Error:");
+    expect(item("infra")).toHaveTextContent("Ended:");
+    expect(item("infra").querySelector(".sdot")).toHaveAttribute(
+      "data-status",
+      "ended",
+    );
   });
 
   it("three_or_fewer_projects_have_no_more_button", () => {

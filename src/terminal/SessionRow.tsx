@@ -104,8 +104,9 @@ export function SessionRow({
         {group.tabs.map((tab) => {
           const row = rows.get(tab.tabKey);
           const active = tab.tabKey === activeKey;
-          // Only a tab blocked on the user is tinted; a finished one is not (spec 2.2).
-          const needs = row?.status === "blocked";
+          // Only a tab blocked or errored (what `countNeeds` counts) is tinted; a finished one
+          // is not (spec 2.2).
+          const needs = row?.status === "blocked" || row?.status === "error";
           const n = tabShortcut(tab.tabKey, allTabs, machines);
           const shortcut = n === null ? null : tabShortcutId(n);
           const sub = tabSubline(tab, row, projects.get(tab.tabKey) ?? null);
@@ -150,7 +151,7 @@ export function SessionRow({
                       <span
                         className="session-tab-sub"
                         data-tone={
-                          status === "blocked"
+                          status === "blocked" || status === "error"
                             ? "needs"
                             : status === "done"
                               ? "done"

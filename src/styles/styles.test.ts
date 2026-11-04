@@ -522,11 +522,13 @@ describe("status shapes", () => {
       "idle",
       "unknown",
       "shell",
-      // A terminal tab with no live session (`TabState`) draws its own shape.
       "error",
+      "ended",
+      // A terminal tab with no live session (`TabState`) draws its own shape; a failed one is
+      // "failed", never the agent's "error".
+      "failed",
       "opening",
       "detached",
-      "ended",
     ];
     for (const status of statuses) {
       expect(selectors, status).toContain(`.sdot[data-status="${status}"]`);
@@ -560,6 +562,16 @@ describe("status shapes", () => {
     // The blocked dot keeps the same geometry, so the two differ by colour and by words only.
     const blocked = rule('.sdot[data-status="blocked"]');
     expect(blocked).toContain("box-shadow");
+  });
+
+  it("a_failed_tab_dot_is_a_static_hollow_danger_ring", () => {
+    const dot = rule('.sdot[data-status="failed"]');
+    expect(dot).toMatch(/border-color:\s*var\(--danger\)/);
+    expect(dot).not.toMatch(/background/);
+    expect(dot).not.toContain("box-shadow");
+    expect(dot).not.toMatch(/animation/);
+    expect(selectors).not.toContain('.sdot[data-status="failed"].live');
+    expect(selectors).not.toContain('.sdot[data-status="failed"].live::after');
   });
 
   it("ended_is_a_static_hollow_square_in_text_3", () => {
@@ -920,7 +932,25 @@ describe("light theme", () => {
           }
         }
       }
-      // The ended bar segment is drawn in --text-3 over the bar's track; it must show.
+      // The failed tab ring is --danger over the surfaces it sits on.
+      for (const surface of surfaces) {
+        expect(
+          ratio(c("--danger"), c(surface)),
+          `${theme}: failed ring on ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+      // The ended segment is a different token from idle's, with a different value, so the
+      // two neighbouring segments read apart.
+      const segToken = (status: string) =>
+        /background:\s*var\((--[\w-]+)\)/.exec(
+          rule(`.status-bar-seg[data-status="${status}"]`),
+        )?.[1];
+      expect(segToken("ended")).not.toBe(segToken("idle"));
+      expect(
+        block[segToken("ended")!],
+        `${theme}: ended vs idle segment`,
+      ).not.toBe(block[segToken("idle")!]);
+      // The ended bar segment is drawn over the bar's track; it must show.
       for (const status of ["error", "ended"]) {
         const seg = /background:\s*var\((--[\w-]+)\)/.exec(
           rule(`.status-bar-seg[data-status="${status}"]`),

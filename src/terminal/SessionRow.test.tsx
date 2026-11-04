@@ -134,6 +134,27 @@ describe("SessionRow", () => {
     expect(tab(/^infra/)).not.toHaveAttribute("data-needs");
   });
 
+  it("an_errored_tab_is_marked_and_toned_like_a_blocked_one", () => {
+    useAppStore.setState({
+      state: appState({ "w1:p1": { status: "error" } }),
+    });
+    open("buildbox", "w1:p1", "planner"); // error
+    open("buildbox", "w1:p2", "infra"); // working
+    render(<Harness machineId="buildbox" />);
+    const planner = screen.getByRole("button", { name: /^planner/ });
+    expect(planner.closest(".session-tab")).toHaveAttribute(
+      "data-needs",
+      "true",
+    );
+    expect(planner.querySelector(".session-tab-sub")).toHaveAttribute(
+      "data-tone",
+      "needs",
+    );
+    expect(
+      screen.getByRole("button", { name: /^infra/ }).closest(".session-tab"),
+    ).not.toHaveAttribute("data-needs");
+  });
+
   it("a_full_ui_tab_reads_herdr_over_full_herdr_ui", () => {
     useTerminalStore.getState().openTab({
       tabKey: "full::buildbox",

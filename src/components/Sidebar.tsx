@@ -7,7 +7,7 @@ import { tabShortcutId, type ShortcutId } from "../lib/shortcuts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { isShell, type Group } from "../lib/grouping";
+import { isShell, STATUS_ORDER, type Group } from "../lib/grouping";
 import { toggleSidebar } from "../lib/uiHelpers";
 import { useWorkboxColor } from "../lib/workboxColors";
 import { useAppStore } from "../store/appStore";
@@ -101,18 +101,9 @@ function RailWorkbox({
   );
 }
 
-const WORST_FIRST: RowStatus[] = [
-  "blocked",
-  "done",
-  "working",
-  "idle",
-  "unknown",
-  "shell",
-];
-
 function worstStatus(group: Group): RowStatus {
   return (
-    WORST_FIRST.find((s) => group.rows.some((r) => r.status === s)) ?? "shell"
+    STATUS_ORDER.find((s) => group.rows.some((r) => r.status === s)) ?? "shell"
   );
 }
 
