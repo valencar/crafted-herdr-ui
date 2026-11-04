@@ -5,6 +5,7 @@ pub mod client;
 pub mod connection;
 pub mod display;
 pub mod errors;
+pub mod locate;
 pub mod log;
 
 pub use client::{CoreClient, HelloInfo, ProcessConnector, USES, hello, timeout_for};

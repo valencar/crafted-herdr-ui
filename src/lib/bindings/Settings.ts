@@ -11,9 +11,10 @@ import type { WorkboxColor } from "./WorkboxColor";
 
 export type Settings = { 
 /**
- * The herdr binary the user picked; `None` finds it automatically.
+ * The herdr-core binary the user picked; `None` finds it automatically. An old settings
+ * file's `herdr_path` (herdr 0.9) is dropped, never reused.
  */
-herdr_path: string | null, 
+core_path: string | null, 
 /**
  * `None` means the first installed of Ghostty, iTerm2, Warp, Terminal.
  */

@@ -24,7 +24,7 @@ use crate::poller::Poller;
 use crate::preview::{PreviewManager, last_nonempty_line, pane_tail_argv};
 use crate::pty::TermSize;
 use crate::settings::{
-    self, AttachMode, HerdrLocator, HerdrStatus, Settings, SharedSettings, ShortcutState,
+    self, AttachMode, CoreLocator, CoreStatus, Settings, SharedSettings, ShortcutState,
     ShortcutStatus, changes,
 };
 use crate::ssh_config;
@@ -663,9 +663,9 @@ pub fn get_settings(settings: State<'_, SharedSettings>) -> Settings {
 pub async fn set_settings(
     app: AppHandle,
     shared: State<'_, SharedSettings>,
-    locator: State<'_, HerdrLocator>,
+    locator: State<'_, CoreLocator>,
     shortcut: State<'_, ShortcutState>,
-    cli: State<'_, HerdrCli>,
+    core: State<'_, Arc<CoreClient>>,
     poller: State<'_, Poller>,
     patch: serde_json::Value,
 ) -> Result<Settings, ActionError> {
@@ -686,16 +686,10 @@ pub async fn set_settings(
             new.poll_interval_hidden_ms,
         ));
     }
-    // Before startup has located herdr, its own `locate` reads the saved path, so there is
+    // Before startup has located the core, its own `locate` reads the saved path, so there is
     // nothing to resolve here (and the login environment may not be captured yet).
-    if todo.herdr_path && poller.is_located() {
-        let status = locator.locate(new.herdr_path.as_deref(), &cli).await;
-        poller.set_herdr(status.path.clone(), status.version.clone());
-        if status.path.is_some() && poller.claim_start() {
-            let runner = poller.inner().clone();
-            tauri::async_runtime::spawn(async move { runner.run().await });
-        }
-        poller.refresh_now(None);
+    if todo.core_path && locator.is_located() {
+        locator.locate(new.core_path.as_deref(), &core).await;
     }
     if todo.shortcut {
         // The setting is saved either way; if another app owns the key, Settings says so.
@@ -709,9 +703,9 @@ pub async fn set_settings(
     Ok(new)
 }
 
-/// Which herdr binary is in use, its version, and whether the saved path was found.
+/// Which herdr-core binary is in use, its version, and whether the saved path was usable.
 #[tauri::command]
-pub fn herdr_status(locator: State<'_, HerdrLocator>) -> HerdrStatus {
+pub fn core_status(locator: State<'_, CoreLocator>) -> CoreStatus {
     locator.status()
 }
 

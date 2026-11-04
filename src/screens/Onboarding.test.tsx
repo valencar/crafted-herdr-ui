@@ -60,7 +60,7 @@ describe("Onboarding", () => {
     );
   });
 
-  it("saves_the_chosen_binary_as_the_herdr_path", async () => {
+  it("saves_the_chosen_binary_as_the_core_path", async () => {
     chooseFile.mockResolvedValue("/opt/herdr/bin/herdr");
     const user = userEvent.setup();
     render(<Onboarding />);
@@ -71,7 +71,7 @@ describe("Onboarding", () => {
     });
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("set_settings", {
-        patch: { herdr_path: "/opt/herdr/bin/herdr" },
+        patch: { core_path: "/opt/herdr/bin/herdr" },
       }),
     );
     expect(screen.queryByRole("alert")).toBeNull();

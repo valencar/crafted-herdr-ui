@@ -33,7 +33,7 @@ use machine_setup::MachineSetup;
 use poller::{Poller, PollerConfig};
 use preview::{PREVIEW_EVENT, PreviewManager};
 use pty::PortablePty;
-use settings::{HerdrLocator, SharedSettings, ShortcutState, ShortcutStatus};
+use settings::{CoreLocator, SharedSettings, ShortcutState, ShortcutStatus};
 use state::{AppState, PollIntervals};
 use terminal::InstalledCache;
 use terminal::session::TermSessions;
@@ -67,7 +67,6 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // The login shell and the version check are slow, so they run after the window is up (see
     // the end of this function). Until then the runner has no environment and no binary, and
     // the UI shows "Connecting to herdr…".
-    let home = app.path().home_dir()?;
     // One log for both doors, so the Activity drawer shows `herdr` calls and core calls in order.
     let log = Arc::new(CommandLog::default());
     let cli = HerdrCli::without_env(PathBuf::new()).with_log(log.clone());
@@ -79,7 +78,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }),
         log,
     ));
-    let locator = HerdrLocator::new(None, home);
+    let locator = CoreLocator::new();
 
     let activity_path = app.path().app_data_dir()?.join("activity.json");
     let config = PollerConfig {
@@ -152,47 +151,63 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     app.manage(shortcut);
 
-    tauri::async_runtime::spawn(locate_and_poll(handle));
+    tauri::async_runtime::spawn(locate_and_start(handle));
     Ok(())
 }
 
-/// The slow part of startup, off the setup path: capture the login environment, find herdr and
-/// read its version, tell the UI, then start polling. Also asks `herdr status` once and logs it
-/// (the spec's startup check); nothing depends on the answer.
+/// The slow part of startup, off the setup path: capture the login environment, find herdr-core
+/// and point the `CoreClient` at it, and tell the UI.
+///
+/// Until v0.9 Task 6c the poller still runs on herdr 0.9, so this also finds a legacy `herdr`
+/// (whether or not a core exists), points `HerdrCli` at it, starts polling and asks `herdr
+/// status` once for the log.
 ///
 /// The settings lock is taken only once the environment is captured, so a settings save during
-/// the capture is not held up. A herdr path saved before that is read by `locate` below; one
-/// saved after waits on the lock, and `set_settings` re-resolves it because herdr is located.
-async fn locate_and_poll(handle: tauri::AppHandle) {
+/// the capture is not held up. A core path saved before that is read by `locate` below; one
+/// saved after waits on the lock, and `set_settings` re-locates it because the core is located.
+async fn locate_and_start(handle: tauri::AppHandle) {
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| FALLBACK_SHELL.to_owned());
-    let (login, login_hit) = tokio::join!(
-        env::capture_login_env(&shell),
-        env::login_which_herdr(&shell)
-    );
-    let (cli, locator, poller, shared) = (
+    let mut login = env::capture_login_env(&shell).await;
+    // The login shell for the `command -v` lookups is the one we captured the environment from.
+    login
+        .vars
+        .entry("SHELL".to_owned())
+        .or_insert_with(|| shell.clone());
+    let (core, cli, locator, poller, shared) = (
+        handle.state::<Arc<CoreClient>>(),
         handle.state::<HerdrCli>(),
-        handle.state::<HerdrLocator>(),
+        handle.state::<CoreLocator>(),
         handle.state::<Poller>(),
         handle.state::<SharedSettings>(),
     );
     cli.set_env(env::forwarded_env(&login));
-    locator.set_login_hit(login_hit);
-    // The settings can't change herdr's path while startup is still resolving it.
+    locator.set_login(login.clone());
+    // The settings can't change the core's path while startup is still resolving it.
     let update = shared.begin_update().await;
-    let herdr = locator
-        .locate(shared.get().herdr_path.as_deref(), &cli)
+    locator
+        .locate(shared.get().core_path.as_deref(), &core)
         .await;
-    poller.set_herdr(herdr.path.clone(), herdr.version.clone());
     drop(update);
-    let Some(path) = herdr.path else { return };
+
+    // Until v0.9 Task 6c: the poller needs a legacy herdr, found by automatic discovery only
+    // (the saved `herdr_path` setting is gone). Task 6c removes this block; Task 20 deletes
+    // `HerdrCli`.
+    let legacy = core::locate::find_legacy_herdr(&login).await;
+    let (path, version) = match legacy {
+        Some((path, version)) => (Some(path), Some(version)),
+        None => (None, None),
+    };
+    cli.set_bin(path.clone().unwrap_or_default());
+    poller.set_herdr(path.as_ref().map(|p| p.display().to_string()), version);
+    let Some(path) = path else { return };
     if poller.claim_start() {
         let runner = poller.inner().clone();
         tauri::async_runtime::spawn(async move { runner.run().await });
     }
-    log_startup_status(&cli, PathBuf::from(path)).await;
+    log_startup_status(&cli, path).await;
 }
 
 /// Runs `herdr status` once and adds it to the command log.
@@ -307,7 +322,7 @@ pub fn run() {
             commands::stop_preview,
             commands::get_settings,
             commands::set_settings,
-            commands::herdr_status,
+            commands::core_status,
             commands::shortcut_status,
             commands::preview_launch_template,
             commands::show_main,

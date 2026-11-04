@@ -13,7 +13,7 @@ import {
 import { KindBadge } from "../components/KindBadge";
 import { StoreToast } from "../components/Toast";
 import type { GroupBy } from "../lib/bindings/GroupBy";
-import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
+import type { CoreStatus } from "../lib/bindings/CoreStatus";
 import type { OpenMode } from "../lib/bindings/OpenMode";
 import type { RowDensity } from "../lib/bindings/RowDensity";
 import type { Theme } from "../lib/bindings/Theme";
@@ -796,16 +796,16 @@ function HerdrCli({
   settings: SettingsData;
   update: Update;
 }) {
-  const [status, setStatus] = useState<HerdrStatus | null>(null);
+  const [status, setStatus] = useState<CoreStatus | null>(null);
   const refresh = useCallback(() => {
-    invokeTyped("herdr_status")
+    invokeTyped("core_status")
       .then(setStatus)
       .catch(() => {});
   }, []);
   useEffect(refresh, [refresh]);
 
   const change = async (path: string | null) => {
-    await update({ herdr_path: path });
+    await update({ core_path: path });
     refresh();
   };
   const choose = async () => {
@@ -849,16 +849,16 @@ function HerdrCli({
             : "Saved herdr binary not found, and herdr was not found on this computer."}
         </p>
       )}
-      {settings.herdr_path && (
+      {settings.core_path && (
         <p className="muted settings-hint">
-          Saved path: <code>{settings.herdr_path}</code>
+          Saved path: <code>{settings.core_path}</code>
         </p>
       )}
       <div className="settings-actions">
         <button type="button" className="btn" onClick={() => void choose()}>
           Choose binary…
         </button>
-        {settings.herdr_path && (
+        {settings.core_path && (
           <button
             type="button"
             className="btn btn-ghost"

@@ -25,7 +25,7 @@ export function Onboarding() {
     if (typeof picked !== "string" || !picked) return;
     setBusy(true);
     try {
-      await invokeTyped("set_settings", { patch: { herdr_path: picked } });
+      await invokeTyped("set_settings", { patch: { core_path: picked } });
     } catch (e) {
       setError(actionErrorMessage(toActionError(e)));
     } finally {

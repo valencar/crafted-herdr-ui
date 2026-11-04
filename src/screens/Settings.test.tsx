@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/bindings/AppState";
-import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
+import type { CoreStatus } from "../lib/bindings/CoreStatus";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
@@ -21,7 +21,7 @@ const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const chooseFile = vi.mocked(openDialog);
 
 const DEFAULTS: SettingsData = {
-  herdr_path: null,
+  core_path: null,
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
@@ -47,10 +47,11 @@ const DEFAULTS: SettingsData = {
   workbox_colors: {},
 };
 
-const HERDR: HerdrStatus = {
+const HERDR: CoreStatus = {
   path: "/home/dev/.local/bin/herdr",
   version: "0.9.4",
   saved_missing: false,
+  legacy_herdr: null,
 };
 
 function machine(id: string, over: Partial<MachineView> = {}): MachineView {
@@ -79,7 +80,7 @@ const STATE: AppState = {
   generated_at_ms: 1,
 };
 
-let herdr: HerdrStatus;
+let herdr: CoreStatus;
 let shortcut: ShortcutStatus;
 /** What `list_agent_kinds` does: a list, or `"fail"`. */
 let kinds: string[] | "fail";
@@ -116,7 +117,7 @@ beforeEach(() => {
             installed: ["ghostty", "warp", "terminalApp"],
             default: "ghostty",
           };
-        case "herdr_status":
+        case "core_status":
           return herdr;
         case "shortcut_status":
           return shortcut;
@@ -344,10 +345,15 @@ describe("Settings", () => {
     expect(screen.queryByText(/Saved herdr binary not found/)).toBeNull();
 
     chooseFile.mockResolvedValue("/opt/mine/herdr");
-    herdr = { path: "/opt/mine/herdr", version: "0.9.5", saved_missing: false };
+    herdr = {
+      path: "/opt/mine/herdr",
+      version: "0.9.5",
+      saved_missing: false,
+      legacy_herdr: null,
+    };
     await user.click(screen.getByRole("button", { name: "Choose binary…" }));
     expect(invoke).toHaveBeenCalledWith("set_settings", {
-      patch: { herdr_path: "/opt/mine/herdr" },
+      patch: { core_path: "/opt/mine/herdr" },
     });
     expect(
       (await screen.findAllByText("/opt/mine/herdr")).length,
@@ -363,7 +369,7 @@ describe("Settings", () => {
 
   it("says when the saved herdr binary is gone and what is used instead", async () => {
     herdr = { ...HERDR, saved_missing: true };
-    await setup({ herdr_path: "/gone/herdr" }, "herdr CLI");
+    await setup({ core_path: "/gone/herdr" }, "herdr CLI");
     expect(
       await screen.findByText(
         "Saved herdr binary not found; using /home/dev/.local/bin/herdr",

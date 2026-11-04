@@ -14,8 +14,23 @@ use tokio::time::timeout;
 /// How long to wait for the login shell before giving up.
 const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Variables handed to every herdr spawn.
-const FORWARDED: [&str; 6] = ["PATH", "HOME", "USER", "SSH_AUTH_SOCK", "LANG", "TERM"];
+/// Variables handed to every `hc` (and legacy herdr) spawn. The `HC_*` ones and the XDG folders
+/// are how the person's shell reaches its core, so the app reaches the same one. It never
+/// includes `HC_TERMINAL_SOCKET`, `HC_TERMINAL_ID` or `HC_SCOPE`: a shell inside a core terminal
+/// has them, and they would scope the app's calls to that terminal.
+const FORWARDED: [&str; 11] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "SSH_AUTH_SOCK",
+    "LANG",
+    "TERM",
+    "HC_SESSION",
+    "HC_SOCKET",
+    "XDG_RUNTIME_DIR",
+    "XDG_STATE_HOME",
+    "XDG_CONFIG_HOME",
+];
 const DEFAULT_TERM: &str = "xterm-256color";
 
 /// The environment of the user's login shell.
@@ -97,21 +112,31 @@ async fn capture_login_env_with(shell: &str, limit: Duration) -> LoginEnv {
     }
 }
 
-/// Asks the login shell where `herdr` is (`command -v herdr`, 5 s limit).
-/// Only an absolute path that exists counts: aliases and functions do not.
-pub async fn login_which_herdr(shell: &str) -> Option<PathBuf> {
-    login_which_herdr_with(shell, SHELL_TIMEOUT).await
+/// Asks the login shell where `name` is (`command -v <name>`, 5 s limit).
+/// Only an absolute path that exists counts: aliases and functions do not. The path is returned
+/// as the shell printed it, never canonicalized.
+pub async fn login_command_v(shell: &str, name: &str) -> Option<PathBuf> {
+    login_command_v_with(shell, name, SHELL_TIMEOUT).await
 }
 
-async fn login_which_herdr_with(shell: &str, limit: Duration) -> Option<PathBuf> {
-    let out = run_login_shell(shell, "command -v herdr", limit).await?;
+async fn login_command_v_with(shell: &str, name: &str, limit: Duration) -> Option<PathBuf> {
+    // The name goes into a shell script, so only plain command names are accepted.
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    let out = run_login_shell(shell, &format!("command -v {name}"), limit).await?;
     // rc files may print before the answer, which is the last line.
     let path = PathBuf::from(out.lines().rev().find(|l| !l.trim().is_empty())?.trim());
     (path.is_absolute() && path.exists()).then_some(path)
 }
 
-/// The variables every herdr spawn gets: `PATH`, `HOME`, `USER`,
-/// `SSH_AUTH_SOCK`, `LANG` and `TERM` (default `xterm-256color`).
+/// The variables every spawn gets: `PATH`, `HOME`, `USER`, `SSH_AUTH_SOCK`, `LANG` and `TERM`
+/// (default `xterm-256color`), plus `HC_SESSION`, `HC_SOCKET` and the `XDG_*` folders when the
+/// login environment has them.
 pub fn forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
     FORWARDED
         .iter()
@@ -163,7 +188,7 @@ pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
 /// Runs `<bin> <args…>` with exactly `env` and returns its stdout when it exits 0 in time.
 /// For the few herdr calls that print plain text instead of JSON, so they don't go through
 /// `HerdrCli`: `--version`, `status` and `agent start --help`.
-async fn run_plain_text(
+pub(crate) async fn run_plain_text(
     bin: &Path,
     env: &[(String, String)],
     args: &[&str],
@@ -318,6 +343,52 @@ mod tests {
     }
 
     #[test]
+    fn forwards_hc_env_when_present() {
+        let login = parse_env_output(
+            "PATH=/a\0HC_SESSION=work\0HC_SOCKET=/run/user/1000/hc.sock\0XDG_RUNTIME_DIR=/run/user/1000\0XDG_STATE_HOME=/home/dev/.state\0XDG_CONFIG_HOME=/home/dev/.config\0",
+        );
+        let fwd = forwarded_env(&login);
+        for (k, v) in [
+            ("HC_SESSION", "work"),
+            ("HC_SOCKET", "/run/user/1000/hc.sock"),
+            ("XDG_RUNTIME_DIR", "/run/user/1000"),
+            ("XDG_STATE_HOME", "/home/dev/.state"),
+            ("XDG_CONFIG_HOME", "/home/dev/.config"),
+        ] {
+            assert!(fwd.contains(&(k.to_string(), v.to_string())), "{k}");
+        }
+        // Absent in the login environment means absent here.
+        let fwd = forwarded_env(&parse_env_output("PATH=/a\0"));
+        assert!(!fwd.iter().any(|(k, _)| k.starts_with("HC_")));
+    }
+
+    #[test]
+    fn never_forwards_the_terminal_scope_variables() {
+        // A shell inside a core terminal has these; they would scope the app to that terminal.
+        let login = parse_env_output(
+            "PATH=/a\0HC_TERMINAL_SOCKET=/tmp/t.sock\0HC_TERMINAL_ID=t7\0HC_SCOPE=terminal\0HC_SESSION=work\0",
+        );
+        let fwd = forwarded_env(&login);
+        for k in ["HC_TERMINAL_SOCKET", "HC_TERMINAL_ID", "HC_SCOPE"] {
+            assert!(!fwd.iter().any(|(name, _)| name == k), "{k}");
+        }
+        assert!(fwd.iter().any(|(k, _)| k == "HC_SESSION"));
+    }
+
+    #[tokio::test]
+    async fn command_v_refuses_names_that_are_not_plain() {
+        let dir = tempfile::tempdir().unwrap();
+        let shell = fake_shell(dir.path(), "sh-any", "echo /bin/sh");
+        for name in ["", "a b", "x; rm -rf /", "$(id)"] {
+            assert_eq!(
+                login_command_v_with(&shell, name, Duration::from_secs(5)).await,
+                None,
+                "{name:?}"
+            );
+        }
+    }
+
+    #[test]
     fn parse_env_output_edge_cases() {
         let login = parse_env_output("A=x=y\0MULTI=l1\nl2\0EMPTY=\0noequals\0=novalue\0");
         assert_eq!(login.vars.get("A").map(String::as_str), Some("x=y"));
@@ -419,7 +490,7 @@ mod tests {
             &format!("echo 'noise from rc'; echo '{}'", bin.display()),
         );
         assert_eq!(
-            login_which_herdr_with(&shell, Duration::from_secs(5)).await,
+            login_command_v_with(&shell, "herdr", Duration::from_secs(5)).await,
             Some(bin)
         );
     }
@@ -435,7 +506,7 @@ mod tests {
         ] {
             let shell = fake_shell(dir.path(), name, &format!("echo '{out}'"));
             assert_eq!(
-                login_which_herdr_with(&shell, Duration::from_secs(5)).await,
+                login_command_v_with(&shell, "herdr", Duration::from_secs(5)).await,
                 None,
                 "{name}"
             );
@@ -447,10 +518,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hang = fake_shell(dir.path(), "sh-hang", "exec sleep 30");
         assert_eq!(
-            login_which_herdr_with(&hang, Duration::from_millis(300)).await,
+            login_command_v_with(&hang, "herdr", Duration::from_millis(300)).await,
             None
         );
-        assert_eq!(login_which_herdr("/nonexistent/shell").await, None);
+        assert_eq!(login_command_v("/nonexistent/shell", "herdr").await, None);
     }
 
     #[tokio::test]

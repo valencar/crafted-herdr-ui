@@ -15,7 +15,9 @@ use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 use ts_rs::TS;
 
-use crate::herdr::cli::HerdrCli;
+use crate::core::locate;
+use crate::core::{CoreClient, ProcessConnector};
+use crate::env::LoginEnv;
 use crate::lock;
 use crate::terminal::{OpenMode, TerminalId};
 
@@ -113,8 +115,9 @@ pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=24;
 #[serde(deny_unknown_fields)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct Settings {
-    /// The herdr binary the user picked; `None` finds it automatically.
-    pub herdr_path: Option<String>,
+    /// The herdr-core binary the user picked; `None` finds it automatically. An old settings
+    /// file's `herdr_path` (herdr 0.9) is dropped, never reused.
+    pub core_path: Option<String>,
     /// `None` means the first installed of Ghostty, iTerm2, Warp, Terminal.
     pub terminal: Option<TerminalId>,
     /// The command for the Custom terminal; `{attach}` is replaced by the quoted command.
@@ -166,7 +169,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            herdr_path: None,
+            core_path: None,
             terminal: None,
             terminal_custom_template: String::new(),
             open_mode: OpenMode::default(),
@@ -214,8 +217,8 @@ impl Settings {
     }
 
     fn normalize(&mut self) {
-        self.herdr_path = self
-            .herdr_path
+        self.core_path = self
+            .core_path
             .take()
             .map(|p| p.trim().to_owned())
             .filter(|p| !p.is_empty());
@@ -310,7 +313,7 @@ impl SharedSettings {
     }
 
     /// Waits for any change in progress, and keeps the next one waiting until the guard drops.
-    /// Without it, two quick herdr path changes could finish out of order and leave the runner
+    /// Without it, two quick core path changes could finish out of order and leave the runner
     /// pointed at the older one.
     pub async fn begin_update(&self) -> tokio::sync::OwnedMutexGuard<()> {
         self.updates.clone().lock_owned().await
@@ -396,82 +399,78 @@ impl ShortcutState {
     }
 }
 
-/// Where herdr was found, for Settings › herdr CLI.
+/// Where herdr-core was found, for Settings › herdr-core.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
-pub struct HerdrStatus {
-    /// The binary in use; `None` when herdr was not found.
+pub struct CoreStatus {
+    /// The binary in use, as found (symlinks are not resolved); `None` when no core was found.
     pub path: Option<String>,
+    /// The version it reports (`0.1.18`).
     pub version: Option<String>,
-    /// A path is saved in Settings but no file is there any more, so `path` is whatever
-    /// automatic discovery found instead.
+    /// A path is saved in Settings but it is not a usable core (the file is gone, or it is some
+    /// other program), so `path` is whatever automatic discovery found instead.
     pub saved_missing: bool,
+    /// The version of a herdr 0.9 binary, reported only when no core was found, so onboarding
+    /// can say that herdr was retired.
+    pub legacy_herdr: Option<String>,
 }
 
-/// The result of looking for herdr.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Resolved {
-    pub path: Option<PathBuf>,
-    pub saved_missing: bool,
+/// Finds the core again when the saved path changes, and points the `CoreClient` at it. It keeps
+/// what only startup can learn (the login environment) and the last result.
+#[derive(Default)]
+pub struct CoreLocator {
+    login: Mutex<LoginEnv>,
+    status: Mutex<Option<CoreStatus>>,
 }
 
-/// Finds herdr: the saved path if it still exists, otherwise automatic discovery (see
-/// `env::resolve_herdr`). A saved path whose file is gone is reported, not an error.
-pub fn resolve_with_saved(
-    saved: Option<&str>,
-    login_path_hit: Option<PathBuf>,
-    home: &Path,
-    exists: &dyn Fn(&Path) -> bool,
-) -> Resolved {
-    let saved = saved.map(Path::new);
-    Resolved {
-        saved_missing: saved.is_some_and(|p| !exists(p)),
-        path: crate::env::resolve_herdr(saved, login_path_hit, home, exists),
-    }
-}
-
-/// Finds herdr again when the saved path changes. It keeps what only startup can learn (the
-/// login shell's hit and the home folder) and the last result.
-pub struct HerdrLocator {
-    login_hit: Mutex<Option<PathBuf>>,
-    home: PathBuf,
-    status: Mutex<HerdrStatus>,
-}
-
-impl HerdrLocator {
-    pub fn new(login_hit: Option<PathBuf>, home: PathBuf) -> Self {
-        Self {
-            login_hit: Mutex::new(login_hit),
-            home,
-            status: Mutex::default(),
-        }
+impl CoreLocator {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Sets what the login shell found, once startup has asked it.
-    pub fn set_login_hit(&self, hit: Option<PathBuf>) {
-        *lock(&self.login_hit) = hit;
+    /// Sets the login environment, once startup has captured it.
+    pub fn set_login(&self, login: LoginEnv) {
+        *lock(&self.login) = login;
     }
 
-    pub fn status(&self) -> HerdrStatus {
-        lock(&self.status).clone()
+    pub fn login(&self) -> LoginEnv {
+        lock(&self.login).clone()
     }
 
-    /// Resolves herdr for `saved`, points `cli` at it, reads its version and remembers the
-    /// result. Without herdr, `cli` gets an empty path (every call then fails `NotFound`).
-    pub async fn locate(&self, saved: Option<&str>, cli: &HerdrCli) -> HerdrStatus {
-        let login_hit = lock(&self.login_hit).clone();
-        let resolved = resolve_with_saved(saved, login_hit, &self.home, &|p| p.is_file());
-        cli.set_bin(resolved.path.clone().unwrap_or_default());
-        let version = match &resolved.path {
-            Some(bin) => crate::env::herdr_version(bin, cli.env(), VERSION_TIMEOUT).await,
-            None => None,
+    /// The last result (all empty before the first `locate`).
+    pub fn status(&self) -> CoreStatus {
+        lock(&self.status).clone().unwrap_or_default()
+    }
+
+    /// Whether `locate` has run at least once.
+    pub fn is_located(&self) -> bool {
+        lock(&self.status).is_some()
+    }
+
+    /// Finds the core for `saved`, points `core` at it with the forwarded environment and
+    /// remembers the result. Without a core, `core` gets an empty path (every call then fails
+    /// `NotFound`).
+    pub async fn locate(&self, saved: Option<&str>, core: &CoreClient) -> CoreStatus {
+        let login = self.login();
+        let located = locate::locate(&login, saved.map(Path::new)).await;
+        let (bin, path, version) = match located.core {
+            Some((bin, version)) => {
+                let path = bin.display().to_string();
+                (bin, Some(path), Some(version))
+            }
+            None => (PathBuf::new(), None, None),
         };
-        let status = HerdrStatus {
-            path: resolved.path.map(|p| p.display().to_string()),
+        core.set_connector(Arc::new(ProcessConnector {
+            bin,
+            env: crate::env::forwarded_env(&login),
+        }));
+        let status = CoreStatus {
+            path,
             version,
-            saved_missing: resolved.saved_missing,
+            saved_missing: located.saved_missing,
+            legacy_herdr: located.legacy_herdr,
         };
-        *lock(&self.status) = status.clone();
+        *lock(&self.status) = Some(status.clone());
         status
     }
 }
@@ -480,7 +479,7 @@ impl HerdrLocator {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Changes {
     pub intervals: bool,
-    pub herdr_path: bool,
+    pub core_path: bool,
     pub shortcut: bool,
 }
 
@@ -488,7 +487,7 @@ pub fn changes(old: &Settings, new: &Settings) -> Changes {
     Changes {
         intervals: old.poll_interval_visible_ms != new.poll_interval_visible_ms
             || old.poll_interval_hidden_ms != new.poll_interval_hidden_ms,
-        herdr_path: old.herdr_path != new.herdr_path,
+        core_path: old.core_path != new.core_path,
         shortcut: old.global_shortcut_enabled != new.global_shortcut_enabled,
     }
 }
@@ -501,7 +500,7 @@ mod tests {
     #[test]
     fn settings_defaults_match_spec() {
         let s = Settings::default();
-        assert_eq!(s.herdr_path, None);
+        assert_eq!(s.core_path, None);
         assert_eq!(s.terminal, None);
         assert_eq!(s.terminal_custom_template, "");
         assert_eq!(s.open_mode, OpenMode::Window);
@@ -534,7 +533,7 @@ mod tests {
             .cloned()
             .collect();
         let expected: std::collections::BTreeSet<_> = [
-            "herdr_path",
+            "core_path",
             "terminal",
             "terminal_custom_template",
             "open_mode",
@@ -842,14 +841,14 @@ mod tests {
     #[test]
     fn a_patch_can_clear_an_optional_key_and_blank_paths_mean_automatic() {
         let set = Settings::default()
-            .merged(&json!({"terminal": "iTerm2", "herdr_path": " /opt/herdr/bin/herdr "}))
+            .merged(&json!({"terminal": "iTerm2", "core_path": " /opt/herdr-core/bin/hc "}))
             .unwrap();
         assert_eq!(set.terminal, Some(TerminalId::ITerm2));
-        assert_eq!(set.herdr_path.as_deref(), Some("/opt/herdr/bin/herdr"));
+        assert_eq!(set.core_path.as_deref(), Some("/opt/herdr-core/bin/hc"));
         let cleared = set
-            .merged(&json!({"terminal": null, "herdr_path": "  "}))
+            .merged(&json!({"terminal": null, "core_path": "  "}))
             .unwrap();
-        assert_eq!((cleared.terminal, cleared.herdr_path), (None, None));
+        assert_eq!((cleared.terminal, cleared.core_path), (None, None));
     }
 
     #[test]
@@ -906,38 +905,6 @@ mod tests {
         assert!(!shared.get().notify_done);
     }
 
-    fn exists_only(paths: &'static [&'static str]) -> impl Fn(&Path) -> bool {
-        move |p| paths.iter().any(|x| Path::new(x) == p)
-    }
-
-    #[test]
-    fn a_saved_herdr_path_that_still_exists_wins() {
-        let r = resolve_with_saved(
-            Some("/opt/mine/herdr"),
-            Some("/opt/homebrew/bin/herdr".into()),
-            Path::new("/Users/dev"),
-            &exists_only(&["/opt/mine/herdr", "/opt/homebrew/bin/herdr"]),
-        );
-        assert_eq!(r.path, Some("/opt/mine/herdr".into()));
-        assert!(!r.saved_missing);
-    }
-
-    #[test]
-    fn a_stale_saved_herdr_path_falls_through_to_discovery_and_is_flagged() {
-        let found = exists_only(&["/opt/homebrew/bin/herdr"]);
-        let r = resolve_with_saved(Some("/gone/herdr"), None, Path::new("/Users/dev"), &found);
-        assert_eq!(r.path, Some("/opt/homebrew/bin/herdr".into()));
-        assert!(r.saved_missing);
-
-        // Nothing saved is not "missing", and nothing found is None.
-        let r = resolve_with_saved(None, None, Path::new("/Users/dev"), &|_| false);
-        assert_eq!((r.path, r.saved_missing), (None, false));
-        let r = resolve_with_saved(Some("/gone/herdr"), None, Path::new("/Users/dev"), &|_| {
-            false
-        });
-        assert_eq!((r.path, r.saved_missing), (None, true));
-    }
-
     #[test]
     fn only_the_live_settings_ask_for_work() {
         let base = Settings::default();
@@ -946,7 +913,7 @@ mod tests {
             none,
             Changes {
                 intervals: false,
-                herdr_path: false,
+                core_path: false,
                 shortcut: false
             }
         );
@@ -961,50 +928,95 @@ mod tests {
             }
         );
         let next = base
-            .merged(&json!({"herdr_path": "/opt/herdr", "global_shortcut_enabled": false}))
+            .merged(
+                &json!({"core_path": "/opt/herdr-core/bin/hc", "global_shortcut_enabled": false}),
+            )
             .unwrap();
         assert_eq!(
             changes(&base, &next),
             Changes {
-                herdr_path: true,
+                core_path: true,
                 shortcut: true,
                 ..none
             }
         );
     }
 
-    fn fake_herdr(dir: &Path, name: &str, version: &str) -> PathBuf {
+    #[test]
+    fn old_settings_herdr_path_is_dropped() {
+        let read = Settings::from_entries([
+            ("herdr_path".to_owned(), json!("/opt/herdr/bin/herdr")),
+            ("notify_done".to_owned(), json!(false)),
+        ]);
+        assert_eq!(read.core_path, None);
+        assert!(!read.notify_done);
+        // It is never written back, and a patch that still has it is refused.
+        assert!(!read.to_entries().iter().any(|(k, _)| k == "herdr_path"));
+        assert!(
+            read.merged(&json!({"herdr_path": "/opt/herdr/bin/herdr"}))
+                .is_err()
+        );
+    }
+
+    /// A stand-in `hc`: reports `hc 0.1.18` and writes its own path to `log` on `connect`.
+    fn recording_core(dir: &Path, name: &str, log: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let bin = dir.join(name);
-        std::fs::write(&bin, format!("#!/bin/sh\necho 'herdr {version}'\n")).unwrap();
+        let script = format!(
+            "#!/bin/sh\ncase \"$1\" in\n  --version) echo 'hc 0.1.18' ;;\n  connect) echo \"$0\" >> '{}' ;;\nesac\n",
+            log.display()
+        );
+        std::fs::write(&bin, script).unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         bin
     }
 
+    /// What the recording cores logged, once a call has made the client spawn one.
+    async fn spawned(core: &CoreClient, log: &Path) -> Vec<String> {
+        let _ = core.call("local", "machine.list", json!({})).await;
+        std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
     #[tokio::test]
-    async fn locating_points_the_runner_at_the_binary_and_reads_its_version() {
+    async fn changing_core_path_relocates_and_rewires() {
         let dir = tempfile::tempdir().unwrap();
-        let on_path = fake_herdr(dir.path(), "herdr-path", "0.9.3");
-        let chosen = fake_herdr(dir.path(), "herdr-chosen", "0.9.4");
-        let cli = HerdrCli::new(PathBuf::new(), vec![]);
-        let locator = HerdrLocator::new(Some(on_path.clone()), dir.path().to_path_buf());
+        let log = dir.path().join("spawns.log");
+        let first = recording_core(dir.path(), "first-hc", &log);
+        let second = recording_core(dir.path(), "second-hc", &log);
+        let core = CoreClient::new(Arc::new(ProcessConnector {
+            bin: PathBuf::new(),
+            env: Vec::new(),
+        }));
+        let locator = CoreLocator::new();
+        locator.set_login(crate::env::parse_env_output(&format!(
+            "HOME={}\0PATH=/usr/bin:/bin\0",
+            dir.path().display()
+        )));
+        assert!(!locator.is_located());
 
-        let auto = locator.locate(None, &cli).await;
-        assert_eq!(auto.path, Some(on_path.display().to_string()));
-        assert_eq!(auto.version.as_deref(), Some("0.9.3"));
-        assert_eq!(cli.bin(), on_path);
+        let old = Settings::default()
+            .merged(&json!({"core_path": first}))
+            .unwrap();
+        let status = locator.locate(old.core_path.as_deref(), &core).await;
+        assert_eq!(status.path, Some(first.display().to_string()));
+        assert_eq!(status.version.as_deref(), Some("0.1.18"));
+        assert!(!status.saved_missing);
+        assert!(locator.is_located());
+        assert_eq!(spawned(&core, &log).await, [first.display().to_string()]);
 
-        let picked = locator.locate(Some(chosen.to_str().unwrap()), &cli).await;
-        assert_eq!(picked.version.as_deref(), Some("0.9.4"));
-        assert!(!picked.saved_missing);
-        assert_eq!(cli.bin(), chosen);
-        assert_eq!(locator.status(), picked);
-
-        // The saved file is gone: back to discovery, and Settings is told.
-        let stale = locator.locate(Some("/gone/herdr"), &cli).await;
-        assert_eq!(stale.path, Some(on_path.display().to_string()));
-        assert!(stale.saved_missing);
-        assert_eq!(cli.bin(), on_path);
+        // The setting changes: `changes` says to re-locate, and the client spawns the new one.
+        let new = old.merged(&json!({"core_path": second})).unwrap();
+        assert!(changes(&old, &new).core_path);
+        let status = locator.locate(new.core_path.as_deref(), &core).await;
+        assert_eq!(status.path, Some(second.display().to_string()));
+        assert_eq!(locator.status(), status);
+        let seen = spawned(&core, &log).await;
+        assert_eq!(seen.last(), Some(&second.display().to_string()), "{seen:?}");
+        assert_eq!(seen.first(), Some(&first.display().to_string()));
     }
 
     #[test]

@@ -6,7 +6,7 @@ import type { AppState } from "./bindings/AppState";
 import type { ActionError } from "./bindings/ActionError";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CreatedSession } from "./bindings/CreatedSession";
-import type { HerdrStatus } from "./bindings/HerdrStatus";
+import type { CoreStatus } from "./bindings/CoreStatus";
 import type { MenuId } from "./bindings/MenuId";
 import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
@@ -59,7 +59,7 @@ export type CommandResults = {
   stop_preview: null;
   get_settings: Settings;
   set_settings: Settings;
-  herdr_status: HerdrStatus;
+  core_status: CoreStatus;
   shortcut_status: ShortcutStatus;
   preview_launch_template: string;
   show_main: null;
@@ -134,7 +134,7 @@ export type CommandArgs = {
   get_settings: undefined;
   /** Merged over the current settings; refused as a whole if any value is invalid. */
   set_settings: { patch: Partial<Settings> };
-  herdr_status: undefined;
+  core_status: undefined;
   shortcut_status: undefined;
   /** The script a Custom launch command runs for a sample pane. */
   preview_launch_template: { template: string };

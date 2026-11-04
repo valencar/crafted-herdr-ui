@@ -244,7 +244,7 @@ describe("appStore", () => {
   it("starts without settings and keeps them once they are read", () => {
     expect(useAppStore.getState().settings).toBeNull();
     const settings = {
-      herdr_path: null,
+      core_path: null,
       terminal: null,
       terminal_custom_template: "",
       open_mode: "window",

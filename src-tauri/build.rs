@@ -42,7 +42,7 @@ const COMMANDS: &[&str] = &[
     "stop_preview",
     "get_settings",
     "set_settings",
-    "herdr_status",
+    "core_status",
     "shortcut_status",
     "preview_launch_template",
     "show_main",

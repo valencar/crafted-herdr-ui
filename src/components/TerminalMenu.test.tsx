@@ -29,7 +29,7 @@ vi.mock("../terminal/Workspace", () => ({
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
 const SETTINGS: Settings = {
-  herdr_path: null,
+  core_path: null,
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
