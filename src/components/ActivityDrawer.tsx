@@ -6,7 +6,6 @@ import {
   formatDuration,
   isQuietRead,
   plural,
-  shellJoin,
 } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
 import { CopyButton } from "./CommandBox";
@@ -19,18 +18,12 @@ type Props = {
 };
 
 /**
- * A line that can be pasted into a terminal: `herdr [--machine <id>] <argv>`. A remote launch
- * has none, because `--machine` doesn't forward attach or `--remote`; the Inspector's command
- * box offers the real command for those.
+ * The line to copy: `display`, which Rust builds. A command handed to a terminal on a remote
+ * workbox has none, because the line it ran (`ssh -t …`) isn't what `display` names.
  */
 function runnable(entry: CommandLogEntry): string | null {
   if (entry.note !== null && entry.machine !== null) return null;
-  // Local runs without the flag (older log entries may still say "local").
-  const machine =
-    entry.machine && entry.machine !== "local"
-      ? ["--machine", entry.machine]
-      : [];
-  return shellJoin(["herdr", ...machine, ...entry.argv]);
+  return entry.display;
 }
 
 /** Newest first. The log arrives oldest first, so equal times keep their reverse order. */
@@ -171,7 +164,7 @@ export function ActivityDrawer({ machines, onClose }: Props) {
               <span className="chip activity-machine">
                 {labelOf(entry.machine)}
               </span>
-              <code className="activity-cmd">{shellJoin(entry.argv)}</code>
+              <code className="activity-cmd">{entry.display}</code>
               <span className="mono activity-exit">
                 {entry.note ??
                   (entry.exitCode === null
@@ -184,7 +177,7 @@ export function ActivityDrawer({ machines, onClose }: Props) {
               {line !== null && (
                 <CopyButton
                   text={line}
-                  label={`Copy command: ${shellJoin(entry.argv)}`}
+                  label={`Copy command: ${entry.display}`}
                 />
               )}
               {entry.error && (

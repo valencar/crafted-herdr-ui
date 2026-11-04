@@ -8,6 +8,7 @@ A thin data and actions layer between the UI and the user's `herdr` binary. The 
 |---|---|
 | `herdr/model.rs` | serde + ts-rs types for herdr JSON (`Snapshot`, `Agent`, `Pane`, `MachineProfile`, …) and the parsers |
 | `herdr/errors.rs` | `HerdrError` (serialized to the UI as `{kind, …}`) |
+| `core/` | the herdr-core client (v0.9): `connection.rs` (`Connection`: JSON-RPC lines over any async reader and writer, one reader task, `Notification`, the `Connector` trait), `client.rs` (`CoreClient`: the one door, a pool of at most 4 connections, `call_long` for one-shot connections, `hello`, `USES`, `timeout_for`, `ProcessConnector` that runs `<bin> connect`), `errors.rs` (`CoreError`), `display.rs` (the `hc` command line the log shows) and `log.rs` (`CommandLogEntry`, `CommandLog`: one `Arc` shared with `HerdrCli`) |
 | `herdr/cli.rs` | `HerdrCli::run(machine, args, timeout)`, the per-machine semaphore (4), and the 200-entry `CommandLog` |
 | `env.rs` | login-shell env capture, herdr binary resolution, the plain-text herdr reads (captured and resolved after the window is up; `get_state` answers `null` until then). The 0.9.0 version floor lives in the UI (`lib/format.ts`) |
 | `activity.rs` | `ActivityTracker`: observed status-change times persisted to `activity.json` |

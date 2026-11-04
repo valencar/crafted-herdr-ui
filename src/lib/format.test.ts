@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ActionError } from "./bindings/ActionError";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import {
   STATUS_LABEL,
@@ -110,6 +111,29 @@ describe("actionErrorMessage", () => {
         error: { kind: "timeout", argv: ["agent"] },
       }),
     ).toBe("herdr did not answer in time.");
+  });
+
+  it("words a failed core call from what the core said", () => {
+    const core = (error: Extract<ActionError, { kind: "core" }>["error"]) =>
+      actionErrorMessage({ kind: "core", error });
+    expect(core({ kind: "notFound" })).toBe("herdr-core was not found.");
+    expect(core({ kind: "timeout", method: "terminal.read" })).toBe(
+      "herdr-core did not answer in time.",
+    );
+    expect(core({ kind: "lost" })).toBe(
+      "The connection to herdr-core was lost.",
+    );
+    expect(
+      core({
+        kind: "rpc",
+        code: "not_found",
+        message: "no terminal",
+        hint: null,
+      }),
+    ).toBe("no terminal");
+    expect(core({ kind: "incompatible", reason: "this core lacks: x" })).toBe(
+      "this core lacks: x",
+    );
   });
 
   it("says a maybe-applied action with no message is being refreshed", () => {
@@ -232,47 +256,38 @@ describe("healthShape", () => {
 });
 
 describe("isQuietRead", () => {
-  const entry = (
-    argv: string[],
-    over: Partial<CommandLogEntry> = {},
-  ): CommandLogEntry => ({
+  const entry = (over: Partial<CommandLogEntry> = {}): CommandLogEntry => ({
     atMs: 1,
     machine: null,
-    argv,
+    argv: ["machine.list"],
     exitCode: 0,
     durationMs: 5,
     error: null,
     note: null,
+    method: "machine.list",
+    display: "hc machine ls",
+    quiet: true,
     ...over,
   });
 
-  it("is true for successful snapshots and pane or agent reads", () => {
-    expect(isQuietRead(entry(["api", "snapshot"]))).toBe(true);
-    expect(isQuietRead(entry(["pane", "read", "w1:p1", "--lines", "3"]))).toBe(
-      true,
-    );
-    expect(isQuietRead(entry(["agent", "read", "w1:p1"]))).toBe(true);
-  });
-
-  it("is false for anything that changes something", () => {
-    expect(isQuietRead(entry(["agent", "prompt", "w1:p1", "read"]))).toBe(
-      false,
-    );
-    expect(isQuietRead(entry(["pane", "close", "w1:p1"]))).toBe(false);
-    expect(isQuietRead(entry(["machine", "list", "--json"]))).toBe(false);
-    expect(isQuietRead(entry([]))).toBe(false);
-  });
-
-  it("is false for a read that failed", () => {
-    expect(isQuietRead(entry(["api", "snapshot"], { exitCode: 1 }))).toBe(
-      false,
-    );
+  it("quiet_flag_drives_isQuietRead", () => {
+    expect(isQuietRead(entry())).toBe(true);
+    // The argv no longer decides anything: the flag does.
     expect(
-      isQuietRead(entry(["pane", "read", "w1:p1"], { exitCode: null })),
+      isQuietRead(
+        entry({ argv: ["api", "snapshot"], method: "herdr", quiet: false }),
+      ),
     ).toBe(false);
     expect(
-      isQuietRead(entry(["api", "snapshot"], { error: "timed out" })),
-    ).toBe(false);
+      isQuietRead(entry({ argv: ["pane", "close", "w1:p1"], quiet: true })),
+    ).toBe(true);
+    expect(isQuietRead(entry({ quiet: false }))).toBe(false);
+  });
+
+  it("failed_quiet_read_is_not_quiet", () => {
+    expect(isQuietRead(entry({ exitCode: 1 }))).toBe(false);
+    expect(isQuietRead(entry({ exitCode: null }))).toBe(false);
+    expect(isQuietRead(entry({ error: "timed out" }))).toBe(false);
   });
 });
 

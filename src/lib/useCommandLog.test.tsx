@@ -19,6 +19,9 @@ const entry = (atMs: number): CommandLogEntry => ({
   durationMs: 12,
   error: null,
   note: null,
+  method: "herdr",
+  display: "herdr api snapshot",
+  quiet: true,
 });
 
 const hide = (hidden: boolean) =>

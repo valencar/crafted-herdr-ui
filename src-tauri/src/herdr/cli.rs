@@ -1,16 +1,16 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
 use serde_json::Value;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
-use ts_rs::TS;
 
 use super::errors::HerdrError;
+use crate::core::log::{CommandLog, CommandLogEntry};
+use crate::terminal::quote::join_quoted;
 use crate::{LOCAL, lock, now_ms};
 
 pub const T_DEFAULT: Duration = Duration::from_secs(10);
@@ -19,47 +19,6 @@ pub const T_AGENT_START: Duration = Duration::from_secs(45);
 pub const T_PROMPT: Duration = Duration::from_secs(30);
 
 const MAX_CONCURRENT_PER_MACHINE: usize = 4;
-const LOG_CAPACITY: usize = 200;
-
-/// One herdr invocation, as shown in the command log.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/lib/bindings/")]
-pub struct CommandLogEntry {
-    /// Unix time in milliseconds when the call started.
-    #[ts(type = "number")]
-    pub at_ms: u64,
-    pub machine: Option<String>,
-    /// The arguments after `--machine <id>`.
-    pub argv: Vec<String>,
-    pub exit_code: Option<i32>,
-    #[ts(type = "number")]
-    pub duration_ms: u64,
-    pub error: Option<String>,
-    /// For a command handed to the user's terminal, where it went ("opened in Ghostty"). The
-    /// app can't see how that command ends, so such an entry has no exit code and no error.
-    pub note: Option<String>,
-}
-
-/// Ring buffer of the most recent calls.
-#[derive(Debug, Default)]
-pub struct CommandLog {
-    entries: VecDeque<CommandLogEntry>,
-}
-
-impl CommandLog {
-    fn push(&mut self, entry: CommandLogEntry) {
-        if self.entries.len() == LOG_CAPACITY {
-            self.entries.pop_front();
-        }
-        self.entries.push_back(entry);
-    }
-
-    fn snapshot(&self) -> Vec<CommandLogEntry> {
-        self.entries.iter().cloned().collect()
-    }
-}
-
 /// The single door to the `herdr` binary.
 #[derive(Debug, Clone)]
 pub struct HerdrCli {
@@ -68,7 +27,7 @@ pub struct HerdrCli {
     /// Set once: at construction, or by `set_env` when the login environment is captured
     /// after startup. Until then calls run with an empty environment.
     env: Arc<OnceLock<Vec<(String, String)>>>,
-    log: Arc<Mutex<CommandLog>>,
+    log: Arc<CommandLog>,
     limits: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
 }
 
@@ -151,15 +110,15 @@ impl HerdrCli {
             Ok((code, stdout, stderr)) => (code, map(code, &stdout, &stderr)),
             Err(e) => (None, Err(e)),
         };
-        lock(&self.log).push(CommandLogEntry {
+        self.log.push(herdr_entry(
             at_ms,
-            machine: remote.map(str::to_owned),
-            argv: args.to_vec(),
+            remote,
+            args.to_vec(),
             exit_code,
-            duration_ms: started.elapsed().as_millis() as u64,
-            error: result.as_ref().err().map(ToString::to_string),
-            note: None,
-        });
+            started.elapsed().as_millis() as u64,
+            result.as_ref().err().map(ToString::to_string),
+            None,
+        ));
         result
     }
 
@@ -189,15 +148,15 @@ impl HerdrCli {
         error: Option<String>,
         note: Option<String>,
     ) {
-        lock(&self.log).push(CommandLogEntry {
-            at_ms: started_ms,
-            machine: machine.filter(|m| *m != LOCAL).map(str::to_owned),
+        self.log.push(herdr_entry(
+            started_ms,
+            machine.filter(|m| *m != LOCAL),
             argv,
             exit_code,
-            duration_ms: now_ms().saturating_sub(started_ms),
+            now_ms().saturating_sub(started_ms),
             error,
             note,
-        });
+        ));
     }
 
     /// The resolved `herdr` binary, for the few calls that print plain text instead of JSON.
@@ -217,7 +176,14 @@ impl HerdrCli {
     }
 
     pub fn log_snapshot(&self) -> Vec<CommandLogEntry> {
-        lock(&self.log).snapshot()
+        self.log.snapshot()
+    }
+
+    /// Makes this runner write to `log`, the one `CoreClient` writes to as well. Call it before
+    /// the runner is cloned: a clone made earlier keeps the old log.
+    pub fn with_log(mut self, log: Arc<CommandLog>) -> Self {
+        self.log = log;
+        self
     }
 
     fn semaphore(&self, key: &str) -> Arc<Semaphore> {
@@ -272,6 +238,42 @@ impl HerdrCli {
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         Ok((code, stdout, stderr))
+    }
+}
+
+/// The command-log entry for one `herdr` invocation. `display` is the line to paste into a
+/// terminal, `herdr [--machine <id>] <argv>`. `quiet` marks the successful reads the Activity
+/// drawer hides: `api snapshot` and `<noun> read`.
+fn herdr_entry(
+    at_ms: u64,
+    machine: Option<&str>,
+    argv: Vec<String>,
+    exit_code: Option<i32>,
+    duration_ms: u64,
+    error: Option<String>,
+    note: Option<String>,
+) -> CommandLogEntry {
+    let mut words = vec!["herdr".to_owned()];
+    if let Some(id) = machine {
+        words.push("--machine".to_owned());
+        words.push(id.to_owned());
+    }
+    words.extend(argv.iter().cloned());
+    let quiet = matches!(
+        argv.as_slice(),
+        [first, second, ..] if (first == "api" && second == "snapshot") || second == "read"
+    );
+    CommandLogEntry {
+        at_ms,
+        machine: machine.map(str::to_owned),
+        argv,
+        exit_code,
+        duration_ms,
+        error,
+        note,
+        method: "herdr".to_owned(),
+        display: join_quoted(&words),
+        quiet,
     }
 }
 
@@ -443,21 +445,61 @@ mod tests {
     }
 
     #[test]
-    fn command_log_is_a_ring_buffer() {
-        let mut log = CommandLog::default();
-        for i in 0..(LOG_CAPACITY as u64 + 3) {
-            log.push(CommandLogEntry {
-                at_ms: i,
-                machine: None,
-                argv: vec![],
-                exit_code: Some(0),
-                duration_ms: 0,
-                error: None,
-                note: None,
-            });
-        }
-        let snap = log.snapshot();
-        assert_eq!(snap.len(), LOG_CAPACITY);
-        assert_eq!(snap[0].at_ms, 3);
+    fn herdr_entries_carry_the_method_the_display_line_and_the_quiet_flag() {
+        let cli = HerdrCli::new(PathBuf::from("herdr"), vec![]);
+        let at = now_ms();
+        let argv = |words: &[&str]| words.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>();
+        cli.record(None, argv(&["api", "snapshot"]), at, Some(0), None, None);
+        cli.record(
+            Some("buildbox"),
+            argv(&["pane", "read", "w1:p1", "--lines", "3"]),
+            at,
+            Some(0),
+            None,
+            None,
+        );
+        cli.record(
+            Some("buildbox"),
+            argv(&["agent", "prompt", "w1:p1", "hello world"]),
+            at,
+            Some(0),
+            None,
+            None,
+        );
+        cli.record(
+            None,
+            argv(&["machine", "list", "--json"]),
+            at,
+            Some(0),
+            None,
+            None,
+        );
+        cli.record(
+            Some(LOCAL),
+            argv(&["pane", "close", "w1:p2"]),
+            at,
+            Some(0),
+            None,
+            None,
+        );
+        let log = cli.log_snapshot();
+        assert!(log.iter().all(|e| e.method == "herdr"));
+        assert_eq!(
+            log.iter().map(|e| e.quiet).collect::<Vec<_>>(),
+            [true, true, false, false, false]
+        );
+        assert_eq!(log[0].display, "herdr api snapshot");
+        assert_eq!(
+            log[1].display,
+            "herdr --machine buildbox pane read w1:p1 --lines 3"
+        );
+        assert_eq!(
+            log[2].display,
+            "herdr --machine buildbox agent prompt w1:p1 'hello world'"
+        );
+        assert_eq!(
+            log[4].display, "herdr pane close w1:p2",
+            "local has no --machine"
+        );
     }
 }

@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod activity;
 pub mod commands;
+pub mod core;
 pub mod env;
 pub mod herdr;
 pub mod machine_setup;
@@ -23,6 +24,7 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
+use crate::core::{CommandLog, CoreClient, ProcessConnector};
 use actions::Actions;
 use activity::ActivityTracker;
 use commands::AgentKindsCache;
@@ -66,7 +68,17 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // the end of this function). Until then the runner has no environment and no binary, and
     // the UI shows "Connecting to herdr…".
     let home = app.path().home_dir()?;
-    let cli = HerdrCli::without_env(PathBuf::new());
+    // One log for both doors, so the Activity drawer shows `herdr` calls and core calls in order.
+    let log = Arc::new(CommandLog::default());
+    let cli = HerdrCli::without_env(PathBuf::new()).with_log(log.clone());
+    // Pointed at no binary until the core is located: a call fails `NotFound`.
+    let core = Arc::new(CoreClient::with_log(
+        Arc::new(ProcessConnector {
+            bin: PathBuf::new(),
+            env: Vec::new(),
+        }),
+        log,
+    ));
     let locator = HerdrLocator::new(None, home);
 
     let activity_path = app.path().app_data_dir()?.join("activity.json");
@@ -114,6 +126,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }),
     ));
     app.manage(cli);
+    app.manage(core);
     app.manage(actions);
     app.manage(AgentKindsCache::default());
     app.manage(InstalledCache::default());

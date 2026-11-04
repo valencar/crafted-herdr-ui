@@ -1,6 +1,7 @@
 import type { ActionError } from "./bindings/ActionError";
 import type { AgentStatus } from "./bindings/AgentStatus";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
+import type { CoreError } from "./bindings/CoreError";
 import type { Health } from "./bindings/Health";
 import type { TerminalId } from "./bindings/TerminalId";
 
@@ -88,6 +89,24 @@ export const TERMINAL_LABEL: Record<TerminalId, string> = {
 
 const MAYBE_APPLIED_FALLBACK = "May have been applied; refreshing…";
 
+/** The sentence for a failed herdr-core call; the words the core gave, where it gave any. */
+function coreErrorMessage(e: CoreError): string {
+  switch (e.kind) {
+    case "notFound":
+      return "herdr-core was not found.";
+    case "timeout":
+      return "herdr-core did not answer in time.";
+    case "lost":
+      return "The connection to herdr-core was lost.";
+    case "rpc":
+    case "spawn":
+    case "protocol":
+      return e.message;
+    case "incompatible":
+      return e.reason;
+  }
+}
+
 /**
  * The sentence shown for a failed action. It reads the `message` fields the app produced,
  * never a Rust Display string.
@@ -96,6 +115,7 @@ export function actionErrorMessage(e: ActionError): string {
   if (e.kind === "maybeApplied") {
     return e.message.trim() || MAYBE_APPLIED_FALLBACK;
   }
+  if (e.kind === "core") return coreErrorMessage(e.error);
   if (e.kind !== "herdr") return e.message;
   switch (e.error.kind) {
     case "notFound":
@@ -188,14 +208,12 @@ export function healthShape(
 }
 
 /**
- * A successful read-only call: `api snapshot`, or `<noun> read …` (`pane read`, `agent read`).
- * The poller and the previews make these every couple of seconds, so the Activity drawer hides
- * them unless asked. A read that failed is never quiet.
+ * A successful timed read, which Rust marks `quiet` (an `api snapshot`, a `pane read`, a core
+ * `machine.list`, `terminal.read`, …). They happen every couple of seconds, so the Activity
+ * drawer hides them unless asked. A read that failed is never quiet.
  */
 export function isQuietRead(entry: CommandLogEntry): boolean {
-  if (entry.exitCode !== 0 || entry.error !== null) return false;
-  const [first, second] = entry.argv;
-  return (first === "api" && second === "snapshot") || second === "read";
+  return entry.quiet && entry.exitCode === 0 && entry.error === null;
 }
 
 /** The workbox health words shown next to a machine's dot (never color alone). */

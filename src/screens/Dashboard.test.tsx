@@ -40,6 +40,9 @@ function entry(over: Partial<CommandLogEntry>): CommandLogEntry {
     durationMs: 10,
     error: null,
     note: null,
+    method: "herdr",
+    display: "herdr api snapshot",
+    quiet: true,
     ...over,
   };
 }

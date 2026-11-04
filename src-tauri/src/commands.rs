@@ -14,8 +14,9 @@ use ts_rs::TS;
 
 use crate::LOCAL;
 use crate::actions::{self, ActionError, Actions, CreatedSession, NewSessionRequest};
+use crate::core::{CommandLogEntry, CoreClient};
 use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
-use crate::herdr::cli::{CommandLogEntry, HerdrCli, T_DEFAULT};
+use crate::herdr::cli::{HerdrCli, T_DEFAULT};
 use crate::herdr::model::{AgentStatus, MachineStatusEntry};
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::notify::VisibleRow;
@@ -258,8 +259,8 @@ pub fn refresh_now(poller: State<'_, Poller>, machine_id: Option<String>) {
 
 /// The last 200 herdr calls, oldest first.
 #[tauri::command]
-pub fn get_command_log(cli: State<'_, HerdrCli>) -> Vec<CommandLogEntry> {
-    cli.log_snapshot()
+pub fn get_command_log(core: State<'_, Arc<CoreClient>>) -> Vec<CommandLogEntry> {
+    core.command_log()
 }
 
 #[tauri::command]

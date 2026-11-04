@@ -60,6 +60,9 @@ function entry(
     durationMs,
     error: null,
     note: null,
+    method: "herdr",
+    display: "herdr api snapshot",
+    quiet: true,
     ...overrides,
   };
 }

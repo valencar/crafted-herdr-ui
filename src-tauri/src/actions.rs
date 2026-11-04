@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
+use crate::core::CoreError;
 use crate::herdr::cli::{HerdrCli, T_AGENT_START, T_CREATE, T_DEFAULT, T_PROMPT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{AgentStatus, MachineStatusEntry, parse_created_pane};
@@ -64,6 +65,9 @@ pub struct CreatedSession {
 pub enum ActionError {
     #[error("{error}")]
     Herdr { error: HerdrError },
+    /// A herdr-core call failed.
+    #[error("{error}")]
+    Core { error: CoreError },
     /// The call timed out or only part of the action happened. The app refreshes; it never retries.
     #[error("{message}")]
     MaybeApplied { argv: Vec<String>, message: String },
