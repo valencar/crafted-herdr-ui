@@ -6,10 +6,9 @@ import type { TermEvent } from "../lib/bindings/TermEvent";
 import type { TerminalFont } from "../lib/bindings/TerminalFont";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
+import { appState, buildboxTerms, machine, unanswered } from "../test/builders";
 
 type FakeTerm = {
   cols: number;
@@ -781,32 +780,21 @@ describe("TerminalView", () => {
   });
 
   describe("the bar under a session that ended", () => {
-    const snapshot = raw.result.snapshot as unknown as Snapshot;
     /** The app state with buildbox listed (remote unless `local`), optionally without this tab's pane. */
     const listed = (opts: { local?: boolean; gone?: boolean } = {}) => {
-      const snap = structuredClone(snapshot);
-      if (opts.gone) {
-        snap.agents = snap.agents.filter((a) => a.pane_id !== "w1:p1");
-        snap.panes = snap.panes.filter((p) => p.pane_id !== "w1:p1");
-      }
-      const state: AppState = {
-        machines: [
-          {
+      const terms = buildboxTerms().filter(
+        (t) => !(opts.gone && t.address === "w1:p1"),
+      );
+      const state: AppState = appState([
+        [
+          machine({
             id: "buildbox",
-            label: "buildbox",
             target: opts.local ? null : "buildbox",
-            session: "default",
-            is_local: opts.local ?? false,
-            health: { kind: "online" },
-            snapshot: snap,
-            last_ok_ms: 1,
-            ages: {},
-          },
+            isLocal: opts.local ?? false,
+          }),
+          terms,
         ],
-        herdr_version: "0.9.4",
-        herdr_path: "/home/dev/.local/bin/herdr",
-        generated_at_ms: 1,
-      };
+      ]);
       act(() => useAppStore.setState({ state }));
     };
     /** Every open from now on ends at once with `code`. */
@@ -1226,7 +1214,7 @@ describe("TerminalView", () => {
         useAppStore.setState((s) => ({
           state: s.state && {
             ...s.state,
-            machines: s.state.machines.map((m) => ({ ...m, snapshot: null })),
+            machines: s.state.machines.map(unanswered),
           },
         })),
       );

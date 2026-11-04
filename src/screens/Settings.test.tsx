@@ -7,6 +7,7 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
 import { useAppStore } from "../store/appStore";
+import { appState, machineView } from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -55,29 +56,26 @@ const HERDR: CoreStatus = {
 };
 
 function machine(id: string, over: Partial<MachineView> = {}): MachineView {
-  return {
-    id,
-    label: id === "local" ? "Local" : id,
-    target: id === "local" ? null : id,
-    session: "default",
-    is_local: id === "local",
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: null,
-    ages: {},
-    ...over,
-  };
+  return machineView(
+    {
+      id,
+      name: id === "local" ? "Local" : id,
+      target: id === "local" ? null : id,
+      isLocal: id === "local",
+      lastOkMs: null,
+    },
+    null,
+    over,
+  );
 }
 
 const STATE: AppState = {
+  ...appState([], { herdr_path: HERDR.path }),
   machines: [
     machine("local"),
     machine("buildbox"),
     machine("staging", { health: { kind: "disabled" } }),
   ],
-  herdr_version: "0.9.4",
-  herdr_path: HERDR.path,
-  generated_at_ms: 1,
 };
 
 let herdr: CoreStatus;

@@ -1,12 +1,16 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
+import {
+  appState as buildState,
+  buildboxTerms,
+  machineView,
+  type TermSpec,
+} from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -42,34 +46,20 @@ const SETTINGS: Settings = {
   new_session_hide_shell: false,
   workbox_colors: {},
 };
-const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();
 
-function machine(
-  id: string,
-  overrides: Partial<MachineView> = {},
-): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: structuredClone(fixture),
-    last_ok_ms: NOW,
-    ages: { "term-1": NOW - 2 * 60_000, "term-4": NOW - 3 * 60_000 },
-    ...overrides,
-  };
+const fixtureTerms = (): TermSpec[] =>
+  buildboxTerms({
+    "w1:p1": { sinceMs: NOW - 2 * 60_000 },
+    "w2:p1": { sinceMs: NOW - 3 * 60_000 },
+  });
+
+function machine(id: string, terms: TermSpec[] = fixtureTerms()): MachineView {
+  return machineView({ id, lastOkMs: NOW }, terms);
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: NOW,
-  };
+  return { ...buildState([], { generated_at_ms: NOW }), machines };
 }
 
 function setup(state: AppState | null) {
@@ -190,9 +180,12 @@ describe("MenuBar", () => {
   });
 
   it("says_so_when_nothing_needs_you_or_nothing_is_known_yet", () => {
-    const quiet = machine("buildbox");
-    quiet.snapshot!.agents = quiet.snapshot!.agents.filter(
-      (a) => a.agent_status !== "blocked" && a.agent_status !== "done",
+    const quiet = machine(
+      "buildbox",
+      fixtureTerms().filter(
+        (t) =>
+          t.kind === "shell" || (t.status !== "blocked" && t.status !== "done"),
+      ),
     );
     setup(appState(quiet));
     expect(screen.getByText("All clear")).toBeInTheDocument();

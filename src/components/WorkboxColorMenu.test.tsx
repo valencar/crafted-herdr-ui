@@ -9,6 +9,7 @@ import { WorkboxRow } from "../terminal/WorkboxRow";
 import { groupTabs } from "../terminal/tabOrder";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
+import { machineView } from "../test/builders";
 import { Sidebar } from "./Sidebar";
 import { WorkboxColorMenu } from "./WorkboxColorMenu";
 
@@ -21,17 +22,7 @@ import { invokeTyped } from "../lib/ipc";
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
 function machine(id: string): MachineView {
-  return {
-    id,
-    label: id,
-    target: id,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: 1,
-    ages: {},
-  } as unknown as MachineView;
+  return machineView({ id, target: id }, null);
 }
 
 const machines = [machine("buildbox"), machine("gpubox")];

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { appState } from "../test/builders";
 import { useAppStore } from "./appStore";
 
 const initial = useAppStore.getState();
@@ -26,12 +27,7 @@ describe("appStore", () => {
 
   it("sets each field through its setter", () => {
     const s = useAppStore.getState();
-    const app = {
-      machines: [],
-      herdr_version: null,
-      herdr_path: null,
-      generated_at_ms: 1,
-    };
+    const app = appState([], { herdr_version: null, herdr_path: null });
     s.setState(app);
     s.select("buildbox::w1:p1");
     s.setGroupBy("status");

@@ -8,9 +8,9 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MachineView } from "../lib/bindings/MachineView";
 import type { Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
+import { appState } from "../test/builders";
 import {
   HOME,
   useTerminalStore,
@@ -58,20 +58,6 @@ const ROW: Row = {
   sinceMs: null,
 };
 
-function machine(id: string): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: null,
-    ages: {},
-  };
-}
-
 function tab(paneId: string): TermTab {
   return {
     tabKey: `buildbox::${paneId}`,
@@ -108,12 +94,9 @@ beforeEach(() => {
   vi.mocked(openRow).mockReset();
   vi.mocked(openFull).mockReset();
   useAppStore.setState({
-    state: {
-      machines: [machine("buildbox")],
-      herdr_version: "0.9.4",
+    state: appState([[{ id: "buildbox", lastOkMs: null }, null]], {
       herdr_path: null,
-      generated_at_ms: 1,
-    },
+    }),
   });
 });
 

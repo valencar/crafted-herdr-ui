@@ -8,13 +8,19 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
+import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { NewSessionRequest } from "../lib/bindings/NewSessionRequest";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
+import {
+  appState as buildState,
+  buildboxTerms,
+  machineView,
+  shellTerm,
+  type TermSpec,
+} from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -28,34 +34,25 @@ import { NewSession } from "./NewSession";
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const pickFolder = vi.mocked(openDialog);
 
-const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();
 
 function machine(
   id: string,
-  overrides: Partial<MachineView> = {},
+  over: {
+    health?: Health;
+    isLocal?: boolean;
+    /** The terminals; the fixture's by default. */
+    terms?: TermSpec[];
+  } = {},
 ): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: structuredClone(fixture),
-    last_ok_ms: NOW,
-    ages: {},
-    ...overrides,
-  };
+  return machineView(
+    { id, health: over.health, isLocal: over.isLocal, lastOkMs: NOW },
+    over.terms ?? buildboxTerms(),
+  );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: NOW,
-  };
+  return { ...buildState([], { generated_at_ms: NOW }), machines };
 }
 
 /** The backend's plan, faked: the agent start line exists only for an agent kind. */
@@ -631,15 +628,7 @@ describe("NewSession form", () => {
   });
 
   it("defaults to New workspace when the machine has no workspaces", async () => {
-    const empty = machine("buildbox", {
-      snapshot: {
-        ...structuredClone(fixture),
-        workspaces: [],
-        tabs: [],
-        panes: [],
-        agents: [],
-      },
-    });
+    const empty = machine("buildbox", { terms: [] });
     const user = setup(appState(empty));
     const select = screen.getByLabelText("Place it") as HTMLSelectElement;
     expect(select.value).toBe("workspace");
@@ -669,19 +658,16 @@ describe("NewSession form", () => {
   });
 
   it("offers exactly six distinct recent folders of the chosen machine", async () => {
-    const snap = structuredClone(fixture);
-    snap.agents = [];
-    const template = snap.panes[0];
     // Nine distinct folders, then a repeat of the first: ten panes in all.
-    snap.panes = [...Array.from({ length: 9 }, (_, i) => i), 0].map((n, i) => ({
-      ...template,
-      pane_id: `w1:p${i + 1}`,
-      terminal_id: `term-${i + 1}`,
-      cwd: `/home/dev/projects/p${n}`,
-      foreground_cwd: null,
-    }));
+    const terms = [...Array.from({ length: 9 }, (_, i) => i), 0].map((n, i) =>
+      shellTerm({
+        address: `w1:p${i + 1}`,
+        terminalId: `term-${i + 1}`,
+        folder: `/home/dev/projects/p${n}`,
+      }),
+    );
     const user = setup(
-      appState(machine("buildbox", { snapshot: snap }), machine("gpubox")),
+      appState(machine("buildbox", { terms }), machine("gpubox")),
     );
     // The buttons show the folder's name; the app tooltip (not a native title) has the path.
     const recentButtons = () =>
@@ -742,7 +728,7 @@ describe("NewSession form", () => {
 
   it("shows Browse only for the local machine and fills the folder from the dialog", async () => {
     const user = setup(
-      appState(machine("local", { is_local: true }), machine("buildbox")),
+      appState(machine("local", { isLocal: true }), machine("buildbox")),
     );
     pickFolder.mockResolvedValue("/home/dev/projects/web-app");
     await user.click(screen.getByRole("button", { name: "Browse…" }));
@@ -761,7 +747,7 @@ describe("NewSession form", () => {
   });
 
   it("keeps the folder when Browse is cancelled", async () => {
-    const user = setup(appState(machine("local", { is_local: true })));
+    const user = setup(appState(machine("local", { isLocal: true })));
     pickFolder.mockResolvedValue(null);
     await fillFolder(user, "/home/dev/x");
     await user.click(screen.getByRole("button", { name: "Browse…" }));

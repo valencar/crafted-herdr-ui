@@ -2,41 +2,25 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useMemo } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
-import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
+import {
+  buildboxTerms,
+  appState as buildState,
+  machine,
+} from "../test/builders";
 import { useRowsByKey } from "./tabInfo";
 import { groupTabs } from "./tabOrder";
 import { HOME, useTerminalStore } from "./terminalStore";
 
 import { WorkboxRow } from "./WorkboxRow";
 
-const fixture = raw.result.snapshot as unknown as Snapshot;
-
-function machine(id: string, withSnapshot: boolean): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: withSnapshot ? structuredClone(fixture) : null,
-    last_ok_ms: 1,
-    ages: {},
-  };
-}
-
-function appState(): AppState {
-  return {
-    machines: [machine("buildbox", true), machine("gpubox", false)],
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: 1,
-  };
+function appState(patch: Parameters<typeof buildboxTerms>[0] = {}): AppState {
+  return buildState([
+    [machine({ id: "buildbox" }), buildboxTerms(patch)],
+    [machine({ id: "gpubox" }), null],
+  ]);
 }
 
 function open(machineId: string, paneId: string, title: string) {
@@ -193,11 +177,7 @@ describe("WorkboxRow", () => {
     open("buildbox", "w1:p1", "planner");
     open("buildbox", "w1:p2", "infra");
     act(() => {
-      const state = appState();
-      const pane = state.machines[0].snapshot!.panes.find(
-        (p) => p.pane_id === "w1:p1",
-      )!;
-      pane.agent_status = "blocked";
+      const state = appState({ "w1:p1": { status: "blocked" } });
       useAppStore.setState({ state });
     });
     render(<Harness />);
@@ -263,10 +243,7 @@ describe("WorkboxRow", () => {
     try {
       open("buildbox", "w1:p1", "planner");
       act(() => {
-        const state = appState();
-        state.machines[0].snapshot!.panes.find(
-          (p) => p.pane_id === "w1:p1",
-        )!.agent_status = "blocked";
+        const state = appState({ "w1:p1": { status: "blocked" } });
         useAppStore.setState({ state });
       });
       render(<Harness />);

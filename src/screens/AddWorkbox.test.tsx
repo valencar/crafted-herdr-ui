@@ -6,6 +6,7 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import type { SetupEvent } from "../lib/bindings/SetupEvent";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import { appState as buildState, machineView } from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -21,26 +22,14 @@ const listen = vi.mocked(onMachineSetup);
 let emitSetup: (event: SetupEvent) => void;
 
 function machine(id: string, label = id, target: string | null = id) {
-  return {
-    id,
-    label,
-    target,
-    session: "default",
-    is_local: target === null,
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: 1,
-    ages: {},
-  } as MachineView;
+  return machineView(
+    { id, name: label, target, isLocal: target === null },
+    null,
+  );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: 1,
-  };
+  return { ...buildState([]), machines };
 }
 
 const LOCAL = machine("local", "This Mac", null);
@@ -342,10 +331,15 @@ describe("AddWorkbox", () => {
   });
 
   it("blocks a host whose profile is in the session being asked for", async () => {
-    const work = {
-      ...machine("buildbox-work", "Build box (work)", "buildbox"),
-      session: "work",
-    };
+    const work = machineView(
+      {
+        id: "buildbox-work",
+        name: "Build box (work)",
+        target: "buildbox",
+        session: "work",
+      },
+      null,
+    );
     useAppStore.setState({
       state: appState(
         LOCAL,

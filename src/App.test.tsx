@@ -8,14 +8,19 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "./lib/bindings/AppState";
 import type { Health } from "./lib/bindings/Health";
 import type { MachineView } from "./lib/bindings/MachineView";
 import type { MenuId } from "./lib/bindings/MenuId";
 import type { Settings } from "./lib/bindings/Settings";
-import type { Snapshot } from "./lib/bindings/Snapshot";
 import { useAppStore } from "./store/appStore";
+import {
+  appState,
+  buildboxTerms,
+  machineView,
+  shellTerm,
+  type TermSpec,
+} from "./test/builders";
 import { HOME, useTerminalStore } from "./terminal/terminalStore";
 import App from "./App";
 
@@ -49,12 +54,7 @@ vi.mock("./lib/ipc", () => ipc);
 
 const activeKey = () => useTerminalStore.getState().activeKey;
 
-const state: AppState = {
-  machines: [],
-  herdr_version: "0.9.4",
-  herdr_path: "/home/dev/.local/bin/herdr",
-  generated_at_ms: 1,
-};
+const state: AppState = appState([]);
 
 beforeEach(() => {
   useAppStore.setState({ state: null });
@@ -141,17 +141,7 @@ it("shows the Workbox screen when the view is a workbox, All agents or the Dashb
   ipc.getState.mockResolvedValue({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: null,
-        last_ok_ms: null,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox", lastOkMs: null }, null),
     ],
   });
   useAppStore.setState({ view: { kind: "workbox", machineId: "buildbox" } });
@@ -186,17 +176,7 @@ it("renders the Add workbox sheet over both Home and the Workbox screen", async 
   ipc.getState.mockResolvedValue({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: null,
-        last_ok_ms: null,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox", lastOkMs: null }, null),
     ],
   });
   ipc.invokeTyped.mockImplementation(async (name: string) =>
@@ -267,17 +247,7 @@ it("selects a row and shows Home when a notification is clicked", async () => {
   ipc.getState.mockResolvedValue({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: raw.result.snapshot as unknown as Snapshot,
-        last_ok_ms: 1,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox" }, buildboxTerms()),
     ],
   });
   // The Inspector asks for the attach command of the selected row.
@@ -300,17 +270,7 @@ function listBuildbox() {
   ipc.getState.mockResolvedValue({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: raw.result.snapshot as unknown as Snapshot,
-        last_ok_ms: 1,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox" }, buildboxTerms()),
     ],
   });
   ipc.invokeTyped.mockImplementation(async (name: string) =>
@@ -601,17 +561,9 @@ describe("terminal menu ids", () => {
     // gpubox comes after buildbox in the machine list, though it was opened first.
     ipc.getState.mockResolvedValue({
       ...state,
-      machines: ["buildbox", "gpubox"].map((id) => ({
-        id,
-        label: id,
-        target: id,
-        session: "default",
-        is_local: false,
-        health: { kind: "online" as const },
-        snapshot: null,
-        last_ok_ms: 1,
-        ages: {},
-      })),
+      machines: ["buildbox", "gpubox"].map((id) =>
+        machineView({ id, target: id }, null),
+      ),
     });
     render(<App />);
     await screen.findByRole("searchbox");
@@ -832,17 +784,10 @@ describe("terminal menu ids", () => {
     ipc.getState.mockResolvedValue({
       ...state,
       machines: [
-        {
-          id: "buildbox",
-          label: "buildbox",
-          target: "buildbox",
-          session: "default",
-          is_local: false,
-          health: { kind: "online" },
-          snapshot: null,
-          last_ok_ms: null,
-          ages: {},
-        },
+        machineView(
+          { id: "buildbox", target: "buildbox", lastOkMs: null },
+          null,
+        ),
       ],
     });
     render(<App />);
@@ -886,17 +831,7 @@ describe("terminal menu ids", () => {
     ipc.getState.mockResolvedValue({
       ...state,
       machines: [
-        {
-          id: "buildbox",
-          label: "buildbox",
-          target: "buildbox",
-          session: "default",
-          is_local: false,
-          health: { kind: "online" },
-          snapshot: raw.result.snapshot as unknown as Snapshot,
-          last_ok_ms: 1,
-          ages: {},
-        },
+        machineView({ id: "buildbox", target: "buildbox" }, buildboxTerms()),
       ],
     });
     ipc.invokeTyped.mockImplementation(async (name: string) =>
@@ -1026,17 +961,7 @@ describe("next-needs-you, split and sidebar menu ids", () => {
   const buildboxState = (): AppState => ({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: raw.result.snapshot as unknown as Snapshot,
-        last_ok_ms: 1,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox" }, buildboxTerms()),
     ],
   });
   const saved = () =>
@@ -1292,18 +1217,21 @@ describe("the Activity drawer", () => {
 
 describe("the window chrome", () => {
   /** A machine with the fixture's agents. */
-  function box(id: string, health: Health = { kind: "online" }): MachineView {
-    return {
-      id,
-      label: id,
-      target: id,
-      session: "default",
-      is_local: false,
-      health,
-      snapshot: structuredClone(raw.result.snapshot) as unknown as Snapshot,
-      last_ok_ms: Date.now(),
-      ages: {},
-    };
+  function box(
+    id: string,
+    health: Health = { kind: "online" },
+    opts: { isLocal?: boolean; terms?: TermSpec[] } = {},
+  ): MachineView {
+    return machineView(
+      {
+        id,
+        target: id,
+        isLocal: opts.isLocal,
+        health,
+        lastOkMs: Date.now(),
+      },
+      opts.terms ?? buildboxTerms(),
+    );
   }
 
   function listBoxes(version = "0.9.4", ...machines: MachineView[]) {
@@ -1620,7 +1548,7 @@ describe("the window chrome", () => {
     });
 
     it("hints_that_only_this_computer_is_there_until_a_workbox_is_added", async () => {
-      listBoxes("0.9.4", { ...box("local"), is_local: true });
+      listBoxes("0.9.4", box("local", undefined, { isLocal: true }));
       render(<App />);
       const sidebar = await screen.findByRole("navigation", {
         name: "Sidebar",
@@ -1632,7 +1560,10 @@ describe("the window chrome", () => {
         useAppStore.setState({
           state: {
             ...useAppStore.getState().state!,
-            machines: [{ ...box("local"), is_local: true }, box("gpubox")],
+            machines: [
+              box("local", undefined, { isLocal: true }),
+              box("gpubox"),
+            ],
           },
         }),
       );
@@ -1690,11 +1621,20 @@ describe("the window chrome", () => {
     const target = { key: KEY, machineId: "buildbox", paneId: "w9:p9" };
     /** The next poll: the fixture plus the new pane. */
     const withNewPane = (): AppState => {
-      const m = box("buildbox");
-      m.snapshot!.panes.push({
-        ...m.snapshot!.panes[0],
-        pane_id: "w9:p9",
-        terminal_id: "term-99",
+      const m = box("buildbox", undefined, {
+        terms: [
+          ...buildboxTerms(),
+          shellTerm({
+            address: "w9:p9",
+            terminalId: "term-99",
+            title: "claude: refactor auth",
+            folder: "/home/dev/projects/api-service",
+            workspaceId: "w1",
+            workspaceLabel: "api-service",
+            tabId: "w1:t1",
+            tabLabel: "main",
+          }),
+        ],
       });
       return { ...state, machines: [m, box("gpubox")] };
     };

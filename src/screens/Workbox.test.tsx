@@ -1,15 +1,19 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
-import type { Pane } from "../lib/bindings/Pane";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import type { Settings } from "../lib/bindings/Settings";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import {
+  appState as buildState,
+  buildboxTerms,
+  machineView,
+  shellTerm,
+  type TermSpec,
+} from "../test/builders";
 import { Workbox } from "./Workbox";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -21,36 +25,28 @@ import { copyText, invokeTyped } from "../lib/ipc";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
-// The raw herdr response has fields the bindings ignore, hence the cast.
-const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();
 
 function machine(
   id: string,
-  overrides: Partial<MachineView> = {},
+  over: { name?: string; terms?: TermSpec[] } = {},
   health: Health = { kind: "online" },
 ): MachineView {
-  return {
-    id,
-    label: id,
-    target: id === "local" ? null : id,
-    session: "default",
-    is_local: id === "local",
-    health,
-    snapshot: structuredClone(fixture),
-    last_ok_ms: NOW,
-    ages: {},
-    ...overrides,
-  };
+  return machineView(
+    {
+      id,
+      name: over.name,
+      target: id === "local" ? null : id,
+      isLocal: id === "local",
+      health,
+      lastOkMs: NOW,
+    },
+    over.terms ?? buildboxTerms(),
+  );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: NOW,
-  };
+  return { ...buildState([], { generated_at_ms: NOW }), machines };
 }
 
 const serverError = (code: string, message: string) => ({
@@ -245,7 +241,7 @@ describe("Workbox", () => {
   });
 
   it("local_hides_rename_disable_remove_and_reconnect", () => {
-    setup(appState(machine("local", { label: "This computer" })), "local");
+    setup(appState(machine("local", { name: "This computer" })), "local");
     for (const name of ["Reconnect", "Rename", "Disable", "Remove…"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
@@ -678,16 +674,18 @@ describe("Workbox", () => {
 
 describe("Workbox pane tails", () => {
   function manyPanes(count: number): MachineView {
-    const m = machine("buildbox");
-    const snap = m.snapshot!;
-    const extra: Pane[] = Array.from({ length: count }, (_, i) => ({
-      ...snap.panes[2],
-      pane_id: `w1:p${100 + i}`,
-      tab_id: "w1:t2",
-      terminal_id: `term-x${i}`,
-    }));
-    snap.panes = [...snap.panes, ...extra];
-    return m;
+    const extra = Array.from({ length: count }, (_, i) =>
+      shellTerm({
+        address: `w1:p${100 + i}`,
+        title: "zsh",
+        folder: "/home/dev/projects/api-service/packages/db",
+        terminalId: `term-x${i}`,
+        workspaceLabel: "api-service",
+        tabId: "w1:t2",
+        tabLabel: "shell",
+      }),
+    );
+    return machine("buildbox", { terms: [...buildboxTerms(), ...extra] });
   }
 
   it("tails_refresh_every_10s_for_at_most_12_panes_agents_first", async () => {

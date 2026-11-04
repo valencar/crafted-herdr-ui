@@ -8,13 +8,15 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
-import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { CommandPalette } from "../components/CommandPalette";
 import { useAppStore } from "../store/appStore";
+import {
+  buildboxTerms,
+  appState as buildState,
+  machine,
+} from "../test/builders";
 import { TabStrip } from "./TabStrip";
 import { HOME, useTerminalStore } from "./terminalStore";
 
@@ -26,29 +28,11 @@ vi.mock("./Workspace", () => ({
   requestTerminalFind: vi.fn(),
 }));
 
-const fixture = raw.result.snapshot as unknown as Snapshot;
-
-function machine(id: string, withSnapshot: boolean): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: withSnapshot ? structuredClone(fixture) : null,
-    last_ok_ms: 1,
-    ages: {},
-  };
-}
-
 function appState(): AppState {
-  return {
-    machines: [machine("buildbox", true), machine("gpubox", false)],
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: 1,
-  };
+  return buildState([
+    [machine({ id: "buildbox" }), buildboxTerms()],
+    [machine({ id: "gpubox" }), null],
+  ]);
 }
 
 function open(machineId: string, paneId: string, title: string) {

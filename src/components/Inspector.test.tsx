@@ -8,14 +8,13 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { toRows } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import { appState, buildboxTerms, machineView } from "../test/builders";
 import { Inspector } from "./Inspector";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -31,23 +30,15 @@ const listen = vi.mocked(onPreview);
 
 const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
 
-const machine: MachineView = {
-  id: "buildbox",
-  label: "buildbox",
-  target: "buildbox",
-  session: "default",
-  is_local: false,
-  health: { kind: "online" },
-  snapshot: raw.result.snapshot as unknown as Snapshot,
-  last_ok_ms: 1,
-  ages: {},
-};
-const rows = toRows({
-  machines: [machine],
-  herdr_version: "0.9.4",
-  herdr_path: null,
-  generated_at_ms: 1,
-});
+const machine: MachineView = machineView(
+  { id: "buildbox", target: "buildbox" },
+  buildboxTerms(),
+);
+const rows = toRows(
+  appState([[{ id: "buildbox", target: "buildbox" }, buildboxTerms()]], {
+    herdr_path: null,
+  }),
+);
 const rowOf = (key: string) => rows.find((r) => r.key === key)!;
 const BLOCKED = rowOf("buildbox::w1:p1");
 const DONE = rowOf("buildbox::w2:p1");

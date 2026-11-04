@@ -1,14 +1,18 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import type { Group } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { Sidebar } from "./Sidebar";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
+import {
+  appState as buildState,
+  buildboxTerms,
+  machineView,
+} from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -23,17 +27,10 @@ function machine(id: string, kind: MachineView["health"]["kind"]): MachineView {
     kind === "attention" || kind === "reconnecting"
       ? { kind, error: "unreachable", attempt: 1 }
       : { kind };
-  return {
-    id,
-    label: id,
-    target: id,
-    session: "default",
-    is_local: false,
-    health,
-    snapshot: null,
-    last_ok_ms: null,
-    ages: {},
-  } as unknown as MachineView;
+  return machineView(
+    { id, target: id, health: health as Health, lastOkMs: null },
+    null,
+  );
 }
 
 /** A project group with one pane of its own; only the name and the key matter here. */
@@ -95,10 +92,7 @@ function renderSidebar(collapsed: boolean, extra: Extra = {}) {
 
 /** A machine carrying the fixture's snapshot, so its panes have rows. */
 function withSnapshot(id: string): MachineView {
-  return {
-    ...machine(id, "online"),
-    snapshot: structuredClone(raw.result.snapshot) as unknown as Snapshot,
-  };
+  return machineView({ id, target: id, lastOkMs: null }, buildboxTerms());
 }
 
 function openTab(paneId: string, title: string, machineId = "buildbox") {
@@ -238,10 +232,8 @@ describe("Sidebar", () => {
   it("each_workbox_shows_its_agent_count", () => {
     useAppStore.setState({
       state: {
+        ...buildState([], { herdr_path: null }),
         machines: [withSnapshot("buildbox")],
-        herdr_version: "0.9.4",
-        herdr_path: null,
-        generated_at_ms: 1,
       },
     });
     renderSidebar(false, { machines: [withSnapshot("buildbox")] });
@@ -254,12 +246,7 @@ describe("Sidebar", () => {
   it("open_tabs_are_nested_under_their_workbox", () => {
     const machines = [withSnapshot("buildbox"), machine("gpubox", "online")];
     useAppStore.setState({
-      state: {
-        machines,
-        herdr_version: "0.9.4",
-        herdr_path: null,
-        generated_at_ms: 1,
-      },
+      state: { ...buildState([], { herdr_path: null }), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     openTab("w2:p1", "agent w2:p1");
@@ -304,12 +291,7 @@ describe("Sidebar", () => {
   it("a_tab_without_a_live_session_says_its_state_in_words", () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: {
-        machines,
-        herdr_version: "0.9.4",
-        herdr_path: null,
-        generated_at_ms: 1,
-      },
+      state: { ...buildState([], { herdr_path: null }), machines },
     });
     openTab("w2:p2", "agent w2:p2");
     renderSidebar(false, { machines });
@@ -323,12 +305,7 @@ describe("Sidebar", () => {
   it("nested_terminal_marks_the_active_tab_current", () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: {
-        machines,
-        herdr_version: "0.9.4",
-        herdr_path: null,
-        generated_at_ms: 1,
-      },
+      state: { ...buildState([], { herdr_path: null }), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     openTab("w2:p1", "agent w2:p1");
@@ -344,12 +321,7 @@ describe("Sidebar", () => {
   it("nested_terminal_activates_its_tab", async () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: {
-        machines,
-        herdr_version: "0.9.4",
-        herdr_path: null,
-        generated_at_ms: 1,
-      },
+      state: { ...buildState([], { herdr_path: null }), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     openTab("w2:p1", "agent w2:p1");
@@ -422,12 +394,7 @@ describe("Sidebar", () => {
   it("nav_box_carries_workbox_color", () => {
     const machines = [withSnapshot("buildbox"), machine("gpubox", "online")];
     useAppStore.setState({
-      state: {
-        machines,
-        herdr_version: "0.9.4",
-        herdr_path: null,
-        generated_at_ms: 1,
-      },
+      state: { ...buildState([], { herdr_path: null }), machines },
     });
     renderSidebar(false, {
       machines,
@@ -443,12 +410,7 @@ describe("Sidebar", () => {
   it("rail_marks_the_active_tabs_workbox", () => {
     const machines = [withSnapshot("buildbox"), machine("gpubox", "online")];
     useAppStore.setState({
-      state: {
-        machines,
-        herdr_version: "0.9.4",
-        herdr_path: null,
-        generated_at_ms: 1,
-      },
+      state: { ...buildState([], { herdr_path: null }), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     renderSidebar(true, { machines });
@@ -508,12 +470,7 @@ describe("Sidebar", () => {
   it("terminal_rows_lead_with_a_live_dot_and_hint_their_tab", () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: {
-        machines,
-        herdr_version: "0.9.4",
-        herdr_path: null,
-        generated_at_ms: 1,
-      },
+      state: { ...buildState([], { herdr_path: null }), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     openTab("w2:p1", "agent w2:p1");
@@ -530,12 +487,7 @@ describe("Sidebar", () => {
   it("no_title_attributes", () => {
     const machines = [withSnapshot("buildbox")];
     useAppStore.setState({
-      state: {
-        machines,
-        herdr_version: "0.9.4",
-        herdr_path: null,
-        generated_at_ms: 1,
-      },
+      state: { ...buildState([], { herdr_path: null }), machines },
     });
     openTab("w1:p1", "agent w1:p1");
     const projects = [project("api-service")];
@@ -570,12 +522,7 @@ describe("Sidebar", () => {
     try {
       const machines = [withSnapshot("buildbox")];
       useAppStore.setState({
-        state: {
-          machines,
-          herdr_version: "0.9.4",
-          herdr_path: null,
-          generated_at_ms: 1,
-        },
+        state: { ...buildState([], { herdr_path: null }), machines },
       });
       openTab("w1:p1", "agent w1:p1");
       openTab("w2:p1", "agent w2:p1");
@@ -642,12 +589,7 @@ describe("Sidebar", () => {
     it("a_terminal_row_tooltip_has_its_title_and_status", () => {
       const machines = [withSnapshot("buildbox")];
       useAppStore.setState({
-        state: {
-          machines,
-          herdr_version: "0.9.4",
-          herdr_path: null,
-          generated_at_ms: 1,
-        },
+        state: { ...buildState([], { herdr_path: null }), machines },
       });
       openTab("w1:p1", "a-very-long-agent-title-that-fades-at-the-edge");
       act(() =>

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MachineView } from "./bindings/MachineView";
+import { machineView } from "../test/builders";
 import type { Row } from "./grouping";
 import { agentActions, buildItems, labelPositions, rankItems } from "./palette";
 
@@ -51,11 +52,14 @@ const rows: Row[] = [
   }),
 ];
 
-const machines = [
-  { id: "local", label: "Local", target: null, is_local: true },
-  { id: "m-1", label: "buildbox", target: "buildbox", is_local: false },
-  { id: "m-2", label: "gpubox", target: "gpubox", is_local: false },
-] as MachineView[];
+const machines: MachineView[] = [
+  machineView(
+    { id: "local", name: "Local", target: null, isLocal: true },
+    null,
+  ),
+  machineView({ id: "m-1", name: "buildbox", target: "buildbox" }, null),
+  machineView({ id: "m-2", name: "gpubox", target: "gpubox" }, null),
+];
 
 const tabRun = vi.fn();
 const openTabs = [

@@ -9,16 +9,20 @@ import {
 import userEvent from "@testing-library/user-event";
 import { Profiler, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { ActionError } from "../lib/bindings/ActionError";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
+import {
+  appState as buildState,
+  buildboxTerms,
+  machineView,
+  type TermSpec,
+} from "../test/builders";
 import { AllAgents } from "./AllAgents";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -49,36 +53,42 @@ async function settleRows() {
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 let emitPreview: (frame: PreviewFrame) => void;
 
-// The raw herdr response has fields the bindings ignore, hence the cast.
-const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();
+
+type Over = {
+  /** The terminals; `null` for a machine that has not answered yet. */
+  terms?: TermSpec[] | null;
+  isLocal?: boolean;
+  name?: string;
+  lastOkMs?: number | null;
+};
+
+/** The fixture's terminals, with the two status ages every machine starts with. */
+const fixtureTerms = (): TermSpec[] =>
+  buildboxTerms({
+    "w1:p1": { sinceMs: NOW - 2 * 60_000 },
+    "w2:p1": { sinceMs: NOW - 3 * 60_000 },
+  });
 
 function machine(
   id: string,
   health: Health = { kind: "online" },
-  overrides: Partial<MachineView> = {},
+  over: Over = {},
 ): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health,
-    snapshot: structuredClone(fixture),
-    last_ok_ms: NOW,
-    ages: { "term-1": NOW - 2 * 60_000, "term-4": NOW - 3 * 60_000 },
-    ...overrides,
-  };
+  return machineView(
+    {
+      id,
+      name: over.name,
+      health,
+      isLocal: over.isLocal,
+      lastOkMs: over.lastOkMs === undefined ? NOW : over.lastOkMs,
+    },
+    over.terms === undefined ? fixtureTerms() : over.terms,
+  );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: NOW,
-  };
+  return { ...buildState([], { generated_at_ms: NOW }), machines };
 }
 
 const defaultState = () => appState(machine("buildbox"), machine("gpubox"));
@@ -337,9 +347,7 @@ describe("AllAgents", () => {
     ]);
     // The header's name is unchanged: the tile is hidden from it.
     expect(
-      screen
-        .getAllByRole("heading", { level: 3 })
-        .map((h) => h.textContent),
+      screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent),
     ).toEqual(["buildbox", "gpubox"]);
     expect(
       screen.getByRole("region", { name: "buildbox" }),
@@ -367,7 +375,7 @@ describe("AllAgents", () => {
         machine(
           "gpubox",
           { kind: "attention", error: "ssh: connection refused" },
-          { last_ok_ms: NOW - 40_000 },
+          { lastOkMs: NOW - 40_000 },
         ),
       ),
     );
@@ -677,24 +685,18 @@ describe("AllAgents", () => {
   it("clears_the_selection_when_the_row_disappears", async () => {
     setup();
     useAppStore.setState({ selectedKey: "gpubox::w1:p1" });
-    const gone = defaultState();
-    gone.machines[1].snapshot!.agents =
-      gone.machines[1].snapshot!.agents.filter((a) => a.pane_id !== "w1:p1");
-    gone.machines[1].snapshot!.panes = gone.machines[1].snapshot!.panes.filter(
-      (p) => p.pane_id !== "w1:p1",
+    const gone = appState(
+      machine("buildbox"),
+      machine("gpubox", undefined, {
+        terms: fixtureTerms().filter((t) => t.address !== "w1:p1"),
+      }),
     );
     useAppStore.getState().setState(gone);
     await waitFor(() => expect(useAppStore.getState().selectedKey).toBeNull());
   });
 
   it("empty_state_points_at_new_session", () => {
-    setup(
-      appState(
-        machine("buildbox", undefined, {
-          snapshot: { ...structuredClone(fixture), agents: [], panes: [] },
-        }),
-      ),
-    );
+    setup(appState(machine("buildbox", undefined, { terms: [] })));
     expect(screen.getByText(/Start one with/)).toBeInTheDocument();
   });
 
@@ -866,15 +868,21 @@ describe("AllAgents", () => {
 });
 
 describe("Home states", () => {
-  const LOCAL = () =>
-    machine("local", { kind: "online" }, { is_local: true, label: "Local" });
-  const noAgents = (m: MachineView): MachineView => ({
-    ...m,
-    snapshot: { ...structuredClone(fixture), agents: [], panes: [] },
-  });
+  const LOCAL = (over: Over = {}) =>
+    machine(
+      "local",
+      { kind: "online" },
+      { isLocal: true, name: "Local", ...over },
+    );
+  const noAgents = { terms: [] };
 
   it("empty_agents_state", () => {
-    setup(appState(noAgents(machine("buildbox")), noAgents(machine("gpubox"))));
+    setup(
+      appState(
+        machine("buildbox", undefined, noAgents),
+        machine("gpubox", undefined, noAgents),
+      ),
+    );
     const card = screen.getByRole("region", { name: "No agents yet" });
     expect(card).toHaveTextContent("Start one with ⌘N.");
     // There are workboxes, so no nudge to add one.
@@ -884,7 +892,7 @@ describe("Home states", () => {
   });
 
   it("the_only_local_card_offers_add_workbox_in_the_empty_state_only", async () => {
-    const user = setup(appState(noAgents(LOCAL())));
+    const user = setup(appState(LOCAL(noAgents)));
     expect(screen.getByRole("region", { name: "No agents yet" })).toBeVisible();
     const card = screen.getByRole("region", {
       name: "Only this computer so far",
@@ -907,9 +915,9 @@ describe("Home states", () => {
         machine(
           "gpubox",
           { kind: "reconnecting", retry_in_ms: 5000, error: "timed out" },
-          { last_ok_ms: NOW - 40_000 },
+          { lastOkMs: NOW - 40_000 },
         ),
-        machine("stagingbox", { kind: "online" }, { last_ok_ms: NOW - 90_000 }),
+        machine("stagingbox", { kind: "online" }, { lastOkMs: NOW - 90_000 }),
       ),
     );
     expect(rowItem("gpubox::w1:p1")).toHaveTextContent(
@@ -927,7 +935,7 @@ describe("Home states", () => {
         machine(
           "gpubox",
           { kind: "attention", error: "ssh: refused" },
-          { last_ok_ms: null },
+          { lastOkMs: null },
         ),
       ),
     );
@@ -937,13 +945,13 @@ describe("Home states", () => {
   });
 
   describe("a Local herdr that isn't answering", () => {
-    const down = (health: Health, snapshot: Snapshot | null = null) =>
+    const down = (health: Health, terms: TermSpec[] | null = null) =>
       appState(
         machine("local", health, {
-          is_local: true,
-          label: "Local",
-          snapshot,
-          last_ok_ms: null,
+          isLocal: true,
+          name: "Local",
+          terms,
+          lastOkMs: null,
         }),
       );
 
@@ -987,7 +995,7 @@ describe("Home states", () => {
       setup(
         down(
           { kind: "reconnecting", retry_in_ms: 1000, error: "boom" },
-          structuredClone(fixture),
+          fixtureTerms(),
         ),
       );
       expect(screen.queryByText("Local isn’t answering")).toBeNull();
@@ -1002,9 +1010,9 @@ describe("Home states", () => {
           "gpubox",
           { kind: "attention", error: "ssh: connection refused" },
           {
-            last_ok_ms: NOW - 40_000,
-            label: "gpu box",
-            snapshot: null,
+            lastOkMs: NOW - 40_000,
+            name: "gpu box",
+            terms: null,
           },
         ),
       );
@@ -1046,7 +1054,7 @@ describe("Home states", () => {
           machine(
             "gpubox",
             { kind: "attention", error: "ssh: connection refused" },
-            { last_ok_ms: NOW - 40_000 },
+            { lastOkMs: NOW - 40_000 },
           ),
         ),
       );
@@ -1067,11 +1075,11 @@ describe("Home states", () => {
     it("shows_the_card_even_when_no_machine_has_rows", () => {
       setup(
         appState(
-          machine("buildbox", { kind: "online" }, { snapshot: null }),
+          machine("buildbox", { kind: "online" }, { terms: null }),
           machine(
             "gpubox",
             { kind: "attention", error: "ssh: connection refused" },
-            { snapshot: null },
+            { terms: null },
           ),
         ),
       );
@@ -1107,13 +1115,15 @@ describe("Home states", () => {
   });
 
   it("labels_each_group_by_a_generated_id_even_when_the_folder_has_spaces", () => {
-    const spaced = JSON.parse(
-      JSON.stringify(fixture).replace(
-        /\/home\/dev\/projects\/api-service/g,
-        "/home/dev/projects/api service",
-      ),
-    ) as Snapshot;
-    setup(appState(machine("buildbox", undefined, { snapshot: spaced })));
+    const spaced = fixtureTerms().map((t) => ({
+      ...t,
+      folder:
+        t.folder?.replace(
+          /\/home\/dev\/projects\/api-service/g,
+          "/home/dev/projects/api service",
+        ) ?? null,
+    }));
+    setup(appState(machine("buildbox", undefined, { terms: spaced })));
     const group = document.querySelector<HTMLElement>(
       '[id^="group-"][id*=" "]',
     );

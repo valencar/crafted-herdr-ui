@@ -1,15 +1,19 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { CommandLogEntry } from "../lib/bindings/CommandLogEntry";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
+import type { AgentStatus } from "../lib/bindings/AgentStatus";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import {
+  appState as buildState,
+  buildboxTerms,
+  machineView,
+} from "../test/builders";
 import { Dashboard } from "./Dashboard";
 
 // xterm is tested on its own; `runMenuAction` only drags the workspace in with it.
@@ -23,8 +27,6 @@ import { invokeTyped } from "../lib/ipc";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
-// The raw herdr response has fields the bindings ignore, hence the cast.
-const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();
 const MIN = 60_000;
 
@@ -47,41 +49,46 @@ function entry(over: Partial<CommandLogEntry>): CommandLogEntry {
   };
 }
 
-function snapshotWith(statuses: Record<string, string>): Snapshot {
-  const snap = structuredClone(fixture);
-  for (const a of snap.agents) {
-    const status = statuses[a.pane_id];
-    if (status) (a as { agent_status: string }).agent_status = status;
-  }
-  return snap;
-}
+type Over = {
+  /** The terminals; `null` for a machine that has not answered yet. */
+  terms?: ReturnType<typeof buildboxTerms> | null;
+  /** Address → when its status began. Replaces the default two. */
+  since?: Record<string, number>;
+  /** Address → the status to give that agent. */
+  statuses?: Record<string, string>;
+  isLocal?: boolean;
+  lastOkMs?: number | null;
+};
 
 function machine(
   id: string,
   health: Health = { kind: "online" },
-  overrides: Partial<MachineView> = {},
+  over: Over = {},
 ): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health,
-    snapshot: structuredClone(fixture),
-    last_ok_ms: NOW,
-    ages: { "term-1": NOW - 2 * MIN, "term-4": NOW - 3 * MIN },
-    ...overrides,
+  const since = over.since ?? {
+    "w1:p1": NOW - 2 * MIN,
+    "w2:p1": NOW - 3 * MIN,
   };
+  const patch: Parameters<typeof buildboxTerms>[0] = {};
+  for (const [address, sinceMs] of Object.entries(since)) {
+    patch[address] = { sinceMs };
+  }
+  for (const [address, status] of Object.entries(over.statuses ?? {})) {
+    patch[address] = { ...patch[address], status: status as AgentStatus };
+  }
+  return machineView(
+    {
+      id,
+      health,
+      isLocal: over.isLocal,
+      lastOkMs: over.lastOkMs === undefined ? NOW : over.lastOkMs,
+    },
+    over.terms === undefined ? buildboxTerms(patch) : over.terms,
+  );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: NOW,
-  };
+  return { ...buildState([], { generated_at_ms: NOW }), machines };
 }
 
 const defaultState = () => appState(machine("buildbox"), machine("gpubox"));
@@ -423,11 +430,7 @@ describe("Dashboard", () => {
 
   it("nobody_waiting_says_so", () => {
     const quiet = { "w1:p1": "working", "w2:p1": "idle" };
-    setup(
-      appState(
-        machine("buildbox", undefined, { snapshot: snapshotWith(quiet) }),
-      ),
-    );
+    setup(appState(machine("buildbox", undefined, { statuses: quiet })));
     const needs = section("Needs you");
     expect(within(needs).getByText("0 waiting")).toBeInTheDocument();
     expect(
@@ -455,7 +458,7 @@ describe("Dashboard", () => {
     setup(
       appState(
         machine("buildbox", undefined, {
-          ages: { "term-1": NOW - 10_000, "term-4": NOW - 20_000 },
+          since: { "w1:p1": NOW - 10_000, "w2:p1": NOW - 20_000 },
         }),
       ),
     );
@@ -475,7 +478,7 @@ describe("Dashboard", () => {
   });
 
   it("blocked_the_longest_shows_a_dash_when_the_blocked_age_is_unknown", () => {
-    setup(appState(machine("buildbox", undefined, { ages: {} })));
+    setup(appState(machine("buildbox", undefined, { since: {} })));
     const t = tile("Blocked the longest");
     expect(t.querySelector(".tile-num")).toHaveTextContent("—");
     expect(t).not.toHaveTextContent("None");
@@ -486,7 +489,7 @@ describe("Dashboard", () => {
     setup(
       appState(
         machine("buildbox", undefined, {
-          snapshot: snapshotWith({ "w1:p1": "idle" }),
+          statuses: { "w1:p1": "idle" },
         }),
       ),
     );
@@ -655,7 +658,7 @@ describe("Dashboard", () => {
     // on an online workbox says nothing about how fresh the data is.
     setup(
       appState(
-        machine("buildbox", { kind: "online" }, { last_ok_ms: NOW - 10 * MIN }),
+        machine("buildbox", { kind: "online" }, { lastOkMs: NOW - 10 * MIN }),
       ),
     );
     const card = within(section("Workboxes")).getByRole("article", {
@@ -672,7 +675,7 @@ describe("Dashboard", () => {
         machine(
           "gpubox",
           { kind: "reconnecting", retry_in_ms: 5000, error: "timed out" },
-          { last_ok_ms: NOW - 2 * MIN },
+          { lastOkMs: NOW - 2 * MIN },
         ),
       ),
     );
@@ -693,9 +696,9 @@ describe("Dashboard", () => {
     const user = setup(
       appState(
         machine("buildbox", undefined, {
-          ages: { "term-2": NOW - 10 * MIN },
+          since: { "w1:p2": NOW - 10 * MIN },
         }),
-        machine("gpubox", undefined, { ages: { "term-2": NOW - 20 * MIN } }),
+        machine("gpubox", undefined, { since: { "w1:p2": NOW - 20 * MIN } }),
       ),
     );
     const working = section("Working now");
@@ -784,14 +787,7 @@ describe("Dashboard", () => {
   });
 
   it("no_agents_shows_the_empty_states", () => {
-    const empty = structuredClone(fixture);
-    empty.agents = [];
-    empty.panes = [];
-    setup(
-      appState(
-        machine("local", undefined, { is_local: true, snapshot: empty }),
-      ),
-    );
+    setup(appState(machine("local", undefined, { isLocal: true, terms: [] })));
     expect(screen.getByText("No agents yet")).toBeInTheDocument();
     expect(screen.getByText("Only this computer so far")).toBeInTheDocument();
     expect(
@@ -815,8 +811,8 @@ describe("Dashboard", () => {
           "local",
           { kind: "attention", error: "no herdr" },
           {
-            is_local: true,
-            snapshot: null,
+            isLocal: true,
+            terms: null,
           },
         ),
         machine("buildbox", { kind: "attention", error: "ssh failed" }),
@@ -829,22 +825,18 @@ describe("Dashboard", () => {
   it("null_snapshot_machine_renders_without_throwing", async () => {
     setup(
       appState(
-        machine(
-          "local",
-          { kind: "online" },
-          { is_local: true, snapshot: null },
-        ),
+        machine("local", { kind: "online" }, { isLocal: true, terms: null }),
         machine(
           "buildbox",
           { kind: "reconnecting", retry_in_ms: 3000, error: "timed out" },
-          { snapshot: null, last_ok_ms: null },
+          { terms: null, lastOkMs: null },
         ),
         machine(
           "gpubox",
           { kind: "attention", error: "ssh failed" },
-          { snapshot: null },
+          { terms: null },
         ),
-        machine("staging", { kind: "disabled" }, { snapshot: null }),
+        machine("staging", { kind: "disabled" }, { terms: null }),
       ),
     );
     await settle();

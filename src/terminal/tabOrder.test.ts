@@ -1,20 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { MachineView } from "../lib/bindings/MachineView";
+import { machineView } from "../test/builders";
 import { dropBefore, groupTabs, stripOrder, tabShortcut } from "./tabOrder";
 import type { TermTab } from "./terminalStore";
 
 function machine(id: string): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: id === "local",
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: null,
-    ages: {},
-  };
+  return machineView({ id, isLocal: id === "local", lastOkMs: null }, null);
 }
 
 function tab(machineId: string, paneId: string): TermTab {

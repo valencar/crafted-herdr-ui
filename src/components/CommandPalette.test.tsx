@@ -13,9 +13,8 @@ import { groupByProject, toRows } from "../lib/grouping";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import { useAppStore } from "../store/appStore";
+import { appState, buildboxTerms, machineView } from "../test/builders";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { ClosePaneHost } from "./ClosePaneHost";
 import { CommandPalette } from "./CommandPalette";
@@ -42,25 +41,10 @@ vi.mock("../terminal/Workspace", () => ({
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
-const snapshot = raw.result.snapshot as unknown as Snapshot;
-const state: AppState = {
-  machines: [
-    {
-      id: "buildbox",
-      label: "buildbox",
-      target: "buildbox",
-      session: "default",
-      is_local: false,
-      health: { kind: "online" },
-      snapshot,
-      last_ok_ms: 1,
-      ages: {},
-    },
-  ],
-  herdr_version: "0.9.4",
-  herdr_path: "/usr/local/bin/herdr",
-  generated_at_ms: 1,
-};
+const state: AppState = appState(
+  [[{ id: "buildbox", target: "buildbox" }, buildboxTerms()]],
+  { herdr_path: "/usr/local/bin/herdr" },
+);
 
 const onClose = vi.fn();
 
@@ -689,7 +673,12 @@ describe("CommandPalette agent frame", () => {
     useAppStore.setState({
       state: {
         ...state,
-        machines: [{ ...state.machines[0], label: "🔧 api-service" }],
+        machines: [
+          machineView(
+            { id: "buildbox", name: "🔧 api-service", target: "buildbox" },
+            buildboxTerms(),
+          ),
+        ],
       },
     });
     const user = open();

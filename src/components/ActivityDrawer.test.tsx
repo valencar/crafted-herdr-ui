@@ -2,7 +2,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommandLogEntry } from "../lib/bindings/CommandLogEntry";
-import type { MachineView } from "../lib/bindings/MachineView";
+import { machineView } from "../test/builders";
 import { useAppStore } from "../store/appStore";
 import { ActivityDrawer } from "./ActivityDrawer";
 
@@ -36,9 +36,9 @@ function entry(over: Partial<CommandLogEntry>): CommandLogEntry {
 }
 
 const machines = [
-  { id: "local", label: "Local" },
-  { id: "m-1", label: "buildbox" },
-] as MachineView[];
+  machineView({ id: "local", name: "Local" }, null),
+  machineView({ id: "m-1", name: "buildbox" }, null),
+];
 
 /** What the backend would answer: oldest first. */
 let log: CommandLogEntry[];

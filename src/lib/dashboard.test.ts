@@ -12,6 +12,7 @@ import {
   workingNow,
 } from "./dashboard";
 import type { Row } from "./grouping";
+import { machineView } from "../test/builders";
 
 function row(
   key: string,
@@ -33,18 +34,12 @@ function row(
   };
 }
 
-function machine(id: string, health: MachineView["health"]): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: id === "local",
-    health,
-    snapshot: null,
-    last_ok_ms: null,
-    ages: {},
-  };
+function machine(
+  id: string,
+  health: MachineView["health"],
+  lastOkMs: number | null = null,
+): MachineView {
+  return machineView({ id, health, isLocal: id === "local", lastOkMs }, null);
 }
 
 function entry(
@@ -226,10 +221,11 @@ describe("failing workboxes", () => {
   });
 
   it("the_note_gives_the_error_and_the_staleness", () => {
-    const m = {
-      ...machine("a", { kind: "attention", error: "ssh failed" }),
-      last_ok_ms: NOW - 40_000,
-    };
+    const m = machine(
+      "a",
+      { kind: "attention", error: "ssh failed" },
+      NOW - 40_000,
+    );
     expect(failingNote(m, NOW)).toBe("ssh failed · last updated 40s ago");
     expect(failingNote(machine("a", { kind: "online" }), NOW)).toBeNull();
     expect(failingNote(undefined, NOW)).toBeNull();

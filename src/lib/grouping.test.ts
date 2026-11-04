@@ -2,8 +2,16 @@ import { describe, expect, it } from "vitest";
 import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { Agent } from "./bindings/Agent";
 import type { AppState } from "./bindings/AppState";
+import type { Health } from "./bindings/Health";
 import type { MachineView } from "./bindings/MachineView";
 import type { Snapshot } from "./bindings/Snapshot";
+import {
+  appState as buildState,
+  buildboxTerms,
+  machineView,
+  shellTerm,
+  type TermSpec,
+} from "../test/builders";
 import {
   displayName,
   groupByProject,
@@ -18,34 +26,23 @@ import {
   type Row,
 } from "./grouping";
 
-// The raw herdr response has fields the bindings ignore, hence the cast.
+// The raw herdr response has fields the bindings ignore, hence the cast. Only the tests whose
+// subject is the herdr 0.9 agent record itself (`displayName`, the `cwd` fallback) read it.
 const fixture = raw.result.snapshot as unknown as Snapshot;
 
+/** A machine with the fixture's terminals, unless `terms` says otherwise (`null`: none yet). */
 function machine(
   id: string,
-  overrides: Partial<MachineView> = {},
+  over: { terms?: TermSpec[] | null; health?: Health } = {},
 ): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: structuredClone(fixture),
-    last_ok_ms: 1_000,
-    ages: {},
-    ...overrides,
-  };
+  return machineView(
+    { id, health: over.health, lastOkMs: 1_000 },
+    over.terms === undefined ? buildboxTerms() : over.terms,
+  );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/usr/local/bin/herdr",
-    generated_at_ms: 1_000,
-  };
+  return { ...buildState([], { generated_at_ms: 1_000 }), machines };
 }
 
 function row(overrides: Partial<Row>): Row {
@@ -106,7 +103,11 @@ describe("toRows", () => {
 
   it("takes sinceMs from the machine ages, null when absent", () => {
     const rows = toRows(
-      appState(machine("buildbox", { ages: { "term-1": 500 } })),
+      appState(
+        machine("buildbox", {
+          terms: buildboxTerms({ "w1:p1": { sinceMs: 500 } }),
+        }),
+      ),
     );
     expect(rows.find((r) => r.terminalId === "term-1")?.sinceMs).toBe(500);
     expect(rows.find((r) => r.terminalId === "term-2")?.sinceMs).toBeNull();
@@ -116,7 +117,7 @@ describe("toRows", () => {
     const rows = toRows(
       appState(
         machine("a", {
-          snapshot: null,
+          terms: null,
           health: { kind: "attention", error: "x" },
         }),
         machine("b", { health: { kind: "disabled" } }),
@@ -137,8 +138,9 @@ describe("toRows", () => {
   });
 
   it("unknown_status_kept", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[3].agent_status = "unknown";
+    const m = machine("buildbox", {
+      terms: buildboxTerms({ "w2:p2": { status: "unknown" } }),
+    });
     const rows = toRows(appState(m));
     const r = rows.find((x) => x.paneId === "w2:p2")!;
     expect(r.status).toBe("unknown");
@@ -251,12 +253,24 @@ describe("groupByProject", () => {
   });
 
   it("shell_does_not_join_another_machine_or_a_sibling_prefix", () => {
-    const a = machine("a");
-    a.snapshot!.panes[2].foreground_cwd = "/home/dev/projects/api-service-v2";
-    const b = machine("b");
-    b.snapshot!.agents = b.snapshot!.agents.filter(
-      (x) => x.pane_id !== "w1:p1",
-    );
+    const a = machine("a", {
+      terms: buildboxTerms({
+        "w1:p3": { folder: "/home/dev/projects/api-service-v2" },
+      }),
+    });
+    // b's w1:p1 stops being an agent but its pane stays, as a shell.
+    const b = machine("b", {
+      terms: buildboxTerms().map((t) =>
+        t.address === "w1:p1"
+          ? shellTerm({
+              address: t.address,
+              terminalId: t.terminalId,
+              folder: t.folder,
+              title: "claude: refactor auth",
+            })
+          : t,
+      ),
+    });
     const groups = groupByProject(toRows(appState(a, b)));
     const aApi = groups.find(
       (g) => g.key === "a::/home/dev/projects/api-service",
@@ -271,15 +285,20 @@ describe("groupByProject", () => {
   });
 
   it("an agent does not join another agent's group by nesting", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[1].foreground_cwd = "/home/dev/projects/api-service/sub";
+    const m = machine("buildbox", {
+      terms: buildboxTerms({
+        "w1:p2": { folder: "/home/dev/projects/api-service/sub" },
+      }),
+    });
     const groups = groupByProject(toRows(appState(m)));
     expect(groups.find((g) => g.name === "sub")?.rows).toHaveLength(1);
   });
 
   it("falls back to cwd when foreground_cwd is missing", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[1].foreground_cwd = null;
+    // herdr 0.9 only: the agent record keeps both `foreground_cwd` and `cwd`.
+    const snapshot = structuredClone(fixture);
+    snapshot.agents[1].foreground_cwd = null;
+    const m: MachineView = { ...machine("buildbox"), snapshot };
     const groups = groupByProject(toRows(appState(m)));
     expect(
       groups.find((g) => g.rows.some((r) => r.paneId === "w1:p2"))?.name,
@@ -287,9 +306,9 @@ describe("groupByProject", () => {
   });
 
   it("an agent with no folder at all is loose", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[1].foreground_cwd = null;
-    m.snapshot!.agents[1].cwd = null;
+    const m = machine("buildbox", {
+      terms: buildboxTerms({ "w1:p2": { folder: null } }),
+    });
     const groups = groupByProject(toRows(appState(m)));
     const loose = groups.find((g) => g.tier === 3)!;
     expect(loose.rows.map((r) => r.paneId)).toContain("w1:p2");
@@ -306,9 +325,12 @@ describe("groupByProject", () => {
   });
 
   it("a group with only idle agents is tier 2 and sorts after working", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[0].agent_status = "idle";
-    m.snapshot!.agents[2].agent_status = "idle";
+    const m = machine("buildbox", {
+      terms: buildboxTerms({
+        "w1:p1": { status: "idle" },
+        "w2:p1": { status: "idle" },
+      }),
+    });
     const groups = groupByProject(toRows(appState(m)));
     expect(groups.map((g) => [g.name, g.tier])).toEqual([
       ["infra", 1],
@@ -372,8 +394,9 @@ describe("groupByWorkbox", () => {
 
 describe("groupByStatus", () => {
   it("orders blocked, done, working, idle, unknown, shell and drops empty groups", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[3].agent_status = "unknown";
+    const m = machine("buildbox", {
+      terms: buildboxTerms({ "w2:p2": { status: "unknown" } }),
+    });
     const groups = groupByStatus(toRows(appState(m)));
     expect(groups.map((g) => g.name)).toEqual([
       "Needs input",
