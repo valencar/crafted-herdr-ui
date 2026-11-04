@@ -32,10 +32,10 @@ const FORWARDED: [&str; 11] = [
     "XDG_STATE_HOME",
     "XDG_CONFIG_HOME",
 ];
-/// Variables handed to everything that is not the core: `HerdrCli`, the legacy herdr probe, the
-/// in-app terminal and the user's terminal launches.
-// Until v0.9 Task 6c: the poller and its callers still run on herdr 0.9. The `HC_*` and `XDG_*`
-// names are core-only, so they stay out of this list.
+/// Variables handed to the legacy herdr probe (`find_legacy_herdr`): `herdr --version` must
+/// never see `HC_SOCKET` or the other core-only names, so they stay out of this list. Permanent
+/// (spec §9.2, onboarding's "You have herdr {version}"). The PTY and terminal-launch envs that
+/// still use it go to the 11-name core list in Task 8.
 const LEGACY_FORWARDED: [&str; 6] = ["PATH", "HOME", "USER", "SSH_AUTH_SOCK", "LANG", "TERM"];
 const DEFAULT_TERM: &str = "xterm-256color";
 
@@ -147,9 +147,8 @@ pub fn forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
     pick_env(login, &FORWARDED)
 }
 
-/// The variables everything that is not the core gets: the first six of `forwarded_env`, never
-/// an `HC_*` or `XDG_*` name.
-// Until v0.9 Task 6c: for `HerdrCli`, the legacy probe, and what is built from them.
+/// The variables the legacy herdr probe gets: the first six of `forwarded_env`, never an `HC_*`
+/// or `XDG_*` name. Permanent, for `find_legacy_herdr` only.
 pub fn legacy_forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
     pick_env(login, &LEGACY_FORWARDED)
 }

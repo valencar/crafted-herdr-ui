@@ -82,12 +82,12 @@ describe("newSessionTarget", () => {
 });
 
 describe("canOpenNewSession", () => {
-  const machine = (kind: "online" | "disabled") =>
+  const machine = (kind: "online" | "hidden") =>
     ({ id: "buildbox", health: { kind } }) as unknown as MachineView;
 
   it("offers_known_workboxes_that_are_not_disabled", () => {
     expect(canOpenNewSession(machine("online"))).toBe(true);
-    expect(canOpenNewSession(machine("disabled"))).toBe(false);
+    expect(canOpenNewSession(machine("hidden"))).toBe(false);
     expect(canOpenNewSession(null)).toBe(false);
     expect(canOpenNewSession(undefined)).toBe(false);
   });

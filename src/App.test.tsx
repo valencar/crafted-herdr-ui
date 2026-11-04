@@ -98,9 +98,9 @@ it("loads the state on mount, then subscribes to pushes", async () => {
   );
 
   const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
-  push({ ...state, herdr_version: "0.9.5" });
+  push({ ...state, core_version: "0.9.5" });
   await waitFor(() =>
-    expect(useAppStore.getState().state?.herdr_version).toBe("0.9.5"),
+    expect(useAppStore.getState().state?.core_version).toBe("0.9.5"),
   );
 });
 
@@ -206,8 +206,6 @@ const SETTINGS = {
   attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
-  poll_interval_visible_ms: 2000,
-  poll_interval_hidden_ms: 10_000,
   group_by: "status",
   global_shortcut_enabled: true,
   open_after_create: true,
@@ -1567,15 +1565,15 @@ describe("the window chrome", () => {
       ).toBeNull();
     });
 
-    it("dims_a_disabled_workbox_and_labels_it", async () => {
-      listBoxes("0.9.4", box("buildbox"), box("gpubox", { kind: "disabled" }));
+    it("dims_a_hidden_workbox_and_labels_it", async () => {
+      listBoxes("0.9.4", box("buildbox"), box("gpubox", { kind: "hidden" }));
       render(<App />);
       const sidebar = await screen.findByRole("navigation", {
         name: "Sidebar",
       });
       expect(
         within(sidebar).getByRole("button", {
-          name: /^gpubox\s*Disabled\s*\d+$/,
+          name: /^gpubox\s*Hidden\s*\d+$/,
         }),
       ).toHaveClass("is-dim");
       expect(
@@ -1784,7 +1782,7 @@ describe("the window chrome", () => {
         listBoxes(version);
         render(<App />);
         await screen.findByRole("region", { name: "Needs you" });
-        expect(useAppStore.getState().state?.herdr_version).toBe(version);
+        expect(useAppStore.getState().state?.core_version).toBe(version);
         expect(
           screen.queryByText(/is older than this app supports/),
         ).toBeNull();
@@ -1797,7 +1795,7 @@ describe("the window chrome", () => {
       await screen.findByRole("region", { name: "Needs you" });
       act(() =>
         useAppStore.setState({
-          state: { ...useAppStore.getState().state!, herdr_version: null },
+          state: { ...useAppStore.getState().state!, core_version: null },
         }),
       );
       expect(screen.getByRole("status")).toHaveTextContent(

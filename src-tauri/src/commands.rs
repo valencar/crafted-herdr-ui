@@ -1,260 +1,212 @@
 //! The Tauri commands the UI calls. Each is a thin wrapper: it looks up what it needs in Tauri
-//! state and hands off to `Actions` (or the poller). Names are snake_case in Rust and in
+//! state and hands off to the sync or the launchers. Names are snake_case in Rust and in
 //! `invoke()`; argument keys are camelCase, which is Tauri's default.
+//!
+//! The commands in the "Interim stubs" block answer `ActionError::Invalid` until the v0.9 task
+//! named next to each one replaces them with a herdr-core call.
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde::Deserialize;
-use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::Mutex;
 use ts_rs::TS;
 
-use crate::LOCAL;
-use crate::actions::{self, ActionError, Actions, CreatedSession, NewSessionRequest};
+use crate::actions::{ActionError, CreatedSession};
 use crate::core::{CommandLogEntry, CoreClient};
-use crate::env::{FALLBACK_AGENT_KINDS, herdr_agent_kinds};
-use crate::herdr::cli::{HerdrCli, T_DEFAULT};
-use crate::herdr::model::{AgentStatus, MachineStatusEntry};
+use crate::herdr::cli::HerdrCli;
+use crate::herdr::model::MachineStatusEntry;
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::notify::VisibleRow;
-use crate::poller::Poller;
-use crate::preview::{PreviewManager, last_nonempty_line, pane_tail_argv};
+use crate::preview::PreviewManager;
 use crate::pty::TermSize;
 use crate::settings::{
-    self, AttachMode, CoreLocator, CoreStatus, Settings, SharedSettings, ShortcutState,
-    ShortcutStatus, changes,
+    self, CoreLocator, CoreStatus, Settings, SharedSettings, ShortcutState, ShortcutStatus, changes,
 };
 use crate::ssh_config;
-use crate::state::{AppState, PollIntervals};
-use crate::terminal::open::{
-    LaunchLog, attach_for_pane, attach_log_args, launch_in_terminal, open_argv, open_full,
-};
-use crate::terminal::session::{TermEvent, TermId, TermSessions, TermSink};
+use crate::state::AppState;
+use crate::sync::SyncCell;
+use crate::terminal::open::{LaunchLog, launch_in_terminal};
+use crate::terminal::session::{TermId, TermSessions};
 use crate::terminal::{
     self, InstalledCache, TerminalList, allowed_herdr_argv, checked_machine_add_argv, join_quoted,
 };
 use crate::tray;
 
-const STILL_STARTING: &str = "herdr is still starting. Try again in a moment.";
-const HELP_TIMEOUT: Duration = Duration::from_secs(5);
+/// What an interim stub answers.
+const NOT_YET: &str = "Not available on herdr-core yet";
 
-/// The agent kinds read from `herdr agent start --help`, kept after the first successful read.
-#[derive(Default)]
-pub struct AgentKindsCache(Mutex<Option<Vec<String>>>);
-
-impl AgentKindsCache {
-    /// The cached kinds, reading them from herdr the first time. If herdr can't be asked, the
-    /// built-in list is returned, and the next call tries again.
-    pub async fn get(&self, cli: &HerdrCli) -> Vec<String> {
-        let mut cached = self.0.lock().await;
-        if let Some(kinds) = cached.as_ref() {
-            return kinds.clone();
-        }
-        match herdr_agent_kinds(&cli.bin(), cli.env(), HELP_TIMEOUT).await {
-            Some(kinds) => {
-                *cached = Some(kinds.clone());
-                kinds
-            }
-            None => FALLBACK_AGENT_KINDS.map(str::to_owned).to_vec(),
-        }
-    }
-}
-
-/// The label to show after `--machine` in a preview: `None` for Local, the machine's label for
-/// a remote one (its id if the machine isn't in the state).
-fn machine_label(state: &AppState, machine_id: &str) -> Option<String> {
-    if machine_id == LOCAL {
-        return None;
-    }
-    let found = state.machines.iter().find(|m| m.id == machine_id);
-    match found {
-        Some(m) if m.is_local => None,
-        Some(m) => Some(m.label.clone()),
-        None => Some(machine_id.to_owned()),
-    }
-}
-
-/// The status the poller last saw for an agent, if it is in the cache.
-fn cached_status(state: &AppState, machine_id: &str, pane_id: &str) -> Option<AgentStatus> {
-    state
-        .machines
-        .iter()
-        .find(|m| m.id == machine_id)?
-        .snapshot
-        .as_ref()?
-        .agents
-        .iter()
-        .find(|a| a.pane_id == pane_id)
-        .map(|a| a.agent_status)
+fn not_yet() -> ActionError {
+    ActionError::invalid(NOT_YET)
 }
 
 /// The current state, for a UI that started listening after the first `"state"` event.
-/// `None` while startup is still looking for herdr; the first `"state"` event follows.
+/// `None` while startup is still looking for herdr-core; the first `"state"` event follows.
 #[tauri::command]
-pub fn get_state(poller: State<'_, Poller>) -> Option<AppState> {
-    poller.is_located().then(|| poller.current_state())
+pub fn get_state(sync: State<'_, SyncCell>) -> Option<AppState> {
+    state_of(&sync)
 }
 
-#[tauri::command]
-pub async fn create_session(
-    actions: State<'_, Actions>,
-    req: NewSessionRequest,
-) -> Result<CreatedSession, ActionError> {
-    actions.create_session(&req).await
+/// What `get_state` answers: the sync's state once it has started.
+fn state_of(cell: &SyncCell) -> Option<AppState> {
+    cell.get().and_then(|sync| sync.state())
 }
 
-/// The exact command lines `create_session` will run, as text for the preview box.
+/// Reads the machine list now (after a machine action, or the Refresh button).
 #[tauri::command]
-pub fn preview_new_session(poller: State<'_, Poller>, req: NewSessionRequest) -> Vec<String> {
-    let label = machine_label(&poller.current_state(), &req.machine_id);
-    actions::preview_new_session(&req, label.as_deref())
+pub fn refresh_now(sync: State<'_, SyncCell>) {
+    if let Some(sync) = sync.get() {
+        sync.refresh_machines();
+    }
 }
 
+/// Reconnect: tries the core again now, with a fresh 2-minute window. Does nothing while the
+/// connection is up.
 #[tauri::command]
-pub async fn rename_session(
-    actions: State<'_, Actions>,
-    machine_id: String,
-    pane_id: String,
-    is_agent: bool,
-    name: String,
-) -> Result<(), ActionError> {
-    actions
-        .rename_session(&machine_id, &pane_id, is_agent, &name)
-        .await
+pub fn reconnect_core(sync: State<'_, SyncCell>) {
+    if let Some(sync) = sync.get() {
+        sync.reconnect_now();
+    }
 }
 
+// ---- Interim stubs (v0.9 Task 6c): replaced by the task named on each ----
+
+/// Task 11.
 #[tauri::command]
-pub async fn close_pane(
-    actions: State<'_, Actions>,
-    machine_id: String,
-    pane_id: String,
-) -> Result<(), ActionError> {
-    actions.close_pane(&machine_id, &pane_id).await
+pub fn create_session() -> Result<CreatedSession, ActionError> {
+    Err(not_yet())
 }
 
+/// Task 11.
 #[tauri::command]
-pub async fn create_tab(
-    actions: State<'_, Actions>,
-    machine_id: String,
-    workspace_id: String,
-    label: String,
-) -> Result<CreatedSession, ActionError> {
-    actions.create_tab(&machine_id, &workspace_id, &label).await
+pub fn preview_new_session() -> Result<Vec<String>, ActionError> {
+    Err(not_yet())
 }
 
+/// Task 11.
 #[tauri::command]
-pub async fn rename_tab(
-    actions: State<'_, Actions>,
-    machine_id: String,
-    tab_id: String,
-    label: String,
-) -> Result<(), ActionError> {
-    actions.rename_tab(&machine_id, &tab_id, &label).await
+pub fn list_agent_kinds() -> Result<Vec<String>, ActionError> {
+    Err(not_yet())
 }
 
+/// Task 10a.
 #[tauri::command]
-pub async fn close_tab(
-    actions: State<'_, Actions>,
-    machine_id: String,
-    tab_id: String,
-) -> Result<(), ActionError> {
-    actions.close_tab(&machine_id, &tab_id).await
+pub fn rename_session() -> Result<(), ActionError> {
+    Err(not_yet())
 }
 
+/// Task 10a.
 #[tauri::command]
-pub async fn create_workspace(
-    actions: State<'_, Actions>,
-    machine_id: String,
-    cwd: String,
-    label: String,
-) -> Result<CreatedSession, ActionError> {
-    actions.create_workspace(&machine_id, &cwd, &label).await
+pub fn close_pane() -> Result<(), ActionError> {
+    Err(not_yet())
 }
 
+/// Task 10a.
 #[tauri::command]
-pub async fn rename_workspace(
-    actions: State<'_, Actions>,
-    machine_id: String,
-    workspace_id: String,
-    label: String,
-) -> Result<(), ActionError> {
-    actions
-        .rename_workspace(&machine_id, &workspace_id, &label)
-        .await
+pub fn create_tab() -> Result<CreatedSession, ActionError> {
+    Err(not_yet())
 }
 
+/// Task 10a.
 #[tauri::command]
-pub async fn close_workspace(
-    actions: State<'_, Actions>,
-    machine_id: String,
-    workspace_id: String,
-) -> Result<(), ActionError> {
-    actions.close_workspace(&machine_id, &workspace_id).await
+pub fn rename_tab() -> Result<(), ActionError> {
+    Err(not_yet())
 }
 
-/// Sends a reply to an agent. `Actions::reply_to_agent` refuses it, without calling herdr, unless
-/// the poller last saw the agent idle or done (or has not seen it at all).
+/// Task 10a.
 #[tauri::command]
-pub async fn reply_to_agent(
-    actions: State<'_, Actions>,
-    poller: State<'_, Poller>,
-    machine_id: String,
-    pane_id: String,
-    text: String,
-) -> Result<(), ActionError> {
-    let status = cached_status(&poller.current_state(), &machine_id, &pane_id);
-    actions
-        .reply_to_agent(&machine_id, &pane_id, &text, status)
-        .await
+pub fn close_tab() -> Result<(), ActionError> {
+    Err(not_yet())
 }
 
+/// Task 10a.
 #[tauri::command]
-pub async fn mark_seen(
-    actions: State<'_, Actions>,
-    machine_id: String,
-    pane_id: String,
-) -> Result<(), ActionError> {
-    actions.mark_seen(&machine_id, &pane_id).await
+pub fn create_workspace() -> Result<CreatedSession, ActionError> {
+    Err(not_yet())
 }
 
+/// Task 10a.
 #[tauri::command]
-pub async fn machine_rename(
-    actions: State<'_, Actions>,
-    id: String,
-    label: String,
-) -> Result<(), ActionError> {
-    actions.machine_rename(&id, &label).await
+pub fn rename_workspace() -> Result<(), ActionError> {
+    Err(not_yet())
 }
 
+/// Task 10a.
 #[tauri::command]
-pub async fn machine_set_enabled(
-    actions: State<'_, Actions>,
-    id: String,
-    enabled: bool,
-) -> Result<(), ActionError> {
-    actions.machine_set_enabled(&id, enabled).await
+pub fn close_workspace() -> Result<(), ActionError> {
+    Err(not_yet())
 }
 
+/// Task 10a.
 #[tauri::command]
-pub async fn machine_remove(actions: State<'_, Actions>, id: String) -> Result<(), ActionError> {
-    actions.machine_remove(&id).await
+pub fn reply_to_agent() -> Result<(), ActionError> {
+    Err(not_yet())
 }
 
+/// Task 10a.
 #[tauri::command]
-pub async fn machine_status(
-    actions: State<'_, Actions>,
-    id: String,
-) -> Result<Vec<MachineStatusEntry>, ActionError> {
-    actions.machine_status(&id).await
+pub fn mark_seen() -> Result<(), ActionError> {
+    Err(not_yet())
 }
 
-/// Polls now: one machine, or every machine and the machine list for `None`.
+/// Task 12.
 #[tauri::command]
-pub fn refresh_now(poller: State<'_, Poller>, machine_id: Option<String>) {
-    poller.refresh_now(machine_id.as_deref());
+pub fn machine_rename() -> Result<(), ActionError> {
+    Err(not_yet())
+}
+
+/// Task 12.
+#[tauri::command]
+pub fn machine_set_enabled() -> Result<(), ActionError> {
+    Err(not_yet())
+}
+
+/// Task 12.
+#[tauri::command]
+pub fn machine_remove() -> Result<(), ActionError> {
+    Err(not_yet())
+}
+
+/// Task 12.
+#[tauri::command]
+pub fn machine_status() -> Result<Vec<MachineStatusEntry>, ActionError> {
+    Err(not_yet())
+}
+
+/// Task 12.
+#[tauri::command]
+pub fn preview_reconnect() -> Result<String, ActionError> {
+    Err(not_yet())
+}
+
+/// Task 8.
+#[tauri::command]
+pub fn open_session() -> Result<(), ActionError> {
+    Err(not_yet())
+}
+
+/// Task 8.
+#[tauri::command]
+pub fn open_full_herdr() -> Result<(), ActionError> {
+    Err(not_yet())
+}
+
+/// Task 8.
+#[tauri::command]
+pub fn copy_attach_command() -> Result<String, ActionError> {
+    Err(not_yet())
+}
+
+/// Task 9.
+#[tauri::command]
+pub fn read_pane_tail() -> Result<String, ActionError> {
+    Err(not_yet())
+}
+
+/// Task 9.
+#[tauri::command]
+pub fn start_preview() -> Result<(), ActionError> {
+    Err(not_yet())
 }
 
 /// The last 200 herdr calls, oldest first.
@@ -263,75 +215,11 @@ pub fn get_command_log(core: State<'_, Arc<CoreClient>>) -> Vec<CommandLogEntry>
     core.command_log()
 }
 
-#[tauri::command]
-pub async fn list_agent_kinds(
-    cli: State<'_, HerdrCli>,
-    cache: State<'_, AgentKindsCache>,
-) -> Result<Vec<String>, ActionError> {
-    // Tauri needs a `Result` from an async command that borrows state; this never fails.
-    Ok(cache.get(&cli).await)
-}
-
 /// The user's home directory, which the terminal launchers need.
 fn home_dir(app: &AppHandle) -> Result<PathBuf, ActionError> {
     app.path()
         .home_dir()
         .map_err(|e| ActionError::invalid(e.to_string()))
-}
-
-/// Opens one pane, attached, in the user's terminal; or, when Settings say "full herdr UI",
-/// the whole herdr UI of that pane's workbox.
-#[tauri::command]
-pub async fn open_session(
-    app: AppHandle,
-    poller: State<'_, Poller>,
-    cli: State<'_, HerdrCli>,
-    installed: State<'_, InstalledCache>,
-    settings: State<'_, SharedSettings>,
-    machine_id: String,
-    pane_id: String,
-) -> Result<(), ActionError> {
-    let state = poller.current_state();
-    if settings.get().attach_mode == AttachMode::FullUi {
-        let home = home_dir(&app)?;
-        return open_full(home, &state, &cli, &installed, &settings, &machine_id).await;
-    }
-    let argv = attach_for_pane(&state, &cli, &machine_id, &pane_id)?;
-    let log = LaunchLog {
-        machine: Some(&machine_id),
-        args: attach_log_args(&state, &machine_id, &pane_id),
-    };
-    launch_in_terminal(
-        home_dir(&app)?,
-        &cli,
-        &installed,
-        &settings,
-        &argv,
-        &pane_id,
-        log,
-    )
-    .await
-}
-
-/// Opens the full herdr UI for a machine in the user's terminal.
-#[tauri::command]
-pub async fn open_full_herdr(
-    app: AppHandle,
-    poller: State<'_, Poller>,
-    cli: State<'_, HerdrCli>,
-    installed: State<'_, InstalledCache>,
-    settings: State<'_, SharedSettings>,
-    machine_id: String,
-) -> Result<(), ActionError> {
-    open_full(
-        home_dir(&app)?,
-        &poller.current_state(),
-        &cli,
-        &installed,
-        &settings,
-        &machine_id,
-    )
-    .await
 }
 
 /// What a terminal tab runs: one pane's attach command, or the machine's full herdr UI.
@@ -347,85 +235,12 @@ pub enum TermTarget {
     Full { machine_id: String },
 }
 
-/// The command a terminal tab runs, built here and nowhere else (the UI never sends one), and
-/// the herdr arguments the Activity log shows for it. Refuses what `open_argv` refuses (an
-/// unknown machine or pane) before anything is spawned.
-fn term_argv(
-    state: &AppState,
-    cli: &HerdrCli,
-    settings: &Settings,
-    target: &TermTarget,
-) -> Result<(Vec<String>, Vec<String>), ActionError> {
-    match target {
-        TermTarget::Pane {
-            machine_id,
-            pane_id,
-        } => {
-            let argv = open_argv(state, cli, settings.attach_mode, machine_id, pane_id)?;
-            let log = match settings.attach_mode {
-                AttachMode::Pane => attach_log_args(state, machine_id, pane_id),
-                AttachMode::FullUi => argv[1..].to_vec(),
-            };
-            Ok((argv, log))
-        }
-        TermTarget::Full { machine_id } => {
-            let argv = open_argv(state, cli, AttachMode::FullUi, machine_id, "")?;
-            let log = argv[1..].to_vec();
-            Ok((argv, log))
-        }
-    }
-}
-
-impl TermTarget {
-    fn machine_id(&self) -> &str {
-        match self {
-            TermTarget::Pane { machine_id, .. } | TermTarget::Full { machine_id } => machine_id,
-        }
-    }
-}
-
-/// The environment a terminal session spawns with; empty until herdr's environment is resolved.
-fn term_env(cli: &HerdrCli) -> Result<Vec<(String, String)>, ActionError> {
-    match cli.env() {
-        [] => Err(ActionError::invalid(STILL_STARTING)),
-        env => Ok(env.to_vec()),
-    }
-}
-
 /// Runs the target's command in the app's terminal panel and streams its output to `on_event`.
-/// Returns the id the other `term_*` commands take.
+/// Task 8 (it runs `hc attach` there); until then it refuses.
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn term_open(
-    poller: State<'_, Poller>,
-    cli: State<'_, HerdrCli>,
-    settings: State<'_, SharedSettings>,
-    sessions: State<'_, Arc<TermSessions>>,
-    target: TermTarget,
-    cols: u16,
-    rows: u16,
-    on_event: Channel<TermEvent>,
-) -> Result<TermId, ActionError> {
-    // Asked first: before the environment is ready, nothing else is worth checking.
-    let env = term_env(&cli)?;
-    let (argv, log_args) = term_argv(&poller.current_state(), &cli, &settings.get(), &target)?;
-    let started = crate::now_ms();
-    let sink: TermSink = Arc::new(move |event| on_event.send(event).is_ok());
-    let sessions = Arc::clone(&sessions);
-    let id = tauri::async_runtime::spawn_blocking(move || {
-        sessions.open(&argv, &env, TermSize { cols, rows }, sink)
-    })
-    .await
-    .map_err(|e| ActionError::invalid(e.to_string()))?
-    .map_err(ActionError::invalid)?;
-    let machine = target.machine_id();
-    cli.record_launch(
-        (machine != LOCAL).then_some(machine),
-        log_args,
-        started,
-        "opened in Crafted Herdr".into(),
-    );
-    Ok(id)
+pub fn term_open(target: TermTarget) -> Result<TermId, ActionError> {
+    let _ = target;
+    Err(not_yet())
 }
 
 /// Runs a blocking call on a session (a write waits on the pty) off the main thread.
@@ -514,7 +329,7 @@ pub fn start_machine_add(
     app: AppHandle,
     cli: State<'_, HerdrCli>,
     setup: State<'_, MachineSetup>,
-    poller: State<'_, Poller>,
+    sync: State<'_, SyncCell>,
     target: String,
     label: Option<String>,
     session: Option<String>,
@@ -524,7 +339,7 @@ pub fn start_machine_add(
     let logged = argv[1..].to_vec();
     argv[0] = cli.bin().to_string_lossy().into_owned();
     let started_ms = crate::now_ms();
-    let (log_cli, poller) = (cli.inner().clone(), poller.inner().clone());
+    let (log_cli, sync) = (cli.inner().clone(), sync.inner().clone());
     let on_exit: ExitHook = Arc::new(move |exit| {
         let error = if exit.cancelled {
             Some("cancelled".to_owned())
@@ -545,7 +360,9 @@ pub fn start_machine_add(
     let emit: Emit = Arc::new(move |event| {
         if matches!(event, SetupEvent::Finished { ok: true }) {
             // The new machine should show up without waiting for the next tick.
-            poller.refresh_now(None);
+            if let Some(sync) = sync.get() {
+                sync.refresh_machines();
+            }
         }
         // Nobody listening (the sheet closed) is fine.
         let _ = app.emit(SETUP_EVENT, event);
@@ -617,35 +434,6 @@ pub async fn list_terminals(
     Ok(TerminalList::new(installed.refresh().await))
 }
 
-/// The one-line command "Open" runs for a pane (so the attach command, or the full herdr UI in
-/// that attach mode), for the user to paste into any terminal.
-#[tauri::command]
-pub fn copy_attach_command(
-    poller: State<'_, Poller>,
-    cli: State<'_, HerdrCli>,
-    settings: State<'_, SharedSettings>,
-    machine_id: String,
-    pane_id: String,
-) -> Result<String, ActionError> {
-    let argv = open_argv(
-        &poller.current_state(),
-        &cli,
-        settings.get().attach_mode,
-        &machine_id,
-        &pane_id,
-    )?;
-    Ok(join_quoted(&argv))
-}
-
-/// `herdr machine reconnect <id>` as the user would type it, for the cards that suggest it.
-/// The id goes through the same allowlist `open_in_terminal` uses, so the text is what runs.
-#[tauri::command]
-pub fn preview_reconnect(id: String) -> Result<String, ActionError> {
-    let args = ["machine", "reconnect", id.as_str()].map(str::to_owned);
-    let full = allowed_herdr_argv("herdr", &args).map_err(ActionError::invalid)?;
-    Ok(join_quoted(&full))
-}
-
 /// The event that asks the main window to open a row.
 pub const OPEN_ROW_EVENT: &str = "open-row";
 
@@ -658,7 +446,7 @@ pub fn get_settings(settings: State<'_, SharedSettings>) -> Settings {
 }
 
 /// Applies a partial settings object on top of the current settings, saves it and makes the
-/// change live. A refused patch (an interval under 1000 ms, an unknown key) changes nothing.
+/// change live. A refused patch (a width out of range, an unknown key) changes nothing.
 #[tauri::command]
 pub async fn set_settings(
     app: AppHandle,
@@ -666,7 +454,7 @@ pub async fn set_settings(
     locator: State<'_, CoreLocator>,
     shortcut: State<'_, ShortcutState>,
     core: State<'_, Arc<CoreClient>>,
-    poller: State<'_, Poller>,
+    sync: State<'_, SyncCell>,
     patch: serde_json::Value,
 ) -> Result<Settings, ActionError> {
     // One change at a time, from reading the old values to applying the new ones.
@@ -680,16 +468,21 @@ pub async fn set_settings(
     shared.set(new.clone());
 
     let todo = changes(&old, &new);
-    if todo.intervals {
-        poller.set_intervals(PollIntervals::from_ms(
-            new.poll_interval_visible_ms,
-            new.poll_interval_hidden_ms,
-        ));
-    }
     // Before startup has located the core, its own `locate` reads the saved path, so there is
     // nothing to resolve here (and the login environment may not be captured yet).
     if todo.core_path && locator.is_located() {
-        locator.locate(new.core_path.as_deref(), &core).await;
+        let status = locator.locate(new.core_path.as_deref(), &core).await;
+        // The state names the core in use, and a core that was not found or was stopped gets
+        // another try with the new one.
+        if let Some(sync) = sync.get() {
+            sync.set_core_path(status.path);
+            sync.reconnect_now();
+        }
+    }
+    if todo.hidden_workboxes
+        && let Some(sync) = sync.get()
+    {
+        sync.refresh_view();
     }
     if todo.shortcut {
         // The setting is saved either way; if another app owns the key, Settings says so.
@@ -762,34 +555,6 @@ pub fn open_settings(app: AppHandle) -> Result<(), ActionError> {
     tray::open_settings(&app).map_err(|e| ActionError::invalid(e.to_string()))
 }
 
-/// The last line a pane printed, for its box in the Workbox screen.
-#[tauri::command]
-pub async fn read_pane_tail(
-    cli: State<'_, HerdrCli>,
-    machine_id: String,
-    pane_id: String,
-) -> Result<String, ActionError> {
-    if machine_id.trim().is_empty() || pane_id.trim().is_empty() || pane_id.starts_with('-') {
-        return Err(ActionError::invalid("Pick a pane to read."));
-    }
-    let text = cli
-        .run_text(Some(&machine_id), &pane_tail_argv(&pane_id), T_DEFAULT)
-        .await
-        .map_err(|error| ActionError::Herdr { error })?;
-    Ok(last_nonempty_line(&text))
-}
-
-/// Starts the live preview for one pane (replacing the previous one).
-#[tauri::command]
-pub async fn start_preview(
-    preview: State<'_, PreviewManager>,
-    machine_id: String,
-    pane_id: String,
-    is_agent: bool,
-) -> Result<(), ActionError> {
-    preview.start(&machine_id, &pane_id, is_agent)
-}
-
 /// Stops the live preview.
 #[tauri::command]
 pub async fn stop_preview(preview: State<'_, PreviewManager>) -> Result<(), ActionError> {
@@ -801,124 +566,112 @@ pub async fn stop_preview(preview: State<'_, PreviewManager>) -> Result<(), Acti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
+    use std::time::Duration;
 
-    use crate::state::fixtures::state;
+    use serde_json::{Value, json};
 
-    #[test]
-    fn the_reconnect_preview_uses_the_profile_id_and_refuses_odd_ids() {
-        assert_eq!(
-            preview_reconnect("buildbox".into()).unwrap(),
-            "herdr machine reconnect buildbox"
-        );
-        assert!(preview_reconnect("a b".into()).is_err());
-        assert!(preview_reconnect("-oProxyCommand=x".into()).is_err());
-        assert!(preview_reconnect(String::new()).is_err());
-    }
+    use crate::activity::ActivityV2;
+    use crate::agents::DisplayStatus;
+    use crate::core::CoreError;
+    use crate::core::connection::{BoxFuture, Connection, Connector, Notification};
+    use crate::core::testing::{Core, Reply, connect, hello_result};
+    use crate::state::{CoreState, Health};
+    use crate::sync::CoreSync;
 
-    fn remote_state() -> AppState {
-        let mut s = state();
-        s.machines[1].target = Some("buildbox".into());
-        s
-    }
+    /// A core that has the `subscribe_local.json` terminals and no remote machines.
+    struct FakeCore(Mutex<Vec<Core>>);
 
-    fn herdr() -> HerdrCli {
-        HerdrCli::new("/opt/herdr/bin/herdr".into(), vec![])
-    }
-
-    #[test]
-    fn a_terminal_waits_for_herdrs_environment_and_says_so() {
-        let starting = HerdrCli::without_env("/opt/herdr/bin/herdr".into());
-        let err = term_env(&starting).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "herdr is still starting. Try again in a moment."
-        );
-        let ready = HerdrCli::new(
-            "/opt/herdr/bin/herdr".into(),
-            vec![("PATH".into(), "/usr/bin".into())],
-        );
-        assert_eq!(
-            term_env(&ready).unwrap(),
-            vec![("PATH".to_string(), "/usr/bin".to_string())]
-        );
-    }
-
-    #[test]
-    fn a_pane_target_runs_the_attach_argv_and_logs_terminal_attach() {
-        let target = TermTarget::Pane {
-            machine_id: "buildbox".into(),
-            pane_id: "w1:p1".into(),
-        };
-        let (argv, log) =
-            term_argv(&remote_state(), &herdr(), &Settings::default(), &target).unwrap();
-        assert_eq!(argv[..3], ["ssh", "-t", "buildbox"]);
-        assert!(argv[3].contains("herdr terminal attach term-1"));
-        assert_eq!(log, ["terminal", "attach", "term-1"]);
-    }
-
-    #[test]
-    fn a_full_target_runs_the_full_ui_argv() {
-        let target = TermTarget::Full {
-            machine_id: "buildbox".into(),
-        };
-        // The target decides, whatever the attach mode says.
-        for attach_mode in [AttachMode::Pane, AttachMode::FullUi] {
-            let settings = Settings {
-                attach_mode,
-                ..Settings::default()
-            };
-            let (argv, log) = term_argv(&remote_state(), &herdr(), &settings, &target).unwrap();
-            assert_eq!(argv, ["/opt/herdr/bin/herdr", "--remote", "buildbox"]);
-            assert_eq!(log, ["--remote", "buildbox"]);
+    impl Connector for FakeCore {
+        fn connect(
+            &self,
+        ) -> BoxFuture<
+            'static,
+            Result<
+                (
+                    Connection,
+                    tokio::sync::mpsc::UnboundedReceiver<Notification>,
+                ),
+                CoreError,
+            >,
+        > {
+            let (conn, notes, core) = connect(|req| match req["method"].as_str() {
+                Some("hello") => (0, Reply::Result(hello_result())),
+                Some("events.subscribe") => (
+                    0,
+                    Reply::Result(
+                        serde_json::from_str(include_str!(
+                            "../tests/fixtures/hc/subscribe_local.json"
+                        ))
+                        .unwrap(),
+                    ),
+                ),
+                Some("machine.list") => (0, Reply::Result(json!({"machines": []}))),
+                _ => (0, Reply::Result(Value::Null)),
+            });
+            // The connection ends with its core, so the fake keeps it.
+            self.0.lock().unwrap().push(core);
+            Box::pin(async move { Ok((conn, notes)) })
         }
     }
 
-    #[test]
-    fn a_pane_target_follows_the_full_ui_attach_mode() {
-        let target = TermTarget::Pane {
-            machine_id: "buildbox".into(),
-            pane_id: "w1:p1".into(),
-        };
-        let settings = Settings {
-            attach_mode: AttachMode::FullUi,
-            ..Settings::default()
-        };
-        let (argv, log) = term_argv(&remote_state(), &herdr(), &settings, &target).unwrap();
-        assert_eq!(argv, ["/opt/herdr/bin/herdr", "--remote", "buildbox"]);
-        assert_eq!(log, ["--remote", "buildbox"]);
+    #[tokio::test(start_paused = true)]
+    async fn lib_wires_sync_and_get_state_returns_v2() {
+        let cell = SyncCell::default();
+        // Before startup has located the core there is no state to answer.
+        assert_eq!(state_of(&cell), None);
+
+        let emitted: Arc<Mutex<Vec<AppState>>> = Arc::default();
+        let sink = emitted.clone();
+        let client = Arc::new(CoreClient::new(Arc::new(FakeCore(Mutex::default()))));
+        let sync = CoreSync::start(
+            client,
+            SharedSettings::default(),
+            Arc::new(Mutex::new(ActivityV2::new(None))),
+            Arc::new(move |s| sink.lock().unwrap().push(s.clone())),
+            Arc::new(|_| {}),
+        );
+        sync.set_core_path(Some("/opt/herdr-core/bin/hc".into()));
+        cell.set(sync);
+        tokio::time::sleep(Duration::from_millis(250)).await;
+
+        let state = state_of(&cell).expect("a state once the sync runs");
+        assert_eq!(state.core_state, CoreState::Ready);
+        assert_eq!(state.core_path.as_deref(), Some("/opt/herdr-core/bin/hc"));
+        assert!(state.core_version.is_some());
+        let local = &state.machines[0];
+        assert_eq!((local.id.as_str(), local.name.as_str()), ("local", "Local"));
+        assert_eq!(local.health, Health::Online);
+        // Addresses are machine-local, and a status word became a display status.
+        let first = &local.terminals[0];
+        assert_eq!(first.address, "t1");
+        assert_eq!(first.status, DisplayStatus::Working);
+        // The "state" event carried the same shape, and the last one is what `get_state` says.
+        let last = emitted.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(last.machines[0].terminals, local.terminals);
+        assert_eq!(last.core_state, CoreState::Ready);
+
+        // The commands reach the sync without panicking.
+        cell.get().unwrap().refresh_machines();
+        cell.get().unwrap().reconnect_now();
     }
 
     #[test]
-    fn an_unknown_pane_is_refused_before_spawning() {
-        let refused = |machine: &str, pane: &str| {
-            let target = TermTarget::Pane {
-                machine_id: machine.into(),
-                pane_id: pane.into(),
-            };
-            term_argv(&remote_state(), &herdr(), &Settings::default(), &target)
-        };
-        assert!(matches!(
-            refused("buildbox", "w9:p9"),
-            Err(ActionError::Invalid { .. })
-        ));
-        assert!(matches!(
-            refused("gone", "w1:p1"),
-            Err(ActionError::Invalid { .. })
-        ));
-        let full = TermTarget::Full {
-            machine_id: "gone".into(),
-        };
-        assert!(term_argv(&remote_state(), &herdr(), &Settings::default(), &full).is_err());
+    fn interim_stubs_say_so() {
+        let e = create_session().unwrap_err();
+        assert_eq!(e.to_string(), NOT_YET);
+        assert!(matches!(e, ActionError::Invalid { .. }));
+        assert!(open_session().is_err());
+        assert!(copy_attach_command().is_err());
+        assert!(machine_status().is_err());
     }
 
     #[test]
     fn a_target_is_read_from_the_ui_in_camel_case() {
         let pane: TermTarget = serde_json::from_value(serde_json::json!(
-            {"kind": "pane", "machineId": "buildbox", "paneId": "w1:p1"}
+            {"kind": "pane", "machineId": "buildbox", "paneId": "t1"}
         ))
         .unwrap();
-        assert_eq!(pane.machine_id(), "buildbox");
         assert!(matches!(pane, TermTarget::Pane { .. }));
         let full: TermTarget =
             serde_json::from_value(serde_json::json!({"kind": "full", "machineId": "local"}))
@@ -928,65 +681,6 @@ mod tests {
             TermTarget::Full {
                 machine_id: "local".into()
             }
-        );
-    }
-
-    #[test]
-    fn preview_label_is_none_for_local_and_the_label_for_remote() {
-        let s = state();
-        assert_eq!(machine_label(&s, "local"), None);
-        assert_eq!(machine_label(&s, "buildbox").as_deref(), Some("Build box"));
-        assert_eq!(machine_label(&s, "gone").as_deref(), Some("gone"));
-    }
-
-    #[test]
-    fn cached_status_finds_the_agent_on_the_right_machine() {
-        let s = state();
-        assert_eq!(
-            cached_status(&s, "buildbox", "w1:p1"),
-            Some(AgentStatus::Blocked)
-        );
-        assert_eq!(
-            cached_status(&s, "buildbox", "w2:p2"),
-            Some(AgentStatus::Idle)
-        );
-        // Same pane id on a machine that has no such agent: not in the cache.
-        assert_eq!(cached_status(&s, "local", "w1:p1"), None);
-        assert_eq!(cached_status(&s, "buildbox", "w9:p9"), None);
-        assert_eq!(cached_status(&s, "gone", "w1:p1"), None);
-    }
-
-    #[tokio::test]
-    async fn agent_kinds_are_read_once_and_cached() {
-        let dir = tempfile::tempdir().unwrap();
-        let count = dir.path().join("runs");
-        let bin = dir.path().join("herdr");
-        std::fs::write(
-            &bin,
-            format!(
-                "#!/bin/sh\necho x >> '{}'\nprintf -- '--kind <KIND>\\n[possible values: claude, grok]\\n'\n",
-                count.display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let cli = HerdrCli::new(bin, vec![]);
-        let cache = AgentKindsCache::default();
-
-        assert_eq!(cache.get(&cli).await, ["claude", "grok"]);
-        assert_eq!(cache.get(&cli).await, ["claude", "grok"]);
-
-        assert_eq!(std::fs::read_to_string(count).unwrap().lines().count(), 1);
-    }
-
-    #[tokio::test]
-    async fn agent_kinds_fall_back_when_herdr_cannot_be_asked() {
-        let cli = HerdrCli::new("/nonexistent/herdr".into(), vec![]);
-        let cache = AgentKindsCache::default();
-
-        assert_eq!(
-            cache.get(&cli).await,
-            ["claude", "codex", "copilot", "opencode", "cursor"]
         );
     }
 }

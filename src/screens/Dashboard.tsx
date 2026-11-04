@@ -139,7 +139,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
 
   const down = online.firstDown;
   const downFoot = down
-    ? `${down.label} ${HEALTH_LABEL[down.health.kind].toLowerCase()}${
+    ? `${down.name} ${HEALTH_LABEL[down.health.kind].toLowerCase()}${
         down.health.kind === "reconnecting"
           ? `, retry in ${Math.ceil(down.health.retry_in_ms / 1000)}s`
           : ""

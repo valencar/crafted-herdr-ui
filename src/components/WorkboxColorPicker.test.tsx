@@ -59,16 +59,15 @@ describe("WorkboxColorPicker", () => {
     render(
       <WorkboxSummary
         machine={machine("local")}
-        counts={{ workspaces: 0, sessions: 0, agents: 0, needsYou: 0 }}
+        counts={{ sessions: 0, agents: 0, needsYou: 0 }}
         nowMs={0}
         checkedAtMs={null}
         checkError={null}
         checking={false}
-        onReconnect={noop}
         onCheck={noop}
         onRename={noop}
-        onDisable={noop}
-        onEnable={noop}
+        onHide={noop}
+        onShow={noop}
         onRemove={noop}
       />,
     );

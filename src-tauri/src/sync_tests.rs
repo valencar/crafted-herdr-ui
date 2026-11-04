@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use super::*;
-use crate::activity_v2::TransitionKind;
+use crate::activity::TransitionKind;
 use crate::agents::DisplayStatus;
 use crate::core::connection::{BoxFuture, Connector};
 use crate::core::testing::{Core, Reply, connect, hello_result};
@@ -114,7 +114,7 @@ impl Connector for TestConnector {
 struct Harness {
     script: Arc<Script>,
     client: Arc<CoreClient>,
-    emits: Arc<Mutex<Vec<(Instant, AppStateV2)>>>,
+    emits: Arc<Mutex<Vec<(Instant, AppState)>>>,
     notified: Arc<Mutex<Vec<Transition>>>,
     settings: SharedSettings,
     activity: Arc<Mutex<ActivityV2>>,
@@ -163,7 +163,7 @@ impl Harness {
         self.sync.as_ref().unwrap()
     }
 
-    fn state(&self) -> AppStateV2 {
+    fn state(&self) -> AppState {
         self.sync().state().unwrap()
     }
 
@@ -258,7 +258,7 @@ async fn wait_alive(h: &Harness, secs: u64) {
     }
 }
 
-fn machine<'a>(state: &'a AppStateV2, id: &str) -> &'a MachineViewV2 {
+fn machine<'a>(state: &'a AppState, id: &str) -> &'a MachineView {
     state
         .machines
         .iter()
@@ -266,7 +266,7 @@ fn machine<'a>(state: &'a AppStateV2, id: &str) -> &'a MachineViewV2 {
         .unwrap_or_else(|| panic!("no machine {id}"))
 }
 
-fn terminal<'a>(state: &'a AppStateV2, id: &str, address: &str) -> &'a TerminalView {
+fn terminal<'a>(state: &'a AppState, id: &str, address: &str) -> &'a TerminalView {
     machine(state, id)
         .terminals
         .iter()
@@ -274,7 +274,7 @@ fn terminal<'a>(state: &'a AppStateV2, id: &str, address: &str) -> &'a TerminalV
         .unwrap_or_else(|| panic!("no terminal {id}/{address}"))
 }
 
-fn addresses(state: &AppStateV2, id: &str) -> Vec<String> {
+fn addresses(state: &AppState, id: &str) -> Vec<String> {
     let mut all: Vec<String> = machine(state, id)
         .terminals
         .iter()
@@ -309,7 +309,7 @@ async fn builds_state_from_subscribe_and_machine_list() {
     assert!(local.is_local);
     assert_eq!(local.host.as_deref(), Some("workstation"));
     assert_eq!(local.hc_version.as_deref(), Some("0.1.18"));
-    assert_eq!(local.health, HealthV2::Online);
+    assert_eq!(local.health, Health::Online);
     assert_eq!(local.terminals.len(), 8);
 
     assert_eq!(
@@ -328,7 +328,7 @@ async fn builds_state_from_subscribe_and_machine_list() {
 
     let buildbox = machine(&state, BUILDBOX);
     assert_eq!(buildbox.name, "buildbox");
-    assert_eq!(buildbox.health, HealthV2::Online);
+    assert_eq!(buildbox.health, Health::Online);
     assert_eq!(buildbox.target.as_deref(), Some("dev@buildbox.example"));
     assert_eq!(buildbox.hc_version.as_deref(), Some("0.1.18"));
     assert_eq!(addresses(&state, BUILDBOX), ["t2", "t3", "t4"]);
@@ -336,23 +336,23 @@ async fn builds_state_from_subscribe_and_machine_list() {
     let health = |i: usize| state.machines[i].health.clone();
     assert!(matches!(
         health(2),
-        HealthV2::Reconnecting { retry_in_ms: 0, .. }
+        Health::Reconnecting { retry_in_ms: 0, .. }
     ));
     assert_eq!(
         health(3),
-        HealthV2::Attention {
+        Health::Attention {
             error: "Needs login".into()
         }
     );
     assert_eq!(
         health(4),
-        HealthV2::Attention {
+        Health::Attention {
             error: "Needs an hc update".into()
         }
     );
     assert!(state.machines[4].temporary);
     // Unreachable for longer than 2 minutes (the fixture is from long ago).
-    assert!(matches!(health(5), HealthV2::Attention { .. }));
+    assert!(matches!(health(5), Health::Attention { .. }));
 
     // One "subscribed" note, and the list was read quietly.
     assert_eq!(h.notes(), ["subscribed"]);
@@ -599,7 +599,7 @@ async fn drop_right_after_an_unknown_name_created_still_emits_backoff_and_stoppe
         s.core_state == CoreState::Connecting
             && matches!(
                 s.machines[0].health,
-                HealthV2::Reconnecting {
+                Health::Reconnecting {
                     retry_in_ms: 2000,
                     ..
                 }
@@ -828,7 +828,7 @@ async fn seq_reset_after_reconnect_takes_fresh_snapshot() {
     assert_eq!(state.core_state, CoreState::Connecting);
     assert_eq!(
         state.machines[0].health,
-        HealthV2::Reconnecting {
+        Health::Reconnecting {
             retry_in_ms: 2000,
             error: "The connection to herdr-core was lost.".into()
         }
@@ -842,7 +842,7 @@ async fn seq_reset_after_reconnect_takes_fresh_snapshot() {
     tokio::time::sleep(Duration::from_millis(2100)).await;
     assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 2);
     let state = h.state();
-    assert_eq!(state.machines[0].health, HealthV2::Online);
+    assert_eq!(state.machines[0].health, Health::Online);
     assert_eq!(
         terminal(&state, "local", "t1").title.as_deref(),
         Some("snapshot")
@@ -926,7 +926,7 @@ async fn watchdog_resubscribes_after_40s_silence() {
     tokio::time::sleep(Duration::from_secs(26)).await;
     assert!(matches!(
         h.state().machines[0].health,
-        HealthV2::Reconnecting {
+        Health::Reconnecting {
             retry_in_ms: 2000,
             ..
         }
@@ -934,7 +934,7 @@ async fn watchdog_resubscribes_after_40s_silence() {
     assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 1);
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 2);
-    assert_eq!(h.state().machines[0].health, HealthV2::Online);
+    assert_eq!(h.state().machines[0].health, Health::Online);
     assert_eq!(h.notes(), ["subscribed", "resubscribed"]);
 }
 
@@ -953,10 +953,7 @@ async fn stops_retrying_after_two_minutes_then_reconnect_now_works() {
         "{:?}",
         state.core_state
     );
-    assert!(matches!(
-        state.machines[0].health,
-        HealthV2::Attention { .. }
-    ));
+    assert!(matches!(state.machines[0].health, Health::Attention { .. }));
     // Attempts at 2, 6, 14, 30, 62 and 120 s after the drop; then no more.
     let attempts = h.script.attempts.load(Ordering::SeqCst);
     assert_eq!(attempts - before, 6);
@@ -976,7 +973,7 @@ async fn stops_retrying_after_two_minutes_then_reconnect_now_works() {
     assert_eq!(state.core_state, CoreState::Connecting);
     assert!(matches!(
         state.machines[0].health,
-        HealthV2::Reconnecting {
+        Health::Reconnecting {
             retry_in_ms: 2000,
             ..
         }
@@ -985,7 +982,7 @@ async fn stops_retrying_after_two_minutes_then_reconnect_now_works() {
     tokio::time::sleep(Duration::from_secs(7)).await;
     assert!(matches!(
         h.state().machines[0].health,
-        HealthV2::Reconnecting {
+        Health::Reconnecting {
             retry_in_ms: 8000,
             ..
         }
@@ -994,7 +991,7 @@ async fn stops_retrying_after_two_minutes_then_reconnect_now_works() {
     settle().await;
     assert!(matches!(
         h.state().machines[0].health,
-        HealthV2::Reconnecting {
+        Health::Reconnecting {
             retry_in_ms: 2000,
             ..
         }
@@ -1006,7 +1003,7 @@ async fn stops_retrying_after_two_minutes_then_reconnect_now_works() {
     settle().await;
     let state = h.state();
     assert_eq!(state.core_state, CoreState::Ready);
-    assert_eq!(state.machines[0].health, HealthV2::Online);
+    assert_eq!(state.machines[0].health, Health::Online);
     assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 2);
 }
 
@@ -1020,7 +1017,7 @@ async fn reconnect_now_skips_the_backoff_wait() {
     // Mid-backoff (the next try is 4 s on): the click doesn't wait for it.
     h.sync().reconnect_now();
     settle().await;
-    assert_eq!(h.state().machines[0].health, HealthV2::Online);
+    assert_eq!(h.state().machines[0].health, Health::Online);
     // Clicking while connected does nothing.
     let attempts = h.script.attempts.load(Ordering::SeqCst);
     h.sync().reconnect_now();
@@ -1126,7 +1123,7 @@ async fn hidden_workbox_reports_hidden_and_no_transitions() {
     let h = h.up().await;
     let state = h.state();
     // Hidden, and its terminals are still listed.
-    assert_eq!(machine(&state, BUILDBOX).health, HealthV2::Hidden);
+    assert_eq!(machine(&state, BUILDBOX).health, Health::Hidden);
     assert_eq!(addresses(&state, BUILDBOX), ["t2", "t3", "t4"]);
 
     h.status(29, "buildbox/t2", "blocked");
@@ -1193,10 +1190,7 @@ async fn incompatible_hello_sets_core_state() {
     };
     assert!(reason.contains("terminal.keep"), "{reason}");
     assert!(!newer, "an old core is not a newer one");
-    assert!(matches!(
-        state.machines[0].health,
-        HealthV2::Attention { .. }
-    ));
+    assert!(matches!(state.machines[0].health, Health::Attention { .. }));
     // It won't get better by itself: no retries.
     tokio::time::sleep(Duration::from_secs(600)).await;
     assert_eq!(h.script.attempts.load(Ordering::SeqCst), 1);
@@ -1256,7 +1250,7 @@ fn machine_in(state: &str, since_ms: Option<u64>, why: Option<&str>) -> CoreMach
 fn connected_online() {
     assert_eq!(
         health_of(&machine_in("connected", None, None), 1_000),
-        HealthV2::Online
+        Health::Online
     );
 }
 
@@ -1264,7 +1258,7 @@ fn connected_online() {
 fn connecting_reconnecting() {
     assert_eq!(
         health_of(&machine_in("connecting", None, None), 1_000),
-        HealthV2::Reconnecting {
+        Health::Reconnecting {
             retry_in_ms: 0,
             error: String::new()
         }
@@ -1275,7 +1269,7 @@ fn connecting_reconnecting() {
 fn needs_login_attention() {
     assert_eq!(
         health_of(&machine_in("needs_login", Some(5), None), 1_000),
-        HealthV2::Attention {
+        Health::Attention {
             error: "Needs login".into()
         }
     );
@@ -1285,7 +1279,7 @@ fn needs_login_attention() {
 fn needs_update_attention() {
     assert_eq!(
         health_of(&machine_in("needs_update", Some(5), None), 1_000),
-        HealthV2::Attention {
+        Health::Attention {
             error: "Needs an hc update".into()
         }
     );
@@ -1296,7 +1290,7 @@ fn unreachable_short_reconnecting() {
     let m = machine_in("unreachable", Some(1_000_000), Some("no route"));
     assert_eq!(
         health_of(&m, 1_000_000 + 119_000),
-        HealthV2::Reconnecting {
+        Health::Reconnecting {
             retry_in_ms: 0,
             error: "no route".into()
         }
@@ -1308,7 +1302,7 @@ fn unreachable_long_attention() {
     let m = machine_in("unreachable", Some(1_000_000), Some("no route"));
     assert_eq!(
         health_of(&m, 1_000_000 + 120_000),
-        HealthV2::Attention {
+        Health::Attention {
             error: "no route".into()
         }
     );

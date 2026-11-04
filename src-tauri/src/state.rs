@@ -1,191 +1,167 @@
-//! What the UI sees: one `AppState` with a `MachineView` per machine, plus the pure helpers
-//! the poller uses for health and timing.
-
-use std::collections::HashMap;
-use std::time::Duration;
+//! What the UI sees: one `AppState` with a `MachineView` per machine, built by `sync.rs` from
+//! the herdr-core event stream and `machine.list` (spec §4.4).
 
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::herdr::errors::HerdrError;
-use crate::herdr::model::Snapshot;
+use crate::agents::TerminalView;
 
-const BACKOFF_BASE_SECS: u64 = 2;
-const BACKOFF_CAP_SECS: u64 = 60;
+/// Reads of the spaces layout (Task 18); empty until then.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct SpaceLayout {}
 
-/// How a machine is doing. Serialized tagged by `kind`, like `HerdrError`.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+/// How a machine is doing. Serialized tagged by `kind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum Health {
     Online,
-    /// The last poll failed in a way that may heal by itself. An empty `error` means the
-    /// machine has not been polled yet.
+    /// `retry_in_ms` is 0 when the app doesn't know (a remote machine's retry is its core's).
+    /// An empty `error` means nothing has failed yet.
     Reconnecting {
         #[ts(type = "number")]
         retry_in_ms: u64,
         error: String,
     },
-    /// The last poll failed in a way that needs the user (authentication, host key, …).
+    /// Needs the person: a login, an update, a click on Reconnect.
     Attention {
         error: String,
     },
-    Disabled,
+    /// The person hid it (`hidden_workboxes`).
+    Hidden,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct MachineView {
-    /// `"local"` for this computer, otherwise the herdr profile id.
+    /// `"local"` for this computer, otherwise the core's permanent machine id.
     pub id: String,
-    pub label: String,
+    pub name: String,
     pub target: Option<String>,
-    pub session: String,
+    pub session: Option<String>,
+    pub host: Option<String>,
+    pub hc_version: Option<String>,
     pub is_local: bool,
+    pub temporary: bool,
     pub health: Health,
-    /// The last good snapshot; kept while the machine is failing.
-    pub snapshot: Option<Snapshot>,
-    /// Unix time in milliseconds of the last successful poll.
+    #[ts(type = "number | null")]
+    pub state_since_ms: Option<u64>,
+    /// Unix time in milliseconds when the machine last looked healthy.
     #[ts(type = "number | null")]
     pub last_ok_ms: Option<u64>,
-    /// terminal_id → unix ms when the app observed its current status begin. Terminals with no
-    /// observation yet are absent.
-    #[ts(type = "Record<string, number>")]
-    pub ages: HashMap<String, u64>,
+    /// Addresses are local to this machine (`t7`); `parent` is still the full address.
+    pub terminals: Vec<TerminalView>,
+    pub layout: Option<SpaceLayout>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum CoreState {
+    Connecting,
+    Ready,
+    /// The 2-minute reconnect window ran out; only Reconnect tries again.
+    Stopped {
+        error: String,
+    },
+    /// `newer`: the core is ahead of the app, so the app is what needs updating.
+    Incompatible {
+        reason: String,
+        newer: bool,
+    },
+    NotFound,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct AppState {
     pub machines: Vec<MachineView>,
-    /// `None` until/unless the version could be read.
-    pub herdr_version: Option<String>,
-    /// `None` when herdr was not found.
-    pub herdr_path: Option<String>,
+    /// `None` until the core has said hello.
+    pub core_version: Option<String>,
+    /// `None` when herdr-core was not found.
+    pub core_path: Option<String>,
+    pub core_state: CoreState,
     #[ts(type = "number")]
     pub generated_at_ms: u64,
-}
-
-/// How often a healthy machine is polled. Comes from Settings (2 s and 10 s by default).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PollIntervals {
-    pub visible: Duration,
-    pub hidden: Duration,
-}
-
-impl Default for PollIntervals {
-    fn default() -> Self {
-        Self {
-            visible: Duration::from_secs(2),
-            hidden: Duration::from_secs(10),
-        }
-    }
-}
-
-impl PollIntervals {
-    pub fn from_ms(visible_ms: u64, hidden_ms: u64) -> Self {
-        Self {
-            visible: Duration::from_millis(visible_ms),
-            hidden: Duration::from_millis(hidden_ms),
-        }
-    }
-}
-
-/// Time to wait before the next poll of a machine: `intervals.visible` while the window is
-/// visible, `intervals.hidden` otherwise; after `consecutive_failures` failures, 2 s·2^(n−1)
-/// capped at 60 s, whatever the intervals are.
-pub fn next_delay(visible: bool, consecutive_failures: u32, intervals: PollIntervals) -> Duration {
-    if consecutive_failures == 0 {
-        return if visible {
-            intervals.visible
-        } else {
-            intervals.hidden
-        };
-    }
-    let doublings = (consecutive_failures - 1).min(16);
-    Duration::from_secs((BACKOFF_BASE_SECS << doublings).min(BACKOFF_CAP_SECS))
-}
-
-fn is_auth_problem(text: &str) -> bool {
-    let text = text.to_lowercase();
-    ["auth", "host key", "permission denied"]
-        .iter()
-        .any(|needle| text.contains(needle))
-}
-
-/// Maps a failed poll to a health. `retry_in_ms` is 0 here; the poller fills in the delay.
-///
-/// The error text is only ever what herdr said. Our own errors (timeout, spawn, parse) get a
-/// fixed sentence, so no argv, paths or OS details reach the UI.
-pub fn classify_error(e: &HerdrError) -> Health {
-    let reconnecting = |error: &str| Health::Reconnecting {
-        retry_in_ms: 0,
-        error: error.to_owned(),
-    };
-    match e {
-        HerdrError::Server { code, message }
-            if is_auth_problem(code) || is_auth_problem(message) =>
-        {
-            Health::Attention {
-                error: message.clone(),
-            }
-        }
-        HerdrError::Server { message, .. } => Health::Reconnecting {
-            retry_in_ms: 0,
-            error: message.clone(),
-        },
-        HerdrError::Timeout { .. } => reconnecting("herdr did not respond in time"),
-        HerdrError::Spawn { .. } => reconnecting("could not start herdr"),
-        HerdrError::NotFound => Health::Attention {
-            error: "herdr binary not found".into(),
-        },
-        HerdrError::Usage { message } => Health::Attention {
-            error: message.clone(),
-        },
-        HerdrError::Parse { .. } => Health::Attention {
-            error: "unreadable response from herdr".into(),
-        },
-    }
 }
 
 /// Sample states for the unit tests of the modules that read an `AppState`.
 #[cfg(test)]
 pub(crate) mod fixtures {
-    use std::collections::HashMap;
-
     use super::*;
-    use crate::herdr::model::parse_snapshot;
+    use crate::agents::DisplayStatus;
 
-    fn view(id: &str, label: &str, is_local: bool, with_snapshot: bool) -> MachineView {
-        let snapshot = with_snapshot.then(|| {
-            let path = format!(
-                "{}/tests/fixtures/snapshot_buildbox.json",
-                env!("CARGO_MANIFEST_DIR")
-            );
-            let text = std::fs::read_to_string(path).unwrap();
-            parse_snapshot(&serde_json::from_str(&text).unwrap()).unwrap()
-        });
-        MachineView {
-            id: id.into(),
-            label: label.into(),
-            target: None,
-            session: "default".into(),
-            is_local,
-            health: Health::Online,
-            snapshot,
-            last_ok_ms: None,
-            ages: HashMap::new(),
+    /// An agent terminal: `address` is machine-local.
+    pub fn term(address: &str, name: &str, status: DisplayStatus, folder: &str) -> TerminalView {
+        TerminalView {
+            address: address.into(),
+            name: Some(name.into()),
+            program: None,
+            kind: Some("claude".into()),
+            is_agent: true,
+            status,
+            word: None,
+            status_kind: None,
+            status_msg: None,
+            progress: None,
+            title: None,
+            folder: Some(folder.into()),
+            since_ms: None,
+            turn: 1,
+            seen_turn: None,
+            pinned: false,
+            parent: None,
+            keep: false,
+            exit_code: None,
+            reason: None,
+            created_ms: 0,
+            restarts: 0,
         }
     }
 
+    pub fn view(id: &str, name: &str, is_local: bool, terminals: Vec<TerminalView>) -> MachineView {
+        MachineView {
+            id: id.into(),
+            name: name.into(),
+            target: (!is_local).then(|| id.to_owned()),
+            session: None,
+            host: None,
+            hc_version: None,
+            is_local,
+            temporary: false,
+            health: Health::Online,
+            state_since_ms: None,
+            last_ok_ms: None,
+            terminals,
+            layout: None,
+        }
+    }
+
+    /// Local with nothing, and `buildbox` with a blocked, a working and a done agent.
     pub fn state() -> AppState {
         AppState {
             machines: vec![
-                view("local", "Local", true, false),
-                view("buildbox", "Build box", false, true),
+                view("local", "Local", true, Vec::new()),
+                view(
+                    "buildbox",
+                    "Build box",
+                    false,
+                    vec![
+                        term(
+                            "t1",
+                            "planner",
+                            DisplayStatus::Blocked,
+                            "/home/dev/api-service",
+                        ),
+                        term("t2", "builder", DisplayStatus::Working, "/home/dev/infra"),
+                        term("t3", "tester", DisplayStatus::Done, "/home/dev/web-app"),
+                    ],
+                ),
             ],
-            herdr_version: None,
-            herdr_path: None,
+            core_version: None,
+            core_path: None,
+            core_state: CoreState::Ready,
             generated_at_ms: 0,
         }
     }
@@ -194,121 +170,6 @@ pub(crate) mod fixtures {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::herdr::errors::HerdrError;
-    use std::time::Duration;
-
-    #[test]
-    fn next_delay_table() {
-        let ms = |visible, failures| next_delay(visible, failures, PollIntervals::default());
-        assert_eq!(ms(true, 0), Duration::from_secs(2));
-        assert_eq!(ms(false, 0), Duration::from_secs(10));
-        assert_eq!(ms(true, 1), Duration::from_secs(2));
-        assert_eq!(ms(true, 3), Duration::from_secs(8));
-        assert_eq!(ms(false, 10), Duration::from_secs(60));
-        assert_eq!(ms(false, 2), Duration::from_secs(4));
-        assert_eq!(ms(true, u32::MAX), Duration::from_secs(60));
-    }
-
-    #[test]
-    fn next_delay_takes_the_healthy_intervals_from_settings() {
-        let custom = PollIntervals::from_ms(1000, 30_000);
-        assert_eq!(next_delay(true, 0, custom), Duration::from_secs(1));
-        assert_eq!(next_delay(false, 0, custom), Duration::from_secs(30));
-        // Backoff after failures does not depend on them.
-        assert_eq!(next_delay(true, 3, custom), Duration::from_secs(8));
-        assert_eq!(next_delay(false, 1, custom), Duration::from_secs(2));
-    }
-
-    fn server(code: &str, message: &str) -> HerdrError {
-        HerdrError::Server {
-            code: code.into(),
-            message: message.into(),
-        }
-    }
-
-    #[test]
-    fn classify_auth_is_attention() {
-        for e in [
-            server("auth_failed", "login rejected"),
-            server("unknown", "Host key verification failed."),
-            server("ssh", "Permission denied (publickey)."),
-            server("x", "Authentication required"),
-        ] {
-            assert!(
-                matches!(classify_error(&e), Health::Attention { .. }),
-                "{e:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn classify_timeout_is_reconnecting() {
-        let timeout = HerdrError::Timeout {
-            argv: vec!["api".into(), "snapshot".into()],
-        };
-        assert!(matches!(
-            classify_error(&timeout),
-            Health::Reconnecting { .. }
-        ));
-        let spawn = HerdrError::Spawn {
-            message: "denied".into(),
-        };
-        assert!(matches!(
-            classify_error(&spawn),
-            Health::Reconnecting { .. }
-        ));
-        let refused = server(
-            "unknown",
-            "ssh: connect to host buildbox port 22: Connection refused",
-        );
-        assert!(matches!(
-            classify_error(&refused),
-            Health::Reconnecting { .. }
-        ));
-    }
-
-    #[test]
-    fn classify_persistent_problems_need_attention() {
-        for e in [
-            HerdrError::NotFound,
-            HerdrError::Usage {
-                message: "unexpected argument".into(),
-            },
-            HerdrError::Parse {
-                message: "snapshot: missing result.snapshot".into(),
-            },
-        ] {
-            assert!(
-                matches!(classify_error(&e), Health::Attention { .. }),
-                "{e:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn error_text_carries_only_what_herdr_said() {
-        let e = server("auth_failed", "login rejected");
-        let Health::Attention { error } = classify_error(&e) else {
-            panic!("expected attention");
-        };
-        assert_eq!(error, "login rejected");
-
-        // No argv, paths or OS details leak into the text shown to the user.
-        let timeout = HerdrError::Timeout {
-            argv: vec!["api".into(), "snapshot".into()],
-        };
-        let Health::Reconnecting { error, .. } = classify_error(&timeout) else {
-            panic!("expected reconnecting");
-        };
-        assert!(!error.contains("snapshot"), "{error}");
-        let spawn = HerdrError::Spawn {
-            message: "No such file /Users/dev/bin/herdr".into(),
-        };
-        let Health::Reconnecting { error, .. } = classify_error(&spawn) else {
-            panic!("expected reconnecting");
-        };
-        assert!(!error.contains("/Users/dev"), "{error}");
-    }
 
     #[test]
     fn health_serializes_tagged_by_kind() {
@@ -324,6 +185,26 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Health::Online).unwrap(),
             serde_json::json!({"kind": "online"})
+        );
+        assert_eq!(
+            serde_json::to_value(Health::Hidden).unwrap(),
+            serde_json::json!({"kind": "hidden"})
+        );
+    }
+
+    #[test]
+    fn core_state_serializes_tagged_by_kind() {
+        assert_eq!(
+            serde_json::to_value(CoreState::Incompatible {
+                reason: "too old".into(),
+                newer: false
+            })
+            .unwrap(),
+            serde_json::json!({"kind": "incompatible", "reason": "too old", "newer": false})
+        );
+        assert_eq!(
+            serde_json::to_value(CoreState::NotFound).unwrap(),
+            serde_json::json!({"kind": "notFound"})
         );
     }
 }

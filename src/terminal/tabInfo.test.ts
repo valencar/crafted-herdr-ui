@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { rowOf } from "../test/builders";
 import type { Row } from "../lib/grouping";
 import { countNeeds, tabSubline } from "./tabInfo";
 import type { TermTab } from "./terminalStore";
@@ -19,12 +20,11 @@ function tab(over: Partial<TermTab> = {}): TermTab {
 }
 
 function row(over: Partial<Row> = {}): Row {
-  return {
+  return rowOf({
     key: "buildbox::w1:p1",
     machineId: "buildbox",
     machineLabel: "buildbox",
     paneId: "w1:p1",
-    terminalId: "t1",
     kind: "claude",
     name: "planner",
     title: "planner",
@@ -32,7 +32,7 @@ function row(over: Partial<Row> = {}): Row {
     folder: null,
     sinceMs: null,
     ...over,
-  };
+  });
 }
 
 describe("tabSubline", () => {

@@ -9,11 +9,13 @@ const MAX_TAIL_PANES = 12;
 
 const STATUS_PRIORITY = [
   "blocked",
+  "error",
   "done",
   "working",
   "idle",
   "unknown",
   "shell",
+  "ended",
 ];
 
 /**

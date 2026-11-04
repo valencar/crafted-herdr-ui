@@ -45,8 +45,8 @@ function renderSidebar() {
       agentCount={0}
       projects={[]}
       machines={machines}
-      herdrPath={null}
-      herdrVersion={null}
+      corePath={null}
+      coreVersion={null}
       activeWorkbox={null}
       dashboardActive={false}
       onDashboard={vi.fn()}

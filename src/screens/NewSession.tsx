@@ -4,7 +4,6 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { KindBadge } from "../components/KindBadge";
 import { Sheet } from "../components/Sheet";
 import { Tooltip } from "../components/Tooltip";
-import type { ActionError } from "../lib/bindings/ActionError";
 import type { NewSessionRequest } from "../lib/bindings/NewSessionRequest";
 import type { Placement } from "../lib/bindings/Placement";
 import { actionErrorMessage, agentNameProblem, plural } from "../lib/format";
@@ -16,21 +15,11 @@ import { useAppStore } from "../store/appStore";
 const PREVIEW_DEBOUNCE_MS = 150;
 const MAX_RECENT_FOLDERS = 6;
 
-type PlacementOption = { value: string; label: string; placement: Placement };
+/** Task 11 rebuilds the sheet; until then every session goes in a new terminal in its folder. */
+const PLACEMENT: Placement = { kind: "newWorkspace" };
 
-/** herdr refused an untrusted repository: its own message, or `null` for any other error. */
-function trustMessage(e: ActionError): string | null {
-  if (e.kind !== "herdr" || e.error.kind !== "server") return null;
-  const { code, message } = e.error;
-  return /trust/i.test(code) || /trust/i.test(message) ? message : null;
-}
-
-function nameProblem(
-  name: string,
-  isAgent: boolean,
-  optional: boolean,
-): string | null {
-  if (name === "") return optional ? null : "";
+function nameProblem(name: string, isAgent: boolean): string | null {
+  if (name === "") return "";
   if (isAgent) return agentNameProblem(name);
   return name.startsWith("-") ? "A name can’t start with “-”." : null;
 }
@@ -71,9 +60,7 @@ export function NewSession({ terminalName }: Props) {
 
   const folderId = useId();
   const nameId = useId();
-  const placeId = useId();
   const argsId = useId();
-  const branchId = useId();
   const machineGroup = useId();
   const kindGroup = useId();
 
@@ -81,13 +68,10 @@ export function NewSession({ terminalName }: Props) {
     prefill?.machineId ?? null,
   );
   const [folder, setFolder] = useState(prefill?.folder ?? "");
-  const [worktree, setWorktree] = useState(false);
-  const [branch, setBranch] = useState("");
   const [kinds, setKinds] = useState<string[] | null>(null);
   // `undefined` = the default (the saved Run choice, else a plain shell).
   const [kindChoice, setKindChoice] = useState<string | null | undefined>();
   const [name, setName] = useState("");
-  const [placementChoice, setPlacementChoice] = useState<string | null>(null);
   const [agentArgs, setAgentArgs] = useState("");
   const [openAfter, setOpenAfter] = useState(
     () => useAppStore.getState().settings?.open_after_create ?? true,
@@ -96,7 +80,6 @@ export function NewSession({ terminalName }: Props) {
   // The last create failure. It only shows while the form still matches what was sent.
   const [failure, setFailure] = useState<{
     message: string;
-    trust: boolean;
     /** The create may have partly happened: stays until dismissed, whatever the form says. */
     sticky: boolean;
     forRequest: string;
@@ -115,7 +98,7 @@ export function NewSession({ terminalName }: Props) {
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const machines = useMemo(
-    () => (state?.machines ?? []).filter((m) => m.health.kind !== "disabled"),
+    () => (state?.machines ?? []).filter((m) => m.health.kind !== "hidden"),
     [state],
   );
   const selectedRow = rows.find((r) => r.key === selectedKey) ?? null;
@@ -175,52 +158,16 @@ export function NewSession({ terminalName }: Props) {
     return [...seen].slice(0, MAX_RECENT_FOLDERS);
   }, [rows, machineId]);
 
-  const placementOptions = useMemo<PlacementOption[]>(() => {
-    const options: PlacementOption[] = (
-      machine?.snapshot?.workspaces ?? []
-    ).map((w) => ({
-      value: `tab:${w.workspace_id}`,
-      label: `New tab in “${w.label}”`,
-      placement: { kind: "newTab", workspaceId: w.workspace_id },
-    }));
-    if (selectedRow && selectedRow.machineId === machineId) {
-      options.push({
-        value: "split",
-        label: `Split beside ${selectedRow.name}`,
-        placement: { kind: "splitBeside", paneId: selectedRow.paneId },
-      });
-    }
-    options.push({
-      value: "workspace",
-      label: "New workspace",
-      placement: { kind: "newWorkspace" },
-    });
-    return options;
-  }, [machine, selectedRow, machineId]);
-  const chosen =
-    placementOptions.find((o) => o.value === placementChoice) ??
-    placementOptions[0];
-
   const cwd = folder.trim();
   const trimmedName = name.trim();
-  const placement: Placement = worktree
-    ? { kind: "worktree", branch: branch.trim(), trust: false }
-    : chosen.placement;
   const isAgent = kind !== null;
-  const nameHint = nameProblem(
-    trimmedName,
-    isAgent,
-    !isAgent && placement.kind === "splitBeside",
-  );
-  const branchOk =
-    !worktree || (branch.trim() !== "" && !branch.trim().startsWith("-"));
+  const nameHint = nameProblem(trimmedName, isAgent);
   const canCreate =
     machineId !== null &&
     kinds !== null &&
     cwd !== "" &&
     !cwd.startsWith("-") &&
     nameHint === null &&
-    branchOk &&
     !busy;
 
   const request: NewSessionRequest | null =
@@ -231,7 +178,7 @@ export function NewSession({ terminalName }: Props) {
           cwd,
           kind,
           name: trimmedName,
-          placement,
+          placement: PLACEMENT,
           agentArgs: isAgent ? agentArgs.split(/\s+/).filter(Boolean) : [],
         };
   const requestJson = request ? JSON.stringify(request) : null;
@@ -264,14 +211,11 @@ export function NewSession({ terminalName }: Props) {
 
   const close = () => setSheet(null);
 
-  async function submit(trust: boolean) {
+  async function submit() {
     if (!request || !canCreate) return;
     setBusy(true);
     setFailure(null);
-    const sent: NewSessionRequest =
-      trust && request.placement.kind === "worktree"
-        ? { ...request, placement: { ...request.placement, trust: true } }
-        : request;
+    const sent: NewSessionRequest = request;
     try {
       const created = await invokeTyped("create_session", { req: sent });
       const key = `${sent.machineId}::${created.paneId}`;
@@ -299,11 +243,8 @@ export function NewSession({ terminalName }: Props) {
         reportError(err);
         return;
       }
-      const trustText =
-        request.placement.kind === "worktree" ? trustMessage(err) : null;
       setFailure({
-        message: trustText ?? actionErrorMessage(err),
-        trust: trustText !== null,
+        message: actionErrorMessage(err),
         sticky: err.kind === "maybeApplied",
         forRequest: requestJson ?? "",
       });
@@ -338,7 +279,7 @@ export function NewSession({ terminalName }: Props) {
       onKeyDown={(e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
           e.preventDefault();
-          void submit(false);
+          void submit();
         }
       }}
       footer={
@@ -360,7 +301,7 @@ export function NewSession({ terminalName }: Props) {
             type="button"
             className="btn btn-primary"
             disabled={!canCreate}
-            onClick={() => void submit(false)}
+            onClick={() => void submit()}
           >
             Create session <Kbd id="create-session" />
           </button>
@@ -374,7 +315,7 @@ export function NewSession({ terminalName }: Props) {
         ) : (
           <div className="opt-grid opt-grid-4">
             {machines.map((m) => {
-              const agents = m.snapshot?.agents.length ?? 0;
+              const agents = m.terminals.filter((t) => t.is_agent).length;
               const meta =
                 m.health.kind === "online"
                   ? plural(agents, "agent", "agents")
@@ -388,7 +329,7 @@ export function NewSession({ terminalName }: Props) {
                       checked={m.id === machineId}
                       onChange={() => setMachineChoice(m.id)}
                     />
-                    <span className="opt-name">{m.label}</span>
+                    <span className="opt-name">{m.name}</span>
                   </span>
                   <span className="mono muted opt-meta">
                     {m.is_local ? `local · ${meta}` : meta}
@@ -437,29 +378,6 @@ export function NewSession({ terminalName }: Props) {
             ))}
           </div>
         )}
-        <div className="sheet-line">
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={worktree}
-              onChange={(e) => setWorktree(e.target.checked)}
-            />
-            Work in a new git worktree
-          </label>
-          <label htmlFor={branchId} className="mono muted sheet-note">
-            branch
-          </label>
-          <input
-            id={branchId}
-            className="field field-small mono"
-            type="text"
-            value={branch}
-            disabled={!worktree}
-            placeholder="feat/orders-index"
-            spellCheck={false}
-            onChange={(e) => setBranch(e.target.value)}
-          />
-        </div>
       </div>
 
       <fieldset className="sheet-field">
@@ -500,33 +418,12 @@ export function NewSession({ terminalName }: Props) {
             className="field mono"
             type="text"
             value={name}
-            placeholder={isAgent ? "orders-index" : "optional for a split"}
+            placeholder={isAgent ? "orders-index" : "optional"}
             spellCheck={false}
             aria-invalid={nameHint ? true : undefined}
             onChange={(e) => setName(e.target.value)}
           />
           {nameHint && <p className="field-error">{nameHint}</p>}
-        </div>
-        <div className="sheet-field">
-          <label htmlFor={placeId} className="sheet-label">
-            Place it
-          </label>
-          <select
-            id={placeId}
-            className="field"
-            value={chosen.value}
-            disabled={worktree}
-            onChange={(e) => setPlacementChoice(e.target.value)}
-          >
-            {placementOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          {worktree && (
-            <p className="muted sheet-note">Not used with a worktree.</p>
-          )}
         </div>
       </div>
 
@@ -574,20 +471,7 @@ export function NewSession({ terminalName }: Props) {
         </p>
       )}
 
-      {shownFailure?.trust && (
-        <div className="sheet-trust" role="alert">
-          <p>{shownFailure.message}</p>
-          <button
-            type="button"
-            className="btn"
-            disabled={busy}
-            onClick={() => void submit(true)}
-          >
-            Trust this repository and retry
-          </button>
-        </div>
-      )}
-      {shownFailure && !shownFailure.trust && (
+      {shownFailure && (
         <div className="sheet-failure" role="alert">
           <p className="field-error">{shownFailure.message}</p>
           {shownFailure.sticky && (

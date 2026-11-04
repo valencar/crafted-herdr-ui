@@ -208,3 +208,53 @@ async fn long_call_uses_its_own_connection() {
     assert_eq!(log[1].method, "terminal.interrupt");
     assert_eq!(log[1].display, "fake-hc interrupt t1");
 }
+
+#[tokio::test]
+async fn log_records_every_call_with_its_outcome() {
+    let (dir, client) = fake();
+    fixture(&dir, "machine.list.json", &json!({"machines": []}));
+    fixture(
+        &dir,
+        "terminal.kill.json",
+        &json!({"error": {"code": -32000, "message": "no terminal \"t99\"",
+            "data": {"kind": "not_found"}}}),
+    );
+    client
+        .call("local", "machine.list", json!({}))
+        .await
+        .unwrap();
+    client
+        .call("local", "terminal.kill", json!({"terminal": "t99"}))
+        .await
+        .unwrap_err();
+
+    let log = client.command_log();
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[0].method, "machine.list");
+    assert_eq!(log[0].exit_code, Some(0));
+    assert_eq!(log[0].error, None);
+    assert_eq!(log[1].method, "terminal.kill");
+    assert_eq!(log[1].exit_code, Some(1));
+    assert!(log[1].error.as_deref().unwrap().contains("no terminal"));
+}
+
+#[tokio::test]
+async fn log_keeps_only_the_last_200_entries() {
+    let (dir, client) = fake();
+    fixture(&dir, "machine.list.json", &json!({"machines": []}));
+    for _ in 0..205 {
+        client
+            .call_quiet("local", "machine.list", json!({}))
+            .await
+            .unwrap();
+    }
+    client
+        .call("local", "machine.list", json!({}))
+        .await
+        .unwrap();
+    let log = client.command_log();
+    assert_eq!(log.len(), 200);
+    // Oldest first: the last entry is the newest, and it is the only one that is not quiet.
+    assert!(!log[199].quiet);
+    assert!(log[..199].iter().all(|e| e.quiet));
+}

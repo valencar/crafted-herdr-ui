@@ -88,7 +88,6 @@ describe("Inspector details", () => {
     expect(grid).toHaveTextContent("Workboxbuildbox · Online");
     expect(grid).toHaveTextContent("Sessiondefault");
     expect(grid).toHaveTextContent("Folder~/projects/api-service");
-    expect(grid).toHaveTextContent("Workspace / tabapi-service · main");
     expect(grid).toHaveTextContent("Panew1:p1");
   });
 

@@ -22,7 +22,7 @@ terminal: TerminalId | null,
 /**
  * The command for the Custom terminal; `{attach}` is replaced by the quoted command.
  */
-terminal_custom_template: string, open_mode: OpenMode, attach_mode: AttachMode, notify_blocked: boolean, notify_done: boolean, poll_interval_visible_ms: number, poll_interval_hidden_ms: number, group_by: GroupBy, global_shortcut_enabled: boolean, 
+terminal_custom_template: string, open_mode: OpenMode, attach_mode: AttachMode, notify_blocked: boolean, notify_done: boolean, group_by: GroupBy, global_shortcut_enabled: boolean, 
 /**
  * The default of "Open in <Terminal> when ready" in the New session sheet.
  */

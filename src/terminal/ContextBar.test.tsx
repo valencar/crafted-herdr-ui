@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { rowOf } from "../test/builders";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/bindings/AppState";
@@ -22,19 +23,18 @@ vi.mock("../lib/openRow", () => ({
 }));
 import { openRow } from "../lib/openRow";
 
-const row: Row = {
+const row: Row = rowOf({
   key: "buildbox::w1:p1",
   machineId: "buildbox",
   machineLabel: "buildbox",
   paneId: "w1:p1",
-  terminalId: "t1",
   kind: "claude",
   name: "planner",
   title: "refactor auth",
   status: "blocked",
   folder: "/home/dev/projects/api-service",
   sinceMs: null,
-};
+});
 
 const paneTab: TermTab = {
   tabKey: row.key,

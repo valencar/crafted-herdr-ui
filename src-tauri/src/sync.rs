@@ -35,14 +35,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::runtime::Handle;
 use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-use crate::activity_v2::{ActivityV2, Transition};
+use crate::activity::{ActivityV2, Transition};
 use crate::agents::{TerminalView, classify};
 use crate::core::connection::Connection;
 use crate::core::display::display;
@@ -52,6 +51,7 @@ use crate::core::{
     timeout_for,
 };
 use crate::settings::SharedSettings;
+use crate::state::{AppState, CoreState, Health, MachineView};
 use crate::{LOCAL, lock, now_ms};
 
 /// No line on the event connection for this long means it is dead (a heartbeat is due every 15 s).
@@ -70,76 +70,8 @@ const MACHINES_HIDDEN: Duration = Duration::from_secs(30);
 /// An unreachable machine is "reconnecting" this long, then it needs the person.
 const UNREACHABLE_ATTENTION_MS: u64 = 120_000;
 
-/// Reads of the spaces layout (Task 18); empty until then.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct SpaceLayout {}
-
-/// How a machine is doing. Serialized tagged by `kind`, like `Health`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum HealthV2 {
-    Online,
-    /// `retry_in_ms` is 0 when the app doesn't know (a remote machine's retry is its core's).
-    /// An empty `error` means nothing has failed yet.
-    Reconnecting {
-        retry_in_ms: u64,
-        error: String,
-    },
-    /// Needs the person: a login, an update, a click on Reconnect.
-    Attention {
-        error: String,
-    },
-    /// The person hid it (`hidden_workboxes`).
-    Hidden,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct MachineViewV2 {
-    /// `"local"` for this computer, otherwise the core's permanent machine id.
-    pub id: String,
-    pub name: String,
-    pub target: Option<String>,
-    pub session: Option<String>,
-    pub host: Option<String>,
-    pub hc_version: Option<String>,
-    pub is_local: bool,
-    pub temporary: bool,
-    pub health: HealthV2,
-    pub state_since_ms: Option<u64>,
-    pub last_ok_ms: Option<u64>,
-    /// Addresses are local to this machine (`t7`); `parent` is still the full address.
-    pub terminals: Vec<TerminalView>,
-    pub layout: Option<SpaceLayout>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum CoreState {
-    Connecting,
-    Ready,
-    /// The 2-minute reconnect window ran out; only Reconnect tries again.
-    Stopped {
-        error: String,
-    },
-    /// `newer`: the core is ahead of the app, so the app is what needs updating.
-    Incompatible {
-        reason: String,
-        newer: bool,
-    },
-    NotFound,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct AppStateV2 {
-    pub machines: Vec<MachineViewV2>,
-    pub core_version: Option<String>,
-    pub core_path: Option<String>,
-    pub core_state: CoreState,
-    pub generated_at_ms: u64,
-}
-
 /// Receives each new state (see the module doc for what it must not call).
-pub type Emit = Arc<dyn Fn(&AppStateV2) + Send + Sync>;
+pub type Emit = Arc<dyn Fn(&AppState) + Send + Sync>;
 /// Receives each transition worth a notification.
 pub type NotifySink = Arc<dyn Fn(Transition) + Send + Sync>;
 
@@ -152,13 +84,13 @@ pub fn split_address(full: &str) -> (Option<&str>, &str) {
 }
 
 /// How a machine of `machine.list` is doing (spec §4.4).
-pub fn health_of(m: &CoreMachine, now_ms: u64) -> HealthV2 {
-    let attention = |text: &str| HealthV2::Attention {
+pub fn health_of(m: &CoreMachine, now_ms: u64) -> Health {
+    let attention = |text: &str| Health::Attention {
         error: text.to_owned(),
     };
     match m.state.as_str() {
-        "connected" => HealthV2::Online,
-        "connecting" => HealthV2::Reconnecting {
+        "connected" => Health::Online,
+        "connecting" => Health::Reconnecting {
             retry_in_ms: 0,
             error: String::new(),
         },
@@ -170,12 +102,12 @@ pub fn health_of(m: &CoreMachine, now_ms: u64) -> HealthV2 {
                 .since_ms
                 .is_none_or(|since| now_ms.saturating_sub(since) < UNREACHABLE_ATTENTION_MS);
             if young {
-                HealthV2::Reconnecting {
+                Health::Reconnecting {
                     retry_in_ms: 0,
                     error,
                 }
             } else {
-                HealthV2::Attention { error }
+                Health::Attention { error }
             }
         }
         // A state a newer core invented: show its word and let the person look.
@@ -219,18 +151,18 @@ enum Link {
 }
 
 impl Link {
-    fn health(&self) -> HealthV2 {
+    fn health(&self) -> Health {
         match self {
-            Link::Pending => HealthV2::Reconnecting {
+            Link::Pending => Health::Reconnecting {
                 retry_in_ms: 0,
                 error: String::new(),
             },
-            Link::Online => HealthV2::Online,
-            Link::Backoff { retry_in_ms, error } => HealthV2::Reconnecting {
+            Link::Online => Health::Online,
+            Link::Backoff { retry_in_ms, error } => Health::Reconnecting {
                 retry_in_ms: *retry_in_ms,
                 error: error.clone(),
             },
-            Link::Down { error } => HealthV2::Attention {
+            Link::Down { error } => Health::Attention {
                 error: error.clone(),
             },
         }
@@ -260,9 +192,9 @@ struct Model {
     keep_seen: HashMap<String, Instant>,
     /// Names machines had before a list renamed them.
     aliases: Vec<Alias>,
-    state: AppStateV2,
+    state: AppState,
     /// The last state handed to `emit`.
-    emitted: Option<AppStateV2>,
+    emitted: Option<AppState>,
 }
 
 /// A name a machine had until the list renamed it: the stream still says it until its `removed`
@@ -360,7 +292,7 @@ impl CoreSync {
         emit: Emit,
         notify: NotifySink,
     ) -> CoreSync {
-        let state = AppStateV2 {
+        let state = AppState {
             machines: Vec::new(),
             core_version: None,
             core_path: None,
@@ -407,7 +339,7 @@ impl CoreSync {
     }
 
     /// The state as of now, for a UI that missed the event.
-    pub fn state(&self) -> Option<AppStateV2> {
+    pub fn state(&self) -> Option<AppState> {
         Some(lock(&self.inner.model).state.clone())
     }
 
@@ -474,6 +406,27 @@ impl CoreSync {
             .find(|x| x.id == machine_id)
             .map(|x| x.name.clone())
     }
+
+    /// Whether the main window was last reported on screen.
+    pub fn is_window_visible(&self) -> bool {
+        self.inner.visible.load(Ordering::Relaxed)
+    }
+}
+
+/// Where Tauri state finds the `CoreSync`: it is started once the core is located, so commands
+/// and the tray ask the cell and get `None` before then.
+#[derive(Clone, Default)]
+pub struct SyncCell(Arc<std::sync::OnceLock<CoreSync>>);
+
+impl SyncCell {
+    pub fn get(&self) -> Option<&CoreSync> {
+        self.0.get()
+    }
+
+    /// Keeps `sync` for the life of the app. A second call is ignored (and drops its argument).
+    pub fn set(&self, sync: CoreSync) {
+        let _ = self.0.set(sync);
+    }
 }
 
 impl Drop for CoreSync {
@@ -516,7 +469,7 @@ fn non_empty(s: &str) -> Option<String> {
 
 /// Whether two states show the same thing: `generated_at_ms` and `last_ok_ms` move on their own
 /// and only matter when something else changed.
-fn same_shown(a: &AppStateV2, b: Option<&AppStateV2>) -> bool {
+fn same_shown(a: &AppState, b: Option<&AppState>) -> bool {
     let Some(b) = b else {
         return false;
     };
@@ -588,7 +541,7 @@ impl Inner {
         let link_health = m.link.health();
         let info = m.info.clone();
         let mut machines = Vec::with_capacity(m.machines.len() + 1);
-        machines.push(MachineViewV2 {
+        machines.push(MachineView {
             id: LOCAL.to_owned(),
             name: "Local".to_owned(),
             target: None,
@@ -604,7 +557,7 @@ impl Inner {
             layout: None,
         });
         for x in &m.machines {
-            machines.push(MachineViewV2 {
+            machines.push(MachineView {
                 id: x.id.clone(),
                 name: x.name.clone(),
                 target: non_empty(&x.target),
@@ -627,15 +580,15 @@ impl Inner {
         }
         for machine in &mut machines {
             if hidden.contains(&machine.id) {
-                machine.health = HealthV2::Hidden;
+                machine.health = Health::Hidden;
             }
-            if machine.health == HealthV2::Online {
+            if machine.health == Health::Online {
                 m.last_ok.insert(machine.id.clone(), now);
             }
             machine.last_ok_ms = m.last_ok.get(&machine.id).copied();
         }
         m.views = views;
-        m.state = AppStateV2 {
+        m.state = AppState {
             machines,
             core_version: info.map(|i| i.version),
             core_path: m.core_path.clone(),

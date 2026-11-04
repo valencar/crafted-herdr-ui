@@ -76,19 +76,19 @@ function RailWorkbox({
   onOpen: () => void;
 }) {
   const color = useWorkboxColor(m.id);
-  const label = `${m.label}: ${HEALTH_LABEL[m.health.kind]}`;
+  const label = `${m.name}: ${HEALTH_LABEL[m.health.kind]}`;
   return (
     <Tooltip label={label}>
       <button
         type="button"
-        className={`rail-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
+        className={`rail-item${m.health.kind === "hidden" ? " is-dim" : ""}`}
         aria-label={label}
         aria-current={current ? "page" : undefined}
         data-on={on ? "true" : undefined}
         data-wb-color={color}
         onClick={onOpen}
       >
-        <WorkboxTile machineId={m.id} label={m.label} />
+        <WorkboxTile machineId={m.id} label={m.name} />
         <span
           className="health rail-health"
           data-health={m.health.kind}
@@ -121,8 +121,8 @@ type Props = {
   agentCount: number;
   projects: Group[];
   machines: MachineView[];
-  herdrPath: string | null;
-  herdrVersion: string | null;
+  corePath: string | null;
+  coreVersion: string | null;
   /** The workbox whose screen is open, if any. */
   activeWorkbox: string | null;
   /** Whether the Home tab is showing the Dashboard. */
@@ -143,8 +143,8 @@ export function Sidebar({
   agentCount,
   projects,
   machines,
-  herdrPath,
-  herdrVersion,
+  corePath,
+  coreVersion,
   activeWorkbox,
   dashboardActive,
   onDashboard,
@@ -320,18 +320,18 @@ export function Sidebar({
       {machines.map((m) => (
         <WorkboxBox key={m.id} machineId={m.id}>
           <Tooltip
-            label={`${m.label}: ${HEALTH_LABEL[m.health.kind]}`}
+            label={`${m.name}: ${HEALTH_LABEL[m.health.kind]}`}
             disabled={colorMenu.openId === m.id}
           >
             <button
               type="button"
-              className={`nav-item${m.health.kind === "disabled" ? " is-dim" : ""}`}
+              className={`nav-item${m.health.kind === "hidden" ? " is-dim" : ""}`}
               aria-current={m.id === activeWorkbox ? "page" : undefined}
               onClick={() => onWorkbox(m.id)}
-              onContextMenu={colorMenu.onContextMenu(m.id, m.label)}
+              onContextMenu={colorMenu.onContextMenu(m.id, m.name)}
             >
-              <WorkboxTile machineId={m.id} label={m.label} health={m.health} />
-              <span className="nav-label">{m.label}</span>
+              <WorkboxTile machineId={m.id} label={m.name} health={m.health} />
+              <span className="nav-label">{m.name}</span>
               <span className="health" data-health={m.health.kind}>
                 {HEALTH_LABEL[m.health.kind]}
               </span>
@@ -400,8 +400,8 @@ export function Sidebar({
 
       <div className="sidebar-foot">
         <span className="mono muted">
-          {herdrPath ?? "herdr not found"}
-          {herdrVersion ? ` · ${herdrVersion}` : ""}
+          {corePath ?? "herdr not found"}
+          {coreVersion ? ` · ${coreVersion}` : ""}
         </span>
         <button
           type="button"

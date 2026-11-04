@@ -1,3 +1,4 @@
+import { rowOf } from "../test/builders";
 import {
   act,
   cleanup,
@@ -44,19 +45,18 @@ const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const copy = vi.mocked(copyText);
 const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
 
-const ROW: Row = {
+const ROW: Row = rowOf({
   key: "buildbox::w1:p1",
   machineId: "buildbox",
   machineLabel: "buildbox",
   paneId: "w1:p1",
-  terminalId: "term-1",
   kind: "claude",
   name: "api-service",
   title: "",
   status: "blocked",
   folder: null,
   sinceMs: null,
-};
+});
 
 function tab(paneId: string): TermTab {
   return {

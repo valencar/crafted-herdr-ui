@@ -51,7 +51,7 @@ export type OnlineSummary = {
 };
 
 export function onlineSummary(machines: MachineView[]): OnlineSummary {
-  const enabled = machines.filter((m) => m.health.kind !== "disabled");
+  const enabled = machines.filter((m) => m.health.kind !== "hidden");
   const online = enabled.filter((m) => m.health.kind === "online");
   return {
     online: online.length,

@@ -40,17 +40,8 @@ export function Inspector({
   const isAgent = row.status !== "shell";
   const target = { machineId, paneId };
 
-  const snapshot = machine.snapshot;
-  const pane =
-    snapshot?.panes.find((p) => p.pane_id === paneId) ??
-    snapshot?.agents.find((a) => a.pane_id === paneId) ??
-    null;
-  const workspace = snapshot?.workspaces.find(
-    (w) => w.workspace_id === pane?.workspace_id,
-  );
-  const tab = snapshot?.tabs.find((t) => t.tab_id === pane?.tab_id);
-  const where = [workspace?.label, tab?.label].filter(Boolean).join(" · ");
-  const agentName = snapshot?.agents.find((a) => a.pane_id === paneId)?.name;
+  // The name the person gave it, which `row.name` falls back from.
+  const agentName = machine.terminals.find((t) => t.address === paneId)?.name;
 
   // What "Open" runs; the text comes from Rust, and follows the attach mode in Settings.
   const attachMode = useAppStore((s) => s.settings?.attach_mode);
@@ -77,7 +68,7 @@ export function Inspector({
     return () => {
       alive = false;
     };
-  }, [machineId, paneId, row.terminalId, attachMode]);
+  }, [machineId, paneId, attachMode]);
 
   // Reply
   const hintId = useId();
@@ -152,23 +143,17 @@ export function Inspector({
         <div>
           <dt>Workbox</dt>
           <dd>
-            {machine.label} · {HEALTH_LABEL[machine.health.kind]}
+            {machine.name} · {HEALTH_LABEL[machine.health.kind]}
           </dd>
         </div>
         <div>
           <dt>Session</dt>
-          <dd>{machine.session}</dd>
+          <dd>{machine.session ?? "default"}</dd>
         </div>
         {row.folder && (
           <div className="span-2">
             <dt>Folder</dt>
             <dd className="mono">{shortPath(row.folder)}</dd>
-          </div>
-        )}
-        {where && (
-          <div>
-            <dt>Workspace / tab</dt>
-            <dd>{where}</dd>
           </div>
         )}
         <div>

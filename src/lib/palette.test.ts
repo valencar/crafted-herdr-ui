@@ -1,16 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MachineView } from "./bindings/MachineView";
-import { machineView } from "../test/builders";
+import { machineView, rowOf } from "../test/builders";
 import type { Row } from "./grouping";
 import { agentActions, buildItems, labelPositions, rankItems } from "./palette";
 
 function row(over: Partial<Row>): Row {
-  return {
+  return rowOf({
     key: "buildbox::w1:p1",
     machineId: "buildbox",
     machineLabel: "buildbox",
     paneId: "w1:p1",
-    terminalId: "t-1",
     kind: "claude",
     name: "planner",
     title: "",
@@ -18,7 +17,7 @@ function row(over: Partial<Row>): Row {
     folder: "/home/dev/api-service",
     sinceMs: null,
     ...over,
-  };
+  });
 }
 
 const rows: Row[] = [

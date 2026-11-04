@@ -22,6 +22,7 @@ const COMMANDS: &[&str] = &[
     "machine_remove",
     "machine_status",
     "refresh_now",
+    "reconnect_core",
     "get_command_log",
     "list_agent_kinds",
     "open_session",

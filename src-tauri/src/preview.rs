@@ -1,8 +1,7 @@
-//! The live preview and the one-line pane read: what the UI shows of a pane's recent output.
+//! The live preview: what the UI shows of a pane's recent output.
 //!
 //! `PreviewManager` reads one pane every 2 s while the window is visible and emits a
-//! `PreviewFrame` when the text changed. `pane_tail_argv` and `last_nonempty_line` back the
-//! single line shown in a pane box of the Workbox screen.
+//! `PreviewFrame` when the text changed.
 
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -15,32 +14,6 @@ use crate::actions::ActionError;
 use crate::herdr::cli::{HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::lock;
-
-/// The one-line read behind a pane box in the Workbox screen.
-pub(crate) fn pane_tail_argv(pane_id: &str) -> Vec<String> {
-    [
-        "pane",
-        "read",
-        pane_id,
-        "--source",
-        "recent-unwrapped",
-        "--lines",
-        "1",
-        "--format",
-        "text",
-    ]
-    .map(str::to_owned)
-    .to_vec()
-}
-
-/// The last line with something on it, trimmed; empty when the pane has printed nothing.
-pub(crate) fn last_nonempty_line(text: &str) -> String {
-    text.lines()
-        .map(str::trim)
-        .rfind(|l| !l.is_empty())
-        .unwrap_or_default()
-        .to_owned()
-}
 
 const PREVIEW_EVERY: Duration = Duration::from_secs(2);
 /// The event `PreviewFrame`s are emitted on.
@@ -219,21 +192,6 @@ mod tests {
             "pane read w1:p2 --source recent-unwrapped --lines 60 --format text"
         );
         assert_eq!(preview_key("buildbox", "w1:p1"), "buildbox::w1:p1");
-    }
-
-    #[test]
-    fn pane_tail_reads_one_unwrapped_line() {
-        assert_eq!(
-            pane_tail_argv("w1:p2").join(" "),
-            "pane read w1:p2 --source recent-unwrapped --lines 1 --format text"
-        );
-        assert_eq!(
-            last_nonempty_line("  ready on :3000  \n\n  \n"),
-            "ready on :3000"
-        );
-        assert_eq!(last_nonempty_line("one\ntwo\n"), "two");
-        assert_eq!(last_nonempty_line("\n \n"), "");
-        assert_eq!(last_nonempty_line(""), "");
     }
 
     #[test]

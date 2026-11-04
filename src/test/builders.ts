@@ -4,20 +4,17 @@
  * into the `AppState` the UI receives. Only this file knows the shape of that state, so when
  * the shape changes, only this file changes and the tests' assertions stay as they are.
  *
- * Today's shape: a `snapshot` with `agents` and `panes` per machine, `label`, and `ages`.
+ * Today's shape (herdr-core): a `terminals` list per machine, `name`, `since_ms`.
  *
- * `address` is the terminal's id inside its machine. It is the pane id today (`w1:p1`), so a
- * row key stays `${machineId}::${address}`.
+ * `address` is the terminal's address inside its machine (`t7`), so a row key stays
+ * `${machineId}::${address}`.
  */
-import type { Agent } from "../lib/bindings/Agent";
-import type { AgentStatus } from "../lib/bindings/AgentStatus";
 import type { AppState } from "../lib/bindings/AppState";
+import type { DisplayStatus } from "../lib/bindings/DisplayStatus";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
-import type { Pane } from "../lib/bindings/Pane";
-import type { Snapshot } from "../lib/bindings/Snapshot";
-import type { Tab } from "../lib/bindings/Tab";
-import type { Workspace } from "../lib/bindings/Workspace";
+import type { TerminalView } from "../lib/bindings/TerminalView";
+import type { Row } from "../lib/grouping";
 
 export type MachineSpec = {
   id: string;
@@ -37,26 +34,20 @@ export type AgentTermSpec = {
   address: string;
   /** The agent kind (`claude`, `codex`, ...). */
   agentKind: string;
-  status: AgentStatus;
+  status: DisplayStatus;
   name: string | null;
   /** The terminal's title; the agent's fallback name. */
   title: string | null;
   folder: string | null;
   /** Unix ms when the current status began; `null` or absent for no observation. */
   sinceMs: number | null;
-  /** The herdr-core fields the 0.9 shape has no home for; accepted now, used by 6c. */
+  /** The parent's address as the local core sees it (`t1`, `buildbox/t1`). */
   parent: string | null;
   pinned: boolean;
   turn: number | null;
   statusKind: string | null;
   statusMsg: string | null;
   progress: number | null;
-  /** Fields that exist only in today's shape. Dropped by 6c. */
-  terminalId: string;
-  workspaceId: string;
-  tabId: string;
-  workspaceLabel: string;
-  tabLabel: string;
 };
 
 export type ShellTermSpec = {
@@ -64,22 +55,15 @@ export type ShellTermSpec = {
   address: string;
   folder: string | null;
   title: string | null;
-  terminalId: string;
-  workspaceId: string;
-  tabId: string;
-  workspaceLabel: string;
-  tabLabel: string;
 };
 
 export type TermSpec = AgentTermSpec | ShellTermSpec;
-
-const wsOf = (address: string) => address.split(":")[0] || "w1";
 
 /** One terminal running an agent. `kind` is the agent kind, `claude` by default. */
 export function agentTerm(spec: {
   address: string;
   kind?: string;
-  status: AgentStatus;
+  status: DisplayStatus;
   name?: string | null;
   title?: string | null;
   folder?: string | null;
@@ -90,13 +74,7 @@ export function agentTerm(spec: {
   statusKind?: string | null;
   statusMsg?: string | null;
   progress?: number | null;
-  terminalId?: string;
-  workspaceId?: string;
-  tabId?: string;
-  workspaceLabel?: string;
-  tabLabel?: string;
 }): AgentTermSpec {
-  const workspaceId = spec.workspaceId ?? wsOf(spec.address);
   return {
     kind: "agent",
     address: spec.address,
@@ -112,11 +90,6 @@ export function agentTerm(spec: {
     statusKind: spec.statusKind ?? null,
     statusMsg: spec.statusMsg ?? null,
     progress: spec.progress ?? null,
-    terminalId: spec.terminalId ?? `term-${spec.address}`,
-    workspaceId,
-    tabId: spec.tabId ?? `${workspaceId}:t1`,
-    workspaceLabel: spec.workspaceLabel ?? workspaceId,
-    tabLabel: spec.tabLabel ?? spec.tabId ?? `${workspaceId}:t1`,
   };
 }
 
@@ -125,23 +98,12 @@ export function shellTerm(spec: {
   address: string;
   folder?: string | null;
   title?: string | null;
-  terminalId?: string;
-  workspaceId?: string;
-  tabId?: string;
-  workspaceLabel?: string;
-  tabLabel?: string;
 }): ShellTermSpec {
-  const workspaceId = spec.workspaceId ?? wsOf(spec.address);
   return {
     kind: "shell",
     address: spec.address,
     folder: spec.folder ?? null,
     title: spec.title ?? null,
-    terminalId: spec.terminalId ?? `term-${spec.address}`,
-    workspaceId,
-    tabId: spec.tabId ?? `${workspaceId}:t1`,
-    workspaceLabel: spec.workspaceLabel ?? workspaceId,
-    tabLabel: spec.tabLabel ?? spec.tabId ?? `${workspaceId}:t1`,
   };
 }
 
@@ -159,8 +121,7 @@ export function machine(spec: MachineSpec): Required<MachineSpec> {
 }
 
 /**
- * The six terminals of `snapshot_buildbox.json` as the UI reads it (not byte for byte: the
- * tab numbering, `focused` and w1:p2's `cwd` differ): four agents (`w1:p1` planner, blocked;
+ * Six terminals on a workbox: four agents (`w1:p1` planner, blocked;
  * `w1:p2` copilot, working; `w2:p1` tester, done; `w2:p2` claude, idle) and two shells
  * (`w1:p3`, `w2:p3`). `patch` changes terminals by address: any `agentTerm` field of an
  * agent, and the `folder` or `title` of a shell.
@@ -169,7 +130,7 @@ export function buildboxTerms(
   patch: Record<
     string,
     Partial<{
-      status: AgentStatus;
+      status: DisplayStatus;
       name: string | null;
       folder: string | null;
       sinceMs: number | null;
@@ -186,197 +147,135 @@ export function buildboxTerms(
   return [
     agentTerm({
       address: "w1:p1",
-      workspaceLabel: "api-service",
-      tabLabel: "main",
       kind: "claude",
       status: "blocked",
       name: "planner",
       title: "claude: refactor auth",
       folder: "/home/dev/projects/api-service",
-      terminalId: "term-1",
       ...p("w1:p1"),
     }),
     agentTerm({
       address: "w1:p2",
-      workspaceLabel: "api-service",
-      tabLabel: "main",
       kind: "copilot",
       status: "working",
       title: "copilot: terraform plan",
       folder: "/home/dev/projects/infra",
-      terminalId: "term-2",
       ...p("w1:p2"),
     }),
     shellTerm({
       address: "w1:p3",
-      workspaceLabel: "api-service",
-      tabLabel: "shell",
       title: "zsh",
       folder: "/home/dev/projects/api-service/packages/db",
-      terminalId: "term-3",
-      tabId: "w1:t2",
       ...shellPatch("w1:p3"),
     }),
     agentTerm({
       address: "w2:p1",
-      workspaceLabel: "web-app",
-      tabLabel: "main",
       kind: "codex",
       status: "done",
       name: "tester",
       title: "codex: add tests",
       folder: "/home/dev/projects/web-app",
-      terminalId: "term-4",
       ...p("w2:p1"),
     }),
     agentTerm({
       address: "w2:p2",
-      workspaceLabel: "web-app",
-      tabLabel: "main",
       kind: "claude",
       status: "idle",
       title: "claude",
       folder: "/home/dev/projects",
-      terminalId: "term-5",
       ...p("w2:p2"),
     }),
     shellTerm({
       address: "w2:p3",
-      workspaceLabel: "web-app",
-      tabLabel: "main",
       title: "zsh",
       folder: "/home/dev",
-      terminalId: "term-6",
       ...shellPatch("w2:p3"),
     }),
   ];
 }
 
-const STATUS_RANK: AgentStatus[] = [
-  "blocked",
-  "done",
-  "working",
-  "idle",
-  "unknown",
-];
-
-function rollup(statuses: AgentStatus[]): AgentStatus {
-  for (const s of STATUS_RANK) if (statuses.includes(s)) return s;
-  return "unknown";
-}
-
-function agentOf(t: AgentTermSpec): Agent {
-  return {
-    pane_id: t.address,
-    tab_id: t.tabId,
-    workspace_id: t.workspaceId,
-    terminal_id: t.terminalId,
-    agent: t.agentKind,
-    name: t.name,
-    agent_status: t.status,
-    cwd: t.folder,
-    foreground_cwd: t.folder,
-    terminal_title_stripped: t.title,
-    focused: false,
-    revision: 1,
-    state_change_seq: 1,
-    completion_seq: 0,
-  };
-}
-
-function paneOf(t: TermSpec): Pane {
-  const title = t.title;
-  return {
-    pane_id: t.address,
-    tab_id: t.tabId,
-    workspace_id: t.workspaceId,
-    terminal_id: t.terminalId,
-    cwd: t.folder,
-    foreground_cwd: t.folder,
-    terminal_title: title,
-    terminal_title_stripped: title,
-    agent_status: t.kind === "agent" ? t.status : "unknown",
-    focused: false,
-    revision: 1,
-  };
-}
-
-function snapshotOf(terms: TermSpec[]): Snapshot {
-  const agents = terms.filter((t): t is AgentTermSpec => t.kind === "agent");
-  const wsIds = [...new Set(terms.map((t) => t.workspaceId))];
-  const tabIds = [...new Set(terms.map((t) => t.tabId))];
-  const statusesIn = (pick: (t: TermSpec) => boolean) =>
-    agents.filter(pick).map((a) => a.status);
-  const workspaces: Workspace[] = wsIds.map((id, i) => {
-    const tabs = tabIds.filter((tid) =>
-      terms.some((t) => t.tabId === tid && t.workspaceId === id),
-    );
+function terminalOf(t: TermSpec): TerminalView {
+  if (t.kind === "agent") {
     return {
-      workspace_id: id,
-      label: terms.find((t) => t.workspaceId === id)!.workspaceLabel,
-      number: i + 1,
-      active_tab_id: tabs[0] ?? null,
-      agent_status: rollup(statusesIn((t) => t.workspaceId === id)),
-      focused: false,
-      pane_count: terms.filter((t) => t.workspaceId === id).length,
-      tab_count: tabs.length,
+      address: t.address,
+      name: t.name,
+      program: t.agentKind,
+      kind: t.agentKind,
+      is_agent: true,
+      status: t.status,
+      word: null,
+      status_kind: t.statusKind,
+      status_msg: t.statusMsg,
+      progress: t.progress,
+      title: t.title,
+      folder: t.folder,
+      since_ms: t.sinceMs,
+      turn: t.turn ?? 0,
+      seen_turn: null,
+      pinned: t.pinned,
+      parent: t.parent,
+      keep: false,
+      exit_code: null,
+      reason: null,
+      created_ms: 0,
+      restarts: 0,
     };
-  });
-  const tabs: Tab[] = tabIds.map((id, i) => {
-    const members = terms.filter((t) => t.tabId === id);
-    return {
-      tab_id: id,
-      workspace_id: members[0].workspaceId,
-      label: members[0].tabLabel,
-      number: i + 1,
-      agent_status: rollup(statusesIn((t) => t.tabId === id)),
-      focused: false,
-      pane_count: members.length,
-    };
-  });
+  }
   return {
-    version: "0.9.4",
-    protocol: 22,
-    workspaces,
-    tabs,
-    panes: terms.map(paneOf),
-    agents: agents.map(agentOf),
-    focused_workspace_id: null,
-    focused_tab_id: null,
-    focused_pane_id: null,
+    address: t.address,
+    name: null,
+    program: "zsh",
+    kind: null,
+    is_agent: false,
+    status: "shell",
+    word: null,
+    status_kind: null,
+    status_msg: null,
+    progress: null,
+    title: t.title,
+    folder: t.folder,
+    since_ms: null,
+    turn: 0,
+    seen_turn: null,
+    pinned: false,
+    parent: null,
+    keep: false,
+    exit_code: null,
+    reason: null,
+    created_ms: 0,
+    restarts: 0,
   };
 }
 
 /**
  * One machine as the UI receives it. `terms` is its terminals; `null` is a machine that has
- * not answered yet (no state to show).
+ * not answered yet (nothing to show).
  */
 export function machineView(
   spec: MachineSpec,
   terms: TermSpec[] | null,
 ): MachineView {
   const m = machine(spec);
-  const ages: Record<string, number> = {};
-  for (const t of terms ?? []) {
-    if (t.kind === "agent" && t.sinceMs !== null)
-      ages[t.terminalId] = t.sinceMs;
-  }
   return {
     id: m.id,
-    label: m.name,
+    name: m.name,
     target: m.target,
     session: m.session,
+    host: null,
+    hc_version: null,
     is_local: m.isLocal,
+    temporary: false,
     health: m.health,
-    snapshot: terms === null ? null : snapshotOf(terms),
+    state_since_ms: null,
     last_ok_ms: m.lastOkMs,
-    ages,
+    terminals: (terms ?? []).map(terminalOf),
+    layout: null,
   };
 }
 
 /**
  * The state the UI receives. `machines` pairs each machine with its terminals. `opts` names
- * the app-level facts a test may need: the path and version of the herdr the app found
+ * the app-level facts a test may need: the path and version of the herdr-core the app found
  * (`null` for none) and the time the state was made.
  */
 export function appState(
@@ -389,14 +288,49 @@ export function appState(
 ): AppState {
   return {
     machines: machines.map(([m, terms]) => machineView(m, terms)),
-    herdr_version: opts.version === undefined ? "0.9.4" : opts.version,
-    herdr_path:
-      opts.path === undefined ? "/home/dev/.local/bin/herdr" : opts.path,
+    core_version: opts.version === undefined ? "0.1.18" : opts.version,
+    core_path: opts.path === undefined ? "/home/dev/.local/bin/hc" : opts.path,
+    // No path means the core was not found; startup says so with `notFound`.
+    core_state: opts.path === null ? { kind: "notFound" } : { kind: "ready" },
     generated_at_ms: opts.generatedAtMs ?? 1,
   };
 }
 
-/** The same machine as one that has not answered yet: no terminals to show. */
+/** The same machine as one that has not answered yet: no terminals, and never healthy. */
 export function unanswered(view: MachineView): MachineView {
-  return { ...view, snapshot: null };
+  return { ...view, terminals: [], last_ok_ms: null };
+}
+
+/**
+ * A `Row` for a test that builds one by hand instead of from a state: what it names, plus the
+ * defaults of a plain terminal (`address` and `fullAddress` follow `paneId`).
+ */
+export function rowOf(
+  r: Pick<
+    Row,
+    "key" | "machineId" | "machineLabel" | "paneId" | "name" | "status"
+  > &
+    Partial<Row>,
+): Row {
+  return {
+    address: r.paneId,
+    fullAddress: r.paneId,
+    kind: r.status === "shell" ? null : "claude",
+    program: null,
+    title: "",
+    folder: null,
+    sinceMs: null,
+    pinned: false,
+    parent: null,
+    isWorker: false,
+    statusKind: null,
+    statusMsg: null,
+    progress: null,
+    turn: 0,
+    keep: false,
+    exitCode: null,
+    reason: null,
+    restarts: 0,
+    ...r,
+  };
 }

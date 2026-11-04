@@ -74,8 +74,8 @@ function renderSidebar(collapsed: boolean, extra: Extra = {}) {
           machine("gpubox", "attention"),
         ]
       }
-      herdrPath="/home/dev/.local/bin/herdr"
-      herdrVersion="0.9.4"
+      corePath="/home/dev/.local/bin/herdr"
+      coreVersion="0.9.4"
       activeWorkbox={extra.activeWorkbox ?? null}
       dashboardActive={extra.dashboardActive ?? false}
       onDashboard={extra.onDashboard ?? vi.fn()}

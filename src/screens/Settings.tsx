@@ -97,7 +97,6 @@ const TERMINALS: TerminalId[] = [
   "custom",
 ];
 
-const MIN_INTERVAL_SECONDS = 1;
 const TEMPLATE_EXAMPLE = "open -na Ghostty --args -e {attach}";
 
 const SHORTCUTS: [keys: ShortcutId | { keys: string }, what: string][] = [
@@ -179,51 +178,6 @@ function Field({
         </span>
       )}
     </div>
-  );
-}
-
-/** A number of seconds, saved when the field loses focus; under a second is refused here. */
-function SecondsField({
-  label,
-  valueMs,
-  onSave,
-}: {
-  label: string;
-  valueMs: number;
-  onSave: (ms: number) => void;
-}) {
-  const id = useId();
-  const [draft, setDraft] = useState(String(valueMs / 1000));
-  const [error, setError] = useState<string | null>(null);
-
-  const commit = () => {
-    const seconds = Number(draft);
-    if (!Number.isFinite(seconds) || seconds < MIN_INTERVAL_SECONDS) {
-      setError("Use at least 1 second.");
-      return;
-    }
-    setError(null);
-    const ms = Math.round(seconds * 1000);
-    if (ms !== valueMs) onSave(ms);
-  };
-  return (
-    <Field id={id} label={label}>
-      <input
-        id={id}
-        type="number"
-        min={MIN_INTERVAL_SECONDS}
-        step={1}
-        className="field settings-number"
-        value={draft}
-        aria-invalid={error !== null}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-        }}
-      />
-      {error && <p className="field-error">{error}</p>}
-    </Field>
   );
 }
 
@@ -375,24 +329,6 @@ function General({
         onChange={(open_after_create) => void update({ open_after_create })}
       />
       <NewSessionOptions settings={settings} update={update} />
-      <div className="settings-pair">
-        <SecondsField
-          key={`visible-${settings.poll_interval_visible_ms}`}
-          label="Refresh every, window open (seconds)"
-          valueMs={settings.poll_interval_visible_ms}
-          onSave={(ms) => void update({ poll_interval_visible_ms: ms })}
-        />
-        <SecondsField
-          key={`hidden-${settings.poll_interval_hidden_ms}`}
-          label="Refresh every, window hidden (seconds)"
-          valueMs={settings.poll_interval_hidden_ms}
-          onSave={(ms) => void update({ poll_interval_hidden_ms: ms })}
-        />
-      </div>
-      <p className="muted settings-hint">
-        A workbox that cannot be reached is retried after 2, 4, 8 … up to 60
-        seconds, whatever these are.
-      </p>
     </div>
   );
 }
@@ -712,25 +648,33 @@ function Appearance({
   );
 }
 
-function Workboxes() {
+/** Hide and Show: an app setting (`hidden_workboxes`) with no core call behind it. */
+function Workboxes({
+  settings,
+  update,
+}: {
+  settings: SettingsData;
+  update: Update;
+}) {
   const state = useAppStore((s) => s.state);
-  const report = useAppStore((s) => s.reportError);
-  const toggle = (id: string, enabled: boolean) =>
-    invokeTyped("machine_set_enabled", { id, enabled }).catch(report);
+  const toggle = (id: string, hide: boolean) => {
+    const others = settings.hidden_workboxes.filter((x) => x !== id);
+    void update({ hidden_workboxes: hide ? [...others, id] : others });
+  };
   if (state === null) return <p className="empty">Connecting to herdr…</p>;
   return (
     <div className="settings-stack">
       <ul className="settings-list">
         {state.machines.map((m) => {
-          const label = `Enable ${m.label}`;
+          const label = `Hide ${m.name}`;
           return (
             <li key={m.id} className="settings-list-row">
               <span className="settings-list-text">
-                <span>{m.label}</span>
+                <span>{m.name}</span>
                 <span className="mono muted settings-hint">
                   {m.is_local
                     ? "This computer"
-                    : `${m.target ?? m.id} · ${m.session}`}
+                    : `${m.target ?? m.id} · ${m.session ?? "default"}`}
                 </span>
               </span>
               <span className="health" data-health={m.health.kind}>
@@ -741,9 +685,9 @@ function Workboxes() {
                 type="checkbox"
                 role="switch"
                 aria-label={label}
-                checked={m.health.kind !== "disabled"}
+                checked={m.health.kind === "hidden"}
                 disabled={m.is_local}
-                onChange={(e) => void toggle(m.id, e.target.checked)}
+                onChange={(e) => toggle(m.id, e.target.checked)}
               />
             </li>
           );
@@ -969,7 +913,7 @@ export function Settings() {
         ) : section === "appearance" ? (
           <Appearance settings={settings} update={update} />
         ) : section === "workboxes" ? (
-          <Workboxes />
+          <Workboxes settings={settings} update={update} />
         ) : section === "notifications" ? (
           <Notifications settings={settings} update={update} />
         ) : section === "herdr" ? (

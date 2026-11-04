@@ -283,14 +283,18 @@ impl TerminalList {
 pub fn custom_template_example(template: &str) -> String {
     let sample = MachineView {
         id: "buildbox".into(),
-        label: "buildbox".into(),
+        name: "buildbox".into(),
         target: Some("buildbox".into()),
-        session: "default".into(),
+        session: Some("default".into()),
+        host: None,
+        hc_version: None,
         is_local: false,
+        temporary: false,
         health: Health::Online,
-        snapshot: None,
+        state_since_ms: None,
         last_ok_ms: None,
-        ages: Default::default(),
+        terminals: Vec::new(),
+        layout: None,
     };
     let cmd = attach_argv(&sample, "term-1", "");
     Custom {

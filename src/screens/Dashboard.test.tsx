@@ -6,7 +6,7 @@ import type { CommandLogEntry } from "../lib/bindings/CommandLogEntry";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { AgentStatus } from "../lib/bindings/AgentStatus";
+import type { DisplayStatus } from "../lib/bindings/DisplayStatus";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import {
@@ -74,7 +74,7 @@ function machine(
     patch[address] = { sinceMs };
   }
   for (const [address, status] of Object.entries(over.statuses ?? {})) {
-    patch[address] = { ...patch[address], status: status as AgentStatus };
+    patch[address] = { ...patch[address], status: status as DisplayStatus };
   }
   return machineView(
     {
@@ -286,9 +286,7 @@ describe("Dashboard", () => {
   });
 
   it("heading_counts_workboxes_agents_and_tabs_and_offers_next_needs_you", () => {
-    setup(
-      appState(machine("buildbox"), machine("gpubox", { kind: "disabled" })),
-    );
+    setup(appState(machine("buildbox"), machine("gpubox", { kind: "hidden" })));
     // Disabled workboxes don't count; a disabled box gives no rows.
     expect(
       screen.getByText("1 workbox · 4 agents · 0 terminal tabs open"),
@@ -507,7 +505,7 @@ describe("Dashboard", () => {
           retry_in_ms: 7_500,
           error: "timed out",
         }),
-        machine("staging", { kind: "disabled" }),
+        machine("staging", { kind: "hidden" }),
       ),
     );
     const t = tile("Workboxes online");
@@ -590,7 +588,7 @@ describe("Dashboard", () => {
           retry_in_ms: 5000,
           error: "timed out",
         }),
-        machine("staging", { kind: "disabled" }),
+        machine("staging", { kind: "hidden" }),
       ),
     );
     const card = (name: string) =>
@@ -620,7 +618,7 @@ describe("Dashboard", () => {
       ["refresh_now", { machineId: "gpubox" }],
     ]);
 
-    expect(within(card("staging")).getByText("Disabled")).toBeInTheDocument();
+    expect(within(card("staging")).getByText("Hidden")).toBeInTheDocument();
     expect(within(card("staging")).queryByRole("button")).toBeNull();
   });
 
@@ -836,7 +834,7 @@ describe("Dashboard", () => {
           { kind: "attention", error: "ssh failed" },
           { terms: null },
         ),
-        machine("staging", { kind: "disabled" }, { terms: null }),
+        machine("staging", { kind: "hidden" }, { terms: null }),
       ),
     );
     await settle();

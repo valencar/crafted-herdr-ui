@@ -21,7 +21,6 @@ use crate::env::LoginEnv;
 use crate::lock;
 use crate::terminal::{OpenMode, TerminalId};
 
-pub const MIN_POLL_INTERVAL_MS: u64 = 1000;
 /// The store file, in the app data folder.
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -126,10 +125,6 @@ pub struct Settings {
     pub attach_mode: AttachMode,
     pub notify_blocked: bool,
     pub notify_done: bool,
-    #[ts(type = "number")]
-    pub poll_interval_visible_ms: u64,
-    #[ts(type = "number")]
-    pub poll_interval_hidden_ms: u64,
     pub group_by: GroupBy,
     pub global_shortcut_enabled: bool,
     /// The default of "Open in <Terminal> when ready" in the New session sheet.
@@ -180,8 +175,6 @@ impl Default for Settings {
             attach_mode: AttachMode::default(),
             notify_blocked: true,
             notify_done: true,
-            poll_interval_visible_ms: 2000,
-            poll_interval_hidden_ms: 10_000,
             group_by: GroupBy::default(),
             global_shortcut_enabled: true,
             open_after_create: true,
@@ -242,16 +235,6 @@ impl Settings {
     }
 
     fn validate(&self) -> Result<(), String> {
-        for (name, ms) in [
-            ("poll_interval_visible_ms", self.poll_interval_visible_ms),
-            ("poll_interval_hidden_ms", self.poll_interval_hidden_ms),
-        ] {
-            if ms < MIN_POLL_INTERVAL_MS {
-                return Err(format!(
-                    "{name} must be at least {MIN_POLL_INTERVAL_MS} (1 second)."
-                ));
-            }
-        }
         if !SPLIT_WIDTH_RANGE.contains(&self.dashboard_split_width) {
             return Err(format!(
                 "dashboard_split_width must be between {} and {}.",
@@ -489,15 +472,14 @@ impl CoreLocator {
 /// What a settings change needs the app to do right away. Everything else is read when used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Changes {
-    pub intervals: bool,
+    pub hidden_workboxes: bool,
     pub core_path: bool,
     pub shortcut: bool,
 }
 
 pub fn changes(old: &Settings, new: &Settings) -> Changes {
     Changes {
-        intervals: old.poll_interval_visible_ms != new.poll_interval_visible_ms
-            || old.poll_interval_hidden_ms != new.poll_interval_hidden_ms,
+        hidden_workboxes: old.hidden_workboxes != new.hidden_workboxes,
         core_path: old.core_path != new.core_path,
         shortcut: old.global_shortcut_enabled != new.global_shortcut_enabled,
     }
@@ -517,8 +499,6 @@ mod tests {
         assert_eq!(s.open_mode, OpenMode::Window);
         assert_eq!(s.attach_mode, AttachMode::Pane);
         assert!(s.notify_blocked && s.notify_done);
-        assert_eq!(s.poll_interval_visible_ms, 2000);
-        assert_eq!(s.poll_interval_hidden_ms, 10_000);
         assert_eq!(s.group_by, GroupBy::Project);
         assert!(s.global_shortcut_enabled);
         assert!(s.open_after_create);
@@ -552,8 +532,6 @@ mod tests {
             "attach_mode",
             "notify_blocked",
             "notify_done",
-            "poll_interval_visible_ms",
-            "poll_interval_hidden_ms",
             "group_by",
             "global_shortcut_enabled",
             "open_after_create",
@@ -834,32 +812,51 @@ mod tests {
     }
 
     #[test]
-    fn settings_patch_validates_intervals() {
+    fn settings_patch_validates_values() {
         let base = Settings::default();
         let ok = base
-            .merged(&json!({"poll_interval_visible_ms": 1000, "notify_done": false}))
+            .merged(&json!({"dashboard_split_width": 360, "notify_done": false}))
             .unwrap();
-        assert_eq!(ok.poll_interval_visible_ms, 1000);
+        assert_eq!(ok.dashboard_split_width, 360);
         assert!(!ok.notify_done);
         // Untouched keys keep their values.
-        assert_eq!(ok.poll_interval_hidden_ms, 10_000);
+        assert_eq!(ok.terminal_font_size, 13);
 
         for bad in [
-            json!({"poll_interval_visible_ms": 999}),
-            json!({"poll_interval_hidden_ms": 0}),
+            json!({"dashboard_split_width": 359}),
+            json!({"terminal_font_size": 0}),
             // One bad value refuses the whole patch.
-            json!({"notify_done": false, "poll_interval_hidden_ms": 500}),
+            json!({"notify_done": false, "dashboard_split_width": 5000}),
         ] {
-            let err = base.merged(&bad).unwrap_err();
-            assert!(err.contains("1000"), "{err}");
+            assert!(base.merged(&bad).is_err(), "{bad}");
         }
         // A patch of the wrong shape or with an unknown key is refused too.
         assert!(
-            base.merged(&json!({"poll_interval_visible_ms": "fast"}))
+            base.merged(&json!({"dashboard_split_width": "wide"}))
                 .is_err()
         );
         assert!(base.merged(&json!({"nonsense": 1})).is_err());
         assert!(base.merged(&json!([1])).is_err());
+    }
+
+    #[test]
+    fn old_poll_interval_keys_are_dropped() {
+        let read = Settings::from_entries([
+            ("poll_interval_visible_ms".to_owned(), json!(5000)),
+            ("poll_interval_hidden_ms".to_owned(), json!(30000)),
+            ("notify_done".to_owned(), json!(false)),
+        ]);
+        assert!(!read.notify_done);
+        assert!(
+            !read
+                .to_entries()
+                .iter()
+                .any(|(k, _)| k.starts_with("poll_"))
+        );
+        assert!(
+            read.merged(&json!({"poll_interval_visible_ms": 5000}))
+                .is_err()
+        );
     }
 
     #[test]
@@ -903,18 +900,18 @@ mod tests {
     #[test]
     fn stored_entries_round_trip_and_bad_ones_fall_back() {
         let custom = Settings::default()
-            .merged(&json!({"notify_blocked": false, "poll_interval_hidden_ms": 30000}))
+            .merged(&json!({"notify_blocked": false, "dashboard_split_width": 800}))
             .unwrap();
         assert_eq!(Settings::from_entries(custom.to_entries()), custom);
 
         let read = Settings::from_entries([
             ("notify_done".to_owned(), json!(false)),
-            ("poll_interval_visible_ms".to_owned(), json!(5)),
+            ("dashboard_split_width".to_owned(), json!(5)),
             ("group_by".to_owned(), json!("sideways")),
             ("removed_in_a_later_version".to_owned(), json!(1)),
         ]);
         assert!(!read.notify_done);
-        assert_eq!(read.poll_interval_visible_ms, 2000);
+        assert_eq!(read.dashboard_split_width, 420);
         assert_eq!(read.group_by, GroupBy::Project);
     }
 
@@ -936,21 +933,15 @@ mod tests {
         assert_eq!(
             none,
             Changes {
-                intervals: false,
+                hidden_workboxes: false,
                 core_path: false,
                 shortcut: false
             }
         );
         let next = base
-            .merged(&json!({"poll_interval_hidden_ms": 5000, "terminal": "kitty", "notify_done": false}))
+            .merged(&json!({"terminal": "kitty", "notify_done": false}))
             .unwrap();
-        assert_eq!(
-            changes(&base, &next),
-            Changes {
-                intervals: true,
-                ..none
-            }
-        );
+        assert_eq!(changes(&base, &next), none);
         let next = base
             .merged(
                 &json!({"core_path": "/opt/herdr-core/bin/hc", "global_shortcut_enabled": false}),
@@ -961,6 +952,16 @@ mod tests {
             Changes {
                 core_path: true,
                 shortcut: true,
+                ..none
+            }
+        );
+        let next = base
+            .merged(&json!({"hidden_workboxes": ["buildbox"]}))
+            .unwrap();
+        assert_eq!(
+            changes(&base, &next),
+            Changes {
+                hidden_workboxes: true,
                 ..none
             }
         );

@@ -39,6 +39,7 @@ export type CommandResults = {
   machine_remove: null;
   machine_status: MachineStatusEntry[];
   refresh_now: null;
+  reconnect_core: null;
   get_command_log: CommandLogEntry[];
   list_agent_kinds: string[];
   open_session: null;
@@ -107,6 +108,7 @@ export type CommandArgs = {
   machine_remove: { id: string };
   machine_status: { id: string };
   refresh_now: { machineId?: string | null };
+  reconnect_core: undefined;
   get_command_log: undefined;
   list_agent_kinds: undefined;
   open_session: { machineId: string; paneId: string };

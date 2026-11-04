@@ -8,7 +8,6 @@ import { ReconnectBox } from "./ReconnectBox";
 import { WorkboxTile } from "./WorkboxTile";
 
 export type Counts = {
-  workspaces: number;
   sessions: number;
   agents: number;
   needsYou: number;
@@ -18,7 +17,7 @@ const HEALTH_BADGE: Record<Health["kind"], string> = {
   online: "Reachable",
   attention: "Attention",
   reconnecting: "Reconnecting",
-  disabled: "Disabled",
+  hidden: "Hidden",
 };
 
 type Props = {
@@ -30,11 +29,10 @@ type Props = {
   /** The error the last check reported for this machine, if any. */
   checkError: string | null;
   checking: boolean;
-  onReconnect: () => void;
   onCheck: () => void;
   onRename: () => void;
-  onDisable: () => void;
-  onEnable: () => void;
+  onHide: () => void;
+  onShow: () => void;
   onRemove: () => void;
 };
 
@@ -63,20 +61,18 @@ export function WorkboxSummary({
   checkedAtMs,
   checkError,
   checking,
-  onReconnect,
   onCheck,
   onRename,
-  onDisable,
-  onEnable,
+  onHide,
+  onShow,
   onRemove,
 }: Props) {
   const headingId = useId();
   const { health } = machine;
-  const version = machine.snapshot?.version;
   const meta = [
     machine.is_local ? "this computer" : `ssh ${machine.target ?? machine.id}`,
-    `session ${machine.session}`,
-    version ? `herdr ${version}` : null,
+    machine.session ? `session ${machine.session}` : null,
+    machine.hc_version ? `hc ${machine.hc_version}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -85,14 +81,14 @@ export function WorkboxSummary({
     <section className="workbox-summary" aria-labelledby={headingId}>
       <div className="workbox-id">
         <div className="workbox-title">
-          <WorkboxTile size="sm" machineId={machine.id} label={machine.label} />
+          <WorkboxTile size="sm" machineId={machine.id} label={machine.name} />
           <h1 id={headingId} className="section-title">
-            {machine.label}
+            {machine.name}
           </h1>
           <span className="health-badge" data-health={health.kind}>
             {HEALTH_BADGE[health.kind]}
           </span>
-          <WorkboxColorPicker machineId={machine.id} label={machine.label} />
+          <WorkboxColorPicker machineId={machine.id} label={machine.name} />
         </div>
         <span className="mono muted workbox-meta">{meta}</span>
         {health.kind === "attention" && (
@@ -108,10 +104,6 @@ export function WorkboxSummary({
         )}
       </div>
       <dl className="workbox-counts">
-        <div>
-          <dt>Workspaces</dt>
-          <dd>{counts.workspaces}</dd>
-        </div>
         <div>
           <dt>Sessions</dt>
           <dd>{counts.sessions}</dd>
@@ -129,9 +121,6 @@ export function WorkboxSummary({
       </dl>
       {!machine.is_local && (
         <div className="workbox-actions">
-          <button type="button" className="btn" onClick={onReconnect}>
-            Reconnect
-          </button>
           <button
             type="button"
             className="btn"
@@ -143,13 +132,13 @@ export function WorkboxSummary({
           <button type="button" className="btn" onClick={onRename}>
             Rename
           </button>
-          {health.kind === "disabled" ? (
-            <button type="button" className="btn" onClick={onEnable}>
-              Enable
+          {health.kind === "hidden" ? (
+            <button type="button" className="btn" onClick={onShow}>
+              Show
             </button>
           ) : (
-            <button type="button" className="btn" onClick={onDisable}>
-              Disable
+            <button type="button" className="btn" onClick={onHide}>
+              Hide
             </button>
           )}
           <button type="button" className="btn btn-danger" onClick={onRemove}>

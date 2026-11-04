@@ -1,36 +1,23 @@
 import { Kbd } from "../components/Kbd";
 import { useEffect, useMemo, useState } from "react";
 import { PaneBox } from "../components/PaneBox";
-import { TabCard } from "../components/TabCard";
 import {
   WorkboxDialogs,
   type WorkboxDialog,
 } from "../components/WorkboxDialogs";
 import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
-import type { Pane } from "../lib/bindings/Pane";
-import type { Workspace } from "../lib/bindings/Workspace";
-import { shortPath } from "../lib/format";
 import { isNeedsYou, toRows } from "../lib/grouping";
-import { invokeTyped, toActionError } from "../lib/ipc";
+import { invokeTyped } from "../lib/ipc";
 import { openFull, openRow } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
-import { isEditable, isInTerminal } from "../lib/uiHelpers";
+import { isEditable, isInTerminal, saveSettings } from "../lib/uiHelpers";
 import { useNow } from "../lib/useNow";
 import { useAppStore } from "../store/appStore";
 
-/** herdr's answer when a workspace has linked worktree workspaces (spec section 7). */
-const GROUP_CLOSE_CODE = "workspace_group_close_required";
-
-/** Where a workspace was started: the folder of its first pane. */
-function workspaceFolder(panes: Pane[], workspaceId: string): string | null {
-  const pane = panes.find((p) => p.workspace_id === workspaceId);
-  const folder = pane?.cwd ?? pane?.foreground_cwd ?? null;
-  return folder ? shortPath(folder) : null;
-}
-
-/** The Workbox screen: one machine's health and actions, and its workspaces drawn as tabs. */
+/** The Workbox screen: one machine's health and actions, and its terminals as a flat list. */
 export function Workbox({ machineId }: { machineId: string }) {
   const state = useAppStore((s) => s.state);
+  const settings = useAppStore((s) => s.settings);
   const sheet = useAppStore((s) => s.sheet);
   const setView = useAppStore((s) => s.setView);
   const openNewSession = useAppStore((s) => s.openNewSession);
@@ -43,18 +30,13 @@ export function Workbox({ machineId }: { machineId: string }) {
   const [checking, setChecking] = useState(false);
 
   const machine = state?.machines.find((m) => m.id === machineId) ?? null;
-  const snapshot = machine?.snapshot ?? null;
   const online = machine?.health.kind === "online";
-  const disabled = machine?.health.kind === "disabled";
+  const hidden = machine?.health.kind === "hidden";
 
   const allRows = useMemo(() => (state ? toRows(state) : []), [state]);
   const rows = useMemo(
     () => allRows.filter((r) => r.machineId === machineId),
     [allRows, machineId],
-  );
-  const rowByPane = useMemo(
-    () => new Map(rows.map((r) => [r.paneId, r])),
-    [rows],
   );
   // A machine that is not answering is not read; its boxes keep their last line.
   const targets = useMemo(
@@ -82,10 +64,6 @@ export function Workbox({ machineId }: { machineId: string }) {
 
   const goHome = () => setView({ kind: "dashboard" });
 
-  const run = (action: Promise<unknown>) => {
-    action.catch(report);
-  };
-
   const check = async () => {
     setChecking(true);
     try {
@@ -102,44 +80,23 @@ export function Workbox({ machineId }: { machineId: string }) {
     }
   };
 
-  const closeWorkspace = async (workspace: Workspace) => {
-    try {
-      await invokeTyped("close_workspace", {
-        machineId,
-        workspaceId: workspace.workspace_id,
-      });
-    } catch (e) {
-      const err = toActionError(e);
-      if (
-        err.kind === "herdr" &&
-        err.error.kind === "server" &&
-        err.error.code === GROUP_CLOSE_CODE
-      ) {
-        setDialog({
-          kind: "group-close",
-          workspace,
-          message: err.error.message,
-        });
-      } else {
-        report(err);
-      }
-    }
+  // Hide and Show are an app setting with no core call behind them (spec section 7.4).
+  const setHidden = (hide: boolean) => {
+    const others = (settings?.hidden_workboxes ?? []).filter(
+      (id) => id !== machineId,
+    );
+    saveSettings({ hidden_workboxes: hide ? [...others, machineId] : others });
   };
 
-  // A disabled machine shows no workspaces, even when a snapshot is still cached, so its
-  // counts are all zero rather than a mix of cached and empty.
-  const counts: Counts = disabled
-    ? { workspaces: 0, sessions: 0, agents: 0, needsYou: 0 }
+  // A hidden machine shows no terminals, even when some are still held, so its counts are all
+  // zero rather than a mix.
+  const counts: Counts = hidden
+    ? { sessions: 0, agents: 0, needsYou: 0 }
     : {
-        workspaces: snapshot?.workspaces.length ?? 0,
-        sessions: snapshot?.panes.length ?? 0,
-        agents: snapshot?.agents.length ?? 0,
+        sessions: rows.length,
+        agents: rows.filter((r) => r.kind !== null).length,
         needsYou: rows.filter(isNeedsYou).length,
       };
-
-  const workspaces = [...(snapshot?.workspaces ?? [])].sort(
-    (a, b) => a.number - b.number,
-  );
 
   let content;
   if (state === null) {
@@ -163,148 +120,41 @@ export function Workbox({ machineId }: { machineId: string }) {
           checkedAtMs={checkedAtMs}
           checkError={checkError}
           checking={checking}
-          onReconnect={() =>
-            run(
-              invokeTyped("open_in_terminal", {
-                argv: ["machine", "reconnect", machine.id],
-              }),
-            )
-          }
           onCheck={() => void check()}
           onRename={() => setDialog({ kind: "rename-box" })}
-          onDisable={() => setDialog({ kind: "disable" })}
-          onEnable={() =>
-            run(
-              invokeTyped("machine_set_enabled", {
-                id: machine.id,
-                enabled: true,
-              }),
-            )
-          }
+          onHide={() => setHidden(true)}
+          onShow={() => setHidden(false)}
           onRemove={() => setDialog({ kind: "remove" })}
         />
-        {disabled && (
+        {hidden && (
           <p className="empty">
-            {machine.label} is disabled. Enable it to see its workspaces.
+            {machine.name} is hidden. Show it to see its terminals.
           </p>
         )}
-        {!disabled && snapshot === null && (
+        {!hidden && machine.last_ok_ms === null && rows.length === 0 && (
           <p className="empty">
-            Waiting for {machine.label} to report its workspaces…
+            Waiting for {machine.name} to report its terminals…
           </p>
         )}
-        {snapshot && !disabled && (
+        {!hidden && (machine.last_ok_ms !== null || rows.length > 0) && (
           <div className={online ? "workbox-layout" : "workbox-layout is-dim"}>
-            {workspaces.length === 0 && (
+            {rows.length === 0 && (
               <p className="empty">
-                No workspaces yet. Start one with “+ New workspace”.
+                No terminals yet. Start one with “+ New session”.
               </p>
             )}
-            {workspaces.map((ws) => {
-              const headingId = `ws-${ws.workspace_id}`;
-              const folder = workspaceFolder(snapshot.panes, ws.workspace_id);
-              const tabs = snapshot.tabs
-                .filter((t) => t.workspace_id === ws.workspace_id)
-                .sort((a, b) => a.number - b.number);
-              return (
-                <section
-                  key={ws.workspace_id}
-                  className="workbox-workspace"
-                  aria-labelledby={headingId}
-                >
-                  <div className="workbox-workspace-head">
-                    <h2 id={headingId} className="section-sub">
-                      {ws.label}
-                    </h2>
-                    <span className="mono muted workbox-workspace-id">
-                      {ws.workspace_id}
-                      {folder ? ` · ${folder}` : ""}
-                    </span>
-                    <span className="workbox-workspace-actions">
-                      <button
-                        type="button"
-                        className="btn btn-small btn-ghost"
-                        onClick={() =>
-                          setDialog({ kind: "new-tab", workspace: ws })
-                        }
-                      >
-                        + Tab
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-small btn-ghost"
-                        aria-label={`Rename workspace ${ws.label}`}
-                        onClick={() =>
-                          setDialog({ kind: "rename-workspace", workspace: ws })
-                        }
-                      >
-                        Rename
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-small btn-ghost btn-danger"
-                        aria-label={`Close workspace ${ws.label}`}
-                        onClick={() =>
-                          setDialog({ kind: "close-workspace", workspace: ws })
-                        }
-                      >
-                        Close
-                      </button>
-                    </span>
-                  </div>
-                  <div className="workbox-tabs">
-                    {tabs.map((tab) => {
-                      const panes = snapshot.panes.filter(
-                        (p) => p.tab_id === tab.tab_id,
-                      );
-                      return (
-                        <TabCard
-                          key={tab.tab_id}
-                          tab={tab}
-                          paneCount={panes.length}
-                          onRename={() =>
-                            setDialog({ kind: "rename-tab", tab })
-                          }
-                          onClose={() => setDialog({ kind: "close-tab", tab })}
-                        >
-                          {panes.flatMap((p) => {
-                            const row = rowByPane.get(p.pane_id);
-                            return row
-                              ? [
-                                  <PaneBox
-                                    key={p.pane_id}
-                                    row={row}
-                                    tail={tails[p.pane_id] ?? null}
-                                    onOpen={openRow}
-                                  />,
-                                ]
-                              : [];
-                          })}
-                        </TabCard>
-                      );
-                    })}
-                    <button
-                      type="button"
-                      className="workbox-new-tab"
-                      onClick={() =>
-                        setDialog({ kind: "new-tab", workspace: ws })
-                      }
-                    >
-                      + New tab in {ws.label}
-                    </button>
-                  </div>
-                </section>
-              );
-            })}
-            <div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setDialog({ kind: "new-workspace" })}
-              >
-                + New workspace
-              </button>
-            </div>
+            {rows.length > 0 && (
+              <div className="workbox-terminals">
+                {rows.map((row) => (
+                  <PaneBox
+                    key={row.key}
+                    row={row}
+                    tail={tails[row.paneId] ?? null}
+                    onOpen={openRow}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </>
@@ -312,7 +162,7 @@ export function Workbox({ machineId }: { machineId: string }) {
   }
 
   const close = () => setDialog(null);
-  const label = machine?.label ?? machineId;
+  const label = machine?.name ?? machineId;
 
   return (
     <div className="screen">
@@ -349,10 +199,8 @@ export function Workbox({ machineId }: { machineId: string }) {
       <WorkboxDialogs
         dialog={dialog}
         machine={machine}
-        machineId={machineId}
         onClose={close}
         onRemoved={goHome}
-        onCloseWorkspace={closeWorkspace}
       />
     </div>
   );

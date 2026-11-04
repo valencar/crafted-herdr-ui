@@ -7,10 +7,11 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crafted_herdr_ui_lib::activity_v2::{ActivityV2, Transition, TransitionKind};
+use crafted_herdr_ui_lib::activity::{ActivityV2, Transition, TransitionKind};
 use crafted_herdr_ui_lib::core::{CoreClient, ProcessConnector};
 use crafted_herdr_ui_lib::settings::{Settings, SharedSettings};
-use crafted_herdr_ui_lib::sync::{AppStateV2, CoreState, CoreSync, HealthV2};
+use crafted_herdr_ui_lib::state::{AppState, CoreState, Health};
+use crafted_herdr_ui_lib::sync::CoreSync;
 use tempfile::TempDir;
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/hc");
@@ -47,7 +48,7 @@ fn events(dir: &TempDir, n: usize, lines: &[&str]) {
 struct Running {
     sync: CoreSync,
     notified: Arc<Mutex<Vec<Transition>>>,
-    emits: Arc<Mutex<Vec<AppStateV2>>>,
+    emits: Arc<Mutex<Vec<AppState>>>,
 }
 
 fn start(dir: &TempDir) -> Running {
@@ -56,7 +57,7 @@ fn start(dir: &TempDir) -> Running {
         env: common::fake_hc_env(dir.path()),
     })));
     let notified: Arc<Mutex<Vec<Transition>>> = Arc::default();
-    let emits: Arc<Mutex<Vec<AppStateV2>>> = Arc::default();
+    let emits: Arc<Mutex<Vec<AppState>>> = Arc::default();
     let (n, e) = (notified.clone(), emits.clone());
     let sync = CoreSync::start(
         client,
@@ -113,7 +114,7 @@ async fn end_to_end_turn_done_notifies() {
     );
     let state = run.sync.state().unwrap();
     assert_eq!(state.core_state, CoreState::Ready);
-    assert_eq!(state.machines[0].health, HealthV2::Online);
+    assert_eq!(state.machines[0].health, Health::Online);
     let t1 = state.machines[0]
         .terminals
         .iter()
@@ -148,7 +149,7 @@ async fn drop_then_reconnect() {
     until("the drop to show", || {
         matches!(
             run.sync.state().unwrap().machines[0].health,
-            HealthV2::Reconnecting { .. }
+            Health::Reconnecting { .. }
         )
     })
     .await;
@@ -163,6 +164,6 @@ async fn drop_then_reconnect() {
         TransitionKind::Blocked
     );
     let state = run.sync.state().unwrap();
-    assert_eq!(state.machines[0].health, HealthV2::Online);
+    assert_eq!(state.machines[0].health, Health::Online);
     assert_eq!(state.core_state, CoreState::Ready);
 }

@@ -17,7 +17,7 @@ describe("new-in-workbox", () => {
       selectedKey: null,
       state: appState([
         [machine({ id: "buildbox", health: { kind: "online" } }), null],
-        [machine({ id: "gpubox", health: { kind: "disabled" } }), null],
+        [machine({ id: "gpubox", health: { kind: "hidden" } }), null],
       ]),
     });
     useTerminalStore.setState({ tabs: [], activeKey: HOME });

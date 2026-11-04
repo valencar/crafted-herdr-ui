@@ -28,8 +28,6 @@ const SETTINGS: Settings = {
   attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
-  poll_interval_visible_ms: 2000,
-  poll_interval_hidden_ms: 10_000,
   group_by: "project",
   global_shortcut_enabled: true,
   open_after_create: true,

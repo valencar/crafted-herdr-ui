@@ -453,9 +453,7 @@ export function AddWorkbox() {
             </div>
           )}
           {existing && !waitingNow && (
-            <p className="muted sheet-note">
-              Already added as {existing.label}
-            </p>
+            <p className="muted sheet-note">Already added as {existing.name}</p>
           )}
         </div>
 

@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { rowOf } from "../test/builders";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../lib/grouping";
@@ -17,19 +18,18 @@ const copy = vi.mocked(copyText);
 
 const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
 
-const row: Row = {
+const row: Row = rowOf({
   key: "buildbox::w1:p1",
   machineId: "buildbox",
   machineLabel: "buildbox",
   paneId: "w1:p1",
-  terminalId: "term-1",
   kind: "claude",
   name: "planner",
   title: "refactor auth",
   status: "done",
   folder: "/home/dev/projects/api-service",
   sinceMs: null,
-};
+});
 
 beforeEach(() => {
   invoke

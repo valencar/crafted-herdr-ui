@@ -9,7 +9,7 @@ import { ReconnectBox } from "./ReconnectBox";
 /** The banner for a herdr older than the app supports, until the user dismisses it. */
 export function VersionBanner() {
   // `undefined` before the first state; `null` when herdr didn't report a version.
-  const version = useAppStore((s) => s.state?.herdr_version);
+  const version = useAppStore((s) => s.state?.core_version);
   const dismissed = useAppStore((s) => s.dismissedVersion);
   const dismiss = useAppStore((s) => s.dismissVersionBanner);
   if (
@@ -74,7 +74,7 @@ export function MachineNotices({
     (m) =>
       m.is_local &&
       m.health.kind !== "online" &&
-      m.snapshot === null &&
+      m.terminals.length === 0 &&
       !isPending(m.health),
   );
   const localError =
@@ -90,7 +90,7 @@ export function MachineNotices({
     <>
       {localDown && <LocalDownCard error={localError} />}
       {attention.map((m) => (
-        <EmptyState key={m.id} title={`${m.label} needs attention`}>
+        <EmptyState key={m.id} title={`${m.name} needs attention`}>
           <p>
             {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
             {formatStaleness(m.last_ok_ms, nowMs)}

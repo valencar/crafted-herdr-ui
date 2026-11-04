@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
+use crate::agents::DisplayStatus;
 use crate::core::CoreError;
 use crate::herdr::cli::{HerdrCli, T_AGENT_START, T_CREATE, T_DEFAULT, T_PROMPT};
 use crate::herdr::errors::HerdrError;
-use crate::herdr::model::{AgentStatus, MachineStatusEntry, parse_created_pane};
+use crate::herdr::model::{MachineStatusEntry, parse_created_pane};
 use crate::terminal::shell_quote;
 
 /// Where a new session goes.
@@ -249,7 +250,7 @@ fn unreadable_reply(argv: Vec<String>) -> ActionError {
     }
 }
 
-/// Tells the poller to look again. `None` means every machine and the machine list.
+/// Tells the sync to look again. `None` means every machine and the machine list.
 pub type RefreshHook = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 
 /// Per-call time limits. Tests shorten them; the app uses the defaults.
@@ -273,7 +274,7 @@ impl Default for Timeouts {
 }
 
 /// Runs the UI's actions through `HerdrCli`. Mutations are never retried: a timeout becomes
-/// `ActionError::MaybeApplied` and the poller is asked to refresh.
+/// `ActionError::MaybeApplied` and the machine list is asked to refresh.
 #[derive(Clone)]
 pub struct Actions {
     cli: HerdrCli,
@@ -563,7 +564,7 @@ impl Actions {
         })
     }
 
-    /// Sends `text` to an agent. `cached_status` is what the poller last saw for it: only an
+    /// Sends `text` to an agent. `cached_status` is what the app last saw for it: only an
     /// idle or done agent is replied to; any other known status is refused here without calling
     /// herdr (a blocked agent is never answered: the app doesn't approve things for the user).
     /// With no cached status herdr decides (it rejects a blocked agent with `agent_blocked`).
@@ -572,20 +573,25 @@ impl Actions {
         machine: &str,
         pane_id: &str,
         text: &str,
-        cached_status: Option<AgentStatus>,
+        cached_status: Option<DisplayStatus>,
     ) -> Result<(), ActionError> {
         check_arg("Pane", pane_id)?;
         if text.trim().is_empty() {
             return Err(ActionError::invalid("Reply can't be empty."));
         }
         match cached_status {
-            None | Some(AgentStatus::Idle | AgentStatus::Done) => {}
-            Some(AgentStatus::Blocked) => {
+            None | Some(DisplayStatus::Idle | DisplayStatus::Done) => {}
+            Some(DisplayStatus::Blocked | DisplayStatus::Error) => {
                 return Err(ActionError::invalid(
                     "This agent is waiting for approval. Open it to answer there.",
                 ));
             }
-            Some(AgentStatus::Working | AgentStatus::Unknown) => {
+            Some(
+                DisplayStatus::Working
+                | DisplayStatus::Unknown
+                | DisplayStatus::Ended
+                | DisplayStatus::Shell,
+            ) => {
                 return Err(ActionError::invalid("Reply when the agent is idle."));
             }
         }

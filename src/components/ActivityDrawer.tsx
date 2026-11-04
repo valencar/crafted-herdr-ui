@@ -33,8 +33,8 @@ function newestFirst(entries: CommandLogEntry[]): CommandLogEntry[] {
 
 /**
  * Every herdr call the app has made, as the command it ran (spec section 8.2). Refreshes every
- * 2 s while it is open and the window is visible. Successful reads (the poller's snapshots, the
- * previews' pane reads) are hidden unless "Show reads" is on, because they would bury everything
+ * 2 s while it is open and the window is visible. Successful reads (the machine list, the
+ * previews' terminal reads) are hidden unless "Show reads" is on, because they would bury everything
  * else.
  */
 export function ActivityDrawer({ machines, onClose }: Props) {
@@ -84,7 +84,7 @@ export function ActivityDrawer({ machines, onClose }: Props) {
   }, []);
 
   const labelOf = useMemo(() => {
-    const byId = new Map(machines.map((m) => [m.id, m.label]));
+    const byId = new Map(machines.map((m) => [m.id, m.name]));
     return (id: string | null) =>
       id === null ? "Local" : (byId.get(id) ?? id);
   }, [machines]);

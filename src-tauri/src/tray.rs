@@ -1,9 +1,8 @@
 //! The menu bar side of the app: the tray icon and its badge, the popover window, showing and
 //! hiding the main window, the Settings window and the global shortcut.
 //!
-//! The badge is driven from a `watch` channel that the poller's emit callback fills. A task of
-//! its own reads it, so nothing here ever calls back into the `Poller` from inside its emit
-//! (which runs under the poller's core lock).
+//! The badge is driven from a `watch` channel that the sync's emit callback fills. A task of
+//! its own reads it, so nothing here ever calls back into `CoreSync` from inside its emit.
 
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,12 +16,12 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
-use crate::herdr::model::AgentStatus;
+use crate::agents::DisplayStatus;
 use crate::menu;
 use crate::now_ms;
-use crate::poller::Poller;
 use crate::settings::{SharedSettings, Theme};
 use crate::state::{AppState, Health};
+use crate::sync::CoreSync;
 
 pub const MAIN_WINDOW: &str = "main";
 pub const POPOVER_WINDOW: &str = "popover";
@@ -42,16 +41,20 @@ const BLUR_GRACE_MS: u64 = 300;
 
 // ---------- the badge ----------
 
-/// Agents waiting for the user: `blocked` or `done`, on a machine that is not disabled. The
-/// same rule as `needsYou` in `lib/grouping.ts`.
+/// Terminals waiting for the user: blocked, error, or done and unseen, on a workbox that is not
+/// hidden. A worker's done does not count (spec §4.5). The same rule as `isNeedsYou` in
+/// `lib/grouping.ts`.
 pub fn needs_you_count(state: &AppState) -> usize {
     state
         .machines
         .iter()
-        .filter(|m| m.health != Health::Disabled)
-        .filter_map(|m| m.snapshot.as_ref())
-        .flat_map(|s| s.agents.iter())
-        .filter(|a| matches!(a.agent_status, AgentStatus::Blocked | AgentStatus::Done))
+        .filter(|m| m.health != Health::Hidden)
+        .flat_map(|m| m.terminals.iter())
+        .filter(|t| match t.status {
+            DisplayStatus::Blocked | DisplayStatus::Error => true,
+            DisplayStatus::Done => t.parent.is_none(),
+            _ => false,
+        })
         .count()
 }
 
@@ -121,7 +124,7 @@ pub fn template_icon_rgba(size: u32) -> Vec<u8> {
 
 // ---------- windows ----------
 
-/// Brings the main window to the front and tells the poller it is on screen (2 s polls).
+/// Brings the main window to the front and tells the sync it is on screen.
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         return;
@@ -129,20 +132,20 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
-    if let Some(poller) = app.try_state::<Poller>() {
-        poller.set_visible(true);
+    if let Some(sync) = app.try_state::<CoreSync>() {
+        sync.set_window_visible(true);
     }
 }
 
-/// Hides the main window (the app keeps running in the menu bar) and slows polling down.
+/// Hides the main window (the app keeps running in the menu bar) and slows the machine list down.
 pub fn hide_main<R: Runtime>(app: &AppHandle<R>) {
     // Hiding is how the window "closes", so this is when its size and position are saved.
     let _ = app.save_window_state(StateFlags::all());
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.hide();
     }
-    if let Some(poller) = app.try_state::<Poller>() {
-        poller.set_visible(false);
+    if let Some(sync) = app.try_state::<CoreSync>() {
+        sync.set_window_visible(false);
     }
 }
 
@@ -340,7 +343,7 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<TrayIcon<R>>
 }
 
 /// Keeps the tray's title (the count next to the icon) and tooltip current. Spawns its own
-/// task; `state` is the watch the poller's emit callback fills.
+/// task; `state` is the watch the sync's emit callback fills.
 pub fn start_badge<R: Runtime>(tray: TrayIcon<R>, state: watch::Receiver<AppState>) {
     tauri::async_runtime::spawn(run_badge(state, move |count| {
         let _ = tray.set_title(badge_title(count));
@@ -420,44 +423,41 @@ mod tests {
             )
         );
     }
-    use crate::herdr::model::{Snapshot, parse_snapshot};
     use crate::state::MachineView;
-    use std::collections::HashMap;
+    use crate::state::fixtures::{state as sample, term, view};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    /// A blocked, a done and a working terminal.
     fn buildbox(health: Health) -> MachineView {
-        let path = format!(
-            "{}/tests/fixtures/snapshot_buildbox.json",
-            env!("CARGO_MANIFEST_DIR")
+        let mut v = view(
+            "buildbox",
+            "Build box",
+            false,
+            vec![
+                term(
+                    "t1",
+                    "planner",
+                    DisplayStatus::Blocked,
+                    "/home/dev/api-service",
+                ),
+                term("t2", "builder", DisplayStatus::Working, "/home/dev/infra"),
+                term("t3", "tester", DisplayStatus::Done, "/home/dev/web-app"),
+            ],
         );
-        let text = std::fs::read_to_string(path).unwrap();
-        let snapshot: Snapshot = parse_snapshot(&serde_json::from_str(&text).unwrap()).unwrap();
-        MachineView {
-            id: "buildbox".into(),
-            label: "Build box".into(),
-            target: Some("buildbox".into()),
-            session: "default".into(),
-            is_local: false,
-            health,
-            snapshot: Some(snapshot),
-            last_ok_ms: None,
-            ages: HashMap::new(),
-        }
+        v.health = health;
+        v
     }
 
     fn state(machines: Vec<MachineView>) -> AppState {
         AppState {
             machines,
-            herdr_version: None,
-            herdr_path: None,
-            generated_at_ms: 0,
+            ..sample()
         }
     }
 
     #[test]
-    fn the_count_is_blocked_plus_done_on_machines_that_are_polled() {
-        // The fixture has one blocked and one done agent.
+    fn the_count_is_blocked_error_and_done_on_workboxes_that_are_not_hidden() {
         assert_eq!(needs_you_count(&state(vec![buildbox(Health::Online)])), 2);
         assert_eq!(
             needs_you_count(&state(vec![
@@ -466,14 +466,25 @@ mod tests {
             ])),
             4
         );
-        // A failing machine keeps its last snapshot, which still counts; a disabled one does not.
+        // A failing machine keeps its terminals, which still count; a hidden one does not.
         let failing = Health::Attention { error: "x".into() };
         assert_eq!(needs_you_count(&state(vec![buildbox(failing)])), 2);
-        assert_eq!(needs_you_count(&state(vec![buildbox(Health::Disabled)])), 0);
-        let mut no_snapshot = buildbox(Health::Online);
-        no_snapshot.snapshot = None;
-        assert_eq!(needs_you_count(&state(vec![no_snapshot])), 0);
+        assert_eq!(needs_you_count(&state(vec![buildbox(Health::Hidden)])), 0);
+        let mut empty = buildbox(Health::Online);
+        empty.terminals.clear();
+        assert_eq!(needs_you_count(&state(vec![empty])), 0);
         assert_eq!(needs_you_count(&state(vec![])), 0);
+    }
+
+    #[test]
+    fn an_error_counts_and_a_workers_done_does_not() {
+        let mut m = buildbox(Health::Online);
+        m.terminals[1].status = DisplayStatus::Error;
+        // A worker's done is not needs-you; its blocker still is.
+        m.terminals[2].parent = Some("t1".into());
+        assert_eq!(needs_you_count(&state(vec![m.clone()])), 2);
+        m.terminals[0].parent = Some("t9".into());
+        assert_eq!(needs_you_count(&state(vec![m])), 2);
     }
 
     #[test]

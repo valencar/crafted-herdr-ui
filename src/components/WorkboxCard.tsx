@@ -35,8 +35,8 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
   const pending = isPending(machine.health);
   const stale = kind !== "online";
   const counts = statusCounts(rows);
-  // An online workbox answers every poll, but `last_ok_ms` only moves when the snapshot
-  // changes, so its age would grow while everything is fine: say "Up to date" instead. A
+  // An online workbox is live on the event stream, but `last_ok_ms` is when it last looked
+  // healthy, so its age says nothing about freshness: say "Up to date" instead. A
   // workbox that is not online keeps its last success, which is what its age claims.
   const updated = stale
     ? formatStaleness(machine.last_ok_ms, nowMs)
@@ -50,9 +50,9 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
     >
       <div className="wb-card-head">
         <div className="wb-card-id">
-          <WorkboxTile size="sm" machineId={machine.id} label={machine.label} />
+          <WorkboxTile size="sm" machineId={machine.id} label={machine.name} />
           <h3 id={headingId} className="wb-card-name mono">
-            {machine.label}
+            {machine.name}
           </h3>
         </div>
         <span className="health" data-health={kind}>
@@ -85,7 +85,7 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
         <button
           type="button"
           className="btn btn-small"
-          onClick={() => void openFull(machine.id, machine.label)}
+          onClick={() => void openFull(machine.id, machine.name)}
         >
           Open herdr
         </button>

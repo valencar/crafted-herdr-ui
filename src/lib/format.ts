@@ -1,19 +1,21 @@
 import type { ActionError } from "./bindings/ActionError";
-import type { AgentStatus } from "./bindings/AgentStatus";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CoreError } from "./bindings/CoreError";
+import type { DisplayStatus } from "./bindings/DisplayStatus";
 import type { Health } from "./bindings/Health";
 import type { TerminalId } from "./bindings/TerminalId";
 
-/** A row's status: a herdr agent status, or `shell` for a pane with no agent. */
-export type RowStatus = AgentStatus | "shell";
+/** A row's status: what the core reports for an agent, or `shell` for a terminal with none. */
+export type RowStatus = DisplayStatus;
 
 /** Every status shows this text next to its color (never color alone). */
 export const STATUS_LABEL: Record<RowStatus, string> = {
   blocked: "Needs input",
+  error: "Error",
   done: "Done, unseen",
   working: "Working",
   idle: "Idle",
+  ended: "Ended",
   unknown: "Unknown",
   shell: "Shell",
 };
@@ -43,8 +45,8 @@ export function agoText(age: string): string {
 
 /**
  * "last updated 40s ago". Only for a machine that is not online: its `last_ok_ms` is the
- * last success. An online machine's only moves when its snapshot changes, so it says nothing
- * about freshness there.
+ * last success. An online machine's moves only when it last looked healthy, so it says
+ * nothing about freshness there.
  */
 export function formatStaleness(
   lastOkMs: number | null,
@@ -202,7 +204,7 @@ export function isPending(health: Health): boolean {
  */
 export function healthShape(
   health: Health,
-): "online" | "pending" | "reconnecting" | "attention" | "disabled" {
+): "online" | "pending" | "reconnecting" | "attention" | "hidden" {
   if (isPending(health)) return "pending";
   return health.kind;
 }
@@ -221,7 +223,7 @@ export const HEALTH_LABEL: Record<Health["kind"], string> = {
   online: "Online",
   reconnecting: "Reconnecting",
   attention: "Attention",
-  disabled: "Disabled",
+  hidden: "Hidden",
 };
 
 /** "1 agent", "2 agents". */

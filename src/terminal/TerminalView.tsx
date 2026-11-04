@@ -335,8 +335,8 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     ended &&
     tab.target.kind === "pane" &&
     !row &&
-    !!machine?.snapshot &&
-    machine.health.kind !== "disabled";
+    machine?.last_ok_ms != null &&
+    machine.health.kind !== "hidden";
 
   // When a session ends, push its last output up past the bar, so the newest line (usually the
   // error) is not under it. Only on the end, never while a session is live. A tab that ends in

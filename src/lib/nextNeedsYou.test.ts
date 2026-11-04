@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { rowOf } from "../test/builders";
 import type { Row } from "./grouping";
 import { nextNeedsYou } from "./nextNeedsYou";
 
 function row(overrides: Partial<Row>): Row {
-  return {
+  return rowOf({
     key: "m::w1:p1",
     machineId: "m",
     machineLabel: "m",
     paneId: "w1:p1",
-    terminalId: "t",
     kind: "claude",
     name: "n",
     title: "t",
@@ -16,7 +16,7 @@ function row(overrides: Partial<Row>): Row {
     folder: null,
     sinceMs: null,
     ...overrides,
-  };
+  });
 }
 
 // In needsYou order: blocked-old, blocked-new, done-old.

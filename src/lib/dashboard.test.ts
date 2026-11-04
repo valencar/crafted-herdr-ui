@@ -12,26 +12,25 @@ import {
   workingNow,
 } from "./dashboard";
 import type { Row } from "./grouping";
-import { machineView } from "../test/builders";
+import { machineView, rowOf } from "../test/builders";
 
 function row(
   key: string,
   status: Row["status"],
   sinceMs: number | null = null,
 ): Row {
-  return {
+  return rowOf({
     key,
     machineId: "local",
     machineLabel: "local",
     paneId: key,
-    terminalId: `t-${key}`,
     kind: status === "shell" ? null : "claude",
     name: "api-service",
     title: "",
     status,
     folder: null,
     sinceMs,
-  };
+  });
 }
 
 function machine(
@@ -124,7 +123,7 @@ describe("onlineSummary", () => {
         error: "x",
       }),
       machine("gpubox", { kind: "attention", error: "y" }),
-      machine("staging", { kind: "disabled" }),
+      machine("staging", { kind: "hidden" }),
     ];
     expect(onlineSummary(machines)).toEqual({
       online: 1,
@@ -136,7 +135,7 @@ describe("onlineSummary", () => {
   it("has_no_first_down_when_all_enabled_are_online", () => {
     const machines = [
       machine("local", { kind: "online" }),
-      machine("staging", { kind: "disabled" }),
+      machine("staging", { kind: "hidden" }),
     ];
     expect(onlineSummary(machines)).toEqual({
       online: 1,
@@ -209,7 +208,7 @@ describe("failing workboxes", () => {
   it("only_attention_and_reconnecting_are_failing", () => {
     expect(isFailing(undefined)).toBe(false);
     expect(isFailing(machine("a", { kind: "online" }))).toBe(false);
-    expect(isFailing(machine("a", { kind: "disabled" }))).toBe(false);
+    expect(isFailing(machine("a", { kind: "hidden" }))).toBe(false);
     expect(isFailing(machine("a", { kind: "attention", error: "x" }))).toBe(
       true,
     );

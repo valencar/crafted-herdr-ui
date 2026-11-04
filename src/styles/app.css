@@ -763,7 +763,7 @@ kbd {
 .sdot[data-health="attention"] {
   border-color: var(--danger);
 }
-.sdot[data-health="disabled"] {
+.sdot[data-health="hidden"] {
   opacity: 0.45;
 }
 .health {
@@ -1540,78 +1540,10 @@ select.field {
 .workbox-layout.is-dim {
   opacity: 0.6;
 }
-.workbox-workspace {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.workbox-workspace-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-.workbox-workspace-id {
-  font-size: var(--fs-small);
-}
-.workbox-workspace-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 6px;
-}
-.workbox-tabs {
+.workbox-terminals {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 12px;
-}
-.workbox-new-tab {
-  min-height: 120px;
-  background: transparent;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-l);
-  color: var(--text-4);
-  font-size: var(--fs-body);
-  cursor: pointer;
-}
-.workbox-new-tab:hover {
-  background: var(--hover);
-}
-
-.tab-card {
-  background: var(--bg-sidebar);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-.tab-card-head {
-  display: flex;
-  align-items: baseline;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 8px;
-}
-.tab-card-name {
-  font-weight: 600;
-}
-.tab-card-id {
-  font-size: var(--fs-small);
-}
-.tab-card-count {
-  margin-left: auto;
-  font-size: var(--fs-small);
-}
-.tab-card-panes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-height: 150px;
-}
-.tab-card-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
 }
 
 .pane-box {

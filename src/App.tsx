@@ -44,11 +44,15 @@ function App() {
   const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
   const shortcutsOpen = useAppStore((s) => s.shortcutsOpen);
   const setShortcutsOpen = useAppStore((s) => s.setShortcutsOpen);
-  const herdrVersion = useAppStore((s) => s.state?.herdr_version ?? null);
+  const herdrVersion = useAppStore((s) => s.state?.core_version ?? null);
   const compact = useAppStore((s) => s.settings?.row_density === "compact");
   const { current: terminal, installed } = useTerminals();
-  // `null` is "herdr was not found"; before the first state there is nothing to say yet.
-  const herdrMissing = useAppStore((s) => s.state?.herdr_path === null);
+  // herdr-core was not found; before the first state there is nothing to say yet. The state
+  // names the core only after it has been located, so `core_path` alone would flash this.
+  const herdrMissing = useAppStore(
+    (s) =>
+      s.state?.core_path === null && s.state.core_state.kind === "notFound",
+  );
 
   useStateSync();
   useSettingsSync();

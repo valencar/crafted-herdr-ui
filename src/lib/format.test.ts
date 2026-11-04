@@ -77,7 +77,7 @@ describe("shortPath", () => {
 
 describe("STATUS_LABEL", () => {
   it("never relies on color alone", () => {
-    expect(STATUS_LABEL).toEqual({
+    expect(STATUS_LABEL).toMatchObject({
       blocked: "Needs input",
       done: "Done, unseen",
       working: "Working",
@@ -85,6 +85,24 @@ describe("STATUS_LABEL", () => {
       unknown: "Unknown",
       shell: "Shell",
     });
+  });
+
+  it("labels_for_error_and_ended", () => {
+    expect(STATUS_LABEL.error).toBe("Error");
+    expect(STATUS_LABEL.ended).toBe("Ended");
+    // Every status has words (spec section 9.1), and exactly these.
+    expect(Object.values(STATUS_LABEL).sort()).toEqual(
+      [
+        "Needs input",
+        "Error",
+        "Done, unseen",
+        "Working",
+        "Idle",
+        "Ended",
+        "Unknown",
+        "Shell",
+      ].sort(),
+    );
   });
 });
 
@@ -131,13 +149,13 @@ describe("actionErrorMessage", () => {
         hint: null,
       }),
     ).toBe("no terminal");
-    expect(core({
+    expect(
+      core({
         kind: "incompatible",
         reason: "this core lacks: x",
         newer: false,
-      })).toBe(
-      "this core lacks: x",
-    );
+      }),
+    ).toBe("this core lacks: x");
   });
 
   it("says a maybe-applied action with no message is being refreshed", () => {
@@ -255,7 +273,7 @@ describe("healthShape", () => {
       healthShape({ kind: "reconnecting", retry_in_ms: 4000, error: "x" }),
     ).toBe("reconnecting");
     expect(healthShape({ kind: "attention", error: "boom" })).toBe("attention");
-    expect(healthShape({ kind: "disabled" })).toBe("disabled");
+    expect(healthShape({ kind: "hidden" })).toBe("hidden");
   });
 });
 

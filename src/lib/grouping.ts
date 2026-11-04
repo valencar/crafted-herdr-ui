@@ -1,24 +1,46 @@
-import type { Agent } from "./bindings/Agent";
 import type { AppState } from "./bindings/AppState";
-import type { Pane } from "./bindings/Pane";
+import type { TerminalView } from "./bindings/TerminalView";
 import { STATUS_LABEL, type RowStatus } from "./format";
 
 export type Row = {
-  /** `${machineId}::${paneId}`. herdr ids repeat across machines. */
+  /** `${machineId}::${address}`. Addresses repeat across machines. */
   key: string;
   machineId: string;
+  /** The machine's name. */
   machineLabel: string;
+  /** The terminal's address on its machine (`t7`). */
+  address: string;
+  /** The address as the local core takes it: `t7`, or `<machine name>/t7` on another machine. */
+  fullAddress: string;
+  /**
+   * An alias of `address`, so the IPC callers keep compiling. Tasks 8-10 remove it as they
+   * rename the IPC arguments, and Task 10b deletes the alias.
+   */
   paneId: string;
-  terminalId: string;
   /** The agent kind (`claude`, …); `null` for a plain shell. */
   kind: string | null;
+  /** The foreground program's name. */
+  program: string | null;
   name: string;
   title: string;
   status: RowStatus;
-  /** `foreground_cwd`, falling back to `cwd`. */
+  /** The working folder. */
   folder: string | null;
-  /** Unix ms when the app observed the current status begin; `null` = no observation. */
+  /** Unix ms when the current status began; `null` = unknown. */
   sinceMs: number | null;
+  pinned: boolean;
+  /** The row key of the parent agent; `null` for a terminal with none. */
+  parent: string | null;
+  /** Whether the terminal reports to a parent agent. */
+  isWorker: boolean;
+  statusKind: string | null;
+  statusMsg: string | null;
+  progress: number | null;
+  turn: number;
+  keep: boolean;
+  exitCode: number | null;
+  reason: string | null;
+  restarts: number;
 };
 
 export type Group = {
@@ -36,11 +58,13 @@ export const LOOSE_NAME = "Loose sessions";
 
 const STATUS_ORDER: RowStatus[] = [
   "blocked",
+  "error",
   "done",
   "working",
   "idle",
   "unknown",
   "shell",
+  "ended",
 ];
 
 function nonEmpty(s: string | null | undefined): string | null {
@@ -48,86 +72,77 @@ function nonEmpty(s: string | null | undefined): string | null {
   return t ? t : null;
 }
 
-function folderOf(x: { foreground_cwd: string | null; cwd: string | null }) {
-  return nonEmpty(x.foreground_cwd) ?? nonEmpty(x.cwd);
-}
-
-/** name, then the stripped terminal title, then `<kind> · <pane_id>`. */
-export function displayName(a: Agent): string {
+/** name, then the terminal title, then `<kind> · <address>` (`shell` for a plain shell). */
+export function displayName(
+  t: Pick<TerminalView, "name" | "title" | "kind" | "address" | "is_agent">,
+): string {
   return (
-    nonEmpty(a.name) ??
-    nonEmpty(a.terminal_title_stripped) ??
-    `${nonEmpty(a.agent) ?? "agent"} · ${a.pane_id}`
+    nonEmpty(t.name) ??
+    nonEmpty(t.title) ??
+    (t.is_agent ? `${nonEmpty(t.kind) ?? "agent"} · ${t.address}` : "shell")
   );
 }
 
-function agentRow(
-  m: { id: string; label: string },
-  a: Agent,
-  sinceMs: number | null,
-): Row {
-  return {
-    key: `${m.id}::${a.pane_id}`,
-    machineId: m.id,
-    machineLabel: m.label,
-    paneId: a.pane_id,
-    terminalId: a.terminal_id,
-    kind: nonEmpty(a.agent),
-    name: displayName(a),
-    title: nonEmpty(a.terminal_title_stripped) ?? "",
-    status: a.agent_status,
-    folder: folderOf(a),
-    sinceMs,
-  };
-}
-
-function shellRow(
-  m: { id: string; label: string },
-  p: Pane,
-  sinceMs: number | null,
-): Row {
-  const title =
-    nonEmpty(p.terminal_title_stripped) ?? nonEmpty(p.terminal_title);
-  return {
-    key: `${m.id}::${p.pane_id}`,
-    machineId: m.id,
-    machineLabel: m.label,
-    paneId: p.pane_id,
-    terminalId: p.terminal_id,
-    kind: null,
-    name: title ?? "shell",
-    title: title ?? "",
-    status: "shell",
-    folder: folderOf(p),
-    sinceMs,
-  };
+/** `buildbox/t7` to the row key of that terminal; a bare `t7` is on Local. */
+function parentKey(state: AppState, full: string | null): string | null {
+  if (full === null) return null;
+  const slash = full.indexOf("/");
+  if (slash < 0) return `local::${full}`;
+  const machine = state.machines.find((m) => m.name === full.slice(0, slash));
+  return machine ? `${machine.id}::${full.slice(slash + 1)}` : null;
 }
 
 /**
- * One row per agent, plus one `shell` row per pane that has no agent. Only a machine's
- * snapshot produces rows, so disabled machines and ones that never answered give none; a
- * failing machine keeps its last good snapshot.
+ * One row per terminal, in the order the machines list them. Hidden machines give none; a
+ * machine that is failing or reconnecting keeps its last terminals; one that never answered
+ * has none.
  */
 export function toRows(state: AppState): Row[] {
   const rows: Row[] = [];
   for (const m of state.machines) {
-    if (m.health.kind === "disabled" || m.snapshot === null) continue;
-    const age = (terminalId: string) => m.ages[terminalId] ?? null;
-    const agentPanes = new Set(m.snapshot.agents.map((a) => a.pane_id));
-    for (const a of m.snapshot.agents) {
-      rows.push(agentRow(m, a, age(a.terminal_id)));
-    }
-    for (const p of m.snapshot.panes) {
-      if (!agentPanes.has(p.pane_id)) {
-        rows.push(shellRow(m, p, age(p.terminal_id)));
-      }
+    if (m.health.kind === "hidden") continue;
+    for (const t of m.terminals) {
+      rows.push({
+        key: `${m.id}::${t.address}`,
+        machineId: m.id,
+        machineLabel: m.name,
+        address: t.address,
+        fullAddress: m.is_local ? t.address : `${m.name}/${t.address}`,
+        paneId: t.address,
+        kind: t.is_agent ? nonEmpty(t.kind) : null,
+        program: nonEmpty(t.program),
+        name: displayName(t),
+        title: nonEmpty(t.title) ?? "",
+        status: t.status,
+        folder: nonEmpty(t.folder),
+        sinceMs: t.since_ms,
+        pinned: t.pinned,
+        parent: parentKey(state, t.parent),
+        isWorker: t.parent !== null,
+        statusKind: t.status_kind,
+        statusMsg: t.status_msg,
+        progress: t.progress,
+        turn: t.turn,
+        keep: t.keep,
+        exitCode: t.exit_code,
+        reason: t.reason,
+        restarts: t.restarts,
+      });
     }
   }
   return rows;
 }
 
+/**
+ * Blocked, error, or done and unseen. A worker's done is not needs-you (spec section 4.5), but
+ * its blocker or error still is, so a blocker is never hidden.
+ */
 export function isNeedsYou(r: Row): boolean {
-  return r.status === "blocked" || r.status === "done";
+  return (
+    r.status === "blocked" ||
+    r.status === "error" ||
+    (r.status === "done" && !r.isWorker)
+  );
 }
 
 /** Oldest first (smallest `sinceMs`), unknown age last, then by key. */
@@ -140,10 +155,18 @@ export function bySinceThenKey(a: Row, b: Row): number {
   return a.key.localeCompare(b.key, "en");
 }
 
-/** Blocked before done; within each, `bySinceThenKey`. */
+const NEEDS_RANK: Partial<Record<RowStatus, number>> = {
+  blocked: 0,
+  error: 1,
+  done: 2,
+};
+
+/** Blocked, then error, then done; within each, `bySinceThenKey`. */
 export function needsYou(rows: Row[]): Row[] {
   return rows.filter(isNeedsYou).sort((a, b) => {
-    if (a.status !== b.status) return a.status === "blocked" ? -1 : 1;
+    if (a.status !== b.status) {
+      return (NEEDS_RANK[a.status] ?? 3) - (NEEDS_RANK[b.status] ?? 3);
+    }
     return bySinceThenKey(a, b);
   });
 }
@@ -312,7 +335,7 @@ export function groupByWorkbox(rows: Row[]): Group[] {
   return out;
 }
 
-/** One group per status that has rows: blocked, done, working, idle, unknown, shell. */
+/** One group per status that has rows, needs-you first and ended last. */
 export function groupByStatus(rows: Row[]): Group[] {
   const out: Group[] = [];
   for (const status of STATUS_ORDER) {

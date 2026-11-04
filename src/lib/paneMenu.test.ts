@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
+import { rowOf } from "../test/builders";
 import type { Row } from "./grouping";
 import { paneMenuItems } from "./paneMenu";
 
-const row = (status: Row["status"]): Row => ({
-  key: "buildbox::w1:p1",
-  machineId: "buildbox",
-  machineLabel: "buildbox",
-  paneId: "w1:p1",
-  terminalId: "t1",
-  kind: "claude",
-  name: "planner",
-  title: "",
-  status,
-  folder: null,
-  sinceMs: null,
-});
+const row = (status: Row["status"]): Row =>
+  rowOf({
+    key: "buildbox::w1:p1",
+    machineId: "buildbox",
+    machineLabel: "buildbox",
+    paneId: "w1:p1",
+    kind: "claude",
+    name: "planner",
+    title: "",
+    status,
+    folder: null,
+    sinceMs: null,
+  });
 
 describe("paneMenuItems", () => {
   it("items_by_status", () => {

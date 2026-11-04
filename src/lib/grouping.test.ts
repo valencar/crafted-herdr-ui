@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
-import type { Agent } from "./bindings/Agent";
 import type { AppState } from "./bindings/AppState";
 import type { Health } from "./bindings/Health";
 import type { MachineView } from "./bindings/MachineView";
-import type { Snapshot } from "./bindings/Snapshot";
 import {
   appState as buildState,
   buildboxTerms,
+  agentTerm,
   machineView,
+  rowOf,
   shellTerm,
   type TermSpec,
 } from "../test/builders";
@@ -26,10 +25,6 @@ import {
   type Row,
 } from "./grouping";
 
-// The raw herdr response has fields the bindings ignore, hence the cast. Only the tests whose
-// subject is the herdr 0.9 agent record itself (`displayName`, the `cwd` fallback) read it.
-const fixture = raw.result.snapshot as unknown as Snapshot;
-
 /** A machine with the fixture's terminals, unless `terms` says otherwise (`null`: none yet). */
 function machine(
   id: string,
@@ -46,12 +41,11 @@ function appState(...machines: MachineView[]): AppState {
 }
 
 function row(overrides: Partial<Row>): Row {
-  return {
+  return rowOf({
     key: "m::w1:p1",
     machineId: "m",
     machineLabel: "m",
     paneId: "w1:p1",
-    terminalId: "t",
     kind: "claude",
     name: "n",
     title: "t",
@@ -59,7 +53,7 @@ function row(overrides: Partial<Row>): Row {
     folder: null,
     sinceMs: null,
     ...overrides,
-  };
+  });
 }
 
 const buildbox = () => toRows(appState(machine("buildbox")));
@@ -86,7 +80,6 @@ describe("toRows", () => {
     expect(rows.find((r) => r.paneId === "w1:p1")).toMatchObject({
       machineId: "buildbox",
       machineLabel: "buildbox",
-      terminalId: "term-1",
       kind: "claude",
       name: "planner",
       title: "claude: refactor auth",
@@ -101,7 +94,7 @@ describe("toRows", () => {
     });
   });
 
-  it("takes sinceMs from the machine ages, null when absent", () => {
+  it("takes sinceMs from the terminal, null when absent", () => {
     const rows = toRows(
       appState(
         machine("buildbox", {
@@ -109,24 +102,24 @@ describe("toRows", () => {
         }),
       ),
     );
-    expect(rows.find((r) => r.terminalId === "term-1")?.sinceMs).toBe(500);
-    expect(rows.find((r) => r.terminalId === "term-2")?.sinceMs).toBeNull();
+    expect(rows.find((r) => r.paneId === "w1:p1")?.sinceMs).toBe(500);
+    expect(rows.find((r) => r.paneId === "w1:p2")?.sinceMs).toBeNull();
   });
 
-  it("gives no rows for a machine without a snapshot or a disabled one", () => {
+  it("gives no rows for a machine without terminals or a hidden one", () => {
     const rows = toRows(
       appState(
         machine("a", {
           terms: null,
           health: { kind: "attention", error: "x" },
         }),
-        machine("b", { health: { kind: "disabled" } }),
+        machine("b", { health: { kind: "hidden" } }),
       ),
     );
     expect(rows).toEqual([]);
   });
 
-  it("keeps the stale snapshot of a reconnecting machine", () => {
+  it("keeps the terminals of a reconnecting machine", () => {
     const rows = toRows(
       appState(
         machine("a", {
@@ -134,6 +127,90 @@ describe("toRows", () => {
         }),
       ),
     );
+    expect(rows).toHaveLength(6);
+  });
+
+  it("toRows_keys_by_machine_and_address", () => {
+    const local = machineView({ id: "local", isLocal: true }, [
+      agentTerm({ address: "t1", status: "working", name: "builder" }),
+    ]);
+    const buildbox = machineView({ id: "mb-2", name: "buildbox" }, [
+      agentTerm({ address: "t1", status: "blocked", name: "planner" }),
+      agentTerm({
+        address: "t2",
+        status: "idle",
+        name: "worker",
+        parent: "t1",
+        pinned: true,
+        turn: 7,
+        statusKind: "tool",
+        statusMsg: "Reading src/auth.rs",
+        progress: 40,
+      }),
+    ]);
+    const rows = toRows(appState(local, buildbox));
+    // The same address on two machines is two rows, keyed by the machine id, not its name.
+    expect(rows.map((r) => r.key)).toEqual([
+      "local::t1",
+      "mb-2::t1",
+      "mb-2::t2",
+    ]);
+    // Calls take the address the local core knows: bare for Local, `<name>/<address>` elsewhere.
+    expect(rows.map((r) => r.fullAddress)).toEqual([
+      "t1",
+      "buildbox/t1",
+      "buildbox/t2",
+    ]);
+    expect(rows[1]).toMatchObject({
+      machineId: "mb-2",
+      machineLabel: "buildbox",
+      address: "t1",
+      paneId: "t1",
+      isWorker: false,
+      parent: null,
+    });
+    // A parent is given as a row key; a bare parent address is on Local.
+    expect(rows[2]).toMatchObject({
+      address: "t2",
+      isWorker: true,
+      parent: "local::t1",
+      pinned: true,
+      turn: 7,
+      statusKind: "tool",
+      statusMsg: "Reading src/auth.rs",
+      progress: 40,
+    });
+  });
+
+  it("a_parent_on_another_machine_is_found_by_its_name", () => {
+    const buildbox = machineView({ id: "mb-2", name: "buildbox" }, [
+      agentTerm({ address: "t1", status: "working" }),
+    ]);
+    const local = machineView({ id: "local", isLocal: true }, [
+      agentTerm({ address: "t9", status: "idle", parent: "buildbox/t1" }),
+      agentTerm({ address: "t8", status: "idle", parent: "gone/t1" }),
+    ]);
+    const rows = toRows(appState(local, buildbox));
+    expect(rows.find((r) => r.key === "local::t9")).toMatchObject({
+      parent: "mb-2::t1",
+      isWorker: true,
+    });
+    // A parent the list doesn't know is still a worker, with no row to point at.
+    expect(rows.find((r) => r.key === "local::t8")).toMatchObject({
+      parent: null,
+      isWorker: true,
+    });
+  });
+
+  it("toRows_skips_hidden_machines", () => {
+    const rows = toRows(
+      appState(
+        machine("a"),
+        machine("b", { health: { kind: "hidden" } }),
+        machine("c", { terms: [] }),
+      ),
+    );
+    expect(new Set(rows.map((r) => r.machineId))).toEqual(new Set(["a"]));
     expect(rows).toHaveLength(6);
   });
 
@@ -150,22 +227,24 @@ describe("toRows", () => {
 });
 
 describe("displayName", () => {
-  const base = fixture.agents[0] as Agent;
+  const base = machineView({ id: "buildbox" }, [
+    agentTerm({ address: "w1:p1", status: "blocked" }),
+  ]).terminals[0];
 
   it("display_name_fallbacks", () => {
     expect(displayName({ ...base, name: "planner" })).toBe("planner");
-    expect(
-      displayName({ ...base, name: null, terminal_title_stripped: "my title" }),
-    ).toBe("my title");
-    expect(
-      displayName({ ...base, name: "", terminal_title_stripped: "my title" }),
-    ).toBe("my title");
-    expect(
-      displayName({ ...base, name: null, terminal_title_stripped: null }),
-    ).toBe("claude · w1:p1");
-    expect(
-      displayName({ ...base, name: null, terminal_title_stripped: "  " }),
-    ).toBe("claude · w1:p1");
+    expect(displayName({ ...base, name: null, title: "my title" })).toBe(
+      "my title",
+    );
+    expect(displayName({ ...base, name: "", title: "my title" })).toBe(
+      "my title",
+    );
+    expect(displayName({ ...base, name: null, title: null })).toBe(
+      "claude · w1:p1",
+    );
+    expect(displayName({ ...base, name: null, title: "  " })).toBe(
+      "claude · w1:p1",
+    );
   });
 });
 
@@ -176,6 +255,39 @@ describe("needsYou", () => {
     for (const status of ["working", "idle", "unknown", "shell"] as const) {
       expect(isNeedsYou(row({ status }))).toBe(false);
     }
+  });
+
+  it("needs_you_is_blocked_error_done_minus_worker_done", () => {
+    expect(isNeedsYou(row({ status: "blocked" }))).toBe(true);
+    expect(isNeedsYou(row({ status: "error" }))).toBe(true);
+    expect(isNeedsYou(row({ status: "done" }))).toBe(true);
+    for (const status of [
+      "working",
+      "idle",
+      "ended",
+      "unknown",
+      "shell",
+    ] as const) {
+      expect(isNeedsYou(row({ status })), status).toBe(false);
+    }
+    // A worker's done is not needs-you; its blocker or error still is.
+    expect(isNeedsYou(row({ status: "done", isWorker: true }))).toBe(false);
+    expect(isNeedsYou(row({ status: "blocked", isWorker: true }))).toBe(true);
+    expect(isNeedsYou(row({ status: "error", isWorker: true }))).toBe(true);
+  });
+
+  it("needs_you_lists_blocked_then_error_then_done", () => {
+    const rows = [
+      row({ key: "done", status: "done", sinceMs: 1 }),
+      row({ key: "error", status: "error", sinceMs: 2 }),
+      row({ key: "blocked", status: "blocked", sinceMs: 3 }),
+      row({ key: "worker-done", status: "done", isWorker: true, sinceMs: 0 }),
+    ];
+    expect(needsYou(rows).map((r) => r.key)).toEqual([
+      "blocked",
+      "error",
+      "done",
+    ]);
   });
 
   it("needs_you_order: blocked first, then done, oldest first, nulls last", () => {
@@ -291,17 +403,6 @@ describe("groupByProject", () => {
     });
     const groups = groupByProject(toRows(appState(m)));
     expect(groups.find((g) => g.name === "sub")?.rows).toHaveLength(1);
-  });
-
-  it("falls back to cwd when foreground_cwd is missing", () => {
-    // herdr 0.9 only: the agent record keeps both `foreground_cwd` and `cwd`.
-    const snapshot = structuredClone(fixture);
-    snapshot.agents[1].foreground_cwd = null;
-    const m: MachineView = { ...machine("buildbox"), snapshot };
-    const groups = groupByProject(toRows(appState(m)));
-    expect(
-      groups.find((g) => g.rows.some((r) => r.paneId === "w1:p2"))?.name,
-    ).toBe("api-service");
   });
 
   it("an agent with no folder at all is loose", () => {

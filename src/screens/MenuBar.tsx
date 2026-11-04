@@ -168,7 +168,7 @@ export function MenuBar() {
           {state.machines.map((m) => (
             <li key={m.id} className="health" data-health={m.health.kind}>
               <HealthDot health={m.health} />
-              {m.label}
+              {m.name}
               <span className="sr-only"> {HEALTH_LABEL[m.health.kind]}</span>
             </li>
           ))}

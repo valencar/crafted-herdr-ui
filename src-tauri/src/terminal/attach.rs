@@ -12,31 +12,27 @@ use super::quote::{is_plain, shell_quote};
 /// characters that are safe unquoted everywhere.
 pub fn check_openable(machine: &MachineView) -> Result<(), String> {
     // A leading '-' would make `--session <s>` read the name as another flag.
-    if machine.session != DEFAULT_SESSION
-        && (!is_plain(&machine.session) || machine.session.starts_with('-'))
-    {
+    let session = session_of(machine);
+    if session != DEFAULT_SESSION && (!is_plain(session) || session.starts_with('-')) {
         return Err(format!(
             "The session name of {} has characters the app won't pass to a shell. \
              Open it from a terminal instead.",
-            machine.label
+            machine.name
         ));
     }
     if machine.is_local {
         return Ok(());
     }
     match machine.target.as_deref() {
-        None | Some("") => Err(format!(
-            "{} has no SSH target to connect to.",
-            machine.label
-        )),
+        None | Some("") => Err(format!("{} has no SSH target to connect to.", machine.name)),
         // ssh would read this as an option, e.g. `-oProxyCommand=…`.
         Some(t) if t.starts_with('-') => Err(format!(
             "The SSH target of {} starts with '-', which ssh would read as an option.",
-            machine.label
+            machine.name
         )),
         Some(t) if !is_plain(t) => Err(format!(
             "The SSH target of {} has characters the app won't pass to a shell.",
-            machine.label
+            machine.name
         )),
         Some(_) => Ok(()),
     }
@@ -65,6 +61,11 @@ pub fn check_bin(bin: &str) -> Result<(), String> {
 }
 
 const DEFAULT_SESSION: &str = "default";
+
+/// The machine's session name; a machine the core reports no session for uses the default.
+fn session_of(machine: &MachineView) -> &str {
+    machine.session.as_deref().unwrap_or(DEFAULT_SESSION)
+}
 const REMOTE_BIN: &str = "herdr";
 
 /// The remote machine's SSH target. Callers check `check_openable` first; an id is the
@@ -86,10 +87,9 @@ fn bin_in_script(bin: &str) -> String {
 
 /// `[export HERDR_SESSION=<s>; ]` for a non-default session.
 fn session_prefix(machine: &MachineView) -> String {
-    if machine.session == DEFAULT_SESSION {
-        String::new()
-    } else {
-        format!("export HERDR_SESSION={}; ", shell_quote(&machine.session))
+    match session_of(machine) {
+        DEFAULT_SESSION => String::new(),
+        session => format!("export HERDR_SESSION={}; ", shell_quote(session)),
     }
 }
 
@@ -147,9 +147,9 @@ pub fn full_ui_argv(machine: &MachineView, local_bin: &str) -> Vec<String> {
         argv.push("--remote".into());
         argv.push(remote_target(machine).to_owned());
     }
-    if machine.session != DEFAULT_SESSION {
+    if session_of(machine) != DEFAULT_SESSION {
         argv.push("--session".into());
-        argv.push(machine.session.clone());
+        argv.push(session_of(machine).to_owned());
     }
     argv
 }
@@ -264,20 +264,13 @@ pub fn checked_machine_add_argv(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Health;
-    use std::collections::HashMap;
+    use crate::state::fixtures::view;
 
     fn machine(id: &str, target: Option<&str>, session: &str) -> MachineView {
         MachineView {
-            id: id.into(),
-            label: id.into(),
             target: target.map(str::to_owned),
-            session: session.into(),
-            is_local: target.is_none(),
-            health: Health::Online,
-            snapshot: None,
-            last_ok_ms: None,
-            ages: HashMap::new(),
+            session: Some(session.into()),
+            ..view(id, id, target.is_none(), Vec::new())
         }
     }
 

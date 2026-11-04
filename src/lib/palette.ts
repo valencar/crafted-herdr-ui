@@ -114,8 +114,8 @@ export function buildItems(ctx: Context): PaletteItem[] {
   const workboxes: PaletteItem[] = ctx.machines.map((m) => ({
     id: `workbox:${m.id}`,
     group: "Workboxes",
-    label: m.label,
-    detail: m.is_local ? "This computer" : (m.target ?? m.session),
+    label: m.name,
+    detail: m.is_local ? "This computer" : (m.target ?? m.session ?? ""),
     keywords: `${m.id} ${m.target ?? ""}`,
     run: () => ctx.goToWorkbox(m.id),
   }));

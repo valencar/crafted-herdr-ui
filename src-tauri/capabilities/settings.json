@@ -14,7 +14,6 @@
     "allow-core-status",
     "allow-list-agent-kinds",
     "allow-list-terminals",
-    "allow-machine-set-enabled",
     "allow-preview-launch-template",
     "allow-set-settings",
     "allow-shortcut-status",

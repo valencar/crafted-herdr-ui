@@ -30,8 +30,6 @@ const DEFAULTS: SettingsData = {
   attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
-  poll_interval_visible_ms: 2000,
-  poll_interval_hidden_ms: 10_000,
   group_by: "project",
   global_shortcut_enabled: true,
   open_after_create: true,
@@ -76,7 +74,7 @@ const STATE: AppState = {
   machines: [
     machine("local"),
     machine("buildbox"),
-    machine("staging", { health: { kind: "disabled" } }),
+    machine("staging", { health: { kind: "hidden" } }),
   ],
 };
 
@@ -301,27 +299,30 @@ describe("Settings", () => {
     });
   });
 
-  it("lists workboxes with an enable switch each", async () => {
-    const user = await setup({}, "Workboxes");
-    const local = screen.getByRole("switch", { name: "Enable Local" });
-    expect(local).toBeChecked();
+  it("lists workboxes with a hide switch each", async () => {
+    const user = await setup({ hidden_workboxes: ["staging"] }, "Workboxes");
+    const local = screen.getByRole("switch", { name: "Hide Local" });
+    expect(local).not.toBeChecked();
     expect(local).toBeDisabled();
     expect(
-      screen.getByRole("switch", { name: "Enable buildbox" }),
-    ).toBeChecked();
-    const staging = screen.getByRole("switch", { name: "Enable staging" });
-    expect(staging).not.toBeChecked();
+      screen.getByRole("switch", { name: "Hide buildbox" }),
+    ).not.toBeChecked();
+    const staging = screen.getByRole("switch", { name: "Hide staging" });
+    expect(staging).toBeChecked();
 
+    // Show: an app setting, with no core call.
     await user.click(staging);
-    expect(invoke).toHaveBeenCalledWith("machine_set_enabled", {
-      id: "staging",
-      enabled: true,
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { hidden_workboxes: [] },
     });
-    await user.click(screen.getByRole("switch", { name: "Enable buildbox" }));
-    expect(invoke).toHaveBeenCalledWith("machine_set_enabled", {
-      id: "buildbox",
-      enabled: false,
+    await user.click(screen.getByRole("switch", { name: "Hide buildbox" }));
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { hidden_workboxes: ["buildbox"] },
     });
+    expect(invoke).not.toHaveBeenCalledWith(
+      "machine_set_enabled",
+      expect.anything(),
+    );
   });
 
   it("switches notifications per kind", async () => {
@@ -472,7 +473,7 @@ describe("Settings", () => {
     expect(screen.queryByText(/Couldn’t register/)).toBeNull();
   });
 
-  it("general: new-session default, grouping, and refresh intervals in seconds", async () => {
+  it("general: new-session default and grouping", async () => {
     const user = await setup();
     await user.click(
       screen.getByRole("checkbox", {
@@ -489,31 +490,6 @@ describe("Settings", () => {
     expect(invoke).toHaveBeenCalledWith("set_settings", {
       patch: { group_by: "status" },
     });
-
-    const visible = screen.getByLabelText(
-      "Refresh every, window open (seconds)",
-    );
-    expect(visible).toHaveValue(2);
-    await user.clear(visible);
-    await user.type(visible, "5");
-    await user.tab();
-    expect(invoke).toHaveBeenCalledWith("set_settings", {
-      patch: { poll_interval_visible_ms: 5000 },
-    });
-  });
-
-  it("refuses an interval under a second without asking Rust", async () => {
-    const user = await setup();
-    const hidden = screen.getByLabelText(
-      "Refresh every, window hidden (seconds)",
-    );
-    await user.clear(hidden);
-    await user.type(hidden, "0.5");
-    await user.tab();
-    expect(
-      await screen.findByText("Use at least 1 second."),
-    ).toBeInTheDocument();
-    expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
   });
 
   it("shows the reason when a change is refused", async () => {

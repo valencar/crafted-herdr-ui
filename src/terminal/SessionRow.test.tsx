@@ -252,7 +252,7 @@ describe("SessionRow", () => {
     open("staging", "w1:p1", "tester"); // not in the machine list
     open("gpubox", "w1:p1", "planner");
     const state = appState();
-    state.machines[1].health = { kind: "disabled" };
+    state.machines[1].health = { kind: "hidden" };
     act(() => useAppStore.setState({ state }));
     const { rerender } = render(<Harness machineId="staging" />);
     expect(screen.getByRole("button", { name: /^tester/ })).toBeInTheDocument();

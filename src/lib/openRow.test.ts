@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { rowOf } from "../test/builders";
 import { useAppStore } from "../store/appStore";
 import type { Row } from "./grouping";
 
@@ -14,19 +15,18 @@ import { markSeen, openRow, openFull } from "./openRow";
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
 function row(status: Row["status"]): Row {
-  return {
+  return rowOf({
     key: "buildbox::w1:p1",
     machineId: "buildbox",
     machineLabel: "buildbox",
     paneId: "w1:p1",
-    terminalId: "term-1",
     kind: "claude",
     name: "planner",
     title: "",
     status,
     folder: null,
     sinceMs: null,
-  };
+  });
 }
 const target = { machineId: "buildbox", paneId: "w1:p1" };
 

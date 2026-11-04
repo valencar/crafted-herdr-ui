@@ -26,8 +26,8 @@ export function AppSidebar() {
       agentCount={rows.filter((r) => r.status !== "shell").length}
       projects={projects}
       machines={state?.machines ?? []}
-      herdrPath={state?.herdr_path ?? null}
-      herdrVersion={state?.herdr_version ?? null}
+      corePath={state?.core_path ?? null}
+      coreVersion={state?.core_version ?? null}
       onJump={(id) => {
         showHomeView({ kind: "all" });
         scrollToId(id);

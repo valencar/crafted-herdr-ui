@@ -76,8 +76,6 @@ const DEFAULT_SETTINGS: Settings = {
   attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
-  poll_interval_visible_ms: 2000,
-  poll_interval_hidden_ms: 10_000,
   group_by: "project",
   global_shortcut_enabled: true,
   open_after_create: true,
@@ -107,14 +105,6 @@ const KINDS = ["claude", "codex"];
 /** Errors the next `create_session` calls fail with, oldest first. */
 let createErrors: unknown[] = [];
 const CREATED = { paneId: "w3:p1", terminalId: "term-9" };
-const TRUST_ERROR = {
-  kind: "herdr",
-  error: {
-    kind: "server",
-    code: "repository_not_trusted",
-    message: "Repository /home/dev/projects/api-service is not trusted.",
-  },
-};
 
 function callsTo(name: string): unknown[][] {
   return invoke.mock.calls.filter((c) => c[0] === name);
@@ -194,7 +184,7 @@ describe("NewSession", () => {
       cwd: "/home/dev/projects/api-service",
       kind: "claude",
       name: "planner",
-      placement: { kind: "newTab", workspaceId: "w1" },
+      placement: { kind: "newWorkspace" },
       agentArgs: [],
     });
     expect(expected).toHaveLength(2);
@@ -236,75 +226,8 @@ describe("NewSession", () => {
     await vi.waitFor(() =>
       expect(screen.queryByText(/agent start/)).not.toBeInTheDocument(),
     );
-    expect(screen.getByText(/tab create/)).toBeInTheDocument();
+    expect(screen.getByText(/ create /)).toBeInTheDocument();
     expect(lastRequest("preview_new_session").agentArgs).toEqual([]);
-  });
-
-  it("trust_retry_flow", async () => {
-    const user = setup(undefined, savedKind("claude"));
-    await fillFolder(user, "/home/dev/projects/api-service");
-    await fillName(user, "planner");
-    await user.click(
-      screen.getByRole("checkbox", { name: "Work in a new git worktree" }),
-    );
-    await user.type(screen.getByLabelText("branch"), "feat/x");
-    createErrors.push(TRUST_ERROR);
-    await user.click(createButton());
-    expect(
-      await screen.findByText(TRUST_ERROR.error.message),
-    ).toBeInTheDocument();
-    expect(lastRequest("create_session").placement).toEqual({
-      kind: "worktree",
-      branch: "feat/x",
-      trust: false,
-    });
-    expect(useAppStore.getState().sheet).toBe("new-session");
-    await user.click(
-      screen.getByRole("button", { name: "Trust this repository and retry" }),
-    );
-    await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
-    expect(callsTo("create_session")).toHaveLength(2);
-    expect(lastRequest("create_session").placement).toEqual({
-      kind: "worktree",
-      branch: "feat/x",
-      trust: true,
-    });
-    expect(lastRequest("create_session").kind).toBe("claude");
-  });
-
-  it("recognises a trust refusal by message alone and shows other errors inline", async () => {
-    const user = setup(undefined, savedKind("claude"));
-    await fillFolder(user, "/home/dev/projects/api-service");
-    await fillName(user, "planner");
-    await user.click(
-      screen.getByRole("checkbox", { name: "Work in a new git worktree" }),
-    );
-    await user.type(screen.getByLabelText("branch"), "feat/x");
-    createErrors.push({
-      kind: "herdr",
-      error: {
-        kind: "server",
-        code: "refused",
-        message: "Please TRUST this repo first",
-      },
-    });
-    await user.click(createButton());
-    expect(
-      await screen.findByText("Please TRUST this repo first"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Trust this repository and retry" }),
-    ).toBeInTheDocument();
-
-    createErrors.push({
-      kind: "herdr",
-      error: { kind: "server", code: "disk_full", message: "No space left" },
-    });
-    await user.click(createButton());
-    expect(await screen.findByText("No space left")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Trust this repository and retry" }),
-    ).not.toBeInTheDocument();
   });
 
   it("cmd_enter_submits", async () => {
@@ -318,7 +241,7 @@ describe("NewSession", () => {
       cwd: "/home/dev/projects/api-service",
       kind: "claude",
       name: "planner",
-      placement: { kind: "newTab", workspaceId: "w1" },
+      placement: { kind: "newWorkspace" },
       agentArgs: [],
     });
   });
@@ -602,59 +525,26 @@ describe("NewSession form", () => {
     expect(group.getByRole("radio", { name: "Plain shell" })).toBeChecked();
   });
 
-  it("defaults the placement to a new tab in the first workspace and lists the rest", async () => {
-    setup(undefined, { selectedKey: "buildbox::w2:p1" });
-    const select = screen.getByLabelText("Place it") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.textContent)).toEqual([
-      "New tab in “api-service”",
-      "New tab in “web-app”",
-      "Split beside tester",
-      "New workspace",
-    ]);
-    expect(select.value).toBe("tab:w1");
-  });
-
-  it("offers a split only when the selection is on the chosen machine", async () => {
-    const user = setup(undefined, { selectedKey: "buildbox::w2:p1" });
-    await user.click(screen.getByRole("radio", { name: /gpubox/ }));
-    const select = screen.getByLabelText("Place it") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.textContent)).not.toContain(
-      "Split beside tester",
-    );
-  });
-
   it("starts on the selected row's machine", () => {
     setup(undefined, { selectedKey: "gpubox::w1:p1" });
     expect(screen.getByRole("radio", { name: /gpubox/ })).toBeChecked();
   });
 
-  it("defaults to New workspace when the machine has no workspaces", async () => {
+  it("every_new_session_goes_in_a_new_terminal_in_its_folder", async () => {
+    // Placement is not a choice any more (the sheet is rebuilt in Task 11): no "Place it", no
+    // worktree, and the same request whatever the machine has or the selection is.
     const empty = machine("buildbox", { terms: [] });
-    const user = setup(appState(empty));
-    const select = screen.getByLabelText("Place it") as HTMLSelectElement;
-    expect(select.value).toBe("workspace");
+    const user = setup(appState(empty), { selectedKey: "buildbox::w2:p1" });
+    expect(screen.queryByLabelText("Place it")).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", { name: "Work in a new git worktree" }),
+    ).toBeNull();
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(createButton());
     await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
     expect(lastRequest("create_session").placement).toEqual({
       kind: "newWorkspace",
-    });
-  });
-
-  it("sends the split placement for the selected pane", async () => {
-    const user = setup(undefined, { selectedKey: "buildbox::w2:p1" });
-    await fillFolder(user, "/home/dev/projects/web-app");
-    await fillName(user, "helper");
-    await user.selectOptions(
-      screen.getByLabelText("Place it"),
-      "Split beside tester",
-    );
-    await user.click(createButton());
-    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
-    expect(lastRequest("create_session").placement).toEqual({
-      kind: "splitBeside",
-      paneId: "w2:p1",
     });
   });
 
@@ -684,26 +574,6 @@ describe("NewSession form", () => {
     // The other machine's folders are its own.
     await user.click(screen.getByRole("radio", { name: /gpubox/ }));
     expect(recentButtons()).toHaveLength(0);
-  });
-
-  it("requires a branch for a worktree and sends it with trust off", async () => {
-    const user = setup(undefined, savedKind("claude"));
-    await fillFolder(user, "/home/dev/projects/api-service");
-    await fillName(user, "planner");
-    await user.click(
-      screen.getByRole("checkbox", { name: "Work in a new git worktree" }),
-    );
-    expect(screen.getByLabelText("Place it")).toBeDisabled();
-    expect(createButton()).toBeDisabled();
-    await user.type(screen.getByLabelText("branch"), "feat/x");
-    expect(createButton()).toBeEnabled();
-    await user.click(createButton());
-    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
-    expect(lastRequest("create_session").placement).toEqual({
-      kind: "worktree",
-      branch: "feat/x",
-      trust: false,
-    });
   });
 
   it("splits Advanced agent arguments on whitespace, and only for an agent", async () => {
@@ -758,7 +628,7 @@ describe("NewSession form", () => {
     setup(
       appState(
         machine("buildbox"),
-        machine("gpubox", { health: { kind: "disabled" } }),
+        machine("gpubox", { health: { kind: "hidden" } }),
       ),
     );
     expect(
@@ -798,17 +668,6 @@ describe("NewSession prefill and ids", () => {
     expect(kind.size).toBe(1);
     expect(machine).not.toContain("machine");
     expect(kind).not.toContain("kind");
-  });
-
-  it("checks the trimmed branch for a leading dash", async () => {
-    const user = setup();
-    await fillFolder(user, "/home/dev/projects/api-service");
-    await fillName(user, "planner");
-    await user.click(
-      screen.getByRole("checkbox", { name: "Work in a new git worktree" }),
-    );
-    await user.type(screen.getByLabelText("branch"), "  -x");
-    expect(createButton()).toBeDisabled();
   });
 });
 

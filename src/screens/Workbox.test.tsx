@@ -12,6 +12,7 @@ import {
   buildboxTerms,
   machineView,
   shellTerm,
+  unanswered,
   type TermSpec,
 } from "../test/builders";
 import { Workbox } from "./Workbox";
@@ -75,10 +76,6 @@ function setup(
   return user;
 }
 
-function workspace(name: string): HTMLElement {
-  return screen.getByRole("region", { name });
-}
-
 function calls(name: string): unknown[] {
   return invoke.mock.calls.filter((c) => c[0] === name).map((c) => c[1]);
 }
@@ -96,6 +93,10 @@ beforeEach(() => {
     get_terminals: () => ({ installed: ["ghostty"], default: "ghostty" }),
     preview_reconnect: (args: { id: string }) =>
       `herdr machine reconnect ${args.id}`,
+    set_settings: (args: { patch: Partial<Settings> }) => ({
+      ...useAppStore.getState().settings,
+      ...args.patch,
+    }),
     read_pane_tail: (args: { paneId: string }) => `tail of ${args.paneId}`,
   };
   invoke.mockReset();
@@ -133,20 +134,21 @@ describe("Workbox", () => {
     expect(heading).toHaveTextContent(/^buildbox$/);
   });
 
-  it("renders_tabs_with_pane_boxes", async () => {
-    setup();
-    const api = workspace("api-service");
-    expect(within(api).getByText("w1 · ~/projects/api-service")).toBeVisible();
-    const tabs = within(api).getAllByRole("group");
-    expect(tabs.map((t) => t.getAttribute("aria-label"))).toEqual([
-      "Tab main",
-      "Tab shell",
+  it("renders_the_machines_terminals_as_a_flat_list_of_pane_boxes", async () => {
+    setup(appState(machine("local"), machine("buildbox")));
+    // Every terminal of this machine, in the order the core lists them, and none from Local.
+    const boxes = screen.getAllByRole("button", { name: /^Open (?!full)/ });
+    expect(boxes.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Open planner",
+      "Open copilot: terraform plan",
+      "Open zsh",
+      "Open tester",
+      "Open claude",
+      "Open zsh",
     ]);
 
-    // A pane box: kind badge, name, status label (text, not color alone), last line, pane id.
-    const main = within(api).getByRole("group", { name: "Tab main" });
-    expect(within(main).getByText("2 sessions")).toBeInTheDocument();
-    const planner = within(main).getByRole("button", { name: /planner/ });
+    // A pane box: kind badge, name, status label (text, not color alone), last line, address.
+    const planner = screen.getByRole("button", { name: /planner/ });
     expect(within(planner).getByText("claude")).toBeInTheDocument();
     expect(within(planner).getByText("planner")).toBeInTheDocument();
     expect(within(planner).getByText("Needs input")).toBeInTheDocument();
@@ -154,33 +156,33 @@ describe("Workbox", () => {
     expect(
       await within(planner).findByText("tail of w1:p1"),
     ).toBeInTheDocument();
-    const working = within(main).getByRole("button", {
+    const working = screen.getByRole("button", {
       name: /copilot: terraform plan/,
     });
     expect(within(working).getByText("Working")).toBeInTheDocument();
 
-    // A shell pane shows the shell badge and label.
-    const shellTab = within(api).getByRole("group", { name: "Tab shell" });
-    const shell = within(shellTab).getByRole("button", { name: /zsh/ });
+    // A shell shows the shell badge and label.
+    const shell = screen.getAllByRole("button", { name: /zsh/ })[0];
     expect(within(shell).getByText("$_")).toBeInTheDocument();
     expect(within(shell).getByText("Shell")).toBeInTheDocument();
-    expect(within(shellTab).getByText("1 session")).toBeInTheDocument();
+  });
 
-    // The other workspace has its own tab, with three panes.
-    const web = workspace("web-app");
-    expect(within(web).getAllByRole("button", { name: /^Open/ })).toHaveLength(
-      3,
-    );
+  it("a_machine_with_no_terminals_says_so", () => {
+    setup(appState(machine("buildbox", { terms: [] })));
+    expect(screen.getByText(/No terminals yet/)).toBeInTheDocument();
+  });
+
+  it("a_machine_that_has_not_answered_is_waited_for", () => {
+    const silent = unanswered(machine("buildbox"));
+    setup(appState(silent));
     expect(
-      within(web).getByRole("button", { name: "+ New tab in web-app" }),
+      screen.getByText("Waiting for buildbox to report its terminals…"),
     ).toBeInTheDocument();
   });
 
   it("clicking_a_pane_box_opens_it_in_the_terminal", async () => {
     const user = setup();
-    const planner = within(workspace("api-service")).getByRole("button", {
-      name: /planner/,
-    });
+    const planner = screen.getByRole("button", { name: /planner/ });
     await user.click(planner);
     expect(calls("open_session")).toEqual([
       { machineId: "buildbox", paneId: "w1:p1" },
@@ -192,12 +194,11 @@ describe("Workbox", () => {
     const summary = screen.getByRole("region", { name: "buildbox" });
     expect(within(summary).getByText("Reachable")).toBeInTheDocument();
     expect(
-      within(summary).getByText("ssh buildbox · session default · herdr 0.9.4"),
+      within(summary).getByText("ssh buildbox · session default"),
     ).toBeInTheDocument();
     const count = (term: string) =>
       within(summary).getByText(term).parentElement?.querySelector("dd")
         ?.textContent;
-    expect(count("Workspaces")).toBe("2");
     expect(count("Sessions")).toBe("6");
     expect(count("Agents")).toBe("4");
     // One blocked and one done agent.
@@ -211,7 +212,7 @@ describe("Workbox", () => {
       { kind: "reconnecting", retry_in_ms: 4000, error: "timed out" },
       "Reconnecting",
     ],
-    [{ kind: "disabled" }, "Disabled"],
+    [{ kind: "hidden" }, "Hidden"],
   ] as [Health, string][])("health_%j_reads_%s", (health, label) => {
     setup(appState(machine("local"), machine("buildbox", {}, health)));
     expect(
@@ -226,27 +227,35 @@ describe("Workbox", () => {
       ),
     );
     expect(screen.getByText("ssh: denied")).toBeInTheDocument();
-    expect(workspace("api-service")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open planner" })).toBeVisible();
   });
 
-  it("a_disabled_machine_offers_enable_and_no_panes", async () => {
-    const user = setup(appState(machine("buildbox", {}, { kind: "disabled" })));
-    expect(screen.queryByRole("region", { name: "api-service" })).toBeNull();
-    expect(screen.getByText(/is disabled/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Disable" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Enable" }));
-    expect(calls("machine_set_enabled")).toEqual([
-      { id: "buildbox", enabled: true },
+  it("a_hidden_machine_offers_show_and_no_terminals", async () => {
+    useAppStore.setState({
+      settings: {
+        open_target: "external",
+        hidden_workboxes: ["buildbox", "gpubox"],
+      } as unknown as Settings,
+    });
+    const user = setup(appState(machine("buildbox", {}, { kind: "hidden" })));
+    expect(screen.queryByRole("button", { name: /^Open (?!full)/ })).toBeNull();
+    expect(screen.getByText(/is hidden/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show" }));
+    // An app setting, with no core call; other hidden workboxes stay hidden.
+    expect(calls("set_settings")).toEqual([
+      { patch: { hidden_workboxes: ["gpubox"] } },
     ]);
+    expect(calls("machine_set_enabled")).toEqual([]);
   });
 
-  it("local_hides_rename_disable_remove_and_reconnect", () => {
+  it("local_hides_rename_hide_and_remove", () => {
     setup(appState(machine("local", { name: "This computer" })), "local");
-    for (const name of ["Reconnect", "Rename", "Disable", "Remove…"]) {
+    for (const name of ["Rename", "Hide", "Remove…"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     expect(
-      screen.getByText("this computer · session default · herdr 0.9.4"),
+      screen.getByText("this computer · session default"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Open full Herdr ↗" }),
@@ -255,13 +264,7 @@ describe("Workbox", () => {
 
   it("remote_machine_offers_all_machine_actions", () => {
     setup();
-    for (const name of [
-      "Reconnect",
-      "Check now",
-      "Rename",
-      "Disable",
-      "Remove…",
-    ]) {
+    for (const name of ["Check now", "Rename", "Hide", "Remove…"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
   });
@@ -311,27 +314,21 @@ describe("Workbox", () => {
     expect(useAppStore.getState().view.kind).toBe("workbox");
   });
 
-  it("disable_requires_confirm", async () => {
-    const user = setup();
-    await user.click(screen.getByRole("button", { name: "Disable" }));
-    const dialog = screen.getByRole("dialog", { name: "Disable buildbox?" });
-    expect(calls("machine_set_enabled")).toEqual([]);
-    const confirm = within(dialog).getByRole("button", {
-      name: "Disable workbox",
+  it("hide_writes_the_setting_and_makes_no_core_call", async () => {
+    useAppStore.setState({
+      settings: {
+        open_target: "external",
+        hidden_workboxes: ["gpubox"],
+      } as unknown as Settings,
     });
-    expect(confirm).not.toHaveClass("btn-danger");
-    await user.click(confirm);
-    expect(calls("machine_set_enabled")).toEqual([
-      { id: "buildbox", enabled: false },
-    ]);
-  });
-
-  it("reconnect_uses_openInTerminal_allowlisted_argv", async () => {
     const user = setup();
-    await user.click(screen.getByRole("button", { name: "Reconnect" }));
-    expect(calls("open_in_terminal")).toEqual([
-      { argv: ["machine", "reconnect", "buildbox"] },
+    await user.click(screen.getByRole("button", { name: "Hide" }));
+    // No confirm: it only changes what this app shows, and Show undoes it.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls("set_settings")).toEqual([
+      { patch: { hidden_workboxes: ["gpubox", "buildbox"] } },
     ]);
+    expect(calls("machine_set_enabled")).toEqual([]);
   });
 
   it("open_full_herdr_targets_this_machine", async () => {
@@ -418,17 +415,12 @@ describe("Workbox", () => {
   });
 
   it("a_refused_rename_keeps_the_sheet_open_with_the_message", async () => {
-    answers.rename_tab = () => {
+    answers.machine_rename = () => {
       throw { kind: "invalid", message: "Name can't start with '-'." };
     };
     const user = setup();
-    const tab = within(workspace("api-service")).getByRole("group", {
-      name: "Tab main",
-    });
-    await user.click(
-      within(tab).getByRole("button", { name: "Rename tab main" }),
-    );
-    const dialog = screen.getByRole("dialog", { name: "Rename tab" });
+    await user.click(screen.getByRole("button", { name: "Rename" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename workbox" });
     const field = within(dialog).getByLabelText("Name");
     await user.clear(field);
     await user.type(field, "-x");
@@ -436,178 +428,6 @@ describe("Workbox", () => {
     expect(
       await within(dialog).findByText("Name can't start with '-'."),
     ).toBeInTheDocument();
-  });
-
-  it("tab_rename_and_close_use_the_tab_id", async () => {
-    const user = setup();
-    const tab = () =>
-      within(workspace("api-service")).getByRole("group", { name: "Tab main" });
-    await user.click(
-      within(tab()).getByRole("button", { name: "Rename tab main" }),
-    );
-    const sheet = screen.getByRole("dialog", { name: "Rename tab" });
-    const field = within(sheet).getByLabelText("Name");
-    await user.clear(field);
-    await user.type(field, "agents");
-    await user.click(within(sheet).getByRole("button", { name: "Rename" }));
-    await waitFor(() =>
-      expect(calls("rename_tab")).toEqual([
-        { machineId: "buildbox", tabId: "w1:t1", label: "agents" },
-      ]),
-    );
-
-    await user.click(
-      within(tab()).getByRole("button", { name: "Close tab main" }),
-    );
-    const dialog = screen.getByRole("dialog", { name: "Close tab main?" });
-    expect(calls("close_tab")).toEqual([]);
-    await user.click(within(dialog).getByRole("button", { name: "Close tab" }));
-    expect(calls("close_tab")).toEqual([
-      { machineId: "buildbox", tabId: "w1:t1" },
-    ]);
-  });
-
-  it("new_tab_asks_for_a_name_and_creates_it_in_the_workspace", async () => {
-    const user = setup();
-    await user.click(
-      within(workspace("web-app")).getByRole("button", { name: "+ Tab" }),
-    );
-    const dialog = screen.getByRole("dialog", { name: "New tab in web-app" });
-    await user.type(within(dialog).getByLabelText("Name"), "logs");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Create tab" }),
-    );
-    await waitFor(() =>
-      expect(calls("create_tab")).toEqual([
-        { machineId: "buildbox", workspaceId: "w2", label: "logs" },
-      ]),
-    );
-
-    // The dashed button at the end of the grid does the same.
-    await user.click(
-      within(workspace("api-service")).getByRole("button", {
-        name: "+ New tab in api-service",
-      }),
-    );
-    expect(
-      screen.getByRole("dialog", { name: "New tab in api-service" }),
-    ).toBeInTheDocument();
-  });
-
-  it("new_workspace_needs_a_folder_and_a_name", async () => {
-    const user = setup();
-    await user.click(screen.getByRole("button", { name: "+ New workspace" }));
-    const dialog = screen.getByRole("dialog", { name: "New workspace" });
-    await user.type(within(dialog).getByLabelText("Name"), "infra");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Create workspace" }),
-    );
-    expect(
-      within(dialog).getByText("Folder can’t be empty."),
-    ).toBeInTheDocument();
-    expect(calls("create_workspace")).toEqual([]);
-
-    await user.type(within(dialog).getByLabelText("Folder"), "/home/dev/infra");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Create workspace" }),
-    );
-    await waitFor(() =>
-      expect(calls("create_workspace")).toEqual([
-        { machineId: "buildbox", cwd: "/home/dev/infra", label: "infra" },
-      ]),
-    );
-  });
-
-  it("workspace_rename_uses_the_workspace_id", async () => {
-    const user = setup();
-    await user.click(
-      within(workspace("web-app")).getByRole("button", {
-        name: "Rename workspace web-app",
-      }),
-    );
-    const sheet = screen.getByRole("dialog", { name: "Rename workspace" });
-    const field = within(sheet).getByLabelText("Name");
-    await user.clear(field);
-    await user.type(field, "site");
-    await user.click(within(sheet).getByRole("button", { name: "Rename" }));
-    await waitFor(() =>
-      expect(calls("rename_workspace")).toEqual([
-        { machineId: "buildbox", workspaceId: "w2", label: "site" },
-      ]),
-    );
-  });
-
-  it("closing_a_workspace_confirms_first", async () => {
-    const user = setup();
-    await user.click(
-      within(workspace("web-app")).getByRole("button", {
-        name: "Close workspace web-app",
-      }),
-    );
-    const dialog = screen.getByRole("dialog", {
-      name: "Close workspace web-app?",
-    });
-    expect(calls("close_workspace")).toEqual([]);
-    await user.click(
-      within(dialog).getByRole("button", { name: "Close workspace" }),
-    );
-    expect(calls("close_workspace")).toEqual([
-      { machineId: "buildbox", workspaceId: "w2" },
-    ]);
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("group_close_flow_shows_dialog", async () => {
-    answers.close_workspace = () => {
-      throw serverError(
-        "workspace_group_close_required",
-        "workspace w1 has linked worktree workspaces; close them first",
-      );
-    };
-    const user = setup();
-    await user.click(
-      within(workspace("api-service")).getByRole("button", {
-        name: "Close workspace api-service",
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: "Close workspace" }));
-
-    // herdr's own message, plus what to do. No error toast: this is an expected answer.
-    const dialog = await screen.findByRole("dialog", {
-      name: "api-service can’t be closed yet",
-    });
-    expect(
-      within(dialog).getByText(
-        /workspace w1 has linked worktree workspaces; close them first/,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(dialog).getByText(
-        /Close its linked worktree workspaces first, then try again\./,
-      ),
-    ).toBeInTheDocument();
-    expect(useAppStore.getState().toast).toBeNull();
-    expect(calls("close_workspace")).toHaveLength(1);
-
-    await user.click(within(dialog).getByRole("button", { name: "OK" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("other_close_workspace_errors_go_to_the_toast", async () => {
-    answers.close_workspace = () => {
-      throw serverError("workspace_not_found", "no such workspace");
-    };
-    const user = setup();
-    await user.click(
-      within(workspace("web-app")).getByRole("button", {
-        name: "Close workspace web-app",
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: "Close workspace" }));
-    await waitFor(() =>
-      expect(useAppStore.getState().toast).toBe("no such workspace"),
-    );
-    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("new_session_button_and_cmd_n_prefill_this_machine", async () => {
@@ -679,10 +499,6 @@ describe("Workbox pane tails", () => {
         address: `w1:p${100 + i}`,
         title: "zsh",
         folder: "/home/dev/projects/api-service/packages/db",
-        terminalId: `term-x${i}`,
-        workspaceLabel: "api-service",
-        tabId: "w1:t2",
-        tabLabel: "shell",
       }),
     );
     return machine("buildbox", { terms: [...buildboxTerms(), ...extra] });
@@ -812,9 +628,7 @@ describe("Workbox pane tails", () => {
 
   it("names_each_pane_box_by_what_it_opens_and_describes_its_status_and_tail", async () => {
     setup();
-    const planner = within(workspace("api-service")).getByRole("button", {
-      name: "Open planner",
-    });
+    const planner = screen.getByRole("button", { name: "Open planner" });
     const described = await waitFor(() => {
       const ids = planner.getAttribute("aria-describedby")!.split(" ");
       expect(ids).toHaveLength(2);
@@ -828,9 +642,7 @@ describe("Workbox pane tails", () => {
       throw serverError("pane_not_found", "pane gone");
     };
     setup();
-    const planner = within(workspace("api-service")).getByRole("button", {
-      name: "Open planner",
-    });
+    const planner = screen.getByRole("button", { name: "Open planner" });
     expect(planner.getAttribute("aria-describedby")!.split(" ")).toHaveLength(
       1,
     );
@@ -839,15 +651,17 @@ describe("Workbox pane tails", () => {
     ).toHaveTextContent("Needs input");
   });
 
-  it("a_disabled_machine_with_a_cached_snapshot_counts_zero_in_all_four", () => {
-    setup(appState(machine("buildbox", {}, { kind: "disabled" })));
+  it("a_hidden_machine_with_held_terminals_counts_zero_in_all_three", () => {
+    setup(appState(machine("buildbox", {}, { kind: "hidden" })));
     const summary = screen.getByRole("region", { name: "buildbox" });
     const count = (term: string) =>
       within(summary).getByText(term).parentElement?.querySelector("dd")
         ?.textContent;
-    expect(
-      ["Workspaces", "Sessions", "Agents", "Needs you"].map(count),
-    ).toEqual(["0", "0", "0", "0"]);
+    expect(["Sessions", "Agents", "Needs you"].map(count)).toEqual([
+      "0",
+      "0",
+      "0",
+    ]);
   });
 
   it("an_attention_machine_suggests_the_reconnect_command_with_copy", async () => {

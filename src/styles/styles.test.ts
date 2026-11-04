@@ -535,7 +535,7 @@ describe("status shapes", () => {
       "pending",
       "reconnecting",
       "attention",
-      "disabled",
+      "hidden",
     ];
     for (const health of healths) {
       expect(selectors, health).toContain(`.sdot[data-health="${health}"]`);

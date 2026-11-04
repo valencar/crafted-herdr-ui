@@ -1,6 +1,6 @@
 //! The app's own record of what the person has seen, and the notifications that follow from a
-//! terminal's status changes (v0.9, spec §4.5). It replaces `activity.rs`, which timed status
-//! changes from polled snapshots; the core now stamps `status_ms` itself.
+//! terminal's status changes (v0.9, spec §4.5). It replaced the polled `ActivityTracker`; the core
+//! now stamps `status_ms` itself.
 //!
 //! Keyed by `(machine id, machine-local address)`, so a renamed machine keeps its record.
 //! Persisted as `activity.json` `{"version":2,…}`; a v1 file (or anything else) is ignored.

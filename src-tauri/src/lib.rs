@@ -1,6 +1,5 @@
 pub mod actions;
 pub mod activity;
-pub mod activity_v2;
 pub mod agents;
 pub mod commands;
 pub mod core;
@@ -9,7 +8,6 @@ pub mod herdr;
 pub mod machine_setup;
 pub mod menu;
 pub mod notify;
-pub mod poller;
 pub mod preview;
 pub mod pty;
 pub mod settings;
@@ -28,16 +26,14 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
 use crate::core::{CommandLog, CoreClient, ProcessConnector};
-use actions::Actions;
-use activity::ActivityTracker;
-use commands::AgentKindsCache;
+use activity::ActivityV2;
 use herdr::cli::HerdrCli;
 use machine_setup::MachineSetup;
-use poller::{Poller, PollerConfig};
 use preview::{PREVIEW_EVENT, PreviewManager};
 use pty::PortablePty;
 use settings::{CoreLocator, SharedSettings, ShortcutState, ShortcutStatus};
-use state::{AppState, PollIntervals};
+use state::{AppState, CoreState};
+use sync::{CoreSync, Emit, NotifySink, SyncCell};
 use terminal::InstalledCache;
 use terminal::session::TermSessions;
 use tray::{MAIN_WINDOW, POPOVER_WINDOW, PopoverGuard};
@@ -60,16 +56,17 @@ pub(crate) fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Startup wiring: read the settings, find herdr, build the CLI runner and the poller, hand them
-/// to Tauri state, start polling, and set up the tray, notifications and the global shortcut.
-/// Without herdr there is nothing to poll, so the UI just gets a state with `herdr_path: None`.
+/// Startup wiring: read the settings, build the herdr-core client, the activity record and the
+/// managed state, and set up the tray, notifications and the global shortcut. `CoreSync` itself
+/// starts once the core is located (see `locate_and_start`), because a start before that would
+/// find no binary and wait for the Reconnect button.
 fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     let settings = settings::load(&handle);
 
     // The login shell and the version check are slow, so they run after the window is up (see
-    // the end of this function). Until then the runner has no environment and no binary, and
-    // the UI shows "Connecting to herdr…".
+    // the end of this function). Until then the client has no binary, and `get_state` answers
+    // `null`, which the UI shows as "Connecting to herdr-core…".
     // One log for both doors, so the Activity drawer shows `herdr` calls and core calls in order.
     let log = Arc::new(CommandLog::default());
     let cli = HerdrCli::without_env(PathBuf::new()).with_log(log.clone());
@@ -84,67 +81,55 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let locator = CoreLocator::new();
 
     let activity_path = app.path().app_data_dir()?.join("activity.json");
-    let config = PollerConfig {
-        activity_path: Some(activity_path.clone()),
-        herdr_version: None,
-        herdr_path: None,
-    };
-    // Everything that reacts to the state without calling the poller (the tray badge, the
-    // notifications) reads this channel. The poller calls `emit` while it holds its core lock,
-    // so `emit` only does non-blocking things: send the event, replace the watched value.
+    let activity = Arc::new(Mutex::new(ActivityV2::load(activity_path)));
+    // Everything that reacts to the state without calling `CoreSync` (the tray badge, the
+    // notifications) reads this channel. The sync calls `emit` under a lock that keeps states in
+    // order, so `emit` only does non-blocking things: send the event, replace the watched value.
     let (state_tx, state_rx) = watch::channel(AppState {
         machines: Vec::new(),
-        herdr_version: None,
-        herdr_path: None,
+        core_version: None,
+        core_path: None,
+        core_state: CoreState::Connecting,
         generated_at_ms: 0,
     });
     let emit_handle = handle.clone();
-    let poller = Poller::new(
-        cli.clone(),
-        ActivityTracker::load(&activity_path),
-        config,
-        Arc::new(move |state| {
-            // Nobody listening yet is fine; `get_state` covers that.
-            let _ = emit_handle.emit("state", &state);
-            state_tx.send_replace(state);
-        }),
-    );
-    poller.set_intervals(PollIntervals::from_ms(
-        settings.poll_interval_visible_ms,
-        settings.poll_interval_hidden_ms,
-    ));
-    let refresh_poller = poller.clone();
-    let actions = Actions::new(
-        cli.clone(),
-        Arc::new(move |machine| refresh_poller.refresh_now(machine)),
-    );
+    let emit: Emit = Arc::new(move |state| {
+        // Nobody listening yet is fine; `get_state` covers that.
+        let _ = emit_handle.emit("state", state);
+        state_tx.send_replace(state.clone());
+    });
+    let shared = SharedSettings::new(settings.clone());
+    let notify = notify::start(&handle, state_rx.clone(), shared.clone());
+
+    let cell = SyncCell::default();
     let preview_handle = handle.clone();
-    let visible_poller = poller.clone();
+    let visible_cell = cell.clone();
     app.manage(PreviewManager::new(
         cli.clone(),
-        Arc::new(move || visible_poller.is_visible()),
+        Arc::new(move || {
+            visible_cell
+                .get()
+                .is_none_or(|sync| sync.is_window_visible())
+        }),
         Arc::new(move |frame| {
             let _ = preview_handle.emit(PREVIEW_EVENT, frame);
         }),
     ));
     app.manage(cli);
     app.manage(core);
-    app.manage(actions);
-    app.manage(AgentKindsCache::default());
     app.manage(InstalledCache::default());
     app.manage(MachineSetup::new(Arc::new(PortablePty)));
     // An `Arc`, so the blocking `term_*` work can move a handle into `spawn_blocking`.
     app.manage(Arc::new(TermSessions::new(Arc::new(PortablePty))));
-    app.manage(poller.clone());
+    app.manage(cell);
+    app.manage(activity.clone());
     app.manage(locator);
     app.manage(PopoverGuard::default());
     app.manage(notify::VisibleRow::default());
-    let shared = SharedSettings::new(settings.clone());
     app.manage(shared.clone());
 
     let tray_icon = tray::create_tray(&handle)?;
-    tray::start_badge(tray_icon, state_rx.clone());
-    notify::start(&handle, &poller, state_rx, shared.clone());
+    tray::start_badge(tray_icon, state_rx);
     let shortcut = ShortcutState::default();
     if settings.global_shortcut_enabled {
         shortcut.record(ShortcutStatus::after(
@@ -154,21 +139,22 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     app.manage(shortcut);
 
-    tauri::async_runtime::spawn(locate_and_start(handle));
+    tauri::async_runtime::spawn(locate_and_start(handle, activity, emit, notify));
     Ok(())
 }
 
 /// The slow part of startup, off the setup path: capture the login environment, find herdr-core
-/// and point the `CoreClient` at it, and tell the UI.
-///
-/// Until v0.9 Task 6c the poller still runs on herdr 0.9, so this also finds a legacy `herdr`
-/// (whether or not a core exists), points `HerdrCli` at it, starts polling and asks `herdr
-/// status` once for the log.
+/// and point the `CoreClient` at it, then start `CoreSync`, which tells the UI.
 ///
 /// The settings lock is taken only once the environment is captured, so a settings save during
 /// the capture is not held up. A core path saved before that is read by `locate` below; one
 /// saved after waits on the lock, and `set_settings` re-locates it because the core is located.
-async fn locate_and_start(handle: tauri::AppHandle) {
+async fn locate_and_start(
+    handle: tauri::AppHandle,
+    activity: Arc<Mutex<ActivityV2>>,
+    emit: Emit,
+    notify: NotifySink,
+) {
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
@@ -179,59 +165,32 @@ async fn locate_and_start(handle: tauri::AppHandle) {
         .vars
         .entry("SHELL".to_owned())
         .or_insert_with(|| shell.clone());
-    let (core, cli, locator, poller, shared) = (
+    let (core, locator, cell, shared) = (
         handle.state::<Arc<CoreClient>>(),
-        handle.state::<HerdrCli>(),
         handle.state::<CoreLocator>(),
-        handle.state::<Poller>(),
+        handle.state::<SyncCell>(),
         handle.state::<SharedSettings>(),
     );
-    // Until v0.9 Task 6c: `HerdrCli` (and the PTYs and launches built from it) is not the core,
-    // so it gets the legacy list without `HC_*` or `XDG_*`.
-    cli.set_env(env::legacy_forwarded_env(&login));
-    locator.set_login(login.clone());
+    locator.set_login(login);
     // The settings can't change the core's path while startup is still resolving it.
     let update = shared.begin_update().await;
-    locator
+    let status = locator
         .locate(shared.get().core_path.as_deref(), &core)
         .await;
     drop(update);
 
-    // Until v0.9 Task 6c: the poller needs a legacy herdr, found by automatic discovery only
-    // (the saved `herdr_path` setting is gone). Task 6c removes this block (and the `HerdrCli`
-    // wiring); Task 20 deletes `HerdrCli`. `find_legacy_herdr` itself stays, for `locate`.
-    let legacy = core::locate::find_legacy_herdr(&login).await;
-    let (path, version) = match legacy {
-        Some((path, version)) => (Some(path), Some(version)),
-        None => (None, None),
-    };
-    cli.set_bin(path.clone().unwrap_or_default());
-    poller.set_herdr(path.as_ref().map(|p| p.display().to_string()), version);
-    let Some(path) = path else { return };
-    if poller.claim_start() {
-        let runner = poller.inner().clone();
-        tauri::async_runtime::spawn(async move { runner.run().await });
-    }
-    log_startup_status(&cli, path).await;
-}
-
-/// Runs `herdr status` once and adds it to the command log.
-async fn log_startup_status(cli: &HerdrCli, bin: PathBuf) {
-    let started = now_ms();
-    let answered = env::herdr_status(&bin, cli.env(), settings::VERSION_TIMEOUT).await;
-    cli.record(
-        None,
-        vec!["status".to_owned()],
-        started,
-        answered.is_some().then_some(0),
-        answered
-            .is_none()
-            .then(|| "herdr status did not answer".to_owned()),
-        None,
+    let sync = CoreSync::start(
+        core.inner().clone(),
+        shared.inner().clone(),
+        activity,
+        emit,
+        notify,
     );
+    sync.set_core_path(status.path);
+    cell.set(sync);
 }
 
-/// Polls fast only while the main window is on screen.
+/// The machine list is read often only while the main window is on screen.
 fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
     let visible = match event {
         WindowEvent::Focused(true) => true,
@@ -241,8 +200,10 @@ fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
         }
         _ => return,
     };
-    if let Some(poller) = window.try_state::<Poller>() {
-        poller.set_visible(visible);
+    if let Some(cell) = window.try_state::<SyncCell>()
+        && let Some(sync) = cell.get()
+    {
+        sync.set_window_visible(visible);
     }
 }
 
@@ -307,6 +268,7 @@ pub fn run() {
             commands::machine_remove,
             commands::machine_status,
             commands::refresh_now,
+            commands::reconnect_core,
             commands::get_command_log,
             commands::list_agent_kinds,
             commands::open_session,
@@ -360,6 +322,10 @@ pub fn run() {
         RunEvent::Exit => {
             if let Some(sessions) = app.try_state::<Arc<TermSessions>>() {
                 sessions.close_all();
+            }
+            // The seen record is saved at most every 5 s; this keeps the last change.
+            if let Some(activity) = app.try_state::<Arc<Mutex<ActivityV2>>>() {
+                lock(&activity).flush();
             }
             let _ = app.save_window_state(StateFlags::all());
         }

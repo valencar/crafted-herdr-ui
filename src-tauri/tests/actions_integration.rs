@@ -1,5 +1,5 @@
 //! Runs the real `Actions` and `HerdrCli` against `scripts/fake-herdr`. The refresh hook is
-//! recorded instead of reaching a poller.
+//! recorded instead of reaching the sync.
 //!
 //! fake-herdr names its files after the joined argv, so the folders used here have no `/`.
 
@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crafted_herdr_ui_lib::actions::{ActionError, Actions, NewSessionRequest, Placement, Timeouts};
+use crafted_herdr_ui_lib::agents::DisplayStatus;
 use crafted_herdr_ui_lib::herdr::cli::HerdrCli;
 use crafted_herdr_ui_lib::herdr::errors::HerdrError;
-use crafted_herdr_ui_lib::herdr::model::AgentStatus;
 use tempfile::TempDir;
 
 fn fixture(name: &str) -> String {
@@ -190,9 +190,9 @@ async fn reply_refused_unless_the_agent_is_idle_or_done() {
     let h = Harness::new();
 
     for status in [
-        AgentStatus::Blocked,
-        AgentStatus::Working,
-        AgentStatus::Unknown,
+        DisplayStatus::Blocked,
+        DisplayStatus::Working,
+        DisplayStatus::Unknown,
     ] {
         let err = h
             .actions
@@ -217,11 +217,11 @@ async fn reply_goes_through_for_idle_or_done_agents_and_lets_herdr_decide_when_u
     h.put("agent_prompt_w1:p2_--_-x.json", "{}");
 
     h.actions
-        .reply_to_agent("local", "w1:p2", "hello", Some(AgentStatus::Idle))
+        .reply_to_agent("local", "w1:p2", "hello", Some(DisplayStatus::Idle))
         .await
         .unwrap();
     h.actions
-        .reply_to_agent("local", "w1:p2", "again", Some(AgentStatus::Done))
+        .reply_to_agent("local", "w1:p2", "again", Some(DisplayStatus::Done))
         .await
         .unwrap();
     h.actions
