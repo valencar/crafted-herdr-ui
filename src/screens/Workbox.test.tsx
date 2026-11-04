@@ -186,7 +186,7 @@ describe("Workbox", () => {
     const planner = screen.getByRole("button", { name: /planner/ });
     await user.click(planner);
     expect(calls("open_session")).toEqual([
-      { machineId: "buildbox", paneId: "w1:p1" },
+      { machineId: "buildbox", address: "w1:p1", observe: false },
     ]);
   });
 
@@ -265,9 +265,6 @@ describe("Workbox", () => {
     expect(
       screen.getByText("this computer · session default · hc 0.1.18"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Open full Herdr ↗" }),
-    ).toBeInTheDocument();
   });
 
   it("remote_machine_offers_all_machine_actions", () => {
@@ -339,27 +336,11 @@ describe("Workbox", () => {
     expect(calls("machine_set_enabled")).toEqual([]);
   });
 
-  it("open_full_herdr_targets_this_machine", async () => {
-    const user = setup();
-    await user.click(screen.getByRole("button", { name: "Open full Herdr ↗" }));
-    expect(calls("open_full_herdr")).toEqual([{ machineId: "buildbox" }]);
-    expect(useTerminalStore.getState().tabs).toEqual([]);
-  });
-
-  it("Open full herdr follows open_target", async () => {
-    useAppStore.setState({
-      settings: { open_target: "app" } as unknown as Settings,
-    });
-    const user = setup();
-    await user.click(screen.getByRole("button", { name: "Open full Herdr ↗" }));
-    expect(calls("open_full_herdr")).toEqual([]);
-    expect(useTerminalStore.getState().tabs).toMatchObject([
-      {
-        tabKey: "full::buildbox",
-        target: { kind: "full", machineId: "buildbox" },
-        machineLabel: "buildbox",
-      },
-    ]);
+  it("there_is_no_full_herdr_button_any_more", () => {
+    setup();
+    expect(
+      screen.queryByRole("button", { name: /Open full Herdr/ }),
+    ).toBeNull();
   });
 
   it("check_now_stores_the_time_and_counts_up", async () => {
@@ -466,9 +447,6 @@ describe("Workbox", () => {
     const nav = within(main).getByRole("navigation", { name: "Breadcrumb" });
     expect(within(nav).getByText("buildbox")).toBeInTheDocument();
     expect(
-      within(main).getByRole("button", { name: "Open full Herdr ↗" }),
-    ).toBeInTheDocument();
-    expect(
       within(main).getByRole("button", { name: /\+ New session/ }),
     ).toBeInTheDocument();
     // First thing in main, above the summary.
@@ -561,13 +539,19 @@ describe("Workbox pane tails", () => {
         tabs: [
           {
             tabKey: "buildbox::w1:p1",
-            target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+            target: {
+              kind: "terminal",
+              machineId: "buildbox",
+              address: "w1:p1",
+            },
             title: "planner",
             machineLabel: "buildbox",
             state: "live",
             error: null,
             termId: 1,
             exitCode: null,
+            lastLine: null,
+            waiting: null,
             attempts: 0,
           },
         ],

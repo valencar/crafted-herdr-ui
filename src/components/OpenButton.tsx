@@ -3,7 +3,7 @@ import { formatTabShortcut } from "../lib/shortcuts";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Row } from "../lib/grouping";
 import { copyText, invokeTyped } from "../lib/ipc";
-import { openFull, openRow } from "../lib/openRow";
+import { openRow } from "../lib/openRow";
 import { PINNED, useMenuBehavior } from "../lib/useMenuBehavior";
 import { useAppStore } from "../store/appStore";
 import { tabShortcut } from "../terminal/tabOrder";
@@ -74,7 +74,7 @@ export function OpenButton({
     attachCommand.current = null;
     const fetching = invokeTyped("copy_attach_command", {
       machineId: row.machineId,
-      paneId: row.paneId,
+      address: row.address,
     });
     attach.current = fetching;
     // A failure surfaces only if the user asks to copy.
@@ -84,7 +84,7 @@ export function OpenButton({
       },
       () => {},
     );
-  }, [open, row.machineId, row.paneId]);
+  }, [open, row.machineId, row.address]);
 
   const toggle = () => {
     if (!open) {
@@ -185,16 +185,6 @@ export function OpenButton({
             onClick={() => choose(() => void openRow(row, "external"))}
           >
             Open in {terminalName}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="menu-item"
-            onClick={() =>
-              choose(() => void openFull(row.machineId, row.machineLabel))
-            }
-          >
-            Open full herdr UI
           </button>
           <div className="menu-sep" role="separator" />
           <button

@@ -27,7 +27,7 @@ describe("new-in-workbox", () => {
   const openTab = (machineId: string) => {
     useTerminalStore.getState().openTab({
       tabKey: `${machineId}::w1:p1`,
-      target: { kind: "pane", machineId, paneId: "w1:p1" },
+      target: { kind: "terminal", machineId, address: "w1:p1" },
       title: "agent",
       machineLabel: machineId,
     });

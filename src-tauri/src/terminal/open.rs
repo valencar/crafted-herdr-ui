@@ -1,12 +1,13 @@
 //! What "Open" runs, handed to the user's terminal as the settings say, and the command-log
-//! entry for it. The attach commands themselves come back with herdr-core's `hc attach` (Task 8).
+//! entry for it. The command itself (`hc attach <address>`, built by `attach.rs`) is the same for
+//! Local and a remote workbox.
 //!
 //! Takes the home directory as an argument, so nothing in `terminal/` depends on Tauri.
 
 use std::path::PathBuf;
 
 use crate::actions::ActionError;
-use crate::herdr::cli::HerdrCli;
+use crate::core::CoreClient;
 use crate::herdr::errors::HerdrError;
 use crate::settings::{Settings, SharedSettings};
 
@@ -35,11 +36,11 @@ fn launch_spec(
     Ok(launcher_for(terminal, home, template).spec(argv, settings.open_mode, title))
 }
 
-/// What the Activity drawer shows for a command that was handed to a terminal: the herdr
-/// arguments (without the binary) and the machine they were for.
+/// What the Activity drawer shows for a command that was handed to a terminal: the machine it
+/// was for (`"local"` when none) and the command line (`hc attach buildbox/t7`).
 pub(crate) struct LaunchLog<'a> {
-    pub(crate) machine: Option<&'a str>,
-    pub(crate) args: Vec<String>,
+    pub(crate) machine_id: &'a str,
+    pub(crate) display: String,
 }
 
 /// The note on a command-log entry for a launch: the app can't see how the command ends, so
@@ -49,10 +50,12 @@ fn opened_in(terminal: TerminalId) -> String {
 }
 
 /// Opens `argv` in the user's terminal, as the settings say (read now, so a change applies to
-/// the next open), and adds the launch to the command log.
+/// the next open), and adds the launch to the command log. `env` is the core environment.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn launch_in_terminal(
     home: PathBuf,
-    cli: &HerdrCli,
+    core: &CoreClient,
+    env: &[(String, String)],
     installed: &InstalledCache,
     settings: &SharedSettings,
     argv: &[String],
@@ -63,17 +66,15 @@ pub(crate) async fn launch_in_terminal(
     let installed = installed.get().await;
     let spec =
         launch_spec(&settings, &installed, home, argv, title).map_err(ActionError::invalid)?;
-    let started = crate::now_ms();
-    launch(&spec, cli.env())
+    launch(&spec, env)
         .await
         .map_err(|message| ActionError::Herdr {
             error: HerdrError::Spawn { message },
         })?;
-    cli.record_launch(
-        log.machine,
-        log.args,
-        started,
-        opened_in(chosen_terminal(&settings, &installed)),
+    core.log_note(
+        log.machine_id,
+        log.display,
+        &opened_in(chosen_terminal(&settings, &installed)),
     );
     Ok(())
 }

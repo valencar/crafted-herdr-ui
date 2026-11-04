@@ -4,6 +4,7 @@ import type { TermTarget } from "../lib/bindings/TermTarget";
 import { actionErrorMessage } from "../lib/format";
 import { invokeTyped, openTerm, toActionError } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
+import { rowFor } from "./tabInfo";
 import { useTerminalStore, type TermTab } from "./terminalStore";
 
 type Size = { cols: number; rows: number };
@@ -18,8 +19,10 @@ type Writer = { id: number; busy: boolean; pending: string };
 /**
  * One tab's session with the Rust side: opens it into `termRef`'s terminal on mount, streams
  * its output, forwards keystrokes, and closes it on unmount. `reattach` opens a fresh session
- * into the same terminal (after a detach or an error). Declare this hook after the effect that
- * creates the terminal, so the terminal exists when the session opens.
+ * into the same terminal after a click (a detach or an error); `resume` does the same when the
+ * tab decided to by itself (see `settle` in the store), so it does not count as an attempt.
+ * Declare this hook after the effect that creates the terminal, so the terminal exists when the
+ * session opens.
  */
 export function useTermSession(
   tab: Pick<TermTab, "tabKey" | "target">,
@@ -62,40 +65,54 @@ export function useTermSession(
       state: "opening",
       error: null,
       exitCode: null,
+      lastLine: null,
+      waiting: null,
       attempts: again ? attempts + 1 : attempts,
     });
     sentSize.current = { cols: term.cols, rows: term.rows };
     let exited = false;
-    // A session is live once it has printed: ssh can sit connecting to a box that is down for a
-    // minute or more, and until then the tab stays "opening" (a reattach keeps its bar).
+    // A session is live once it has printed: `hc attach` to a workbox that is dialing can sit
+    // for a while, and until then the tab stays "opening" (a reattach keeps its bar).
     let printed = false;
     try {
-      const id = await openTerm(target, term.cols, term.rows, (e) => {
-        if (mine !== generation.current) return;
-        if (e.kind === "data") {
-          term.write(e.data);
-          if (!printed) {
-            printed = true;
-            // Before the open returns there is no id yet; the open goes live itself then.
-            if (idRef.current !== null)
-              useTerminalStore.getState().updateTab(tabKey, { state: "live" });
+      const id = await openTerm(
+        target,
+        term.cols,
+        term.rows,
+        (e) => {
+          if (mine !== generation.current) return;
+          if (e.kind === "data") {
+            term.write(e.data);
+            if (!printed) {
+              printed = true;
+              // Before the open returns there is no id yet; the open goes live itself then.
+              if (idRef.current !== null)
+                useTerminalStore
+                  .getState()
+                  .updateTab(tabKey, { state: "live" });
+            }
+            return;
           }
-          return;
-        }
-        exited = true;
-        idRef.current = null;
-        writer.current = null;
-        // Only a normal end (exit 0) clears the count. A session is "live" from the moment its
-        // pty runs, and the attach script's own failures (herdr missing, a declined takeover, a
-        // slow ssh timeout) wait on a human or the network, so how long it lived says nothing.
-        const worked = !e.code;
-        useTerminalStore.getState().updateTab(tabKey, {
-          state: "detached",
-          termId: null,
-          exitCode: e.code,
-          ...(worked && { attempts: 0 }),
-        });
-      });
+          exited = true;
+          idRef.current = null;
+          writer.current = null;
+          // Only a normal end (exit 0) clears the count: a session is "live" from the moment its
+          // pty runs, and an attach that fails (exit 3, 5…) says so within a moment, so how long
+          // it lived says nothing.
+          const { state } = useAppStore.getState();
+          useTerminalStore
+            .getState()
+            .sessionEnded(
+              tabKey,
+              { code: e.code, lastLine: e.last_line },
+              rowFor(state, tabKey),
+              state?.core_state.kind ?? "connecting",
+            );
+          if (!e.code)
+            useTerminalStore.getState().updateTab(tabKey, { attempts: 0 });
+        },
+        false,
+      );
       if (mine !== generation.current) {
         // Unmounted, or replaced by a newer open, while this one was starting.
         invokeTyped("term_close", { id }).catch(() => {});
@@ -171,5 +188,5 @@ export function useTermSession(
     asked.current = true;
     return open();
   }, [open]);
-  return { reattach, resize };
+  return { reattach, resume: open, resize };
 }

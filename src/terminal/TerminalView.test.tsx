@@ -244,7 +244,7 @@ beforeEach(() => {
   });
   useTerminalStore.getState().openTab({
     tabKey: KEY,
-    target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+    target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
     title: "agent",
     machineLabel: "buildbox",
   });
@@ -293,10 +293,11 @@ describe("TerminalView", () => {
     render(<Harness />);
     await flush();
     expect(open).toHaveBeenCalledWith(
-      { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+      { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
       100,
       30,
       expect.any(Function),
+      false,
     );
     expect(term().options).toMatchObject({
       fontSize: 13,
@@ -466,7 +467,7 @@ describe("TerminalView", () => {
       const other = "buildbox::w1:p2";
       useTerminalStore.getState().openTab({
         tabKey: other,
-        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p2" },
+        target: { kind: "terminal", machineId: "buildbox", address: "w1:p2" },
         title: "second",
         machineLabel: "buildbox",
       });
@@ -633,7 +634,7 @@ describe("TerminalView", () => {
     );
     term().dataHandler?.("a");
     term().dataHandler?.("b");
-    emit({ kind: "exit", code: 0 });
+    emit({ kind: "exit", code: 0, last_line: null });
     invoke.mockClear();
     settle();
     await flush();
@@ -662,14 +663,14 @@ describe("TerminalView", () => {
     const user = userEvent.setup();
     render(<Harness />);
     await flush();
-    emit({ kind: "exit", code: 0 });
-    expect(screen.getByText("Detached. The attach ended.")).toBeInTheDocument();
+    emit({ kind: "exit", code: 0, last_line: "[detached from w1:p1]" });
+    expect(screen.getByText("Detached.")).toBeInTheDocument();
     expect(tabState()).toMatchObject({ state: "detached", termId: null });
     await user.click(screen.getByRole("button", { name: "Reattach" }));
     await flush();
     expect(open).toHaveBeenCalledTimes(2);
     expect(tabState()).toMatchObject({ state: "live", termId: 8 });
-    expect(screen.queryByText("Detached. The attach ended.")).toBeNull();
+    expect(screen.queryByText("Detached.")).toBeNull();
     // Both sessions stream into the one terminal.
     expect(h.terms).toHaveLength(1);
     emit({ kind: "data", data: "again" });
@@ -722,7 +723,7 @@ describe("TerminalView", () => {
       render(<Harness />);
       await flush();
       emit({ kind: "data", data: "herdr" });
-      emit({ kind: "exit", code: 255 });
+      emit({ kind: "exit", code: 255, last_line: null });
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
       // The network is still down: ssh runs, but the tab is not left blank.
@@ -738,7 +739,7 @@ describe("TerminalView", () => {
       const user = userEvent.setup();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 255 });
+      emit({ kind: "exit", code: 255, last_line: null });
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
       await user.click(screen.getByRole("button", { name: "Close tab" }));
@@ -751,7 +752,7 @@ describe("TerminalView", () => {
     const user = userEvent.setup();
     render(<Harness />);
     await flush();
-    emit({ kind: "exit", code: null });
+    emit({ kind: "exit", code: null, last_line: null });
     await user.click(screen.getByRole("button", { name: "Close tab" }));
     expect(useTerminalStore.getState().tabs).toEqual([]);
   });
@@ -801,7 +802,7 @@ describe("TerminalView", () => {
     const failWith = (code: number | null) =>
       open.mockImplementation(async (_t, _c, _r, onEvent) => {
         emitters.push(onEvent);
-        queueMicrotask(() => onEvent({ kind: "exit", code }));
+        queueMicrotask(() => onEvent({ kind: "exit", code, last_line: null }));
         return 50;
       });
 
@@ -810,43 +811,153 @@ describe("TerminalView", () => {
     it("an_exit_with_code_1_says_so_and_the_output_stays_uncovered", async () => {
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
-      expect(
-        screen.getByText("The attach command stopped with exit 1."),
-      ).toBeInTheDocument();
-      expect(screen.getByText("Its output is above.")).toBeInTheDocument();
-      expect(tabState()).toMatchObject({ state: "detached", exitCode: 1 });
+      emit({ kind: "exit", code: 1, last_line: "error: boom" });
+      expect(screen.getByText("Couldn't attach: boom")).toBeInTheDocument();
+      expect(tabState()).toMatchObject({
+        state: "detached",
+        exitCode: 1,
+        lastLine: "error: boom",
+      });
       // The host (xterm) is a sibling of the bar, and still there.
       const host = document.querySelector(".term-host");
       expect(host).not.toBeNull();
       expect(host?.contains(document.querySelector(".term-bar"))).toBe(false);
     });
 
-    it("a_remote_255_names_the_workbox", async () => {
+    it.each([
+      [3, 'error: no terminal "w1:p1"', "This terminal is gone."],
+      [
+        4,
+        'error: unknown machine "buildbox"',
+        "That workbox isn't known to herdr-core.",
+      ],
+      [5, "error: buildbox is unreachable", "Not available right now."],
+      [11, "error: w1:p1 has finished", "The program has ended."],
+      [127, null, "herdr-core not found."],
+    ])("exit_%i_says_it_in_the_spec_words", async (code, line, words) => {
       listed();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 255 });
-      expect(
-        screen.getByText("Couldn’t reach buildbox over ssh."),
-      ).toBeInTheDocument();
+      emit({ kind: "exit", code, last_line: line });
+      expect(screen.getByText(words)).toBeInTheDocument();
     });
 
-    it("a_local_255_is_a_plain_non_zero_exit", async () => {
-      listed({ local: true });
+    it("the_program_ending_names_its_reason", async () => {
+      listed();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 255 });
-      expect(
-        screen.getByText("The attach command stopped with exit 255."),
-      ).toBeInTheDocument();
+      emit({ kind: "exit", code: 0, last_line: "[w1:p1 finished: exited]" });
+      expect(screen.getByText("The program ended (exited).")).toBeVisible();
+    });
+
+    /** buildbox listed with this tab's terminal kept (or not), `restarts` times restarted. */
+    const kept = (restarts: number, keep = true, core = "ready" as const) => {
+      const state: AppState = appState([
+        [machine({ id: "buildbox", target: "buildbox" }), buildboxTerms()],
+      ]);
+      const mine = state.machines[0].terminals.find(
+        (t) => t.address === "w1:p1",
+      )!;
+      Object.assign(mine, { keep, restarts });
+      act(() =>
+        useAppStore.setState({
+          state: { ...state, core_state: { kind: core } },
+        }),
+      );
+    };
+    const coreIs = (kind: "connecting" | "ready" | "stopped") =>
+      act(() => {
+        const state = useAppStore.getState().state!;
+        useAppStore.setState({
+          state: {
+            ...state,
+            core_state:
+              kind === "stopped"
+                ? { kind, error: "gone" }
+                : ({ kind } as AppState["core_state"]),
+          },
+        });
+      });
+
+    it("a_kept_loss_waits_for_a_new_shell_and_reattaches_once_on_a_restart", async () => {
+      kept(1);
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0, last_line: "[w1:p1 finished: signaled]" });
+      expect(screen.getByText("Waiting for a new shell…")).toBeVisible();
+      expect(screen.queryByText(/The program ended/)).toBeNull();
+      expect(open).toHaveBeenCalledTimes(1);
+      // The button is still there for a person in a hurry.
+      expect(screen.getByRole("button", { name: "Reattach" })).toBeVisible();
+
+      kept(2);
+      await flush();
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(tabState()).toMatchObject({
+        state: "live",
+        waiting: null,
+        // Not a click: it is no attempt.
+        attempts: 0,
+      });
+      // It happened once: more restarts do not reattach a live tab.
+      kept(3);
+      await flush();
+      expect(open).toHaveBeenCalledTimes(2);
+    });
+
+    it("a_signaled_end_on_a_row_that_is_not_kept_reads_as_a_program_end", async () => {
+      kept(1, false);
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0, last_line: "[w1:p1 finished: signaled]" });
+      expect(screen.getByText("The program ended (signaled).")).toBeVisible();
+      kept(2, false);
+      await flush();
+      expect(open).toHaveBeenCalledTimes(1);
+    });
+
+    it("a_lost_core_reattaches_once_when_the_core_is_ready_again", async () => {
+      kept(0);
+      render(<Harness />);
+      await flush();
+      emit({
+        kind: "exit",
+        code: 0,
+        last_line: "[lost the core; it keeps w1:p1 running: hc attach w1:p1]",
+      });
+      expect(screen.getByText("herdr-core stopped answering.")).toBeVisible();
+      coreIs("connecting");
+      await flush();
+      coreIs("stopped");
+      await flush();
+      expect(open).toHaveBeenCalledTimes(1);
+      coreIs("ready");
+      await flush();
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(tabState()).toMatchObject({ state: "live", attempts: 0 });
+      coreIs("connecting");
+      coreIs("ready");
+      await flush();
+      expect(open).toHaveBeenCalledTimes(2);
+    });
+
+    it("a_plain_detach_waits_for_the_button_whatever_the_row_does", async () => {
+      kept(1);
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0, last_line: "[detached from w1:p1]" });
+      kept(2);
+      coreIs("connecting");
+      coreIs("ready");
+      await flush();
+      expect(open).toHaveBeenCalledTimes(1);
     });
 
     it("going_live_again_clears_the_exit_code", async () => {
       const user = userEvent.setup();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       expect(tabState().exitCode).toBe(1);
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
@@ -857,16 +968,16 @@ describe("TerminalView", () => {
       const user = userEvent.setup();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       // The pty starts (the tab is live), then the attach command inside fails.
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
       expect(tabState().state).toBe("live");
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       expect(screen.getByText("Reattach failed (attempt 1).")).toBeVisible();
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       expect(screen.getByText("Reattach failed (attempt 2).")).toBeVisible();
     });
 
@@ -876,7 +987,7 @@ describe("TerminalView", () => {
       const user = userEvent.setup();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 127 });
+      emit({ kind: "exit", code: 127, last_line: null });
       const now = vi.spyOn(Date, "now");
       const start = Date.now();
       try {
@@ -885,7 +996,7 @@ describe("TerminalView", () => {
           await flush();
           expect(tabState().state).toBe("live");
           now.mockReturnValue(start + n * 30_000);
-          emit({ kind: "exit", code: 127 });
+          emit({ kind: "exit", code: 127, last_line: null });
           expect(
             screen.getByText(`Reattach failed (attempt ${n}).`),
           ).toBeVisible();
@@ -899,14 +1010,14 @@ describe("TerminalView", () => {
       const user = userEvent.setup();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       expect(tabState().attempts).toBe(1);
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
-      emit({ kind: "exit", code: 0 });
+      emit({ kind: "exit", code: 0, last_line: null });
       expect(tabState().attempts).toBe(0);
       expect(screen.queryByText(/Reattach failed/)).toBeNull();
     });
@@ -915,7 +1026,7 @@ describe("TerminalView", () => {
       const user = userEvent.setup();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       open.mockRejectedValueOnce({ kind: "invalid", message: "No can do." });
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
@@ -948,7 +1059,7 @@ describe("TerminalView", () => {
         .mockReturnValue(600);
       term().rows = 30;
       try {
-        emit({ kind: "exit", code: 1 });
+        emit({ kind: "exit", code: 1, last_line: null });
         expect(term().write).toHaveBeenCalledWith("\r\n\r\n");
       } finally {
         height.mockRestore();
@@ -981,7 +1092,7 @@ describe("TerminalView", () => {
       it("is_topped_up_by_the_missing_rows_once_it_is_shown", async () => {
         const view = render(<Harness active={false} />);
         await flush();
-        emit({ kind: "exit", code: 1 });
+        emit({ kind: "exit", code: 1, last_line: null });
         expect(lifts()).toEqual([4]);
         // 120 px of bar over 20 px rows: six rows, two more than the fallback lifted.
         const restore = barOf(120);
@@ -1000,7 +1111,7 @@ describe("TerminalView", () => {
       it("measures_with_the_rows_the_box_now_fits_not_the_ones_of_the_last_fit", async () => {
         const view = render(<Harness active={false} />);
         await flush();
-        emit({ kind: "exit", code: 1 });
+        emit({ kind: "exit", code: 1, last_line: null });
         expect(lifts()).toEqual([4]);
         // An 800 px host fits 40 rows of 20 px, but the terminal still has its default 24
         // (never fitted while hidden): 120 px of bar is six rows, not four.
@@ -1025,7 +1136,7 @@ describe("TerminalView", () => {
         listed();
         render(<Harness />);
         await flush();
-        emit({ kind: "exit", code: 0 });
+        emit({ kind: "exit", code: 0, last_line: null });
         expect(lifts()).toEqual([4]);
         // The pane vanishes: the bar shows other words and buttons and grows to six rows.
         const restore = barOf(120);
@@ -1040,7 +1151,7 @@ describe("TerminalView", () => {
       it("writes_nothing_more_when_the_lift_already_covers_the_bar", async () => {
         const view = render(<Harness active={false} />);
         await flush();
-        emit({ kind: "exit", code: 1 });
+        emit({ kind: "exit", code: 1, last_line: null });
         // 60 px of bar over 20 px rows: three rows, fewer than the four lifted.
         const restore = barOf(60);
         try {
@@ -1056,13 +1167,13 @@ describe("TerminalView", () => {
         listed();
         const view = render(<Harness active={false} />);
         await flush();
-        emit({ kind: "exit", code: 1 });
+        emit({ kind: "exit", code: 1, last_line: null });
         expect(lifts()).toEqual([4]);
         view.rerender(<Harness active />);
         await user.click(screen.getByRole("button", { name: "Reattach" }));
         await flush();
         expect(tabState().state).toBe("live");
-        emit({ kind: "exit", code: 1 });
+        emit({ kind: "exit", code: 1, last_line: null });
         expect(lifts()).toEqual([4, 4]);
       });
 
@@ -1082,7 +1193,7 @@ describe("TerminalView", () => {
     it("an_unmeasurable_bar_still_lifts_the_output", async () => {
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       expect(term().write).toHaveBeenCalledWith("\r\n\r\n\r\n\r\n");
     });
 
@@ -1090,7 +1201,7 @@ describe("TerminalView", () => {
       const user = userEvent.setup();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 0 });
+      emit({ kind: "exit", code: 0, last_line: null });
       // Plain detach: no failure to report yet.
       expect(screen.queryByText(/Reattach failed/)).toBeNull();
       failWith(1);
@@ -1103,9 +1214,7 @@ describe("TerminalView", () => {
       expect(screen.getByText("Reattach failed (attempt 2).")).toBeVisible();
       expect(screen.queryByText("Reattach failed (attempt 1).")).toBeNull();
       // The reason is still there under the count.
-      expect(
-        screen.getByText("The attach command stopped with exit 1."),
-      ).toBeVisible();
+      expect(screen.getByText("Couldn't attach.")).toBeVisible();
     });
 
     it("while_reattaching_the_bar_says_so_and_its_buttons_are_disabled", async () => {
@@ -1113,7 +1222,7 @@ describe("TerminalView", () => {
       const user = userEvent.setup();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       let finish: (id: number) => void = () => {};
       open.mockImplementationOnce(
         (_target, _c, _r, onEvent) =>
@@ -1163,9 +1272,9 @@ describe("TerminalView", () => {
       listed({ gone: true });
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 0 });
+      emit({ kind: "exit", code: 0, last_line: null });
       expect(
-        screen.getByText("This pane no longer exists on buildbox."),
+        screen.getByText("This terminal no longer exists on buildbox."),
       ).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
       expect(
@@ -1186,7 +1295,7 @@ describe("TerminalView", () => {
       await flush();
       expect(tabState().state).toBe("error");
       expect(
-        screen.getByText("This pane no longer exists on buildbox."),
+        screen.getByText("This terminal no longer exists on buildbox."),
       ).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
@@ -1201,7 +1310,7 @@ describe("TerminalView", () => {
       listed();
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 0 });
+      emit({ kind: "exit", code: 0, last_line: null });
       expect(screen.getByRole("button", { name: "Reattach" })).toHaveFocus();
       listed({ gone: true });
       expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
@@ -1220,7 +1329,7 @@ describe("TerminalView", () => {
       );
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 0 });
+      emit({ kind: "exit", code: 0, last_line: null });
       expect(screen.queryByText(/no longer exists/)).toBeNull();
       expect(screen.getByRole("button", { name: "Reattach" })).toBeVisible();
     });
@@ -1233,13 +1342,13 @@ describe("TerminalView", () => {
       );
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       await user.click(
         screen.getByRole("button", { name: "Copy attach command" }),
       );
       expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
         machineId: "buildbox",
-        paneId: "w1:p1",
+        address: "w1:p1",
       });
       expect(copy).toHaveBeenCalledWith("ssh -t buildbox herdr attach");
     });
@@ -1254,12 +1363,13 @@ describe("TerminalView", () => {
       );
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       await flush(); // the terminal list arrives
       await user.click(screen.getByRole("button", { name: "Open in Ghostty" }));
       expect(invoke).toHaveBeenCalledWith("open_session", {
         machineId: "buildbox",
-        paneId: "w1:p1",
+        address: "w1:p1",
+        observe: false,
       });
     });
 
@@ -1269,7 +1379,7 @@ describe("TerminalView", () => {
       document.addEventListener("keydown", onKey);
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 1 });
+      emit({ kind: "exit", code: 1, last_line: null });
       expect(screen.getByRole("button", { name: "Reattach" })).toHaveFocus();
       await user.keyboard("{Escape}");
       expect(onKey).toHaveBeenCalledTimes(1);
@@ -1305,7 +1415,7 @@ describe("TerminalView", () => {
 
   it("an_exit_that_arrives_before_the_open_resolves_still_ends_detached", async () => {
     open.mockReset().mockImplementation(async (_t, _c, _r, onEvent) => {
-      onEvent({ kind: "exit", code: 1 });
+      onEvent({ kind: "exit", code: 1, last_line: null });
       return 40;
     });
     render(<Harness />);
@@ -1323,7 +1433,7 @@ describe("TerminalView", () => {
       }),
     );
     term().dataHandler?.("a"); // in flight when the session ends
-    emit({ kind: "exit", code: 0 });
+    emit({ kind: "exit", code: 0, last_line: null });
     fail({ kind: "invalid", message: "That terminal is no longer open." });
     await flush();
     invoke.mockClear();
@@ -1837,7 +1947,7 @@ describe("TerminalView", () => {
     act(() =>
       useTerminalStore.getState().updateTab(KEY, {
         title: "renamed",
-        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+        target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
       }),
     );
     await flush();

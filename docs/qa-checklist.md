@@ -328,3 +328,8 @@ Workbox colors and agent logos. Use generic data (buildbox, gpubox, staging; api
 herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, infra).
 
 - [ ] Lists fill and statuses move against the sandbox core (`HC_SESSION=herdr-ui-qa`, scratch XDG dirs).
+- [ ] Open a Local terminal and a terminal on a second machine (`buildbox`) with "Open in {Terminal}": the window runs `hc attach t7` / `hc attach buildbox/t7` directly (no `ssh -t`, no takeover prompt), in Ghostty, iTerm2 and Terminal.app. The Activity drawer shows the same line, and Copy puts it on the clipboard and it works in a shell. Try a fish login shell and a core path with a space.
+- [ ] In an in-app tab press `Ctrl+\` to detach: the bar says "Detached." Kill the terminal's program (`hc kill t7`): "The program ended (killed)." Run `hc server stop` in a scratch session: "herdr-core stopped.", and the tab reattaches by itself when the core is back.
+- [ ] In a scratch session, kill a kept terminal's shell with a signal: the tab says "Waiting for a new shell…" and reattaches by itself once, when the new shell starts.
+- [ ] Open a tab on a machine that is unreachable: the bar says "Not available right now." and Reattach works once it is back. Remove a terminal from another window: "This terminal is gone."
+- [ ] Workbox "Open in terminal" (Add workbox) opens `hc machine add <target> …` in the default terminal.

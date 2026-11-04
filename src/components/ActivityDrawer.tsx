@@ -18,11 +18,10 @@ type Props = {
 };
 
 /**
- * The line to copy: `display`, which Rust builds. A command handed to a terminal on a remote
- * workbox has none, because the line it ran (`ssh -t …`) isn't what `display` names.
+ * The line to copy: `display`, which Rust builds. A command handed to a terminal is the same
+ * `hc attach buildbox/t7` for Local and a remote workbox, so every entry has one.
  */
 function runnable(entry: CommandLogEntry): string | null {
-  if (entry.note !== null && entry.machine !== null) return null;
   return entry.display;
 }
 

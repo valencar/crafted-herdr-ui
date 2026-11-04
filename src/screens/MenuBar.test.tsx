@@ -25,7 +25,6 @@ const SETTINGS: Settings = {
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
-  attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
   group_by: "project",
@@ -131,7 +130,7 @@ describe("MenuBar", () => {
     await user.click(within(first).getByRole("button", { name: /^Open/ }));
     expect(invoke).toHaveBeenCalledWith("show_main_open_row", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     });
     expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
@@ -147,7 +146,8 @@ describe("MenuBar", () => {
     await user.click(within(first).getByRole("button", { name: /^Open/ }));
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 

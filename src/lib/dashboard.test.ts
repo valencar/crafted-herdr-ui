@@ -257,13 +257,15 @@ describe("failing workboxes", () => {
 describe("error and ended on the dashboard", () => {
   const tabFor = (key: string): TermTab => ({
     tabKey: key,
-    target: { kind: "pane", machineId: "local", paneId: key },
+    target: { kind: "terminal", machineId: "local", address: key },
     title: key,
     machineLabel: "local",
     state: "live",
     error: null,
     termId: 1,
     exitCode: null,
+    lastLine: null,
+    waiting: null,
     attempts: 0,
   });
 

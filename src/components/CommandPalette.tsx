@@ -243,9 +243,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       ],
       openTabs: stripOrder(tabs, machines ?? []).map((tab) => {
         const row = rowsByKey.get(tab.tabKey) ?? null;
-        const words =
-          tabStatus(tab, row ?? undefined) ??
-          (tab.target.kind === "full" ? "Full herdr UI" : null);
+        const words = tabStatus(tab, row ?? undefined);
         const n = tabShortcut(tab.tabKey, tabs, machines ?? []);
         return {
           key: tab.tabKey,

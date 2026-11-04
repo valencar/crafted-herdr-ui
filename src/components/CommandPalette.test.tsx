@@ -220,13 +220,19 @@ describe("CommandPalette", () => {
         tabs: [
           {
             tabKey: "buildbox::w1:p1",
-            target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+            target: {
+              kind: "terminal",
+              machineId: "buildbox",
+              address: "w1:p1",
+            },
             title: "planner",
             machineLabel: "buildbox",
             state: "live",
             error: null,
             termId: 1,
             exitCode: null,
+            lastLine: null,
+            waiting: null,
             attempts: 0,
           },
         ],
@@ -262,7 +268,8 @@ describe("CommandPalette", () => {
       await user.keyboard("{Meta>}{Enter}{/Meta}");
       expect(invoke).toHaveBeenCalledWith("open_session", {
         machineId: "buildbox",
-        paneId: "w1:p1",
+        address: "w1:p1",
+        observe: false,
       });
       expect(useTerminalStore.getState().activeKey).toBe(HOME);
     });
@@ -619,13 +626,15 @@ describe("CommandPalette agent frame", () => {
       tabs: [
         {
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "planner",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: 1,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],
@@ -638,7 +647,8 @@ describe("CommandPalette agent frame", () => {
     await user.click(screen.getByRole("option", { name: /Open in Ghostty/ }));
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
     expect(useTerminalStore.getState().activeKey).toBe(HOME);
     cleanup();
@@ -751,13 +761,15 @@ describe("CommandPalette agent frame", () => {
       tabs: [
         {
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "planner",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: 1,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],
@@ -782,13 +794,15 @@ describe("CommandPalette agent frame", () => {
       tabs: [
         {
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "planner",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: 1,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],
@@ -944,7 +958,8 @@ describe("CommandPalette agent frame", () => {
     await user.keyboard("{Tab}{Meta>}{Enter}{/Meta}");
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

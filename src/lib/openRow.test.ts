@@ -10,7 +10,7 @@ vi.mock("./ipc", async (importOriginal) => ({
 import { invokeTyped } from "./ipc";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import type { Settings } from "./bindings/Settings";
-import { markSeen, openRow, openFull } from "./openRow";
+import { markSeen, openRow } from "./openRow";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
@@ -29,6 +29,8 @@ function row(status: Row["status"]): Row {
   });
 }
 const target = { machineId: "buildbox", paneId: "w1:p1" };
+/** What `open_session` takes: the machine-local address, and Watch off. */
+const opened = { machineId: "buildbox", address: "w1:p1", observe: false };
 
 function openSessionsIn(open_target: "app" | "external") {
   useAppStore.setState({ settings: { open_target } as unknown as Settings });
@@ -55,7 +57,7 @@ describe("openRow", () => {
     expect(store.tabs).toMatchObject([
       {
         tabKey: "buildbox::w1:p1",
-        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+        target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
         title: "planner",
         machineLabel: "buildbox",
       },
@@ -74,7 +76,7 @@ describe("openRow", () => {
   it("external target calls open_session", async () => {
     openSessionsIn("external");
     await openRow(row("blocked"));
-    expect(invoke.mock.calls).toEqual([["open_session", target]]);
+    expect(invoke.mock.calls).toEqual([["open_session", opened]]);
     expect(useTerminalStore.getState().tabs).toEqual([]);
   });
 
@@ -91,7 +93,7 @@ describe("openRow", () => {
     });
     openSessionsIn("app");
     await openRow(row("blocked"), "external");
-    expect(invoke.mock.calls).toEqual([["open_session", target]]);
+    expect(invoke.mock.calls).toEqual([["open_session", opened]]);
     expect(useTerminalStore.getState().tabs).toEqual([]);
   });
 
@@ -111,7 +113,7 @@ describe("openRow", () => {
   it("opens the session and marks a done agent seen, in that order", async () => {
     await openRow(row("done"));
     expect(invoke.mock.calls).toEqual([
-      ["open_session", target],
+      ["open_session", opened],
       ["mark_seen", target],
     ]);
   });
@@ -120,7 +122,7 @@ describe("openRow", () => {
     "only opens a %s row",
     async (status) => {
       await openRow(row(status));
-      expect(invoke.mock.calls).toEqual([["open_session", target]]);
+      expect(invoke.mock.calls).toEqual([["open_session", opened]]);
     },
   );
 
@@ -142,38 +144,5 @@ describe("markSeen", () => {
     invoke.mockRejectedValueOnce({ kind: "invalid", message: "gone" });
     markSeen(row("done"));
     await vi.waitFor(() => expect(useAppStore.getState().toast).toBe("gone"));
-  });
-});
-
-describe("openFull", () => {
-  it("app target opens the full UI tab for the machine", async () => {
-    openSessionsIn("app");
-    await openFull("buildbox", "buildbox");
-    expect(useTerminalStore.getState().tabs).toMatchObject([
-      {
-        tabKey: "full::buildbox",
-        target: { kind: "full", machineId: "buildbox" },
-        machineLabel: "buildbox",
-      },
-    ]);
-    expect(invoke).not.toHaveBeenCalled();
-  });
-
-  it("external target calls open_full_herdr, and how overrides the setting", async () => {
-    openSessionsIn("external");
-    await openFull("buildbox", "buildbox");
-    expect(invoke.mock.calls).toEqual([
-      ["open_full_herdr", { machineId: "buildbox" }],
-    ]);
-    invoke.mockClear();
-    await openFull("buildbox", "buildbox", "app");
-    expect(invoke).not.toHaveBeenCalled();
-    expect(useTerminalStore.getState().tabs).toHaveLength(1);
-  });
-
-  it("reports a failed external open to the toast", async () => {
-    invoke.mockRejectedValueOnce({ kind: "invalid", message: "no terminal" });
-    await openFull("buildbox", "buildbox", "external");
-    expect(useAppStore.getState().toast).toBe("no terminal");
   });
 });

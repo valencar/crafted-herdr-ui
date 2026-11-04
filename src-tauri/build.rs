@@ -26,7 +26,6 @@ const COMMANDS: &[&str] = &[
     "get_command_log",
     "list_agent_kinds",
     "open_session",
-    "open_full_herdr",
     "open_in_terminal",
     "list_ssh_hosts",
     "machine_add_argv",

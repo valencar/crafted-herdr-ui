@@ -359,8 +359,8 @@ export function AddWorkbox() {
         label: labelText || null,
         session: sessionText || null,
       };
-      const argv = await invokeTyped("machine_add_argv", fields);
-      await invokeTyped("open_in_terminal", { argv });
+      const args = await invokeTyped("machine_add_argv", fields);
+      await invokeTyped("open_in_terminal", { args });
       if (!mounted.current) return;
       setWaiting({ ...newRun(), via: "terminal" });
     } catch (e) {

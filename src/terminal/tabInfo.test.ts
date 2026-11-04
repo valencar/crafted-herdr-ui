@@ -7,13 +7,15 @@ import type { TermTab } from "./terminalStore";
 function tab(over: Partial<TermTab> = {}): TermTab {
   return {
     tabKey: "buildbox::w1:p1",
-    target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+    target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
     title: "planner",
     machineLabel: "buildbox",
     state: "live",
     error: null,
     termId: 1,
     exitCode: null,
+    lastLine: null,
+    waiting: null,
     attempts: 0,
     ...over,
   };
@@ -56,14 +58,6 @@ describe("tabSubline", () => {
     expect(tabSubline(tab({ state: "detached" }), row(), "api-service")).toBe(
       "api-service · Detached · Needs input",
     );
-  });
-
-  it("subline_of_a_full_ui_tab", () => {
-    const full = tab({
-      tabKey: "full::buildbox",
-      target: { kind: "full", machineId: "buildbox" },
-    });
-    expect(tabSubline(full, undefined, "api-service")).toBe("Full herdr UI");
   });
 
   it("subline_without_anything_is_empty", () => {

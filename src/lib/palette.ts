@@ -81,7 +81,7 @@ export function buildItems(ctx: Context): PaletteItem[] {
       ]
         .filter((part) => part !== null)
         .join(" · "),
-      keywords: [row.kind, row.title, row.paneId].filter(Boolean).join(" "),
+      keywords: [row.kind, row.title, row.address].filter(Boolean).join(" "),
       row,
       alt,
       run: (how) =>

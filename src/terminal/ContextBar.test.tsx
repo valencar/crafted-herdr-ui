@@ -38,26 +38,24 @@ const row: Row = rowOf({
 
 const paneTab: TermTab = {
   tabKey: row.key,
-  target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+  target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
   title: "planner",
   machineLabel: "buildbox",
   state: "live",
   error: null,
   termId: 1,
   exitCode: null,
+  lastLine: null,
+  waiting: null,
   attempts: 0,
 };
 
-const fullTab: TermTab = {
-  tabKey: "full::buildbox",
-  target: { kind: "full", machineId: "buildbox" },
-  title: "herdr",
-  machineLabel: "buildbox",
-  state: "live",
-  error: null,
-  termId: 2,
-  exitCode: null,
-  attempts: 0,
+/** A second tab, so closing the first leaves one behind. */
+const otherTab: TermTab = {
+  ...paneTab,
+  tabKey: "buildbox::w9:p9",
+  target: { kind: "terminal", machineId: "buildbox", address: "w9:p9" },
+  title: "other",
 };
 
 beforeEach(() => {
@@ -71,7 +69,7 @@ beforeEach(() => {
   vi.mocked(openRow).mockReset();
   useAppStore.setState({ settings: null, state: null, dialogOpen: 0 });
   useTerminalStore.setState({
-    tabs: [paneTab, fullTab],
+    tabs: [paneTab, otherTab],
     activeKey: paneTab.tabKey,
     lastTermKey: paneTab.tabKey,
   });
@@ -168,7 +166,7 @@ describe("ContextBar", () => {
     await terminalButton();
     await user.click(screen.getByRole("button", { name: "Detach" }));
     expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
-      "full::buildbox",
+      otherTab.tabKey,
     ]);
     expect(useTerminalStore.getState().activeKey).toBe(HOME);
     // Detaching ends only our attach client: no herdr command.
@@ -203,7 +201,7 @@ describe("ContextBar", () => {
     const tabB: TermTab = {
       ...paneTab,
       tabKey: rowB.key,
-      target: { kind: "pane", machineId: "buildbox", paneId: "w1:p2" },
+      target: { kind: "terminal", machineId: "buildbox", address: "w1:p2" },
       title: "reviewer",
     };
     const { rerender } = render(
@@ -297,21 +295,6 @@ describe("ContextBar", () => {
     expect(
       await screen.findByText("Close this view. The agent keeps running."),
     ).toBeInTheDocument();
-  });
-
-  it("full_ui_tab_has_only_find_and_detach", () => {
-    const { container } = render(
-      <ContextBar tab={fullTab} row={null} onFind={() => {}} />,
-    );
-    const bar = container.querySelector(".context-bar")!;
-    expect(bar).toHaveTextContent("herdr");
-    expect(bar).toHaveTextContent("buildbox");
-    expect(bar.querySelector(".pill")).toBeNull();
-    expect(
-      screen
-        .getAllByRole("button")
-        .map((b) => b.getAttribute("aria-label") ?? b.textContent),
-    ).toEqual(["Find in terminal (⌘F)", "Detach"]);
   });
 
   it("a_pane_tab_whose_row_is_gone_has_the_same_short_bar", () => {

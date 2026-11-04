@@ -22,7 +22,7 @@ function openPane(paneId: string, state: TabState = "live") {
   act(() => {
     useTerminalStore.getState().openTab({
       tabKey: `buildbox::${paneId}`,
-      target: { kind: "pane", machineId: "buildbox", paneId },
+      target: { kind: "terminal", machineId: "buildbox", address: paneId },
       title: "planner",
       machineLabel: "Build box",
     });
@@ -70,21 +70,11 @@ describe("useVisibleRowReport", () => {
     });
   });
 
-  it("reports_null_on_home_and_for_full_tabs", () => {
+  it("reports_null_on_home", () => {
     render(<Probe />);
     expect(invoke).toHaveBeenLastCalledWith("set_visible_row", { key: null });
     openPane("w1:p1");
     act(() => useTerminalStore.getState().activate(HOME));
-    expect(invoke).toHaveBeenLastCalledWith("set_visible_row", { key: null });
-
-    act(() =>
-      useTerminalStore.getState().openTab({
-        tabKey: "full::buildbox",
-        target: { kind: "full", machineId: "buildbox" },
-        title: "herdr",
-        machineLabel: "Build box",
-      }),
-    );
     expect(invoke).toHaveBeenLastCalledWith("set_visible_row", { key: null });
   });
 

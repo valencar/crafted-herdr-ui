@@ -25,7 +25,7 @@ function appState(patch: Parameters<typeof buildboxTerms>[0] = {}): AppState {
 function open(machineId: string, paneId: string, title: string) {
   useTerminalStore.getState().openTab({
     tabKey: `${machineId}::${paneId}`,
-    target: { kind: "pane", machineId, paneId },
+    target: { kind: "terminal", machineId, address: paneId },
     title,
     machineLabel: machineId,
   });
@@ -103,7 +103,7 @@ describe("SessionRow", () => {
     expect(planner).toHaveAttribute("data-tone", "needs");
     expect(sub(/^infra/)).toHaveTextContent("Opening…");
     expect(sub(/^web/)).toHaveTextContent("Detached");
-    expect(sub(/^tester/)).toHaveTextContent("Error");
+    expect(sub(/^tester/)).toHaveTextContent("Failed");
   });
 
   it("a_done_tab_has_the_done_tone_and_a_quiet_one_no_tone", () => {
@@ -153,24 +153,6 @@ describe("SessionRow", () => {
     expect(
       screen.getByRole("button", { name: /^infra/ }).closest(".session-tab"),
     ).not.toHaveAttribute("data-needs");
-  });
-
-  it("a_full_ui_tab_reads_herdr_over_full_herdr_ui", () => {
-    useTerminalStore.getState().openTab({
-      tabKey: "full::buildbox",
-      target: { kind: "full", machineId: "buildbox" },
-      title: "herdr",
-      machineLabel: "buildbox",
-    });
-    useTerminalStore
-      .getState()
-      .updateTab("full::buildbox", { state: "live", termId: 2 });
-    render(<Harness machineId="buildbox" />);
-    const tab = screen.getByRole("button", { name: "herdr on buildbox" });
-    expect(tab.querySelector(".session-tab-title")).toHaveTextContent("herdr");
-    expect(tab.querySelector(".session-tab-sub")).toHaveTextContent(
-      "Full herdr UI",
-    );
   });
 
   it("tab_tooltip_has_status_and_shortcut", () => {

@@ -183,9 +183,9 @@ describe("openTerm", () => {
     invoke.mockResolvedValue(7);
     const events: TermEvent[] = [];
     const target: TermTarget = {
-      kind: "pane",
+      kind: "terminal",
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     };
 
     await expect(openTerm(target, 80, 24, (e) => events.push(e))).resolves.toBe(
@@ -194,16 +194,17 @@ describe("openTerm", () => {
 
     expect(invoke).toHaveBeenCalledWith("term_open", {
       target,
+      observe: false,
       cols: 80,
       rows: 24,
       onEvent: expect.any(MockChannel),
     });
     const channel = invoke.mock.calls[0][1].onEvent as MockChannel<TermEvent>;
     channel.onmessage({ kind: "data", data: "x" });
-    channel.onmessage({ kind: "exit", code: 0 });
+    channel.onmessage({ kind: "exit", code: 0, last_line: null });
     expect(events).toEqual([
       { kind: "data", data: "x" },
-      { kind: "exit", code: 0 },
+      { kind: "exit", code: 0, last_line: null },
     ]);
   });
 
@@ -213,7 +214,12 @@ describe("openTerm", () => {
       message: "herdr is still starting. Try again in a moment.",
     });
     await expect(
-      openTerm({ kind: "full", machineId: "local" }, 80, 24, () => {}),
+      openTerm(
+        { kind: "command", args: ["machine", "login", "buildbox"] },
+        80,
+        24,
+        () => {},
+      ),
     ).rejects.toEqual({
       kind: "invalid",
       message: "herdr is still starting. Try again in a moment.",

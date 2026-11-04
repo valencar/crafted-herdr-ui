@@ -383,7 +383,8 @@ describe("Dashboard", () => {
     );
     expect(calls("open_session")[0][1]).toEqual({
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
+      observe: false,
     });
     expect(calls("mark_seen")).toHaveLength(1);
   });
@@ -407,13 +408,15 @@ describe("Dashboard", () => {
       tabs: [
         {
           tabKey: "buildbox::w2:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w2:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w2:p1" },
           title: "tester",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: null,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],
@@ -580,7 +583,7 @@ describe("Dashboard", () => {
       ]) {
         useTerminalStore.getState().openTab({
           tabKey: `${machineId}::${paneId}`,
-          target: { kind: "pane", machineId, paneId },
+          target: { kind: "terminal", machineId, address: paneId },
           title: "claude",
           machineLabel: machineId,
         });
@@ -611,12 +614,10 @@ describe("Dashboard", () => {
       within(section("Workboxes")).getByRole("article", { name });
 
     expect(within(card("buildbox")).getByText("Online")).toBeInTheDocument();
-    await user.click(
-      within(card("buildbox")).getByRole("button", { name: "Open herdr" }),
-    );
-    expect(calls("open_full_herdr")).toEqual([
-      ["open_full_herdr", { machineId: "buildbox" }],
-    ]);
+    // There is no herdr TUI to open any more.
+    expect(
+      within(card("buildbox")).queryByRole("button", { name: "Open herdr" }),
+    ).toBeNull();
     expect(
       within(card("buildbox")).queryByRole("button", { name: "Retry now" }),
     ).toBeNull();
@@ -643,7 +644,7 @@ describe("Dashboard", () => {
     act(() =>
       useTerminalStore.getState().openTab({
         tabKey: "gpubox::w1:p1",
-        target: { kind: "pane", machineId: "gpubox", paneId: "w1:p1" },
+        target: { kind: "terminal", machineId: "gpubox", address: "w1:p1" },
         title: "claude",
         machineLabel: "gpubox",
       }),
@@ -729,7 +730,8 @@ describe("Dashboard", () => {
     await user.click(within(items[0]).getByRole("button", { name: /^Open / }));
     expect(calls("open_session")[0][1]).toEqual({
       machineId: "gpubox",
-      paneId: "w1:p2",
+      address: "w1:p2",
+      observe: false,
     });
 
     await user.click(
@@ -757,7 +759,7 @@ describe("Dashboard", () => {
     act(() =>
       useTerminalStore.getState().openTab({
         tabKey: "buildbox::w1:p1",
-        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+        target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
         title: "claude",
         machineLabel: "buildbox",
       }),

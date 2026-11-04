@@ -101,15 +101,15 @@ beforeEach(() => {
         case "list_ssh_hosts":
           return ["buildbox", "gpubox", "staging"];
         case "preview_machine_add":
-          return `herdr machine add ${a.target}${a.label ? ` --label '${a.label}'` : ""}`;
+          return `hc machine add ${a.target}${a.label ? ` --name '${a.label}'` : ""}`;
         case "machine_add_argv":
           if (argvError) throw argvError;
           return [
             "machine",
             "add",
             a.target,
-            ...(a.label ? ["--label", a.label] : []),
-            ...(a.session ? ["--remote-session", a.session] : []),
+            ...(a.label ? ["--name", a.label] : []),
+            ...(a.session ? ["--session", a.session] : []),
           ];
         default:
           return null;
@@ -146,7 +146,7 @@ describe("AddWorkbox", () => {
     await user.type(screen.getByLabelText("Label"), "Gpu box");
     await user.type(screen.getByLabelText("Remote session"), "work");
     await advance(0);
-    expect(screen.getByText(/herdr machine add gpubox/)).toBeVisible();
+    expect(screen.getByText(/hc machine add gpubox/)).toBeVisible();
 
     await user.click(
       screen.getByRole("button", { name: "Continue in Ghostty" }),
@@ -162,13 +162,13 @@ describe("AddWorkbox", () => {
       [
         "open_in_terminal",
         {
-          argv: [
+          args: [
             "machine",
             "add",
             "gpubox",
-            "--label",
+            "--name",
             "Gpu box",
-            "--remote-session",
+            "--session",
             "work",
           ],
         },
@@ -190,7 +190,7 @@ describe("AddWorkbox", () => {
     act(() =>
       useTerminalStore.getState().openTab({
         tabKey: "buildbox::w1:p1",
-        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+        target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
         title: "planner",
         machineLabel: "buildbox",
       }),

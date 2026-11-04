@@ -137,7 +137,7 @@ function appState(): AppState {
 function open(paneId: string, title: string) {
   useTerminalStore.getState().openTab({
     tabKey: `buildbox::${paneId}`,
-    target: { kind: "pane", machineId: "buildbox", paneId },
+    target: { kind: "terminal", machineId: "buildbox", address: paneId },
     title,
     machineLabel: "buildbox",
   });

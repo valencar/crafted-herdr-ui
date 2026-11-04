@@ -43,7 +43,6 @@ export type CommandResults = {
   get_command_log: CommandLogEntry[];
   list_agent_kinds: string[];
   open_session: null;
-  open_full_herdr: null;
   open_in_terminal: null;
   list_ssh_hosts: string[];
   machine_add_argv: string[];
@@ -111,12 +110,12 @@ export type CommandArgs = {
   reconnect_core: undefined;
   get_command_log: undefined;
   list_agent_kinds: undefined;
-  open_session: { machineId: string; paneId: string };
-  open_full_herdr: { machineId: string };
-  /** What follows the herdr binary; the Rust side allows only a few shapes. */
-  open_in_terminal: { argv: string[] };
+  /** Opens `hc attach` for the terminal in the user's terminal; `observe` is Watch (never types or resizes). */
+  open_session: { machineId: string; address: string; observe: boolean };
+  /** What follows the herdr-core binary, which Rust takes from the resolved core; only a few shapes are allowed. */
+  open_in_terminal: { args: string[] };
   list_ssh_hosts: undefined;
-  /** What follows the herdr binary in `machine add`: the argv `open_in_terminal` expects. */
+  /** What follows the herdr-core binary in `machine add`: the args `open_in_terminal` expects. */
   machine_add_argv: MachineAddFields;
   /** The `machine add` command line, as text. */
   preview_machine_add: MachineAddFields;
@@ -130,7 +129,7 @@ export type CommandArgs = {
   read_pane_tail: { machineId: string; paneId: string };
   get_terminals: undefined;
   list_terminals: undefined;
-  copy_attach_command: { machineId: string; paneId: string };
+  copy_attach_command: { machineId: string; address: string };
   start_preview: { machineId: string; paneId: string; isAgent: boolean };
   stop_preview: undefined;
   get_settings: undefined;
@@ -144,14 +143,19 @@ export type CommandArgs = {
   show_main_new_session: undefined;
   open_settings: undefined;
   /** `onEvent` (the output channel) is added by `openTerm`; callers don't pass it. */
-  term_open: { target: TermTarget; cols: number; rows: number };
+  term_open: {
+    target: TermTarget;
+    observe: boolean;
+    cols: number;
+    rows: number;
+  };
   /** Keystrokes and pastes only; the command a tab runs is built on the Rust side. */
   term_write: { id: number; data: string };
   term_resize: { id: number; cols: number; rows: number };
   /** Kills the attach client; the herdr pane keeps running. */
   term_close: { id: number };
-  show_main_open_row: { machineId: string; paneId: string };
-  /** The pane tab the main window is showing (`${machineId}::${paneId}`), or `null`; Rust skips notifications for it. */
+  show_main_open_row: { machineId: string; address: string };
+  /** The terminal tab the main window is showing (`${machineId}::${address}`), or `null`; Rust skips notifications for it. */
   set_visible_row: { key: string | null };
 };
 
@@ -283,19 +287,21 @@ export function onOpenRow(cb: (key: string) => void): Promise<() => void> {
 
 /**
  * Opens a terminal tab on `target` and streams its output to `onEvent`. Resolves to the id the
- * `term_*` commands take. Rejects with an `ActionError`.
+ * `term_*` commands take. `observe` is Watch. Rejects with an `ActionError`.
  */
 export async function openTerm(
   target: TermTarget,
   cols: number,
   rows: number,
   onEvent: (e: TermEvent) => void,
+  observe = false,
 ): Promise<number> {
   const channel = new Channel<TermEvent>();
   channel.onmessage = onEvent;
   try {
     return await invoke<number>("term_open", {
       target,
+      observe,
       cols,
       rows,
       onEvent: channel,

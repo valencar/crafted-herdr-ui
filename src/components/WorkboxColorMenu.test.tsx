@@ -31,7 +31,7 @@ function openTab(machineId: string, paneId: string, title: string) {
   act(() =>
     useTerminalStore.getState().openTab({
       tabKey: `${machineId}::${paneId}`,
-      target: { kind: "pane", machineId, paneId },
+      target: { kind: "terminal", machineId, address: paneId },
       title,
       machineLabel: machineId,
     }),

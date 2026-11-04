@@ -43,8 +43,7 @@ export function Inspector({
   // The name the person gave it, which `row.name` falls back from.
   const agentName = machine.terminals.find((t) => t.address === paneId)?.name;
 
-  // What "Open" runs; the text comes from Rust, and follows the attach mode in Settings.
-  const attachMode = useAppStore((s) => s.settings?.attach_mode);
+  // What "Open" runs; the text comes from Rust.
   // Rust's refusal is kept too, so "Copy command" can say why there is nothing to copy.
   const [attach, setAttach] = useState<{
     command: string | null;
@@ -53,7 +52,7 @@ export function Inspector({
   const { command, refusal } = attach;
   useEffect(() => {
     let alive = true;
-    invokeTyped("copy_attach_command", { machineId, paneId })
+    invokeTyped("copy_attach_command", { machineId, address: row.address })
       .then(
         (c) =>
           alive &&
@@ -68,7 +67,7 @@ export function Inspector({
     return () => {
       alive = false;
     };
-  }, [machineId, paneId, attachMode]);
+  }, [machineId, row.address]);
 
   // Reply
   const hintId = useId();

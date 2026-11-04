@@ -17,7 +17,6 @@ import type { CoreStatus } from "../lib/bindings/CoreStatus";
 import type { OpenMode } from "../lib/bindings/OpenMode";
 import type { RowDensity } from "../lib/bindings/RowDensity";
 import type { Theme } from "../lib/bindings/Theme";
-import type { AttachMode } from "../lib/bindings/AttachMode";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
 import type { TerminalFont } from "../lib/bindings/TerminalFont";
@@ -408,7 +407,6 @@ function TerminalSection({
   const [list, setList] = useState<TerminalList | null>(null);
   const targetId = useId();
   const whereId = useId();
-  const attachId = useId();
   const fontId = useId();
   useEffect(() => {
     let cancelled = false;
@@ -550,19 +548,6 @@ function TerminalSection({
           >
             <option value="window">New window</option>
             <option value="tab">New tab (iTerm2; others open a window)</option>
-          </select>
-        </Field>
-        <Field id={attachId} label="Attach as">
-          <select
-            id={attachId}
-            className="field"
-            value={settings.attach_mode}
-            onChange={(e) =>
-              void update({ attach_mode: e.target.value as AttachMode })
-            }
-          >
-            <option value="pane">Just that session (terminal attach)</option>
-            <option value="full_ui">Full herdr UI on that workbox</option>
           </select>
         </Field>
       </div>

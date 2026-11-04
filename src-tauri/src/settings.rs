@@ -25,16 +25,6 @@ use crate::terminal::{OpenMode, TerminalId};
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// What a click on a session opens: just that pane, or the whole herdr UI on its workbox.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../src/lib/bindings/")]
-pub enum AttachMode {
-    #[default]
-    Pane,
-    FullUi,
-}
-
 /// How the Home screen groups sessions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -122,7 +112,6 @@ pub struct Settings {
     /// The command for the Custom terminal; `{attach}` is replaced by the quoted command.
     pub terminal_custom_template: String,
     pub open_mode: OpenMode,
-    pub attach_mode: AttachMode,
     pub notify_blocked: bool,
     pub notify_done: bool,
     pub group_by: GroupBy,
@@ -172,7 +161,6 @@ impl Default for Settings {
             terminal: None,
             terminal_custom_template: String::new(),
             open_mode: OpenMode::default(),
-            attach_mode: AttachMode::default(),
             notify_blocked: true,
             notify_done: true,
             group_by: GroupBy::default(),
@@ -497,7 +485,6 @@ mod tests {
         assert_eq!(s.terminal, None);
         assert_eq!(s.terminal_custom_template, "");
         assert_eq!(s.open_mode, OpenMode::Window);
-        assert_eq!(s.attach_mode, AttachMode::Pane);
         assert!(s.notify_blocked && s.notify_done);
         assert_eq!(s.group_by, GroupBy::Project);
         assert!(s.global_shortcut_enabled);
@@ -529,7 +516,6 @@ mod tests {
             "terminal",
             "terminal_custom_template",
             "open_mode",
-            "attach_mode",
             "notify_blocked",
             "notify_done",
             "group_by",
@@ -873,12 +859,27 @@ mod tests {
     }
 
     #[test]
+    fn old_full_ui_setting_loads() {
+        // A file saved by v0.8 has `attach_mode`; the key is dropped and the rest is kept.
+        let s = Settings::from_entries([
+            ("attach_mode".to_owned(), json!("full_ui")),
+            ("open_mode".to_owned(), json!("tab")),
+        ]);
+        assert_eq!(s.open_mode, OpenMode::Tab);
+        assert!(!s.to_entries().iter().any(|(k, _)| k == "attach_mode"));
+        // And it is never written back.
+        assert_eq!(
+            Settings::from_entries([("attach_mode".to_owned(), json!("pane"))]),
+            Settings::default()
+        );
+    }
+
+    #[test]
     fn enums_use_the_spec_spellings() {
         let s = Settings::default()
-            .merged(&json!({"open_mode": "tab", "attach_mode": "full_ui", "group_by": "status"}))
+            .merged(&json!({"open_mode": "tab", "group_by": "status"}))
             .unwrap();
         assert_eq!(s.open_mode, OpenMode::Tab);
-        assert_eq!(s.attach_mode, AttachMode::FullUi);
         assert_eq!(s.group_by, GroupBy::Status);
         assert!(
             Settings::default()

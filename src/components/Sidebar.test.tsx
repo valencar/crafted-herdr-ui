@@ -100,7 +100,7 @@ function openTab(paneId: string, title: string, machineId = "buildbox") {
   act(() =>
     useTerminalStore.getState().openTab({
       tabKey: `${machineId}::${paneId}`,
-      target: { kind: "pane", machineId, paneId },
+      target: { kind: "terminal", machineId, address: paneId },
       title,
       machineLabel: machineId,
     }),
@@ -253,8 +253,8 @@ describe("Sidebar", () => {
     openTab("w2:p1", "agent w2:p1");
     act(() =>
       useTerminalStore.getState().openTab({
-        tabKey: "full::gpubox",
-        target: { kind: "full", machineId: "gpubox" },
+        tabKey: "gpubox::t9",
+        target: { kind: "terminal", machineId: "gpubox", address: "t9" },
         title: "herdr",
         machineLabel: "gpubox",
       }),

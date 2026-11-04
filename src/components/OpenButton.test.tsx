@@ -29,9 +29,8 @@ import { copyText, invokeTyped } from "../lib/ipc";
 
 vi.mock("../lib/openRow", () => ({
   openRow: vi.fn(),
-  openFull: vi.fn(),
 }));
-import { openFull, openRow } from "../lib/openRow";
+import { openRow } from "../lib/openRow";
 
 // xterm is tested on its own; the palette only reaches the panel through menu actions.
 vi.mock("../terminal/Workspace", () => ({
@@ -43,7 +42,7 @@ vi.mock("../terminal/Workspace", () => ({
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const copy = vi.mocked(copyText);
-const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
+const ATTACH = "hc attach buildbox/t1";
 
 const ROW: Row = rowOf({
   key: "buildbox::w1:p1",
@@ -61,13 +60,15 @@ const ROW: Row = rowOf({
 function tab(paneId: string): TermTab {
   return {
     tabKey: `buildbox::${paneId}`,
-    target: { kind: "pane", machineId: "buildbox", paneId },
+    target: { kind: "terminal", machineId: "buildbox", address: paneId },
     title: paneId,
     machineLabel: "buildbox",
     state: "live",
     error: null,
     termId: null,
     exitCode: null,
+    lastLine: null,
+    waiting: null,
     attempts: 0,
   };
 }
@@ -92,7 +93,6 @@ beforeEach(() => {
   invoke.mockResolvedValue(ATTACH);
   copy.mockReset().mockResolvedValue(undefined);
   vi.mocked(openRow).mockReset();
-  vi.mocked(openFull).mockReset();
   useAppStore.setState({
     state: appState([[{ id: "buildbox", lastOkMs: null }, null]], {
       path: null,
@@ -171,7 +171,6 @@ describe("OpenButton", () => {
     expect(items().map((i) => i.textContent)).toEqual([
       "Open here",
       "Open in Ghostty",
-      "Open full herdr UI",
       "Copy attach command",
     ]);
     expect(screen.getByRole("separator")).toBeInTheDocument();
@@ -192,9 +191,10 @@ describe("OpenButton", () => {
     expect(openRow).toHaveBeenLastCalledWith(ROW, "app");
     await choose("Open in Ghostty");
     expect(openRow).toHaveBeenLastCalledWith(ROW, "external");
-    await choose("Open full herdr UI");
-    expect(openFull).toHaveBeenCalledWith("buildbox", "buildbox");
     expect(openRow).toHaveBeenCalledTimes(2);
+    // There is no herdr TUI to open any more.
+    await user.click(chevron());
+    expect(screen.queryByRole("menuitem", { name: /full/i })).toBeNull();
   });
 
   it("copy_attach_command_copies_and_toasts_copied", async () => {
@@ -206,7 +206,7 @@ describe("OpenButton", () => {
     await waitFor(() => expect(copy).toHaveBeenCalledWith(ATTACH));
     expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     });
     await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
     expect(useAppStore.getState().toastTone).toBe("info");
@@ -219,7 +219,7 @@ describe("OpenButton", () => {
     expect(fetches()).toHaveLength(0);
     await user.click(chevron());
     expect(fetches()).toEqual([
-      ["copy_attach_command", { machineId: "buildbox", paneId: "w1:p1" }],
+      ["copy_attach_command", { machineId: "buildbox", address: "w1:p1" }],
     ]);
     await user.keyboard("{Escape}");
     await user.click(chevron());
@@ -290,7 +290,7 @@ describe("OpenButton", () => {
     const all = items();
     expect(all[0]).toHaveFocus();
     await user.keyboard("{ArrowUp}");
-    expect(all[3]).toHaveFocus();
+    expect(all[2]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(all[0]).toHaveFocus();
     await user.keyboard("{ArrowDown}{ArrowDown}");
@@ -298,7 +298,7 @@ describe("OpenButton", () => {
     await user.keyboard("{Home}");
     expect(all[0]).toHaveFocus();
     await user.keyboard("{End}");
-    expect(all[3]).toHaveFocus();
+    expect(all[2]).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
     expect(chevron()).toHaveFocus();

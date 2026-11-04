@@ -11,13 +11,15 @@ function machine(id: string): MachineView {
 function tab(machineId: string, paneId: string): TermTab {
   return {
     tabKey: `${machineId}::${paneId}`,
-    target: { kind: "pane", machineId, paneId },
+    target: { kind: "terminal", machineId, address: paneId },
     title: paneId,
     machineLabel: machineId,
     state: "live",
     error: null,
     termId: null,
     exitCode: null,
+    lastLine: null,
+    waiting: null,
     attempts: 0,
   };
 }
@@ -51,20 +53,6 @@ describe("groupTabs", () => {
   it("groups_without_tabs_are_omitted", () => {
     expect(groupTabs([tab("gpubox", "p1")], machines)).toHaveLength(1);
     expect(groupTabs([], machines)).toEqual([]);
-  });
-
-  it("full_ui_tabs_group_with_their_machine", () => {
-    const full: TermTab = {
-      ...tab("buildbox", "p1"),
-      tabKey: "full::buildbox",
-      target: { kind: "full", machineId: "buildbox" },
-    };
-    const groups = groupTabs([tab("buildbox", "p1"), full], machines);
-    expect(groups).toHaveLength(1);
-    expect(groups[0].tabs.map((t) => t.tabKey)).toEqual([
-      "buildbox::p1",
-      "full::buildbox",
-    ]);
   });
 });
 

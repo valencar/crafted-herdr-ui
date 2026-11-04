@@ -71,9 +71,9 @@ const openTabs = [
     run: tabRun,
   },
   {
-    key: "full::m-1",
-    title: "herdr",
-    detail: "buildbox · Full herdr UI",
+    key: "m-1::t9",
+    title: "scratch",
+    detail: "buildbox · Detached",
     shortcut: "tab2" as const,
     row: null,
     run: vi.fn(),
@@ -242,9 +242,9 @@ describe("open tabs", () => {
     const { items } = setup("app", openTabs);
     const tab = (q: string) =>
       rankItems(items, q).find((i) => i.group === "Open tabs");
-    expect(tab("herdr")).toMatchObject({ id: "tab:full::m-1" });
-    // "full" is only in the second tab's detail; the workbox name is in both details.
-    expect(tab("full")?.id).toBe("tab:full::m-1");
+    expect(tab("scratch")).toMatchObject({ id: "tab:m-1::t9" });
+    // "detached" is only in the second tab's detail; the workbox name is in both details.
+    expect(tab("detached")?.id).toBe("tab:m-1::t9");
     expect(tab("gpubox")?.id).toBe("tab:gpubox::w1:p1");
     expect(tab("gpubox")).toMatchObject({
       label: "reviewer",

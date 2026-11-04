@@ -26,7 +26,7 @@ function appState(patch: Parameters<typeof buildboxTerms>[0] = {}): AppState {
 function open(machineId: string, paneId: string, title: string) {
   useTerminalStore.getState().openTab({
     tabKey: `${machineId}::${paneId}`,
-    target: { kind: "pane", machineId, paneId },
+    target: { kind: "terminal", machineId, address: paneId },
     title,
     machineLabel: machineId,
   });

@@ -89,7 +89,7 @@ describe("AppSidebar", () => {
       act(() =>
         useTerminalStore.getState().openTab({
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "planner",
           machineLabel: "buildbox",
         }),

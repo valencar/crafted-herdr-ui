@@ -268,7 +268,6 @@ pub fn run() {
             commands::get_command_log,
             commands::list_agent_kinds,
             commands::open_session,
-            commands::open_full_herdr,
             commands::open_in_terminal,
             commands::list_ssh_hosts,
             commands::machine_add_argv,

@@ -3,16 +3,14 @@ import { copyAttach } from "../lib/copyAttach";
 import type { Row } from "../lib/grouping";
 import { openRow } from "../lib/openRow";
 import { terminalName, useTerminals } from "../lib/uiHelpers";
-import { detachReason } from "./detachReason";
+import { detachReason, WAITING_FOR_SHELL } from "./detachReason";
 import type { TermTab } from "./terminalStore";
 
 type Props = {
   tab: TermTab;
-  /** The agent the tab shows; `null` for the full herdr UI or a pane that isn't in the list. */
+  /** The terminal the tab shows; `null` when it isn't in the list. */
   row: Row | null;
-  /** The tab's workbox is reached over ssh. */
-  remote: boolean;
-  /** The pane is no longer in the app's state: nothing to reattach to. */
+  /** The terminal is no longer in the app's state: nothing to reattach to. */
   gone: boolean;
   /** Which button the user last clicked; the attempt line is named after it. */
   clicked: "Reattach" | "Retry";
@@ -25,12 +23,11 @@ type Props = {
 /**
  * The bar docked at the bottom of a tab whose session is not running: why it ended, what to try,
  * and the ways out. It sits over the last rows only, so the output the attach command printed
- * (herdr's, ssh's or the script's own message) stays readable above it.
+ * stays readable above it.
  */
 export function TermBar({
   tab,
   row,
-  remote,
   gone,
   clicked,
   onReattach,
@@ -41,18 +38,27 @@ export function TermBar({
   const opening = tab.state === "opening";
   const failed = tab.state === "error";
   const retryWord = failed ? "Retry" : "Reattach";
-  const reason = detachReason(tab.exitCode, {
-    remote,
-    label: tab.machineLabel,
-  });
+  const reason = detachReason(tab.exitCode ?? 0, tab.lastLine);
+  // A kept terminal whose shell was lost comes back by itself; the core's own loss too.
+  const waitingForShell = tab.waiting?.kind === "restart";
+  const waitingForCore = tab.waiting?.kind === "core";
   const title = opening
     ? "Reattaching…"
     : gone
-      ? `This pane no longer exists on ${tab.machineLabel}.`
+      ? `This terminal no longer exists on ${tab.machineLabel}.`
       : failed
         ? tab.error
-        : reason.title;
-  const hint = opening || gone || failed ? null : reason.hint;
+        : waitingForShell
+          ? WAITING_FOR_SHELL
+          : reason;
+  const hint =
+    opening || gone || failed
+      ? null
+      : waitingForShell
+        ? "It reattaches by itself when the new shell starts."
+        : waitingForCore
+          ? "It reattaches by itself when herdr-core is back."
+          : null;
   const attempt =
     !opening && !gone && tab.attempts > 0
       ? `${clicked} failed (attempt ${tab.attempts}).`

@@ -5,13 +5,15 @@
 //! The commands in the "Interim stubs" block answer `ActionError::Invalid` until the v0.9 task
 //! named next to each one replaces them with a herdr-core call.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Deserialize;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
 use ts_rs::TS;
 
+use crate::LOCAL;
 use crate::actions::{ActionError, CreatedSession};
 use crate::core::{CommandLogEntry, CoreClient};
 use crate::herdr::cli::HerdrCli;
@@ -27,9 +29,10 @@ use crate::ssh_config;
 use crate::state::AppState;
 use crate::sync::SyncCell;
 use crate::terminal::open::{LaunchLog, launch_in_terminal};
-use crate::terminal::session::{TermId, TermSessions};
+use crate::terminal::session::{TermEvent, TermId, TermSessions, TermSink};
 use crate::terminal::{
-    self, InstalledCache, TerminalList, allowed_herdr_argv, checked_machine_add_argv, join_quoted,
+    self, InstalledCache, TerminalList, args_display, attach_argv, attach_display, bin_name,
+    checked_core_argv, checked_machine_add_args,
 };
 use crate::tray;
 
@@ -179,24 +182,6 @@ pub fn preview_reconnect() -> Result<String, ActionError> {
     Err(not_yet())
 }
 
-/// Task 8.
-#[tauri::command]
-pub fn open_session() -> Result<(), ActionError> {
-    Err(not_yet())
-}
-
-/// Task 8.
-#[tauri::command]
-pub fn open_full_herdr() -> Result<(), ActionError> {
-    Err(not_yet())
-}
-
-/// Task 8.
-#[tauri::command]
-pub fn copy_attach_command() -> Result<String, ActionError> {
-    Err(not_yet())
-}
-
 /// Task 9.
 #[tauri::command]
 pub fn read_pane_tail() -> Result<String, ActionError> {
@@ -222,7 +207,9 @@ fn home_dir(app: &AppHandle) -> Result<PathBuf, ActionError> {
         .map_err(|e| ActionError::invalid(e.to_string()))
 }
 
-/// What a terminal tab runs: one pane's attach command, or the machine's full herdr UI.
+/// What a terminal tab runs: the attach command of one terminal, or one of the few other core
+/// commands that need a terminal (`machine login`, …). The UI sends this, never a command line:
+/// Rust builds the argv, with the resolved core in front.
 #[derive(Debug, Clone, PartialEq, Deserialize, TS)]
 #[serde(
     tag = "kind",
@@ -231,16 +218,169 @@ fn home_dir(app: &AppHandle) -> Result<PathBuf, ActionError> {
 )]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum TermTarget {
-    Pane { machine_id: String, pane_id: String },
-    Full { machine_id: String },
+    /// `address` is machine-local (`t7`); Rust makes the full address from the machine's name.
+    Terminal { machine_id: String, address: String },
+    /// Arguments only, checked by `allowed_core_args`.
+    Command { args: Vec<String> },
+}
+
+/// A command ready to run in a terminal.
+#[derive(Debug, Clone, PartialEq)]
+struct TermLaunch {
+    /// Starts with the resolved core.
+    argv: Vec<String>,
+    /// The command as the user would type it (`hc attach buildbox/t7`).
+    display: String,
+    /// The machine the command log files it under (`local` for none).
+    machine_id: String,
+}
+
+/// The command a target runs, built here and nowhere else (the UI never sends a binary).
+/// `full_address` turns (machine id, machine-local address) into the address the local core
+/// takes; `None` is an unknown machine.
+fn term_launch(
+    core: &Path,
+    target: &TermTarget,
+    observe: bool,
+    full_address: impl Fn(&str, &str) -> Option<String>,
+) -> Result<TermLaunch, ActionError> {
+    match target {
+        TermTarget::Terminal {
+            machine_id,
+            address,
+        } => {
+            let full = full_address(machine_id, address)
+                .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))?;
+            let attach = attach_argv(core, &full, observe);
+            let argv = checked_core_argv(core, &attach[1..]).map_err(ActionError::invalid)?;
+            Ok(TermLaunch {
+                argv,
+                display: attach_display(&bin_name(core), &full, observe),
+                machine_id: machine_id.clone(),
+            })
+        }
+        TermTarget::Command { args } => Ok(TermLaunch {
+            argv: checked_core_argv(core, args).map_err(ActionError::invalid)?,
+            display: args_display(&bin_name(core), args),
+            machine_id: LOCAL.to_owned(),
+        }),
+    }
+}
+
+/// The core in use, or why there is none.
+fn resolved_core(locator: &CoreLocator) -> Result<PathBuf, ActionError> {
+    locator
+        .status()
+        .path
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| ActionError::invalid("herdr-core was not found on this computer."))
+}
+
+/// The variables a terminal that runs `hc` gets: the core's 11, never the legacy herdr list.
+fn core_env(locator: &CoreLocator) -> Vec<(String, String)> {
+    crate::env::forwarded_env(&locator.login())
+}
+
+/// A target's command for the current core and state.
+fn launch_for(
+    locator: &CoreLocator,
+    sync: &SyncCell,
+    target: &TermTarget,
+    observe: bool,
+) -> Result<TermLaunch, ActionError> {
+    let core = resolved_core(locator)?;
+    term_launch(&core, target, observe, |machine, address| {
+        sync.get()?.full_address(machine, address)
+    })
+}
+
+/// Opens one terminal, attached, in the user's terminal (`observe` is Watch: it never types or
+/// resizes).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn open_session(
+    app: AppHandle,
+    core: State<'_, Arc<CoreClient>>,
+    locator: State<'_, CoreLocator>,
+    sync: State<'_, SyncCell>,
+    installed: State<'_, InstalledCache>,
+    settings: State<'_, SharedSettings>,
+    machine_id: String,
+    address: String,
+    observe: bool,
+) -> Result<(), ActionError> {
+    let target = TermTarget::Terminal {
+        machine_id,
+        address: address.clone(),
+    };
+    let launch = launch_for(&locator, &sync, &target, observe)?;
+    let log = LaunchLog {
+        machine_id: &launch.machine_id,
+        display: launch.display.clone(),
+    };
+    let env = core_env(&locator);
+    launch_in_terminal(
+        home_dir(&app)?,
+        &core,
+        &env,
+        &installed,
+        &settings,
+        &launch.argv,
+        &address,
+        log,
+    )
+    .await
+}
+
+/// The one-line command "Open" runs for a terminal (`hc attach buildbox/t7`), for the user to
+/// paste into any terminal. It names the binary by its file name.
+#[tauri::command]
+pub fn copy_attach_command(
+    locator: State<'_, CoreLocator>,
+    sync: State<'_, SyncCell>,
+    machine_id: String,
+    address: String,
+) -> Result<String, ActionError> {
+    let target = TermTarget::Terminal {
+        machine_id,
+        address,
+    };
+    Ok(launch_for(&locator, &sync, &target, false)?.display)
 }
 
 /// Runs the target's command in the app's terminal panel and streams its output to `on_event`.
-/// Task 8 (it runs `hc attach` there); until then it refuses.
+/// Returns the id the other `term_*` commands take.
 #[tauri::command]
-pub fn term_open(target: TermTarget) -> Result<TermId, ActionError> {
-    let _ = target;
-    Err(not_yet())
+#[allow(clippy::too_many_arguments)]
+pub async fn term_open(
+    core: State<'_, Arc<CoreClient>>,
+    locator: State<'_, CoreLocator>,
+    sync: State<'_, SyncCell>,
+    sessions: State<'_, Arc<TermSessions>>,
+    target: TermTarget,
+    observe: bool,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<TermEvent>,
+) -> Result<TermId, ActionError> {
+    let launch = launch_for(&locator, &sync, &target, observe)?;
+    let env = core_env(&locator);
+    let sink: TermSink = Arc::new(move |event| on_event.send(event).is_ok());
+    let sessions = Arc::clone(&sessions);
+    let argv = launch.argv;
+    let id = tauri::async_runtime::spawn_blocking(move || {
+        sessions.open(&argv, &env, TermSize { cols, rows }, sink)
+    })
+    .await
+    .map_err(|e| ActionError::invalid(e.to_string()))?
+    .map_err(ActionError::invalid)?;
+    core.log_note(
+        &launch.machine_id,
+        launch.display,
+        "opened in Crafted Herdr",
+    );
+    Ok(id)
 }
 
 /// Runs a blocking call on a session (a write waits on the pty) off the main thread.
@@ -287,43 +427,60 @@ pub async fn term_close(
     on_sessions(&sessions, move |s| s.close(id)).await
 }
 
-/// Runs one of the few herdr commands that need a terminal (`machine reconnect` asks for SSH
-/// authentication) in the user's terminal. `args` is what follows the herdr binary, which is
-/// always the resolved local one; anything outside the allowlist is refused.
+/// Runs one of the few core commands that need a terminal (`machine login` asks for SSH
+/// authentication) in the user's terminal. `args` is what follows the binary, which Rust
+/// always takes from the resolved core; anything outside `allowed_core_args` is refused.
 #[tauri::command]
 pub async fn open_in_terminal(
     app: AppHandle,
-    cli: State<'_, HerdrCli>,
+    core: State<'_, Arc<CoreClient>>,
+    locator: State<'_, CoreLocator>,
     installed: State<'_, InstalledCache>,
     settings: State<'_, SharedSettings>,
-    argv: Vec<String>,
+    args: Vec<String>,
 ) -> Result<(), ActionError> {
-    let bin = cli.bin().to_string_lossy().into_owned();
-    let full = allowed_herdr_argv(&bin, &argv).map_err(ActionError::invalid)?;
+    let launch = term_launch(
+        &resolved_core(&locator)?,
+        &TermTarget::Command { args },
+        false,
+        |_, _| None,
+    )?;
     let log = LaunchLog {
-        machine: None,
-        args: argv,
+        machine_id: &launch.machine_id,
+        display: launch.display.clone(),
     };
+    let env = core_env(&locator);
     let home = home_dir(&app)?;
-    launch_in_terminal(home, &cli, &installed, &settings, &full, "herdr", log).await
+    launch_in_terminal(
+        home,
+        &core,
+        &env,
+        &installed,
+        &settings,
+        &launch.argv,
+        "herdr-core",
+        log,
+    )
+    .await
 }
 
-/// What follows the herdr binary in `machine add`, for the form's fields. The UI hands this to
-/// `open_in_terminal`, so the call and the preview below come from one builder.
+/// What follows the binary in `machine add`, for the form's fields (the label is the
+/// machine's `--name`). The UI hands this to `open_in_terminal`, so the call and the preview
+/// below come from one builder.
 #[tauri::command]
 pub fn machine_add_argv(
     target: String,
     label: Option<String>,
     session: Option<String>,
 ) -> Result<Vec<String>, ActionError> {
-    let full = checked_machine_add_argv(&target, label.as_deref(), session.as_deref())
-        .map_err(ActionError::invalid)?;
-    Ok(full[1..].to_vec())
+    checked_machine_add_args(&target, label.as_deref(), session.as_deref())
+        .map_err(ActionError::invalid)
 }
 
-/// Runs `herdr machine add …` in a hidden terminal and streams `"machine-setup"` events. The
-/// argv is the same allowlisted one `open_in_terminal` takes, so only the form's three fields
-/// reach herdr. A second call while one setup runs is refused.
+/// Runs `machine add …` in a hidden terminal and streams `"machine-setup"` events. The args are
+/// the same allowlisted ones `open_in_terminal` takes, so only the form's three fields reach
+/// the core. A second call while one setup runs is refused. Task 13 replaces this with
+/// `machine.add`.
 #[tauri::command]
 pub fn start_machine_add(
     app: AppHandle,
@@ -334,10 +491,10 @@ pub fn start_machine_add(
     label: Option<String>,
     session: Option<String>,
 ) -> Result<(), ActionError> {
-    let mut argv = checked_machine_add_argv(&target, label.as_deref(), session.as_deref())
+    let logged = checked_machine_add_args(&target, label.as_deref(), session.as_deref())
         .map_err(ActionError::invalid)?;
-    let logged = argv[1..].to_vec();
-    argv[0] = cli.bin().to_string_lossy().into_owned();
+    let mut argv = vec![cli.bin().to_string_lossy().into_owned()];
+    argv.extend(logged.iter().cloned());
     let started_ms = crate::now_ms();
     let (log_cli, sync) = (cli.inner().clone(), sync.inner().clone());
     let on_exit: ExitHook = Arc::new(move |exit| {
@@ -391,13 +548,15 @@ pub fn cancel_machine_setup(setup: State<'_, MachineSetup>) {
 /// The `machine add` command line as the user would type it, for the Add workbox sheet.
 #[tauri::command]
 pub fn preview_machine_add(
+    locator: State<'_, CoreLocator>,
     target: String,
     label: Option<String>,
     session: Option<String>,
 ) -> Result<String, ActionError> {
-    let full = checked_machine_add_argv(&target, label.as_deref(), session.as_deref())
+    let args = checked_machine_add_args(&target, label.as_deref(), session.as_deref())
         .map_err(ActionError::invalid)?;
-    Ok(join_quoted(&full))
+    let name = resolved_core(&locator).map_or_else(|_| "hc".to_owned(), |p| bin_name(&p));
+    Ok(args_display(&name, &args))
 }
 
 /// The `Host` aliases of `~/.ssh/config` (and its `Include`s, one level deep): names only.
@@ -527,21 +686,21 @@ pub fn show_main_new_session(app: AppHandle) {
     tray::show_main_new_session(&app);
 }
 
-/// Shows the main window and asks it to select a row (`"<machineId>::<paneId>"`), from the
+/// Shows the main window and asks it to select a row (`"<machineId>::<address>"`), from the
 /// popover or a notification.
 #[tauri::command]
-pub fn show_main_open_row(app: AppHandle, machine_id: String, pane_id: String) {
+pub fn show_main_open_row(app: AppHandle, machine_id: String, address: String) {
     tray::show_main(&app);
     tray::hide_popover(&app);
     let _ = app.emit_to(
         tray::MAIN_WINDOW,
         OPEN_ROW_EVENT,
-        format!("{machine_id}::{pane_id}"),
+        format!("{machine_id}::{address}"),
     );
 }
 
-/// Records which pane's tab the main window is showing (`"<machineId>::<paneId>"`), or `None`,
-/// so a notification for that pane is skipped while the window is focused.
+/// Records which terminal's tab the main window is showing (`"<machineId>::<address>"`), or
+/// `None`, so a notification for that terminal is skipped while the window is focused.
 #[tauri::command]
 pub fn set_visible_row(key: Option<String>, visible: State<'_, VisibleRow>) {
     *visible
@@ -661,26 +820,148 @@ mod tests {
         let e = create_session().unwrap_err();
         assert_eq!(e.to_string(), NOT_YET);
         assert!(matches!(e, ActionError::Invalid { .. }));
-        assert!(open_session().is_err());
-        assert!(copy_attach_command().is_err());
         assert!(machine_status().is_err());
     }
 
     #[test]
     fn a_target_is_read_from_the_ui_in_camel_case() {
-        let pane: TermTarget = serde_json::from_value(serde_json::json!(
-            {"kind": "pane", "machineId": "buildbox", "paneId": "t1"}
+        let terminal: TermTarget = serde_json::from_value(serde_json::json!(
+            {"kind": "terminal", "machineId": "m-1", "address": "t1"}
         ))
         .unwrap();
-        assert!(matches!(pane, TermTarget::Pane { .. }));
-        let full: TermTarget =
-            serde_json::from_value(serde_json::json!({"kind": "full", "machineId": "local"}))
-                .unwrap();
         assert_eq!(
-            full,
-            TermTarget::Full {
-                machine_id: "local".into()
+            terminal,
+            TermTarget::Terminal {
+                machine_id: "m-1".into(),
+                address: "t1".into()
             }
         );
+        let command: TermTarget = serde_json::from_value(
+            serde_json::json!({"kind": "command", "args": ["machine", "login", "buildbox"]}),
+        )
+        .unwrap();
+        assert!(matches!(command, TermTarget::Command { .. }));
+        // The old targets are gone.
+        assert!(
+            serde_json::from_value::<TermTarget>(
+                serde_json::json!({"kind": "full", "machineId": "local"})
+            )
+            .is_err()
+        );
+    }
+
+    fn core() -> &'static Path {
+        Path::new("/opt/herdr-core/bin/herdr-core")
+    }
+
+    /// Local is `t7`; the machine with id `m-1` is named `buildbox`.
+    fn names(machine: &str, address: &str) -> Option<String> {
+        match machine {
+            "local" => Some(address.to_owned()),
+            "m-1" => Some(format!("buildbox/{address}")),
+            _ => None,
+        }
+    }
+
+    fn terminal(machine: &str, address: &str) -> TermTarget {
+        TermTarget::Terminal {
+            machine_id: machine.into(),
+            address: address.into(),
+        }
+    }
+
+    #[test]
+    fn local_and_remote_terminals_run_the_same_attach() {
+        let local = term_launch(core(), &terminal("local", "t7"), false, names).unwrap();
+        let remote = term_launch(core(), &terminal("m-1", "t7"), false, names).unwrap();
+        assert_eq!(
+            local.argv,
+            ["/opt/herdr-core/bin/herdr-core", "attach", "t7"]
+        );
+        assert_eq!(
+            remote.argv,
+            ["/opt/herdr-core/bin/herdr-core", "attach", "buildbox/t7"]
+        );
+        assert_eq!(remote.display, "herdr-core attach buildbox/t7");
+        assert_eq!(remote.machine_id, "m-1");
+        let watch = term_launch(core(), &terminal("m-1", "t7"), true, names).unwrap();
+        assert_eq!(watch.argv[1..], ["attach", "--observe", "buildbox/t7"]);
+        // An unknown workbox is refused before anything runs.
+        assert!(matches!(
+            term_launch(core(), &terminal("gone", "t7"), false, names),
+            Err(ActionError::Invalid { .. })
+        ));
+    }
+
+    #[test]
+    fn ui_cannot_choose_the_binary() {
+        for args in [
+            vec!["/bin/sh", "-c", "id"],
+            vec!["/bin/sh"],
+            vec!["server", "stop"],
+            vec![],
+        ] {
+            let target = TermTarget::Command {
+                args: args.iter().map(|a| (*a).to_owned()).collect(),
+            };
+            assert!(
+                matches!(
+                    term_launch(core(), &target, false, names),
+                    Err(ActionError::Invalid { .. })
+                ),
+                "{args:?}"
+            );
+        }
+        // What is allowed runs behind the resolved core, whatever the arguments say.
+        let target = TermTarget::Command {
+            args: ["machine", "login", "buildbox"].map(str::to_owned).into(),
+        };
+        let launch = term_launch(core(), &target, false, names).unwrap();
+        assert_eq!(launch.argv[0], "/opt/herdr-core/bin/herdr-core");
+        assert_eq!(launch.argv.len(), 4);
+        // A hostile address cannot become another command or flag.
+        for bad in ["--takeover", "t7; id", "-t7", ""] {
+            assert!(
+                term_launch(core(), &terminal("local", bad), false, names).is_err(),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn open_in_terminal_prepends_core() {
+        let target = TermTarget::Command {
+            args: ["machine", "add", "buildbox", "--name", "box"]
+                .map(str::to_owned)
+                .into(),
+        };
+        let launch = term_launch(core(), &target, false, |_, _| None).unwrap();
+        assert_eq!(
+            launch.argv,
+            [
+                "/opt/herdr-core/bin/herdr-core",
+                "machine",
+                "add",
+                "buildbox",
+                "--name",
+                "box"
+            ]
+        );
+        assert_eq!(launch.display, "herdr-core machine add buildbox --name box");
+        // Without a core there is nothing to prepend.
+        let locator = CoreLocator::new();
+        assert!(matches!(
+            resolved_core(&locator),
+            Err(ActionError::Invalid { .. })
+        ));
+    }
+
+    #[test]
+    fn copy_attach_uses_binary_name() {
+        let hc = Path::new("/home/dev/.local/bin/hc");
+        let launch = term_launch(hc, &terminal("m-1", "t7"), false, names).unwrap();
+        assert_eq!(launch.display, "hc attach buildbox/t7");
+        let launch = term_launch(core(), &terminal("local", "t7"), false, names).unwrap();
+        assert_eq!(launch.display, "herdr-core attach t7");
     }
 }

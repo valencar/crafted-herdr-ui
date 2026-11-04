@@ -10,14 +10,12 @@ import { invokeTyped } from "./ipc";
  * Only a changed value is sent.
  */
 export function useVisibleRowReport(): void {
-  // The active tab's key when it is a pane tab with a live session; Home, the full herdr UI and
-  // a tab whose session ended or has not started report none.
+  // The active tab's key when it has a live session; Home and a tab whose session ended or has
+  // not started report none.
   const paneKey = useTerminalStore((s) => {
     if (s.activeKey === HOME) return null;
     const tab = s.tabs.find((t) => t.tabKey === s.activeKey);
-    return tab && tab.target.kind !== "full" && tab.state === "live"
-      ? tab.tabKey
-      : null;
+    return tab && tab.state === "live" ? tab.tabKey : null;
   });
   const [hidden, setHidden] = useState(
     () => document.visibilityState === "hidden",

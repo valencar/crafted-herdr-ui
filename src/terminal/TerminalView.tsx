@@ -208,7 +208,7 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
     term.options.theme = xtermTheme(getComputedStyle(document.documentElement));
   }, [resolved]);
 
-  const { reattach, resize } = useTermSession(tab, termRef);
+  const { reattach, resume, resize } = useTermSession(tab, termRef);
 
   /** Fits the terminal to its box and tells the session. Skipped while there is no real size. */
   const fitNow = useCallback(() => {
@@ -327,16 +327,38 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
   // The bar needs the pane's row (to copy or open its attach command) and its workbox (ssh or
   // not). The pane is "gone" only when its workbox has a list to look in and it is not on it.
   const rows = useRowsByKey();
-  const row = tab.target.kind === "pane" ? rows.get(tab.tabKey) : undefined;
+  const row = rows.get(tab.tabKey);
   const machine = useAppStore((s) =>
     s.state?.machines.find((m) => m.id === tab.target.machineId),
   );
   const gone =
     ended &&
-    tab.target.kind === "pane" &&
     !row &&
     machine?.last_ok_ms != null &&
     machine.health.kind !== "hidden";
+
+  // A tab that is waiting for a new shell or for the core reattaches by itself, once, when the
+  // wait is over (the store decides; see `settle`). A click is not needed, and it is no attempt.
+  const core = useAppStore((s) => s.state?.core_state.kind ?? "connecting");
+  const [restarts, keep, status] = [row?.restarts, row?.keep, row?.status];
+  useEffect(() => {
+    if (tab.state !== "detached" || !tab.waiting) return;
+    const facts =
+      restarts === undefined || keep === undefined || status === undefined
+        ? undefined
+        : { restarts, keep, status };
+    if (useTerminalStore.getState().settle(tab.tabKey, facts, core))
+      void resume();
+  }, [
+    tab.state,
+    tab.waiting,
+    tab.tabKey,
+    restarts,
+    keep,
+    status,
+    core,
+    resume,
+  ]);
 
   // When a session ends, push its last output up past the bar, so the newest line (usually the
   // error) is not under it. Only on the end, never while a session is live. A tab that ends in
@@ -390,7 +412,6 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
         <TermBar
           tab={tab}
           row={row ?? null}
-          remote={machine?.is_local === false}
           gone={gone}
           clicked={clicked}
           onReattach={() => {

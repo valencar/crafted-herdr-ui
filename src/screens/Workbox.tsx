@@ -8,7 +8,7 @@ import {
 import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
 import { isNeedsYou, isShell, toRows } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { openFull, openRow } from "../lib/openRow";
+import { openRow } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
 import { isEditable, isInTerminal, saveSettings } from "../lib/uiHelpers";
 import { useNow } from "../lib/useNow";
@@ -176,14 +176,6 @@ export function Workbox({ machineId }: { machineId: string }) {
             <span className="crumb-current">{label}</span>
           </nav>
           <div className="workbox-heading-actions">
-            <button
-              type="button"
-              className="btn"
-              disabled={machine === null}
-              onClick={() => void openFull(machineId, label)}
-            >
-              Open full Herdr ↗
-            </button>
             <button
               type="button"
               className="btn btn-primary"

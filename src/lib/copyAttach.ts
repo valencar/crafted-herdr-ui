@@ -15,7 +15,7 @@ export async function copyAttach(row: Row): Promise<void> {
   try {
     command = await invokeTyped("copy_attach_command", {
       machineId: row.machineId,
-      paneId: row.paneId,
+      address: row.address,
     });
   } catch (e) {
     reportError(e);

@@ -18,40 +18,30 @@ export function defaultOpenHow(): OpenHow {
  * once it really opened. Errors go to the toast.
  */
 export async function openRow(row: Row, how?: OpenHow): Promise<void> {
-  const target = { machineId: row.machineId, paneId: row.paneId };
   try {
     if ((how ?? defaultOpenHow()) === "app") {
       useTerminalStore.getState().openTab({
         tabKey: row.key,
-        target: { kind: "pane", ...target },
+        target: {
+          kind: "terminal",
+          machineId: row.machineId,
+          address: row.address,
+        },
         title: row.name,
         machineLabel: row.machineLabel,
       });
     } else {
-      await invokeTyped("open_session", target);
-    }
-    if (row.status === "done") await invokeTyped("mark_seen", target);
-  } catch (e) {
-    useAppStore.getState().reportError(e);
-  }
-}
-
-/** Opens a workbox's full herdr UI, here or in the user's terminal (as `openRow` does). */
-export async function openFull(
-  machineId: string,
-  label: string,
-  how?: OpenHow,
-): Promise<void> {
-  try {
-    if ((how ?? defaultOpenHow()) === "app") {
-      useTerminalStore.getState().openTab({
-        tabKey: `full::${machineId}`,
-        target: { kind: "full", machineId },
-        title: "herdr",
-        machineLabel: label,
+      await invokeTyped("open_session", {
+        machineId: row.machineId,
+        address: row.address,
+        observe: false,
       });
-    } else {
-      await invokeTyped("open_full_herdr", { machineId });
+    }
+    if (row.status === "done") {
+      await invokeTyped("mark_seen", {
+        machineId: row.machineId,
+        paneId: row.paneId,
+      });
     }
   } catch (e) {
     useAppStore.getState().reportError(e);
@@ -68,7 +58,7 @@ export function markSeen(row: Row): void {
 
 /**
  * A session was just created: selects its row, and with "Open when ready" opens it, once the
- * row is in `rows` (`open_session` reads the pane from the state, so it can't run before then).
+ * row is in `rows` (`open_session` reads the terminal from the state, so it can't run before then).
  * It follows the "Open sessions" setting like any other Open. Mounted once, by `App`, so it
  * works whichever screen the Home tab shows, and while a terminal tab is active.
  */

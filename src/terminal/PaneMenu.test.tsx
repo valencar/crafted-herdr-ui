@@ -16,7 +16,7 @@ import { copyText, invokeTyped } from "../lib/ipc";
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const copy = vi.mocked(copyText);
 
-const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
+const ATTACH = "hc attach buildbox/t1";
 
 const row: Row = rowOf({
   key: "buildbox::w1:p1",
@@ -132,7 +132,7 @@ describe("PaneMenu", () => {
     await waitFor(() => expect(copy).toHaveBeenCalledWith(ATTACH));
     expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     });
     await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
   });

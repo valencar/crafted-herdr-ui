@@ -255,7 +255,7 @@ describe("AllAgents", () => {
     );
     expect(
       within(screen.getByRole("menu")).getAllByRole("menuitem"),
-    ).toHaveLength(4);
+    ).toHaveLength(3);
   });
 
   it("open_buttons_name_their_row_for_screen_readers", () => {
@@ -364,7 +364,8 @@ describe("AllAgents", () => {
     );
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "gpubox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 
@@ -519,7 +520,8 @@ describe("AllAgents", () => {
     await user.keyboard("{Meta>}{Enter}{/Meta}");
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "gpubox",
-      paneId: "w2:p1",
+      address: "w2:p1",
+      observe: false,
     });
     // w2:p1 is a done agent: opening it marks it seen.
     await waitFor(() =>
@@ -651,13 +653,15 @@ describe("AllAgents", () => {
       tabs: [
         {
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "api-service",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: 1,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],

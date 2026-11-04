@@ -31,7 +31,7 @@ function RowItem({ row, project, nowMs, primary }: RowItemProps) {
     if (defaultOpenHow() === "app") {
       invokeTyped("show_main_open_row", {
         machineId: row.machineId,
-        paneId: row.paneId,
+        address: row.address,
       }).catch(report);
     } else {
       void openRow(row, "external");

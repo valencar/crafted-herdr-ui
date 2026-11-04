@@ -14,7 +14,6 @@ import {
 } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { openFull } from "../lib/openRow";
 import { useAppStore } from "../store/appStore";
 import { useId } from "react";
 
@@ -80,15 +79,6 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
             <span>{plural(tabCount, "tab", "tabs")} open</span>
           </div>
         </>
-      )}
-      {kind === "online" && (
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() => void openFull(machine.id, machine.name)}
-        >
-          Open herdr
-        </button>
       )}
       {(kind === "reconnecting" || kind === "attention") && (
         <button

@@ -17,12 +17,11 @@ use tokio::sync::Mutex;
 use ts_rs::TS;
 
 pub use attach::{
-    allowed_herdr_argv, attach_argv, check_bin, check_openable, check_terminal_id,
-    checked_machine_add_argv, full_ui_argv, machine_add_argv,
+    allowed_core_args, args_display, attach_argv, attach_display, bin_name, check_bin,
+    checked_core_argv, checked_machine_add_args,
 };
 pub use quote::{join_quoted, shell_quote};
 
-use crate::state::{Health, MachineView};
 use launchers::{Alacritty, Custom, Ghostty, ITerm2, Kitty, TerminalApp, Warp, WezTerm};
 
 /// The macOS tools the app runs, always by absolute path: the login `PATH` it captures belongs
@@ -278,25 +277,11 @@ impl TerminalList {
     }
 }
 
-/// The script a Custom template runs for a sample pane on a remote workbox, for the preview
-/// in Settings. The same substitution `Custom` uses: `{attach}` becomes the quoted command.
+/// The command a Custom template runs for a sample terminal on a remote workbox, for the
+/// preview in Settings. The same substitution `Custom` uses: `{attach}` becomes the quoted
+/// command.
 pub fn custom_template_example(template: &str) -> String {
-    let sample = MachineView {
-        id: "buildbox".into(),
-        name: "buildbox".into(),
-        target: Some("buildbox".into()),
-        session: Some("default".into()),
-        host: None,
-        hc_version: None,
-        is_local: false,
-        temporary: false,
-        health: Health::Online,
-        state_since_ms: None,
-        last_ok_ms: None,
-        terminals: Vec::new(),
-        layout: None,
-    };
-    let cmd = attach_argv(&sample, "term-1", "");
+    let cmd = attach_argv(std::path::Path::new("hc"), "buildbox/t7", false);
     Custom {
         template: template.to_owned(),
     }
@@ -487,13 +472,9 @@ mod tests {
     }
 
     #[test]
-    fn the_template_example_substitutes_a_quoted_sample_attach() {
+    fn the_template_example_substitutes_a_sample_attach() {
         let line = custom_template_example("myterm -e {attach}");
-        assert!(
-            line.starts_with("myterm -e ssh -t buildbox 'sh -c "),
-            "{line}"
-        );
-        assert!(line.contains("herdr terminal attach term-1"), "{line}");
+        assert_eq!(line, "myterm -e hc attach buildbox/t7");
         assert_eq!(custom_template_example("plain"), "plain");
     }
 

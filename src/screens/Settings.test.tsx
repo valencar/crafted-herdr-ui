@@ -27,7 +27,6 @@ const DEFAULTS: SettingsData = {
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
-  attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
   group_by: "project",
@@ -266,7 +265,7 @@ describe("Settings", () => {
     expect(screen.getByLabelText("Terminal font")).toHaveValue("ibm_plex_mono");
   });
 
-  it("saves open mode and attach mode", async () => {
+  it("saves open mode, and offers no attach mode", async () => {
     const user = await setup({}, "Terminal");
     await user.selectOptions(
       screen.getByLabelText("Each session opens in a"),
@@ -275,10 +274,8 @@ describe("Settings", () => {
     expect(invoke).toHaveBeenCalledWith("set_settings", {
       patch: { open_mode: "tab" },
     });
-    await user.selectOptions(screen.getByLabelText("Attach as"), "full_ui");
-    expect(invoke).toHaveBeenCalledWith("set_settings", {
-      patch: { attach_mode: "full_ui" },
-    });
+    expect(screen.queryByLabelText("Attach as")).toBeNull();
+    expect(screen.queryByText(/Full herdr UI/)).toBeNull();
   });
 
   it("the launch command is saved on blur, previewed, and warns about double quotes", async () => {

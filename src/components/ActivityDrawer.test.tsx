@@ -201,27 +201,28 @@ describe("ActivityDrawer", () => {
     log = [
       entry({
         machine: "m-1",
-        argv: ["terminal", "attach", "t1"],
-        display: "herdr terminal attach t1",
+        argv: [],
+        display: "hc attach buildbox/t1",
         exitCode: null,
         note: "opened in Ghostty",
       }),
     ];
-    await open();
+    const user = await open();
     const row = rows()[0];
     expect(row).toHaveAttribute("data-failed", "false");
     expect(within(row).getByText("opened in Ghostty")).toBeInTheDocument();
     expect(within(row).queryByText("no exit")).not.toBeInTheDocument();
-    // `--machine` doesn't forward attach, so a remote launch has no line to copy.
-    expect(within(row).queryByRole("button")).not.toBeInTheDocument();
+    // `hc attach` runs the same from any terminal, so a remote launch has a line to copy.
+    await user.click(within(row).getByRole("button", { name: /^Copy/ }));
+    expect(copy).toHaveBeenLastCalledWith("hc attach buildbox/t1");
   });
 
   it("keeps_copy_on_a_local_terminal_launch", async () => {
     log = [
       entry({
         machine: null,
-        argv: ["terminal", "attach", "t1"],
-        display: "herdr terminal attach t1",
+        argv: [],
+        display: "hc attach t1",
         exitCode: null,
         note: "opened in Ghostty",
       }),
@@ -230,7 +231,7 @@ describe("ActivityDrawer", () => {
     const row = rows()[0];
     expect(row).toHaveAttribute("data-failed", "false");
     await user.click(within(row).getByRole("button", { name: /^Copy/ }));
-    expect(copy).toHaveBeenLastCalledWith("herdr terminal attach t1");
+    expect(copy).toHaveBeenLastCalledWith("hc attach t1");
   });
 
   it("still_marks_a_call_without_an_exit_code_but_with_an_error_as_failed", async () => {

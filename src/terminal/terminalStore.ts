@@ -1,12 +1,31 @@
 import { create } from "zustand";
+import type { CoreState } from "../lib/bindings/CoreState";
 import type { TermTarget } from "../lib/bindings/TermTarget";
+import type { Row } from "../lib/grouping";
+import { endingOf } from "./detachReason";
 
 export type TabState = "opening" | "live" | "detached" | "error";
 
+/** The terminal a tab attaches to. (A `command` target has no tab: it has no terminal row.) */
+export type TabTarget = Extract<TermTarget, { kind: "terminal" }>;
+
+export type CoreKind = CoreState["kind"];
+
+/** What the reattach rules read of a tab's row. */
+export type RowFacts = Pick<Row, "keep" | "status" | "restarts">;
+
+/**
+ * What a detached tab waits for before it reattaches by itself, once:
+ * - `restart`: its kept terminal lost its shell; the row's `restarts` was this when it ended.
+ * - `core`: herdr-core stopped; `sawDown` is whether the core has been seen not ready since.
+ */
+export type Waiting =
+  { kind: "restart"; restarts: number } | { kind: "core"; sawDown: boolean };
+
 export type TermTab = {
-  /** `${machineId}::${paneId}` for a pane, `full::${machineId}` for the full herdr UI. */
+  /** `${machineId}::${address}`, the row's key. */
   tabKey: string;
-  target: TermTarget;
+  target: TabTarget;
   title: string;
   machineLabel: string;
   state: TabState;
@@ -15,6 +34,10 @@ export type TermTab = {
   termId: number | null;
   /** How the last session ended: the attach command's exit code; null while one runs, or when it gave none. */
   exitCode: number | null;
+  /** The last non-empty line the last session printed (`[detached from t7]`); null while one runs. */
+  lastLine: string | null;
+  /** What the tab waits for before it reattaches on its own; null when only the button reattaches. */
+  waiting: Waiting | null;
   /** Reattach and Retry clicks since a session last ended normally (exit 0); the first open does not count. */
   attempts: number;
 };
@@ -35,6 +58,30 @@ type TerminalStore = {
   /** Focuses the tab with that key if there is one, else appends it; either way it becomes active. */
   openTab: (t: NewTab) => void;
   updateTab: (tabKey: string, patch: Partial<TermTab>) => void;
+  /**
+   * A session ended: the tab is detached with its exit code and last line, and waits to
+   * reattach by itself in the two cases the spec names. `row` is the tab's row now (`undefined`
+   * when it is gone); `core` is the core's state now.
+   * - The ruled kept-loss line (`[… finished: signaled]`) on a row with `keep` that has not
+   *   finished: waits for the row's `restarts` to rise.
+   * - `[lost the core…]` or `[… finished: server_stop]`: waits for the core to come back.
+   * Anything else waits for the Reattach button.
+   */
+  sessionEnded: (
+    tabKey: string,
+    end: { code: number | null; lastLine: string | null },
+    row: RowFacts | undefined,
+    core: CoreKind,
+  ) => void;
+  /**
+   * Called when the tab's row or the core's state changed. Returns whether the tab should
+   * reattach now, and then the wait is over, so it happens once.
+   */
+  settle: (
+    tabKey: string,
+    row: RowFacts | undefined,
+    core: CoreKind,
+  ) => boolean;
   /** Removes the tab; when it was the active one, Home takes over. */
   closeTab: (tabKey: string) => void;
   /** Home always; a terminal tab only if it exists. */
@@ -74,6 +121,8 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
         error: null,
         termId: null,
         exitCode: null,
+        lastLine: null,
+        waiting: null,
         attempts: 0,
       };
       return { ...shown, tabs: [...s.tabs, tab] };
@@ -82,6 +131,54 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => (t.tabKey === tabKey ? { ...t, ...patch } : t)),
     })),
+  sessionEnded: (tabKey, end, row, core) => {
+    const ending = endingOf(end.code ?? -1, end.lastLine);
+    let waiting: Waiting | null = null;
+    if (
+      ending.kind === "finished" &&
+      ending.reason === "signaled" &&
+      row?.keep &&
+      row.status !== "ended"
+    ) {
+      waiting = { kind: "restart", restarts: row.restarts };
+    } else if (ending.kind === "server-stop" || ending.kind === "core-lost") {
+      waiting = { kind: "core", sawDown: core !== "ready" };
+    }
+    get().updateTab(tabKey, {
+      state: "detached",
+      termId: null,
+      exitCode: end.code,
+      lastLine: end.lastLine,
+      waiting,
+    });
+  },
+  settle: (tabKey, row, core) => {
+    const tab = get().tabs.find((t) => t.tabKey === tabKey);
+    const waiting = tab?.waiting;
+    if (!tab || !waiting || tab.state !== "detached") return false;
+    const stop = () => get().updateTab(tabKey, { waiting: null });
+    if (!row) {
+      stop();
+      return false;
+    }
+    if (waiting.kind === "restart") {
+      if (row.status === "ended" || !row.keep) {
+        stop();
+        return false;
+      }
+      if (row.restarts <= waiting.restarts) return false;
+      stop();
+      return true;
+    }
+    if (core !== "ready") {
+      if (!waiting.sawDown)
+        get().updateTab(tabKey, { waiting: { kind: "core", sawDown: true } });
+      return false;
+    }
+    if (!waiting.sawDown) return false;
+    stop();
+    return true;
+  },
   closeTab: (tabKey) =>
     set((s) => {
       if (!s.tabs.some((t) => t.tabKey === tabKey)) return {};

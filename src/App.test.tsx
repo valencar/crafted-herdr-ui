@@ -203,7 +203,6 @@ const SETTINGS = {
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
-  attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
   group_by: "status",
@@ -315,7 +314,8 @@ it("focus-row selects and opens", async () => {
   await waitFor(() =>
     expect(ipc.invokeTyped).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p2",
+      address: "w1:p2",
+      observe: false,
     }),
   );
   expect(useTerminalStore.getState().tabs).toEqual([]);
@@ -379,7 +379,7 @@ it("open-row event opens the tab", async () => {
   expect(useTerminalStore.getState().tabs).toMatchObject([
     {
       tabKey: "buildbox::w1:p1",
-      target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+      target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
     },
   ]);
   expect(ipc.invokeTyped).not.toHaveBeenCalledWith(
@@ -518,7 +518,7 @@ function openTabs(...paneIds: string[]) {
   for (const paneId of paneIds) {
     useTerminalStore.getState().openTab({
       tabKey: `buildbox::${paneId}`,
-      target: { kind: "pane", machineId: "buildbox", paneId },
+      target: { kind: "terminal", machineId: "buildbox", address: paneId },
       title: `agent ${paneId}`,
       machineLabel: "buildbox",
     });
@@ -571,7 +571,7 @@ describe("terminal menu ids", () => {
     act(() => {
       useTerminalStore.getState().openTab({
         tabKey: "gpubox::w1:p1",
-        target: { kind: "pane", machineId: "gpubox", paneId: "w1:p1" },
+        target: { kind: "terminal", machineId: "gpubox", address: "w1:p1" },
         title: "gpu job",
         machineLabel: "gpubox",
       });
@@ -1039,7 +1039,8 @@ describe("next-needs-you, split and sidebar menu ids", () => {
     expect(activeKey()).toBe(HOME);
     expect(ipc.invokeTyped).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 
@@ -1694,7 +1695,12 @@ describe("the window chrome", () => {
       act(() => useAppStore.getState().setState(withNewPane()));
       expect(
         ipc.invokeTyped.mock.calls.filter(([n]) => n === "open_session"),
-      ).toEqual([["open_session", { machineId: "buildbox", paneId: "w9:p9" }]]);
+      ).toEqual([
+        [
+          "open_session",
+          { machineId: "buildbox", address: "w9:p9", observe: false },
+        ],
+      ]);
       expect(tabKeys()).toEqual([]);
     });
 

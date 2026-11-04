@@ -73,7 +73,6 @@ const DEFAULT_SETTINGS: Settings = {
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
-  attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
   group_by: "project",

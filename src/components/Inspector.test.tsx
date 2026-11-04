@@ -28,7 +28,7 @@ import { copyText, invokeTyped, onPreview } from "../lib/ipc";
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const listen = vi.mocked(onPreview);
 
-const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
+const ATTACH = "hc attach buildbox/t1";
 
 const machine: MachineView = machineView(
   { id: "buildbox", target: "buildbox" },
@@ -112,40 +112,12 @@ describe("Inspector details", () => {
 
   it("command_box_shows_exact_attach_argv", async () => {
     setup();
-    const box = await screen.findByText(new RegExp("terminal attach term-1"));
+    const box = await screen.findByText(new RegExp("hc attach buildbox/t1"));
     expect(box).toHaveTextContent(`$ ${ATTACH}`);
     expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     });
-  });
-});
-
-describe("Inspector command box and the attach mode", () => {
-  const settings = (attach_mode: "pane" | "full_ui") =>
-    ({ attach_mode }) as unknown as Settings;
-  const FULL_UI = "/opt/herdr/bin/herdr --remote buildbox";
-
-  it("asks_again_and_shows_the_full_ui_command_when_the_attach_mode_changes", async () => {
-    invoke.mockImplementation(async (name: string) =>
-      name === "copy_attach_command"
-        ? useAppStore.getState().settings?.attach_mode === "full_ui"
-          ? FULL_UI
-          : ATTACH
-        : null,
-    );
-    useAppStore.setState({ settings: settings("pane") });
-    setup();
-    expect(await screen.findByText(/terminal attach term-1/)).toHaveTextContent(
-      `$ ${ATTACH}`,
-    );
-
-    act(() => useAppStore.setState({ settings: settings("full_ui") }));
-    expect(await screen.findByText(/--remote buildbox/)).toHaveTextContent(
-      `$ ${FULL_UI}`,
-    );
-    expect(screen.queryByText(/terminal attach term-1/)).toBeNull();
-    useAppStore.setState({ settings: null });
   });
 });
 
@@ -322,7 +294,8 @@ describe("Inspector actions", () => {
     );
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 
@@ -332,7 +305,8 @@ describe("Inspector actions", () => {
     await user.click(screen.getByRole("button", { name: "Open planner" }));
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 
@@ -517,13 +491,19 @@ describe("Inspector live preview", () => {
           tabs: [
             {
               tabKey: "buildbox::w1:p3",
-              target: { kind: "pane", machineId: "buildbox", paneId: "w1:p3" },
+              target: {
+                kind: "terminal",
+                machineId: "buildbox",
+                address: "w1:p3",
+              },
               title: "shell",
               machineLabel: "buildbox",
               state: "live",
               error: null,
               termId: 1,
               exitCode: null,
+              lastLine: null,
+              waiting: null,
               attempts: 0,
             },
           ],
