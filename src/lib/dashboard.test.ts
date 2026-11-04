@@ -82,6 +82,16 @@ describe("statusCounts", () => {
   });
 });
 
+describe("statusCounts and ended shells", () => {
+  it("an_ended_shell_is_not_counted_as_an_agent", () => {
+    const endedShell = { ...row("s", "ended"), isAgent: false, kind: null };
+    const endedAgent = row("a", "ended");
+    expect(statusCounts([endedShell, endedAgent, row("w", "working")])).toEqual(
+      { blocked: 0, done: 0, working: 1, idle: 0, total: 2 },
+    );
+  });
+});
+
 describe("oldestBlocked", () => {
   it("oldest_blocked_is_smallest_since_and_null_since_last", () => {
     const rows = [

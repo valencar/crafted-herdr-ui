@@ -18,6 +18,7 @@ import {
   groupByWorkbox,
   isHomeLike,
   isNeedsYou,
+  isShell,
   needsYou,
   projectNames,
   projectNamesOf,
@@ -200,6 +201,47 @@ describe("toRows", () => {
       parent: null,
       isWorker: true,
     });
+  });
+
+  it("an_ended_shell_is_not_an_agent_and_a_reported_agent_without_a_kind_is", () => {
+    const m = machineView({ id: "buildbox" }, [
+      agentTerm({
+        address: "t1",
+        status: "idle",
+        name: "planner",
+        folder: "/home/dev/projects/api-service",
+      }),
+      shellTerm({
+        address: "t2",
+        status: "ended",
+        title: "zsh",
+        folder: "/home/dev/projects/web-app",
+      }),
+      agentTerm({
+        address: "t3",
+        status: "working",
+        kind: "",
+        folder: "/home/dev/projects/infra",
+      }),
+    ]);
+    const rows = toRows(appState(m));
+    const byAddress = (a: string) => rows.find((r) => r.address === a)!;
+    // `ended` is the status of any finished terminal, so the status cannot say what it was.
+    expect(byAddress("t2")).toMatchObject({ status: "ended", isAgent: false });
+    expect(isShell(byAddress("t2"))).toBe(true);
+    // A reported agent whose kind is empty still counts as an agent.
+    expect(byAddress("t3")).toMatchObject({ kind: null, isAgent: true });
+    expect(isShell(byAddress("t3"))).toBe(false);
+    // The ended shell makes no project group of its own: it joins nothing, so it is loose.
+    const groups = groupByProject(rows);
+    expect(groups.map((g) => g.name).sort()).toEqual([
+      "Loose sessions",
+      "api-service",
+      "infra",
+    ]);
+    expect(groups.find((g) => g.name === "Loose sessions")!.rows).toEqual([
+      byAddress("t2"),
+    ]);
   });
 
   it("toRows_skips_hidden_machines", () => {

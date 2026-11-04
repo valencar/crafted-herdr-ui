@@ -30,7 +30,7 @@ const NOW = Date.now();
 
 function machine(
   id: string,
-  over: { name?: string; terms?: TermSpec[] } = {},
+  over: { name?: string; terms?: TermSpec[]; hcVersion?: string } = {},
   health: Health = { kind: "online" },
 ): MachineView {
   return machineView(
@@ -41,6 +41,7 @@ function machine(
       isLocal: id === "local",
       health,
       lastOkMs: NOW,
+      hcVersion: over.hcVersion ?? "0.1.18",
     },
     over.terms ?? buildboxTerms(),
   );
@@ -194,7 +195,7 @@ describe("Workbox", () => {
     const summary = screen.getByRole("region", { name: "buildbox" });
     expect(within(summary).getByText("Reachable")).toBeInTheDocument();
     expect(
-      within(summary).getByText("ssh buildbox · session default"),
+      within(summary).getByText("ssh buildbox · session default · hc 0.1.18"),
     ).toBeInTheDocument();
     const count = (term: string) =>
       within(summary).getByText(term).parentElement?.querySelector("dd")
@@ -249,13 +250,20 @@ describe("Workbox", () => {
     expect(calls("machine_set_enabled")).toEqual([]);
   });
 
+  it("the_meta_names_the_hc_version_the_machine_reports", () => {
+    setup(appState(machine("buildbox", { hcVersion: "0.1.17" })));
+    expect(
+      screen.getByText("ssh buildbox · session default · hc 0.1.17"),
+    ).toBeInTheDocument();
+  });
+
   it("local_hides_rename_hide_and_remove", () => {
     setup(appState(machine("local", { name: "This computer" })), "local");
     for (const name of ["Rename", "Hide", "Remove…"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     expect(
-      screen.getByText("this computer · session default"),
+      screen.getByText("this computer · session default · hc 0.1.18"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Open full Herdr ↗" }),

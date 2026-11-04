@@ -200,11 +200,7 @@ fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
         }
         _ => return,
     };
-    if let Some(cell) = window.try_state::<SyncCell>()
-        && let Some(sync) = cell.get()
-    {
-        sync.set_window_visible(visible);
-    }
+    tray::report_visible(window.try_state::<SyncCell>().as_deref(), visible);
 }
 
 fn on_window_event(window: &tauri::Window, event: &WindowEvent) {

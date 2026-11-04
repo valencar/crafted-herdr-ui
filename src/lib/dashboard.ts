@@ -1,7 +1,7 @@
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { MachineView } from "./bindings/MachineView";
 import { formatStaleness } from "./format";
-import { bySinceThenKey, type Row } from "./grouping";
+import { bySinceThenKey, isShell, type Row } from "./grouping";
 
 export type StatusCounts = {
   blocked: number;
@@ -21,7 +21,7 @@ export function statusCounts(rows: Row[]): StatusCounts {
     total: 0,
   };
   for (const r of rows) {
-    if (r.status === "shell") continue;
+    if (isShell(r)) continue;
     counts.total += 1;
     if (r.status === "blocked") counts.blocked += 1;
     else if (r.status === "done") counts.done += 1;

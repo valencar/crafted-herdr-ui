@@ -6,7 +6,7 @@ import {
   type WorkboxDialog,
 } from "../components/WorkboxDialogs";
 import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
-import { isNeedsYou, toRows } from "../lib/grouping";
+import { isNeedsYou, isShell, toRows } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { openFull, openRow } from "../lib/openRow";
 import { tailTargets, usePaneTails } from "../lib/usePaneTails";
@@ -94,7 +94,7 @@ export function Workbox({ machineId }: { machineId: string }) {
     ? { sessions: 0, agents: 0, needsYou: 0 }
     : {
         sessions: rows.length,
-        agents: rows.filter((r) => r.kind !== null).length,
+        agents: rows.filter((r) => !isShell(r)).length,
         needsYou: rows.filter(isNeedsYou).length,
       };
 

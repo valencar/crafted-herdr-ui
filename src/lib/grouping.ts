@@ -21,6 +21,11 @@ export type Row = {
   kind: string | null;
   /** The foreground program's name. */
   program: string | null;
+  /**
+   * Whether it is an agent (the core says so, or the program is a known agent). A finished
+   * terminal is `ended` whether it was an agent or a plain shell, so `status` cannot tell.
+   */
+  isAgent: boolean;
   name: string;
   title: string;
   status: RowStatus;
@@ -111,6 +116,7 @@ export function toRows(state: AppState): Row[] {
         paneId: t.address,
         kind: t.is_agent ? nonEmpty(t.kind) : null,
         program: nonEmpty(t.program),
+        isAgent: t.is_agent,
         name: displayName(t),
         title: nonEmpty(t.title) ?? "",
         status: t.status,
@@ -131,6 +137,11 @@ export function toRows(state: AppState): Row[] {
     }
   }
   return rows;
+}
+
+/** A plain shell, running or ended. Everything else is an agent. */
+export function isShell(r: Pick<Row, "isAgent">): boolean {
+  return !r.isAgent;
 }
 
 /**
@@ -248,7 +259,7 @@ export function groupByProject(rows: Row[]): Group[] {
   };
 
   for (const r of rows) {
-    if (r.status === "shell") continue;
+    if (isShell(r)) continue;
     if (r.folder === null || isHomeLike(r.folder)) {
       looseFor(r).rows.push(r);
       continue;
@@ -272,7 +283,7 @@ export function groupByProject(rows: Row[]): Group[] {
   }
 
   for (const r of rows) {
-    if (r.status !== "shell") continue;
+    if (!isShell(r)) continue;
     let best: Group | null = null;
     if (r.folder !== null) {
       const folder = trimSlash(r.folder);

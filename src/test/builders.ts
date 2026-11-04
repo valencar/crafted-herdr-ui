@@ -27,6 +27,8 @@ export type MachineSpec = {
   session?: string;
   /** Unix ms of the last successful poll; `null` for none. */
   lastOkMs?: number | null;
+  /** The `hc` version the machine reports; `null` for none. */
+  hcVersion?: string | null;
 };
 
 export type AgentTermSpec = {
@@ -53,6 +55,7 @@ export type AgentTermSpec = {
 export type ShellTermSpec = {
   kind: "shell";
   address: string;
+  status: DisplayStatus;
   folder: string | null;
   title: string | null;
 };
@@ -96,12 +99,15 @@ export function agentTerm(spec: {
 /** One plain shell terminal (no agent). */
 export function shellTerm(spec: {
   address: string;
+  /** `ended` for a shell that has exited. */
+  status?: DisplayStatus;
   folder?: string | null;
   title?: string | null;
 }): ShellTermSpec {
   return {
     kind: "shell",
     address: spec.address,
+    status: spec.status ?? "shell",
     folder: spec.folder ?? null,
     title: spec.title ?? null,
   };
@@ -117,6 +123,7 @@ export function machine(spec: MachineSpec): Required<MachineSpec> {
     target: spec.target ?? null,
     session: spec.session ?? "default",
     lastOkMs: spec.lastOkMs === undefined ? 1 : spec.lastOkMs,
+    hcVersion: spec.hcVersion ?? null,
   };
 }
 
@@ -227,7 +234,7 @@ function terminalOf(t: TermSpec): TerminalView {
     program: "zsh",
     kind: null,
     is_agent: false,
-    status: "shell",
+    status: t.status,
     word: null,
     status_kind: null,
     status_msg: null,
@@ -262,7 +269,7 @@ export function machineView(
     target: m.target,
     session: m.session,
     host: null,
-    hc_version: null,
+    hc_version: m.hcVersion,
     is_local: m.isLocal,
     temporary: false,
     health: m.health,
@@ -317,6 +324,7 @@ export function rowOf(
     fullAddress: r.paneId,
     kind: r.status === "shell" ? null : "claude",
     program: null,
+    isAgent: r.status !== "shell",
     title: "",
     folder: null,
     sinceMs: null,

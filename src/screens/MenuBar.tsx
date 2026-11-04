@@ -3,7 +3,13 @@ import { HealthDot, StatusDot } from "../components/StatusDot";
 import { useMemo } from "react";
 import { StoreToast } from "../components/Toast";
 import { HEALTH_LABEL, STATUS_LABEL, formatAge, plural } from "../lib/format";
-import { needsYou, projectNames, toRows, type Row } from "../lib/grouping";
+import {
+  isShell,
+  needsYou,
+  projectNames,
+  toRows,
+  type Row,
+} from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { defaultOpenHow, openRow } from "../lib/openRow";
 import { useNow } from "../lib/useNow";
@@ -74,7 +80,7 @@ export function MenuBar() {
     [rows],
   );
   const idle = useMemo(() => rows.filter((r) => r.status === "idle"), [rows]);
-  const agentCount = rows.filter((r) => r.status !== "shell").length;
+  const agentCount = rows.filter((r) => !isShell(r)).length;
   const idleNames = [
     ...new Set(idle.map((r) => projectOf.get(r.key) ?? r.name)),
   ].join(", ");

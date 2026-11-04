@@ -25,7 +25,7 @@ export function Preview({ row }: { row: Row }) {
   const setPreview = useAppStore((s) => s.setPreview);
   const reportError = useAppStore((s) => s.reportError);
   const { key, machineId, paneId } = row;
-  const isAgent = row.status !== "shell";
+  const { isAgent } = row;
   const visible = useHomeVisible();
   const started = useRef(false);
 

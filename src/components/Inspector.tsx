@@ -37,7 +37,7 @@ export function Inspector({
 }: Props) {
   const reportError = useAppStore((s) => s.reportError);
   const { machineId, paneId } = row;
-  const isAgent = row.status !== "shell";
+  const { isAgent } = row;
   const target = { machineId, paneId };
 
   // The name the person gave it, which `row.name` falls back from.

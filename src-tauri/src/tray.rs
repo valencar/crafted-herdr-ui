@@ -21,7 +21,7 @@ use crate::menu;
 use crate::now_ms;
 use crate::settings::{SharedSettings, Theme};
 use crate::state::{AppState, Health};
-use crate::sync::CoreSync;
+use crate::sync::SyncCell;
 
 pub const MAIN_WINDOW: &str = "main";
 pub const POPOVER_WINDOW: &str = "popover";
@@ -132,8 +132,14 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
-    if let Some(sync) = app.try_state::<CoreSync>() {
-        sync.set_window_visible(true);
+    report_visible(app.try_state::<SyncCell>().as_deref(), true);
+}
+
+/// Tells the sync whether the main window is on screen, if it has started (the cell is empty
+/// until the core is located).
+pub(crate) fn report_visible(cell: Option<&SyncCell>, visible: bool) {
+    if let Some(sync) = cell.and_then(SyncCell::get) {
+        sync.set_window_visible(visible);
     }
 }
 
@@ -144,9 +150,7 @@ pub fn hide_main<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.hide();
     }
-    if let Some(sync) = app.try_state::<CoreSync>() {
-        sync.set_window_visible(false);
-    }
+    report_visible(app.try_state::<SyncCell>().as_deref(), false);
 }
 
 /// What the show/hide shortcut does: hide the window only when the user is looking at it. A
@@ -485,6 +489,49 @@ mod tests {
         assert_eq!(needs_you_count(&state(vec![m.clone()])), 2);
         m.terminals[0].parent = Some("t9".into());
         assert_eq!(needs_you_count(&state(vec![m])), 2);
+    }
+
+    /// A core that is never there: the sync starts and waits, which is all this test needs.
+    struct NoCore;
+
+    impl crate::core::connection::Connector for NoCore {
+        fn connect(
+            &self,
+        ) -> crate::core::connection::BoxFuture<
+            'static,
+            Result<
+                (
+                    crate::core::connection::Connection,
+                    tokio::sync::mpsc::UnboundedReceiver<crate::core::connection::Notification>,
+                ),
+                crate::core::CoreError,
+            >,
+        > {
+            Box::pin(async { Err(crate::core::CoreError::NotFound) })
+        }
+    }
+
+    #[tokio::test]
+    async fn showing_and_hiding_the_window_reaches_the_sync() {
+        // Before the core is located there is no sync, and nothing to tell.
+        report_visible(None, false);
+        let cell = SyncCell::default();
+        report_visible(Some(&cell), false);
+
+        let sync = crate::sync::CoreSync::start(
+            Arc::new(crate::core::CoreClient::new(Arc::new(NoCore))),
+            crate::settings::SharedSettings::default(),
+            Arc::new(Mutex::new(crate::activity::ActivityV2::new(None))),
+            Arc::new(|_| {}),
+            Arc::new(|_| {}),
+        );
+        cell.set(sync);
+        let visible = || cell.get().unwrap().is_window_visible();
+        assert!(visible());
+        report_visible(Some(&cell), false);
+        assert!(!visible());
+        report_visible(Some(&cell), true);
+        assert!(visible());
     }
 
     #[test]

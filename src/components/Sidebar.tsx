@@ -7,7 +7,7 @@ import { tabShortcutId, type ShortcutId } from "../lib/shortcuts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
-import type { Group } from "../lib/grouping";
+import { isShell, type Group } from "../lib/grouping";
 import { toggleSidebar } from "../lib/uiHelpers";
 import { useWorkboxColor } from "../lib/workboxColors";
 import { useAppStore } from "../store/appStore";
@@ -171,7 +171,7 @@ export function Sidebar({
   const agentsByMachine = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of rows.values()) {
-      if (r.status === "shell") continue;
+      if (isShell(r)) continue;
       counts.set(r.machineId, (counts.get(r.machineId) ?? 0) + 1);
     }
     return counts;
