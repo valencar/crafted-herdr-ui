@@ -5,13 +5,17 @@ pub mod client;
 pub mod connection;
 pub mod display;
 pub mod errors;
+pub mod events;
 pub mod locate;
 pub mod log;
+pub mod model;
 
 pub use client::{CoreClient, HelloInfo, ProcessConnector, USES, hello, timeout_for};
 pub use connection::{Connection, Connector, Notification};
 pub use errors::CoreError;
+pub use events::{Applied, TerminalMap};
 pub use log::{CommandLog, CommandLogEntry};
+pub use model::{CoreMachine, CoreTerminal, Foreground, StatusRecord, TemplateInfo};
 
 /// An in-memory stand-in for a core, for the unit tests: a `Connection` over `tokio::io::duplex`
 /// whose other end answers each request line from a handler.
