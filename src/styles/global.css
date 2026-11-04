@@ -219,6 +219,7 @@ textarea {
   .live,
   .live::after,
   .sdot[data-status="blocked"].live::after,
+  .sdot[data-status="error"].live::after,
   .sdot[data-status="working"].live,
   .sdot[data-status="opening"].live,
   .sdot[data-health="pending"].live,

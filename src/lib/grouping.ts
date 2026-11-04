@@ -211,6 +211,27 @@ function isInside(folder: string, root: string): boolean {
   return folder === root || folder.startsWith(root === "/" ? "/" : `${root}/`);
 }
 
+/** A stable sort that moves ended rows after the rest, each side keeping its order. */
+function endedLast(rows: Row[]): Row[] {
+  return [
+    ...rows.filter((r) => r.status !== "ended"),
+    ...rows.filter((r) => r.status === "ended"),
+  ];
+}
+
+/**
+ * The second line of an ended row: "Ended · exit 1", or "Ended · {reason}" when the core gave
+ * no exit code; `null` for any other row, or an ended one with neither to say.
+ */
+export function endedDetail(
+  r: Pick<Row, "status" | "exitCode" | "reason">,
+): string | null {
+  if (r.status !== "ended") return null;
+  if (r.exitCode !== null) return `Ended · exit ${r.exitCode}`;
+  const reason = nonEmpty(r.reason);
+  return reason ? `Ended · ${reason}` : null;
+}
+
 function tierOf(rows: Row[]): 0 | 1 | 2 {
   if (rows.some(isNeedsYou)) return 0;
   if (rows.some((r) => r.status === "working")) return 1;
@@ -300,6 +321,7 @@ export function groupByProject(rows: Row[]): Group[] {
 
   const projects = [...groups.values()];
   for (const g of projects) g.tier = tierOf(g.rows);
+  for (const g of [...projects, ...loose.values()]) g.rows = endedLast(g.rows);
   projects.sort((a, b) => a.tier - b.tier || byNameThenMachine(a, b));
   return [...projects, ...[...loose.values()].sort(byNameThenMachine)];
 }
@@ -342,7 +364,10 @@ export function groupByWorkbox(rows: Row[]): Group[] {
     g.rows.push(r);
   }
   const out = [...groups.values()];
-  for (const g of out) g.tier = tierOf(g.rows);
+  for (const g of out) {
+    g.tier = tierOf(g.rows);
+    g.rows = endedLast(g.rows);
+  }
   return out;
 }
 

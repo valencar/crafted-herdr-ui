@@ -550,3 +550,57 @@ describe("groupByStatus", () => {
     expect(groups.find((g) => g.name === "Shell")?.rows).toHaveLength(2);
   });
 });
+
+describe("ended rows", () => {
+  const ended = (key: string, over: Partial<Row> = {}) =>
+    row({ key, paneId: key, status: "ended", sinceMs: 1, ...over });
+
+  it("ended_sorts_last_and_never_needs_you", () => {
+    const rows = [
+      ended("m::t1", { folder: "/home/dev/projects/api-service" }),
+      row({
+        key: "m::t2",
+        paneId: "t2",
+        status: "idle",
+        folder: "/home/dev/projects/api-service",
+      }),
+      row({
+        key: "m::t3",
+        paneId: "t3",
+        status: "working",
+        folder: "/home/dev/projects/api-service",
+      }),
+      ended("m::t4", { folder: "/home/dev/projects/api-service" }),
+    ];
+    // Never needs-you, however old.
+    expect(isNeedsYou(rows[0])).toBe(false);
+    expect(needsYou(rows)).toEqual([]);
+    // Inside a project and a workbox, the ended rows follow the others, keeping their order.
+    const byProject = groupByProject(rows);
+    expect(byProject[0].rows.map((r) => r.key)).toEqual([
+      "m::t2",
+      "m::t3",
+      "m::t1",
+      "m::t4",
+    ]);
+    expect(groupByWorkbox(rows)[0].rows.map((r) => r.key)).toEqual([
+      "m::t2",
+      "m::t3",
+      "m::t1",
+      "m::t4",
+    ]);
+    // By status, the Ended group is last, and it does not lift its project into Needs you.
+    expect(groupByStatus(rows).map((g) => g.name)).toEqual([
+      "Working",
+      "Idle",
+      "Ended",
+    ]);
+    expect(groupByProject([rows[0]])[0].tier).toBe(2);
+  });
+
+  it("an_ended_shell_stays_a_shell_and_never_needs_you", () => {
+    const shell = ended("m::t5", { isAgent: false, kind: null });
+    expect(isShell(shell)).toBe(true);
+    expect(isNeedsYou(shell)).toBe(false);
+  });
+});

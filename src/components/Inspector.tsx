@@ -130,8 +130,10 @@ export function Inspector({
       <header className="inspector-head">
         <div className="inspector-badges">
           <StatusPill status={row.status} />
-          <KindBadge kind={row.kind} named />
-          <span className="muted">{row.kind ?? "Shell"}</span>
+          <KindBadge kind={row.kind} isAgent={isAgent} named />
+          <span className="muted">
+            {row.kind ?? (isAgent ? "Agent" : "Shell")}
+          </span>
         </div>
         <h2 className="inspector-name mono">{row.name}</h2>
         <span className="inspector-sub">

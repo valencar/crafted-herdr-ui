@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { formatAge } from "../lib/format";
-import type { Row } from "../lib/grouping";
+import { endedDetail, type Row } from "../lib/grouping";
 import { KindBadge } from "./KindBadge";
 import { OpenButton } from "./OpenButton";
 import { StatusPill } from "./StatusPill";
@@ -30,6 +30,7 @@ export const AgentRow = memo(function AgentRow({
 }: Props) {
   const title = row.title || row.name;
   const age = formatAge(row.sinceMs, nowMs);
+  const ended = endedDetail(row);
   return (
     <li
       className={`agent-row${selected ? " is-selected" : ""}${dim ? " is-dim" : ""}`}
@@ -43,9 +44,10 @@ export const AgentRow = memo(function AgentRow({
         onClick={() => onSelect(row.key)}
       >
         <StatusPill status={row.status} />
-        <KindBadge kind={row.kind} />
+        <KindBadge kind={row.kind} isAgent={row.isAgent} />
         <span className="row-text">
           <span className="row-title">{title}</span>
+          {ended && <span className="row-sub">{ended}</span>}
           {note && <span className="row-note">{note}</span>}
         </span>
         {row.title && row.name !== row.title && (

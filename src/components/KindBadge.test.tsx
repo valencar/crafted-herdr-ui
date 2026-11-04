@@ -52,6 +52,21 @@ describe("KindBadge", () => {
     expect(container.querySelector("svg")).toBeNull();
   });
 
+  it("an_agent_with_no_kind_is_an_agent_not_a_shell", () => {
+    const { container } = render(<KindBadge kind={null} isAgent />);
+    expect(screen.queryByText("$_")).toBeNull();
+    expect(screen.getByText("AG")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByText("Agent")).toHaveClass("sr-only");
+    expect(screen.queryByText("shell")).toBeNull();
+    expect(container.querySelector("svg")).toBeNull();
+  });
+
+  it("a_known_kind_ignores_the_agent_flag", () => {
+    const { container } = render(<KindBadge kind="claude" isAgent />);
+    expect(container.querySelector("svg")).not.toBeNull();
+    expect(screen.getByText("claude")).toHaveClass("sr-only");
+  });
+
   it("screen_reader_name_is_unchanged", () => {
     render(<KindBadge kind="claude" />);
     const full = screen.getByText("claude");

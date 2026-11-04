@@ -11,8 +11,11 @@ import {
   statusCounts,
   workingNow,
 } from "./dashboard";
-import type { Row } from "./grouping";
+import { needsYou, type Row } from "./grouping";
 import { machineView, rowOf } from "../test/builders";
+import { countNeeds } from "../terminal/tabInfo";
+import type { TermTab } from "../terminal/terminalStore";
+import { barLabel, legendText } from "../components/StatusBar";
 
 function row(
   key: string,
@@ -74,9 +77,11 @@ describe("statusCounts", () => {
     ];
     expect(statusCounts(rows)).toEqual({
       blocked: 1,
+      error: 0,
       done: 2,
       working: 1,
       idle: 1,
+      ended: 0,
       total: 6,
     });
   });
@@ -87,7 +92,15 @@ describe("statusCounts and ended shells", () => {
     const endedShell = { ...row("s", "ended"), isAgent: false, kind: null };
     const endedAgent = row("a", "ended");
     expect(statusCounts([endedShell, endedAgent, row("w", "working")])).toEqual(
-      { blocked: 0, done: 0, working: 1, idle: 0, total: 2 },
+      {
+        blocked: 0,
+        error: 0,
+        done: 0,
+        working: 1,
+        idle: 0,
+        ended: 1,
+        total: 2,
+      },
     );
   });
 });
@@ -238,5 +251,82 @@ describe("failing workboxes", () => {
     expect(failingNote(m, NOW)).toBe("ssh failed · last updated 40s ago");
     expect(failingNote(machine("a", { kind: "online" }), NOW)).toBeNull();
     expect(failingNote(undefined, NOW)).toBeNull();
+  });
+});
+
+describe("error and ended on the dashboard", () => {
+  const tabFor = (key: string): TermTab => ({
+    tabKey: key,
+    target: { kind: "pane", machineId: "local", paneId: key },
+    title: key,
+    machineLabel: "local",
+    state: "live",
+    error: null,
+    termId: 1,
+    exitCode: null,
+    attempts: 0,
+  });
+
+  it("error_counts_in_count_needs_and_dashboard", () => {
+    const rows = [
+      row("local::t1", "blocked", 10),
+      row("local::t2", "error", 20),
+      row("local::t3", "done", 30),
+      row("local::t4", "working", 40),
+      row("local::t5", "ended", 50),
+    ];
+    // The tab badges count blocked and error, not done.
+    const byKey = new Map(rows.map((r) => [r.key, r]));
+    expect(
+      countNeeds(
+        rows.map((r) => tabFor(r.key)),
+        byKey,
+      ),
+    ).toBe(2);
+    // The Needs you list has the error between blocked and done.
+    expect(needsYou(rows).map((r) => r.status)).toEqual([
+      "blocked",
+      "error",
+      "done",
+    ]);
+    // The status counts have a bucket for each, so the bar and legend say so too.
+    const counts = statusCounts(rows);
+    expect(counts).toMatchObject({
+      blocked: 1,
+      error: 1,
+      done: 1,
+      working: 1,
+      idle: 0,
+      ended: 1,
+      total: 5,
+    });
+    expect(legendText(counts)).toBe(
+      "1 need input · 1 error · 1 done · 1 working · 0 idle · 1 ended",
+    );
+    expect(barLabel(counts)).toBe(
+      "1 need input, 1 error, 1 done and unseen, 1 working, 0 idle, 1 ended",
+    );
+  });
+
+  it("keeps_the_legend_short_when_nothing_is_in_error_or_ended", () => {
+    const counts = statusCounts([row("local::t1", "blocked")]);
+    expect(legendText(counts)).toBe(
+      "1 need input · 0 done · 0 working · 0 idle",
+    );
+  });
+
+  it("counts_an_ended_shell_nowhere", () => {
+    const shell = rowOf({
+      key: "local::t9",
+      machineId: "local",
+      machineLabel: "local",
+      paneId: "t9",
+      name: "zsh",
+      status: "ended",
+      isAgent: false,
+      kind: null,
+    });
+    expect(statusCounts([shell]).ended).toBe(0);
+    expect(statusCounts([shell]).total).toBe(0);
   });
 });

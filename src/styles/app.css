@@ -727,10 +727,28 @@ kbd {
   background: var(--text-4);
   border-color: var(--text-4);
 }
-/* Terminal tabs with no live session (`TabState`): error reads as attention, opening as the
-   first connect, detached as a dim dashed ring. */
+/* Error is the needs shape (a filled dot, a static halo, a pulse while live) in --danger. It is
+   also what a terminal tab whose session failed shows (`TabState`): both mean "look at this".
+   Opening is the first connect and detached a dim dashed ring. */
 .sdot[data-status="error"] {
+  background: var(--danger);
   border-color: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.sdot[data-status="error"].live::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  background: var(--danger);
+  opacity: 0.6;
+  animation: st-pulse 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+/* Ended: a finished terminal. A hollow square, never animated; the shell is a small solid one. */
+.sdot[data-status="ended"] {
+  border-radius: 2px;
+  background: transparent;
+  border-color: var(--text-3);
 }
 .sdot[data-status="opening"] {
   border-color: color-mix(in srgb, var(--muted) 40%, transparent);
@@ -853,6 +871,9 @@ kbd {
 .card[data-status="blocked"] {
   border-color: color-mix(in srgb, var(--st-needs) 22%, var(--border));
 }
+.card[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 22%, var(--border));
+}
 .card[data-status="done"] {
   border-color: color-mix(in srgb, var(--st-done) 18%, var(--border));
 }
@@ -861,6 +882,9 @@ kbd {
 }
 .card[data-status="blocked"]:hover {
   border-color: color-mix(in srgb, var(--st-needs) 45%, var(--border));
+}
+.card[data-status="error"]:hover {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
 }
 .card[data-status="done"]:hover {
   border-color: color-mix(in srgb, var(--st-done) 40%, var(--border));
@@ -978,6 +1002,11 @@ kbd {
   font-size: var(--fs-small);
   color: var(--danger);
 }
+/* The second line of an ended row: "Ended · exit 1". */
+.row-sub {
+  font-size: var(--fs-small);
+  color: var(--text-4);
+}
 .row-name,
 .row-pane {
   color: var(--muted);
@@ -1028,6 +1057,14 @@ kbd {
 .pill[data-status="blocked"] {
   color: var(--st-needs);
   background: color-mix(in srgb, var(--st-needs) 13%, transparent);
+}
+.pill[data-status="error"] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+.pill[data-status="ended"] {
+  color: var(--text-3);
+  background: color-mix(in srgb, var(--text-3) 10%, transparent);
 }
 .pill[data-status="done"] {
   color: var(--st-done);
@@ -1568,6 +1605,9 @@ select.field {
 }
 .pane-box[data-status="blocked"] {
   border-color: color-mix(in srgb, var(--st-needs) 40%, transparent);
+}
+.pane-box[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 .pane-box[data-status="done"] {
   border-color: color-mix(in srgb, var(--st-done) 35%, transparent);
@@ -3214,6 +3254,9 @@ select.field {
 .status-bar-seg[data-status="blocked"] {
   background: var(--st-needs);
 }
+.status-bar-seg[data-status="error"] {
+  background: var(--danger);
+}
 .status-bar-seg[data-status="done"] {
   background: var(--st-done);
 }
@@ -3222,6 +3265,9 @@ select.field {
 }
 .status-bar-seg[data-status="idle"] {
   background: var(--st-idle);
+}
+.status-bar-seg[data-status="ended"] {
+  background: var(--text-3);
 }
 
 .wb-cards {

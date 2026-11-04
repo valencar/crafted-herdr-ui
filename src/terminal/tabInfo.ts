@@ -71,7 +71,10 @@ export function tabSubline(
   return [place, tabStatus(tab, row)].filter(Boolean).join(" · ");
 }
 
-/** How many of the tabs show a blocked agent. */
+/** How many of the tabs show a blocked or errored agent (a done one is not counted). */
 export function countNeeds(tabs: TermTab[], rows: Map<string, Row>): number {
-  return tabs.filter((t) => rows.get(t.tabKey)?.status === "blocked").length;
+  return tabs.filter((t) => {
+    const status = rows.get(t.tabKey)?.status;
+    return status === "blocked" || status === "error";
+  }).length;
 }

@@ -42,7 +42,7 @@ export function ContextBar({ tab, row, onFind }: Props) {
       <div className="context-id">
         <span className="mono context-title">{row ? row.name : tab.title}</span>
         {row && <StatusPill status={row.status} live />}
-        {row && <KindBadge kind={row.kind} />}
+        {row && <KindBadge kind={row.kind} isAgent={row.isAgent} />}
         <WorkboxTile
           size="sm"
           machineId={tab.target.machineId}

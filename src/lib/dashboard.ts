@@ -5,25 +5,31 @@ import { bySinceThenKey, isShell, type Row } from "./grouping";
 
 export type StatusCounts = {
   blocked: number;
+  error: number;
   done: number;
   working: number;
   idle: number;
+  ended: number;
   total: number;
 };
 
-/** Counts agents only; plain shells are left out of every field. */
+/** Counts agents only; plain shells, ended or not, are left out of every field. */
 export function statusCounts(rows: Row[]): StatusCounts {
   const counts: StatusCounts = {
     blocked: 0,
+    error: 0,
     done: 0,
     working: 0,
     idle: 0,
+    ended: 0,
     total: 0,
   };
   for (const r of rows) {
     if (isShell(r)) continue;
     counts.total += 1;
     if (r.status === "blocked") counts.blocked += 1;
+    else if (r.status === "error") counts.error += 1;
+    else if (r.status === "ended") counts.ended += 1;
     else if (r.status === "done") counts.done += 1;
     else if (r.status === "working") counts.working += 1;
     else if (r.status === "idle") counts.idle += 1;

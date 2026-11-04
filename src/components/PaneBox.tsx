@@ -24,7 +24,7 @@ export function PaneBox({ row, tail, onOpen }: Props) {
       onClick={() => onOpen(row)}
     >
       <span className="pane-box-head">
-        <KindBadge kind={row.kind} />
+        <KindBadge kind={row.kind} isAgent={row.isAgent} />
         <span className="mono pane-box-name">{row.name}</span>
       </span>
       <span id={statusId}>

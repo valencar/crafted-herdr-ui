@@ -91,6 +91,25 @@ describe("Inspector details", () => {
     expect(grid).toHaveTextContent("Panew1:p1");
   });
 
+  it("labels_an_agent_with_no_kind_agent_and_a_shell_shell", () => {
+    const noKind = { ...BLOCKED, kind: null };
+    const { unmount } = setup(noKind);
+    const badges = document.querySelector(".inspector-badges")!;
+    expect(
+      within(badges as HTMLElement).getByText("Agent"),
+    ).toBeInTheDocument();
+    expect(within(badges as HTMLElement).queryByText("Shell")).toBeNull();
+    expect(within(badges as HTMLElement).queryByText("$_")).toBeNull();
+    unmount();
+    setup(SHELL);
+    const shellBadges = document.querySelector(
+      ".inspector-badges",
+    ) as HTMLElement;
+    // The status pill and the kind label both say "Shell".
+    expect(within(shellBadges).getAllByText("Shell")).toHaveLength(2);
+    expect(within(shellBadges).getByText("$_")).toBeInTheDocument();
+  });
+
   it("command_box_shows_exact_attach_argv", async () => {
     setup();
     const box = await screen.findByText(new RegExp("terminal attach term-1"));

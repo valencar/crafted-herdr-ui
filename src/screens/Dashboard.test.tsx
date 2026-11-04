@@ -426,6 +426,22 @@ describe("Dashboard", () => {
     expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
   });
 
+  it("an_error_agent_gets_a_needs_you_card_and_an_ended_one_does_not", () => {
+    // w1:p1 errored (older than the blocked agent would be), w2:p1 ended, w2:p2 idle.
+    const statuses = { "w1:p1": "error", "w2:p1": "ended", "w2:p2": "idle" };
+    setup(appState(machine("buildbox", undefined, { statuses })));
+    const needs = section("Needs you");
+    expect(within(needs).getByText("1 waiting")).toBeInTheDocument();
+    const cards = within(needs).getAllByRole("article");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveAttribute("data-status", "error");
+    expect(within(cards[0]).getByText("Error")).toBeInTheDocument();
+    expect(within(needs).queryByText("Ended")).toBeNull();
+    // The Agents tile counts them in words.
+    expect(tile("Agents")).toHaveTextContent("1 error");
+    expect(tile("Agents")).toHaveTextContent("1 ended");
+  });
+
   it("nobody_waiting_says_so", () => {
     const quiet = { "w1:p1": "working", "w2:p1": "idle" };
     setup(appState(machine("buildbox", undefined, { statuses: quiet })));

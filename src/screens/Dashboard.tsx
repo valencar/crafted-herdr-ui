@@ -126,7 +126,8 @@ export function Dashboard({ narrow = false, visible }: Props) {
   const projectOf = useMemo(() => projectNamesOf(groupByProject(rows)), [rows]);
   const counts = statusCounts(rows);
   const needs = useMemo(() => needsYou(rows), [rows]);
-  const blocked = needs.filter((r) => r.status === "blocked");
+  // Blocked and errored agents get a card each (blocked first); done ones a short row.
+  const cards = needs.filter((r) => r.status !== "done");
   const done = needs.filter((r) => r.status === "done");
   const working = useMemo(() => workingNow(rows), [rows]);
   const longest = oldestBlocked(rows);
@@ -188,9 +189,9 @@ export function Dashboard({ narrow = false, visible }: Props) {
                   <p>Nobody needs you right now.</p>
                 </EmptyState>
               )}
-              {blocked.length > 0 && (
+              {cards.length > 0 && (
                 <div className="cards">
-                  {blocked.map((r) => (
+                  {cards.map((r) => (
                     <NeedsYouCard
                       key={r.key}
                       row={r}

@@ -35,7 +35,12 @@ export const NeedsYouCard = memo(function NeedsYouCard({
   live = false,
 }: Props) {
   const age = formatAge(row.sinceMs, nowMs);
-  const since = row.status === "blocked" ? "blocked" : "finished";
+  const since =
+    row.status === "blocked"
+      ? "blocked"
+      : row.status === "error"
+        ? "errored"
+        : "finished";
   return (
     <article
       className={`card${selected ? " is-selected" : ""}${dim ? " is-dim" : ""}`}

@@ -77,6 +77,18 @@ describe("tabSubline", () => {
 });
 
 describe("countNeeds", () => {
+  it("count_needs_counts_error_rows_too", () => {
+    const rows = new Map<string, Row>([
+      ["buildbox::w1:p1", row({ key: "buildbox::w1:p1", status: "error" })],
+      ["buildbox::w1:p2", row({ key: "buildbox::w1:p2", status: "ended" })],
+    ]);
+    const tabs = [
+      tab({ tabKey: "buildbox::w1:p1" }),
+      tab({ tabKey: "buildbox::w1:p2" }),
+    ];
+    expect(countNeeds(tabs, rows)).toBe(1);
+  });
+
   it("count_needs_counts_blocked_rows_only", () => {
     const rows = new Map<string, Row>([
       ["buildbox::w1:p1", row({ key: "buildbox::w1:p1", status: "blocked" })],

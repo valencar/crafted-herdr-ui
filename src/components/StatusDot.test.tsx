@@ -14,6 +14,26 @@ describe("StatusDot", () => {
     expect(container.querySelector(".sdot")).toHaveClass("live");
   });
 
+  it("error_and_ended_render_their_status_and_loop_only_when_live", () => {
+    const { container, rerender } = render(<StatusDot status="error" />);
+    const dot = () => container.querySelector(".sdot");
+    expect(dot()).toHaveAttribute("data-status", "error");
+    expect(dot()).toHaveAttribute("aria-hidden", "true");
+    expect(dot()).not.toHaveClass("live");
+    rerender(<StatusDot status="error" live />);
+    expect(dot()).toHaveClass("live");
+    rerender(<StatusDot status="ended" />);
+    expect(dot()).toHaveAttribute("data-status", "ended");
+    expect(dot()).not.toHaveClass("live");
+  });
+
+  it("pill_says_error_and_ended_in_words", () => {
+    const { rerender } = render(<StatusPill status="error" />);
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    rerender(<StatusPill status="ended" />);
+    expect(screen.getByText("Ended")).toBeInTheDocument();
+  });
+
   it("health_dot_carries_the_shape_of_the_health", () => {
     const { container, rerender } = render(
       <HealthDot
