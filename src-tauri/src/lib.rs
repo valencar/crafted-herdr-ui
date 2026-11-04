@@ -183,7 +183,9 @@ async fn locate_and_start(handle: tauri::AppHandle) {
         handle.state::<Poller>(),
         handle.state::<SharedSettings>(),
     );
-    cli.set_env(env::forwarded_env(&login));
+    // Until v0.9 Task 6c: `HerdrCli` (and the PTYs and launches built from it) is not the core,
+    // so it gets the legacy list without `HC_*` or `XDG_*`.
+    cli.set_env(env::legacy_forwarded_env(&login));
     locator.set_login(login.clone());
     // The settings can't change the core's path while startup is still resolving it.
     let update = shared.begin_update().await;
@@ -193,8 +195,8 @@ async fn locate_and_start(handle: tauri::AppHandle) {
     drop(update);
 
     // Until v0.9 Task 6c: the poller needs a legacy herdr, found by automatic discovery only
-    // (the saved `herdr_path` setting is gone). Task 6c removes this block; Task 20 deletes
-    // `HerdrCli`.
+    // (the saved `herdr_path` setting is gone). Task 6c removes this block (and the `HerdrCli`
+    // wiring); Task 20 deletes `HerdrCli`. `find_legacy_herdr` itself stays, for `locate`.
     let legacy = core::locate::find_legacy_herdr(&login).await;
     let (path, version) = match legacy {
         Some((path, version)) => (Some(path), Some(version)),

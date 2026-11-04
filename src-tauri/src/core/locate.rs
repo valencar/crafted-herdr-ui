@@ -22,29 +22,27 @@ const NAMES: [&str; 2] = ["herdr-core", "hc"];
 /// How long `--version` may take before the candidate is skipped.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The version in the first line of `<bin> --version`, only when it has the form `hc X.Y.Z`
-/// (a pre-release or build suffix is ignored). `herbstclient 0.9.5`, `herdr 0.9.4`, an empty
-/// output and a version on a later line all give `None`: that is what tells herdr-core from
-/// the other programs named `hc`.
+/// The version in the first line of `<bin> --version`, only when it has the form `hc <v>` with
+/// `<v>` three dot-separated digit groups, optionally followed by a `-` or `+` suffix. It is
+/// returned whole, suffix included (`hc 0.2.0-beta.1` gives `0.2.0-beta.1`). `herbstclient 0.9.5`,
+/// `herdr 0.9.4`, an empty output and a version on a later line all give `None`: that is what
+/// tells herdr-core from the other programs named `hc`.
 pub fn parse_core_version(stdout: &str) -> Option<String> {
     let line = stdout.lines().next()?.trim();
     let version = line.strip_prefix("hc")?.strip_prefix(' ')?.trim();
     if version.is_empty() || version.contains(char::is_whitespace) {
         return None;
     }
-    let numbers = version.split(['-', '+']).next()?;
-    let mut parts = numbers.split('.');
-    let mut next = || -> Option<u32> {
-        let part = parts.next()?;
-        (!part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
-            .then(|| part.parse().ok())
-            .flatten()
+    let (numbers, suffix) = match version.find(['-', '+']) {
+        Some(i) => (&version[..i], Some(&version[i + 1..])),
+        None => (version, None),
     };
-    let (major, minor, patch) = (next()?, next()?, next()?);
-    parts
-        .next()
-        .is_none()
-        .then(|| format!("{major}.{minor}.{patch}"))
+    if suffix.is_some_and(str::is_empty) {
+        return None;
+    }
+    let groups: Vec<&str> = numbers.split('.').collect();
+    let digits = |g: &&str| !g.is_empty() && g.bytes().all(|b| b.is_ascii_digit());
+    (groups.len() == 3 && groups.iter().all(digits)).then(|| version.to_owned())
 }
 
 /// Where to look for the core, best first: the saved path, the login shell's hits, then
@@ -125,16 +123,21 @@ async fn legacy_among(
     Some((bin.clone(), version))
 }
 
-/// Finds a herdr 0.9 binary (automatic discovery only) and its version.
-// Until v0.9 Task 6c: the poller still runs on herdr 0.9. Task 6c stops calling this outside
-// `locate`, and Task 20 deletes it.
+/// Finds a herdr 0.9 binary (automatic discovery only) and its version. `locate` uses it for good,
+/// to report a retired herdr to onboarding (spec 9.2); only the `lib.rs` call that points
+/// `HerdrCli` and the poller at the result is interim (until v0.9 Task 6c).
 pub async fn find_legacy_herdr(env: &LoginEnv) -> Option<(PathBuf, String)> {
     let hit = match shell_of(env) {
         Some(shell) => crate::env::login_command_v(&shell, "herdr").await,
         None => None,
     };
     let candidates = legacy_candidates(hit, &home_of(env));
-    legacy_among(&candidates, &crate::env::forwarded_env(env), PROBE_TIMEOUT).await
+    legacy_among(
+        &candidates,
+        &crate::env::legacy_forwarded_env(env),
+        PROBE_TIMEOUT,
+    )
+    .await
 }
 
 /// Finds herdr-core: the saved path, then the login shell's `herdr-core` and `hc`, then the
@@ -213,9 +216,14 @@ mod tests {
             parse_core_version("hc 0.1.18\nsecond line\n").as_deref(),
             Some("0.1.18")
         );
+        // A pre-release or build suffix is kept: it is reported whole.
         assert_eq!(
             parse_core_version("hc 0.2.0-beta.1\n").as_deref(),
-            Some("0.2.0")
+            Some("0.2.0-beta.1")
+        );
+        assert_eq!(
+            parse_core_version("hc 0.1.18+build.7").as_deref(),
+            Some("0.1.18+build.7")
         );
         for other in [
             HERBSTCLIENT,
@@ -225,6 +233,12 @@ mod tests {
             "hc",
             "hc 0.1",
             "hc 0.1.x",
+            "hc foo",
+            "hc 1.2",
+            "hc 1.2.x",
+            "hc 1.2.3-",
+            "hc 1.2.3+",
+            "hc -1.2.3",
             "hc 1.2.3.4",
             "hcx 0.1.18",
             "banner\nhc 0.1.18\n",

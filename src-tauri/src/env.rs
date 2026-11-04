@@ -14,10 +14,11 @@ use tokio::time::timeout;
 /// How long to wait for the login shell before giving up.
 const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Variables handed to every `hc` (and legacy herdr) spawn. The `HC_*` ones and the XDG folders
-/// are how the person's shell reaches its core, so the app reaches the same one. It never
-/// includes `HC_TERMINAL_SOCKET`, `HC_TERMINAL_ID` or `HC_SCOPE`: a shell inside a core terminal
-/// has them, and they would scope the app's calls to that terminal.
+/// Variables handed to the core: every `hc` spawn (the connector and the `--version` probes).
+/// The `HC_*` ones and the XDG folders are how the person's shell reaches its core, so the app
+/// reaches the same one. It never includes `HC_TERMINAL_SOCKET`, `HC_TERMINAL_ID` or `HC_SCOPE`:
+/// a shell inside a core terminal has them, and they would scope the app's calls to that
+/// terminal. Nothing that is not `hc` gets this list (see `LEGACY_FORWARDED`).
 const FORWARDED: [&str; 11] = [
     "PATH",
     "HOME",
@@ -31,6 +32,11 @@ const FORWARDED: [&str; 11] = [
     "XDG_STATE_HOME",
     "XDG_CONFIG_HOME",
 ];
+/// Variables handed to everything that is not the core: `HerdrCli`, the legacy herdr probe, the
+/// in-app terminal and the user's terminal launches.
+// Until v0.9 Task 6c: the poller and its callers still run on herdr 0.9. The `HC_*` and `XDG_*`
+// names are core-only, so they stay out of this list.
+const LEGACY_FORWARDED: [&str; 6] = ["PATH", "HOME", "USER", "SSH_AUTH_SOCK", "LANG", "TERM"];
 const DEFAULT_TERM: &str = "xterm-256color";
 
 /// The environment of the user's login shell.
@@ -134,11 +140,22 @@ async fn login_command_v_with(shell: &str, name: &str, limit: Duration) -> Optio
     (path.is_absolute() && path.exists()).then_some(path)
 }
 
-/// The variables every spawn gets: `PATH`, `HOME`, `USER`, `SSH_AUTH_SOCK`, `LANG` and `TERM`
-/// (default `xterm-256color`), plus `HC_SESSION`, `HC_SOCKET` and the `XDG_*` folders when the
-/// login environment has them.
+/// The variables every `hc` spawn gets: `PATH`, `HOME`, `USER`, `SSH_AUTH_SOCK`, `LANG` and
+/// `TERM` (default `xterm-256color`), plus `HC_SESSION`, `HC_SOCKET` and the `XDG_*` folders when
+/// the login environment has them. Only for the core connector and the core probes.
 pub fn forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
-    FORWARDED
+    pick_env(login, &FORWARDED)
+}
+
+/// The variables everything that is not the core gets: the first six of `forwarded_env`, never
+/// an `HC_*` or `XDG_*` name.
+// Until v0.9 Task 6c: for `HerdrCli`, the legacy probe, and what is built from them.
+pub fn legacy_forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
+    pick_env(login, &LEGACY_FORWARDED)
+}
+
+fn pick_env(login: &LoginEnv, names: &[&str]) -> Vec<(String, String)> {
+    names
         .iter()
         .filter_map(|&key| match login.vars.get(key) {
             Some(v) => Some((key.to_string(), v.clone())),
@@ -360,6 +377,22 @@ mod tests {
         // Absent in the login environment means absent here.
         let fwd = forwarded_env(&parse_env_output("PATH=/a\0"));
         assert!(!fwd.iter().any(|(k, _)| k.starts_with("HC_")));
+    }
+
+    #[test]
+    fn legacy_env_carries_no_hc_or_xdg_names() {
+        let login = parse_env_output(
+            "PATH=/a\0HOME=/home/dev\0HC_SESSION=work\0HC_SOCKET=/tmp/hc.sock\0HC_TERMINAL_ID=t7\0HC_SCOPE=terminal\0XDG_RUNTIME_DIR=/run/user/1000\0XDG_STATE_HOME=/home/dev/.state\0XDG_CONFIG_HOME=/home/dev/.config\0",
+        );
+        let fwd = legacy_forwarded_env(&login);
+        assert!(
+            !fwd.iter()
+                .any(|(k, _)| k.starts_with("HC_") || k.starts_with("XDG_")),
+            "{fwd:?}"
+        );
+        assert!(fwd.contains(&("PATH".to_string(), "/a".to_string())));
+        assert!(fwd.contains(&("HOME".to_string(), "/home/dev".to_string())));
+        assert!(fwd.iter().any(|(k, _)| k == "TERM"));
     }
 
     #[test]
