@@ -37,6 +37,8 @@ struct Script {
     subscribe: Mutex<Vec<Value>>,
     machine_list: Mutex<Vec<Value>>,
     list_delay_ms: AtomicU64,
+    /// From the second `machine.list` on, the core says nothing (the call times out).
+    list_silent: AtomicBool,
     hello: Mutex<Option<Value>>,
     hello_error: Mutex<Option<Value>>,
     /// Every `connect()`, refused or not.
@@ -95,6 +97,9 @@ impl Connector for TestConnector {
                     } else {
                         0
                     };
+                    if n > 1 && s.list_silent.load(Ordering::SeqCst) {
+                        return (0, Reply::Silent);
+                    }
                     (delay, Reply::Result(nth(&s.machine_list, n)))
                 }
                 _ => (0, Reply::Result(json!({"ok": true}))),
@@ -211,6 +216,31 @@ impl Harness {
 /// Lets every task that can run, run. The clock moves 1 ms.
 async fn settle() {
     tokio::time::sleep(Duration::from_millis(1)).await;
+}
+
+/// The `core_state` of each emitted state, without repeats.
+fn core_states(h: &Harness) -> Vec<CoreState> {
+    let mut states: Vec<CoreState> = Vec::new();
+    for (_, s) in lock(&h.emits).iter() {
+        if states.last() != Some(&s.core_state) {
+            states.push(s.core_state.clone());
+        }
+    }
+    states
+}
+
+/// The lines of the rename capture, renumbered to follow `base_seq`.
+fn rename_lines(base_seq: u64) -> Vec<Value> {
+    EVENTS_RENAME
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .enumerate()
+        .map(|(i, line)| {
+            let mut v = json_of(line);
+            v["params"]["seq"] = json!(base_seq + i as u64);
+            v
+        })
+        .collect()
 }
 
 /// Waits `secs` of quiet time, but with a heartbeat every 10 s so the watchdog doesn't fire.
@@ -432,6 +462,168 @@ async fn rename_keeps_row_keys_and_ids() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn rename_in_separate_reads_does_not_flicker_or_lose_seen_state() {
+    let h = Harness::new();
+    *lock(&h.script.machine_list) =
+        vec![json_of(MACHINE_LIST), list_with_buildbox_named("buildhost")];
+    h.script.list_delay_ms.store(50, Ordering::SeqCst);
+    let h = h.up().await;
+    let n0 = h.emit_count();
+    // The first sight of buildbox/t2 was at turn 0. Under its new name it comes back with turn 1
+    // and a done status: Done, unseen, as long as that record survives (it has no herdr.seen
+    // label). Had it been dropped, the first sight would take turn 1 as seen, and it'd be Idle.
+    let mut lines = rename_lines(29);
+    lines[3]["params"]["data"]["turn"] = json!(1);
+    lines[3]["params"]["data"]["status"]["state"] = json!("done");
+
+    // The three `removed` arrive alone, and the task settles: nothing is emitted at once.
+    for line in &lines[..3] {
+        h.send(&line.to_string());
+    }
+    settle().await;
+    assert_eq!(h.emit_count(), n0, "a removed is not a leading-edge emit");
+    assert_eq!(h.script.lists.load(Ordering::SeqCst), 1);
+
+    // Then the `created` under the new name, inside the window: the list is asked for, and
+    // the emit waits for it.
+    for line in &lines[3..] {
+        h.send(&line.to_string());
+    }
+    settle().await;
+    assert_eq!(h.script.lists.load(Ordering::SeqCst), 2);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let state = h.state();
+    assert_eq!(machine(&state, BUILDBOX).name, "buildhost");
+    assert_eq!(addresses(&state, BUILDBOX), ["t2", "t3", "t4"]);
+    {
+        let emits = lock(&h.emits);
+        assert!(emits.len() > n0, "the renamed state is shown");
+        for (_, s) in emits.iter().skip(n0) {
+            assert_eq!(addresses(s, BUILDBOX), ["t2", "t3", "t4"], "no flicker");
+        }
+    }
+    // The seen record survived the rename.
+    assert_eq!(terminal(&state, BUILDBOX, "t2").status, DisplayStatus::Done);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_started_before_the_new_name_does_not_release_the_hold() {
+    let h = Harness::new();
+    let old = json_of(MACHINE_LIST);
+    *lock(&h.script.machine_list) = vec![
+        old.clone(),
+        // The tick's list started before the rename and still says the old name.
+        old,
+        list_with_buildbox_named("buildhost"),
+    ];
+    h.script.list_delay_ms.store(50, Ordering::SeqCst);
+    let h = h.up().await;
+    // The 10 s tick starts a list (it answers 50 ms later).
+    tokio::time::sleep(Duration::from_millis(9_870)).await;
+    assert_eq!(h.script.lists.load(Ordering::SeqCst), 2);
+    let n0 = h.emit_count();
+
+    for line in rename_lines(29) {
+        h.send(&line.to_string());
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    // The old list answers with the old name: that is no answer for buildhost.
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    assert_eq!(machine(&h.state(), BUILDBOX).name, "buildbox");
+    assert_eq!(h.emit_count(), n0, "still held");
+    // The one asked for after the new name appeared does.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(h.script.lists.load(Ordering::SeqCst), 3);
+    assert_eq!(machine(&h.state(), BUILDBOX).name, "buildhost");
+    let emits = lock(&h.emits);
+    assert!(emits.len() > n0);
+    for (_, s) in emits.iter().skip(n0) {
+        assert_eq!(addresses(s, BUILDBOX), ["t2", "t3", "t4"]);
+        assert_eq!(machine(s, BUILDBOX).name, "buildhost");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hold_ends_when_the_list_it_waits_for_times_out() {
+    let h = Harness::new();
+    h.script.list_silent.store(true, Ordering::SeqCst);
+    let h = h.up().await;
+    h.event(
+        29,
+        "created",
+        "newbox/t1",
+        json!({"address": "newbox/t1", "state": "live", "reported": false, "turn": 0,
+            "argv": ["sh"], "cwd": "/home/dev/infra"}),
+    );
+    settle().await;
+    let n0 = h.emit_count();
+    // Held: a change meanwhile is kept back.
+    h.event(30, "title", "t7", json!({"title": "kept back"}));
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(h.emit_count(), n0);
+    // The list never answers; its 10 s timeout ends the hold.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    assert_eq!(h.emit_count(), n0 + 1);
+    assert_eq!(
+        terminal(&h.state(), "local", "t7").title.as_deref(),
+        Some("kept back")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn drop_right_after_an_unknown_name_created_still_emits_backoff_and_stopped() {
+    let h = Harness::new();
+    // The 10 s tick's list never answers, so the machine task is busy until it times out at
+    // 20 s: the list asked for by the unknown name can't start, and nothing releases the hold.
+    h.script.list_silent.store(true, Ordering::SeqCst);
+    let h = h.up().await;
+    tokio::time::sleep(Duration::from_millis(11_850)).await;
+    assert_eq!(h.script.lists.load(Ordering::SeqCst), 2);
+    h.event(
+        29,
+        "created",
+        "newbox/t1",
+        json!({"address": "newbox/t1", "state": "live", "reported": false, "turn": 0,
+            "argv": ["sh"], "cwd": "/home/dev/infra"}),
+    );
+    settle().await;
+    // The connection ends while the terminal is held back.
+    h.script.refuse.store(true, Ordering::SeqCst);
+    h.drop_events();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Well before the list's timeout, the UI was told.
+    let reconnecting = lock(&h.emits).iter().any(|(_, s)| {
+        s.core_state == CoreState::Connecting
+            && matches!(
+                s.machines[0].health,
+                HealthV2::Reconnecting {
+                    retry_in_ms: 2000,
+                    ..
+                }
+            )
+    });
+    assert!(reconnecting, "the Backoff state was emitted");
+
+    tokio::time::sleep(Duration::from_secs(130)).await;
+    assert!(
+        lock(&h.emits)
+            .iter()
+            .any(|(_, s)| matches!(s.core_state, CoreState::Stopped { .. })),
+        "the Stopped state was emitted"
+    );
+    // And a click is seen too.
+    h.script.list_silent.store(false, Ordering::SeqCst);
+    h.script.refuse.store(false, Ordering::SeqCst);
+    h.sync().reconnect_now();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        lock(&h.emits).last().unwrap().1.core_state,
+        CoreState::Ready
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn unknown_machine_name_triggers_machine_list() {
     let h = Harness::new();
     let mut later = json_of(MACHINE_LIST);
@@ -505,6 +697,9 @@ async fn seq_reset_after_reconnect_takes_fresh_snapshot() {
     h.drop_events();
     settle().await;
     let state = h.state();
+    // Connecting while the connection is re-made (Task 8 reattaches tabs on the way back to
+    // Ready), with the old rows still shown.
+    assert_eq!(state.core_state, CoreState::Connecting);
     assert_eq!(
         state.machines[0].health,
         HealthV2::Reconnecting {
@@ -535,6 +730,17 @@ async fn seq_reset_after_reconnect_takes_fresh_snapshot() {
         Some("after")
     );
     assert_eq!(h.notes(), ["subscribed", "resubscribed"]);
+    // The states the UI got: Connecting, Ready, Connecting again during the backoff, Ready again.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        core_states(&h),
+        [
+            CoreState::Connecting,
+            CoreState::Ready,
+            CoreState::Connecting,
+            CoreState::Ready
+        ]
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -636,7 +842,39 @@ async fn stops_retrying_after_two_minutes_then_reconnect_now_works() {
         DisplayStatus::Working
     );
 
-    // Reconnect: a click tries again.
+    // Reconnect starts a fresh window: the core still refuses, and the click gets the backoff
+    // again from its first wait, not Stopped straight away.
+    h.sync().reconnect_now();
+    settle().await;
+    let state = h.state();
+    assert_eq!(state.core_state, CoreState::Connecting);
+    assert!(matches!(
+        state.machines[0].health,
+        HealthV2::Reconnecting {
+            retry_in_ms: 2000,
+            ..
+        }
+    ));
+    // Two more failed tries (at 2 s and 6 s) lengthen the wait to 8 s; a click then starts over.
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    assert!(matches!(
+        h.state().machines[0].health,
+        HealthV2::Reconnecting {
+            retry_in_ms: 8000,
+            ..
+        }
+    ));
+    h.sync().reconnect_now();
+    settle().await;
+    assert!(matches!(
+        h.state().machines[0].health,
+        HealthV2::Reconnecting {
+            retry_in_ms: 2000,
+            ..
+        }
+    ));
+
+    // The core is back: a click connects.
     h.script.refuse.store(false, Ordering::SeqCst);
     h.sync().reconnect_now();
     settle().await;

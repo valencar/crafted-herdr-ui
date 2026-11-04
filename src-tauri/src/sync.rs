@@ -14,12 +14,21 @@
 //! that keeps states in order, so it must not call `CoreSync` methods that emit (`refresh_view`,
 //! `set_core_path`). `state()` is safe.
 //!
+//! Lock order: the model lock, then the `ActivityV2` lock, never the other way. A caller must not
+//! call into `CoreSync` while it holds the `ActivityV2` lock (Mark as seen takes that lock to
+//! `mark_seen`, releases it, and only then calls `refresh_view`).
+//!
 //! Terminals arrive with addresses as the local core sees them (`t7`, `buildbox/t7`). They are
 //! split on the first `/`, the machine name is mapped to the machine id through `machine.list`,
 //! and the view holds the machine-local address. A renamed machine arrives as `removed` for every
 //! old address and `created` under the new name: the new name is unknown until the list answers,
-//! so those terminals are held back, and the state isn't emitted meanwhile, then the rows come
-//! back under the same machine id and so the same keys.
+//! so those terminals are held back, then the rows come back under the same machine id and so the
+//! same keys. A `removed` for a remote terminal is never emitted on the leading edge (only at the
+//! end of its 100 ms window), and if terminals then show up under a name the list doesn't know,
+//! the emit waits for a `machine.list` that *started after* that name was seen (an older one in
+//! flight can't release it), for at most `HOLD_MAX`. The seen records of a machine whose
+//! terminals were just removed are kept for that long too, so a Done-unseen row stays Done.
+//! The hold ends at once when the event connection leaves Online.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -53,6 +62,9 @@ const BACKOFF_BASE_SECS: u64 = 2;
 const BACKOFF_CAP_SECS: u64 = 60;
 /// Changes within this window of an emit are merged into one emit at its end.
 const EMIT_WINDOW: Duration = Duration::from_millis(100);
+/// The longest a state is held back for a machine name: an older list still in flight (at most
+/// its 10 s timeout), then the one asked for after the name was seen (another 10 s), and a second.
+const HOLD_MAX: Duration = Duration::from_secs(21);
 const MACHINES_VISIBLE: Duration = Duration::from_secs(10);
 const MACHINES_HIDDEN: Duration = Duration::from_secs(30);
 /// An unreachable machine is "reconnecting" this long, then it needs the person.
@@ -240,10 +252,30 @@ struct Model {
     /// Machine names a list was already asked for and still don't resolve.
     asked: HashSet<String>,
     /// Terminals are held back for a machine name the list hasn't answered yet: don't emit.
-    holding: bool,
+    hold: Option<Hold>,
+    /// `machine.list` calls started so far; each call's number is its id.
+    lists_started: u64,
+    /// Machines whose seen records are not pruned until then: their terminals were just removed,
+    /// and may come back under a new name (the machine id stays).
+    keep_seen: HashMap<String, Instant>,
     state: AppStateV2,
     /// The last state handed to `emit`.
     emitted: Option<AppStateV2>,
+}
+
+/// A state held back for a machine name nobody has resolved yet.
+#[derive(Debug, Clone, Copy)]
+struct Hold {
+    /// Only a list with a higher id than this (one started after the name was seen) releases it.
+    after_list: u64,
+    /// The time bound.
+    until: Instant,
+}
+
+impl Model {
+    fn holding(&self, now: Instant) -> bool {
+        self.hold.is_some_and(|hold| now < hold.until)
+    }
 }
 
 #[derive(Default)]
@@ -308,7 +340,9 @@ impl CoreSync {
                 last_ok: HashMap::new(),
                 views: HashMap::new(),
                 asked: HashSet::new(),
-                holding: false,
+                hold: None,
+                lists_started: 0,
+                keep_seen: HashMap::new(),
                 state,
                 emitted: None,
             }),
@@ -318,7 +352,7 @@ impl CoreSync {
             throttle: Mutex::default(),
             emit_lock: Mutex::new(()),
         });
-        inner.commit(false);
+        inner.commit(None, false);
         let tasks = vec![
             tokio::spawn(inner.clone().run_events()),
             tokio::spawn(inner.clone().run_machines()),
@@ -355,13 +389,13 @@ impl CoreSync {
     /// Builds the state again from what is held: after the seen record changed (Mark as seen) or
     /// the hidden workboxes did. Emits if anything shows differently.
     pub fn refresh_view(&self) {
-        self.inner.commit(false);
+        self.inner.commit(None, false);
     }
 
     /// The core binary's path as the state reports it.
     pub fn set_core_path(&self, path: Option<String>) {
         lock(&self.inner.model).core_path = path;
-        self.inner.commit(false);
+        self.inner.commit(None, false);
     }
 
     /// `machine_id` and a machine-local address to the address as the local core knows it
@@ -463,8 +497,11 @@ fn same_shown(a: &AppStateV2, b: Option<&AppStateV2>) -> bool {
 impl Inner {
     /// Rebuilds the views and the state from the map, the machine list and the link. Returns
     /// whether a `machine.list` is needed (a machine name nobody has asked about yet).
-    /// `after_list`: the list just answered, so names it doesn't know are not asked about again.
-    fn rebuild(&self, m: &mut Model, after_list: bool) -> bool {
+    /// `answered`: the id of a `machine.list` that just answered (or failed). It releases the
+    /// hold if it started after the hold began; names it doesn't know are then not asked about
+    /// again.
+    fn rebuild(&self, m: &mut Model, answered: Option<u64>) -> bool {
+        let at = Instant::now();
         let hidden = self.settings.get().hidden_workboxes;
         let now = now_ms();
         let mut views = HashMap::new();
@@ -485,9 +522,15 @@ impl Inner {
             }
             // Forget the seen record of terminals that are gone. Not while some are held back:
             // they would look gone and come back as new, with their turn counted as seen.
+            // Nor for a machine whose terminals were just removed: a rename removes them all and
+            // creates them again under the new name, and the records are by machine id.
+            m.keep_seen.retain(|_, until| at < *until);
             if m.map.seq.is_some() && unknown.is_empty() {
                 let online = m.machines.iter().filter(|x| x.state == "connected");
                 for id in std::iter::once(LOCAL).chain(online.map(|x| x.id.as_str())) {
+                    if m.keep_seen.contains_key(id) {
+                        continue;
+                    }
                     activity.retain(id, |address| {
                         views.contains_key(&(id.to_owned(), address.to_owned()))
                     });
@@ -553,45 +596,70 @@ impl Inner {
             generated_at_ms: now,
         };
 
-        if after_list {
-            m.holding = false;
+        let released = answered.is_some_and(|id| m.hold.is_none_or(|hold| id > hold.after_list));
+        if released {
+            m.hold = None;
             m.asked = unknown;
             return false;
         }
         m.asked.retain(|name| unknown.contains(name));
         let fresh = unknown.iter().any(|name| !m.asked.contains(name));
         m.asked.extend(unknown.iter().cloned());
+        if m.link != Link::Online {
+            // No list can come with the connection down, and the person has to see that.
+            m.hold = None;
+            return false;
+        }
         if fresh {
-            m.holding = true;
+            // The next list to start answers for this name; the time bound is kept once begun.
+            m.hold = Some(Hold {
+                after_list: m.lists_started,
+                until: m.hold.map_or(at + HOLD_MAX, |hold| hold.until),
+            });
         } else if unknown.is_empty() {
-            m.holding = false;
+            m.hold = None;
         }
         fresh
     }
 
     /// Rebuilds, then asks for the machine list if a name needs it and emits if the state shows
     /// something new (and isn't held for the list).
-    fn commit(self: &Arc<Self>, after_list: bool) {
-        let (need_list, changed) = {
+    /// `deferred`: a remote terminal was removed, which may be half of a rename, so the emit
+    /// waits for the end of the window instead of going out at once.
+    fn commit(self: &Arc<Self>, answered: Option<u64>, deferred: bool) {
+        let (need_list, changed, hold_until) = {
             let mut m = lock(&self.model);
-            let need_list = self.rebuild(&mut m, after_list);
-            let changed = !m.holding && !same_shown(&m.state, m.emitted.as_ref());
-            (need_list, changed)
+            let need_list = self.rebuild(&mut m, answered);
+            let changed = !m.holding(Instant::now()) && !same_shown(&m.state, m.emitted.as_ref());
+            (need_list, changed, m.hold.map(|hold| hold.until))
         };
         if need_list {
             self.machine_wake.notify_one();
+            if let Some(until) = hold_until {
+                // When the hold runs out, whatever it kept back is shown.
+                let me = self.clone();
+                self.handle.spawn(async move {
+                    tokio::time::sleep_until(until).await;
+                    me.commit(None, false);
+                });
+            }
         }
         if changed {
-            self.request_emit();
+            self.request_emit(deferred);
         }
     }
 
     /// The leading and trailing edge of the 100 ms window.
-    fn request_emit(self: &Arc<Self>) {
+    fn request_emit(self: &Arc<Self>, deferred: bool) {
         let now = Instant::now();
         let at_once = {
             let mut t = lock(&self.throttle);
-            if t.window_until.is_some_and(|until| now < until) {
+            let in_window = t.window_until.is_some_and(|until| now < until);
+            if in_window || deferred {
+                if !in_window {
+                    // Opens the window without emitting: the emit is its trailing edge.
+                    t.window_until = Some(now + EMIT_WINDOW);
+                }
                 t.pending = true;
                 if !t.timer {
                     t.timer = true;
@@ -638,7 +706,7 @@ impl Inner {
         let _ordered = lock(&self.emit_lock);
         let state = {
             let mut m = lock(&self.model);
-            if m.holding || same_shown(&m.state, m.emitted.as_ref()) {
+            if m.holding(Instant::now()) || same_shown(&m.state, m.emitted.as_ref()) {
                 return;
             }
             let mut state = m.state.clone();
@@ -656,12 +724,26 @@ impl Inner {
             if let Some(core_state) = core_state {
                 m.core_state = core_state;
             }
+            if m.link != Link::Online {
+                // Nothing will answer a hold now; never keep the UI from seeing that.
+                m.hold = None;
+            }
         }
-        self.commit(false);
+        self.commit(None, false);
     }
 
     fn online(&self) -> bool {
         lock(&self.model).link == Link::Online
+    }
+
+    /// Reads `machine.list` (quiet). Its id says when it started, for the hold.
+    async fn list_machines(&self) -> (u64, Result<Vec<CoreMachine>, CoreError>) {
+        let id = {
+            let mut m = lock(&self.model);
+            m.lists_started += 1;
+            m.lists_started
+        };
+        (id, self.fetch_machines().await)
     }
 
     async fn fetch_machines(&self) -> Result<Vec<CoreMachine>, CoreError> {
@@ -698,11 +780,13 @@ impl Inner {
             if !self.online() {
                 continue;
             }
-            // A failed read keeps the old list; either way, stop holding terminals for it.
-            if let Ok(machines) = self.fetch_machines().await {
+            // A failed read keeps the old list; either way it answers for the hold, if it started
+            // after the hold did.
+            let (id, answer) = self.list_machines().await;
+            if let Ok(machines) = answer {
                 lock(&self.model).machines = machines;
             }
-            self.commit(true);
+            self.commit(Some(id), false);
             lock(&self.activity).maybe_save();
         }
     }
@@ -759,11 +843,17 @@ impl Inner {
                     retry_in_ms: delay.as_millis() as u64,
                     error: last_error.clone(),
                 },
-                None,
+                // The connection is being re-made; Ready comes back once it is resubscribed.
+                Some(CoreState::Connecting),
             );
-            tokio::select! {
-                () = tokio::time::sleep(delay) => {}
-                () = self.reconnect.notified() => {}
+            let clicked = tokio::select! {
+                () = tokio::time::sleep(delay) => false,
+                () = self.reconnect.notified() => true,
+            };
+            if clicked {
+                // Reconnect starts a fresh window, with the backoff from its first wait.
+                down_since = None;
+                attempt = 0;
             }
         }
     }
@@ -815,10 +905,12 @@ impl Inner {
             // Any seq: a core that restarted starts again from a lower one.
             m.map.reset(seq, terminals);
             m.info = Some(info);
+            // A new snapshot: nothing is held back or asked about any more.
+            m.hold = None;
+            m.asked.clear();
         }
         // Events that arrive meanwhile wait in `notes`; those the snapshot has are dropped.
-        let list = self.fetch_machines().await;
-        let listed = list.is_ok();
+        let (list_id, list) = self.list_machines().await;
         {
             let mut m = lock(&self.model);
             if let Ok(machines) = list {
@@ -828,7 +920,7 @@ impl Inner {
             m.core_state = CoreState::Ready;
         }
         // The baseline: no transition comes out of what changed while we weren't looking.
-        self.commit(listed);
+        self.commit(Some(list_id), false);
         lock(&self.activity).maybe_save();
         Ok((conn, notes))
     }
@@ -866,15 +958,32 @@ impl Inner {
         let hidden = self.settings.get().hidden_workboxes;
         let mut transitions = Vec::new();
         let mut machines_wanted = false;
+        let mut deferred = false;
         {
             let mut guard = lock(&self.model);
             let m = &mut *guard;
             for note in batch {
+                // A remote terminal removed may be half of a rename: its created half comes right
+                // after, so the state isn't shown without the rows, and their seen records stay.
+                if let Notification::Event {
+                    ty,
+                    terminal: Some(address),
+                    ..
+                } = note
+                    && ty == "removed"
+                    && let (Some(name), _) = split_address(address)
+                {
+                    deferred = true;
+                    if let Some(machine) = m.machines.iter().find(|x| x.name == name) {
+                        m.keep_seen
+                            .insert(machine.id.clone(), Instant::now() + HOLD_MAX);
+                    }
+                }
                 let applied = m.map.apply(note, now_ms());
                 if applied.missed {
                     // The core dropped events: this is a new baseline, and the machines may have
                     // changed too (their state isn't in the stream).
-                    self.rebuild(m, false);
+                    self.rebuild(m, None);
                     machines_wanted = true;
                     continue;
                 }
@@ -909,7 +1018,7 @@ impl Inner {
         if machines_wanted {
             self.machine_wake.notify_one();
         }
-        self.commit(false);
+        self.commit(None, deferred);
         for transition in transitions {
             (self.notify)(transition);
         }
