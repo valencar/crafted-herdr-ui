@@ -582,7 +582,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     onMouseMove={() => setActive(index)}
                     onClick={(e) => run(item, e.metaKey ? "alt" : "default")}
                   >
-                    {item.row && <StatusDot status={item.row.status} live />}
+                    {item.row && (
+                      <StatusDot status={shownStatus(item.row).status} live />
+                    )}
                     <span className="palette-label">
                       <Highlighted
                         text={item.label}

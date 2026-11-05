@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/bindings/AppState";
 import { useAppStore } from "../store/appStore";
 import {
+  agentTerm,
   buildboxTerms,
   appState as buildState,
   machine,
@@ -120,6 +121,34 @@ describe("SessionRow", () => {
         .getByRole("button", { name: /^infra/ })
         .querySelector(".session-tab-sub"),
     ).not.toHaveAttribute("data-tone");
+  });
+
+  it("a_workers_done_tab_reads_done_with_no_tone", () => {
+    // Spec 4.5: a worker's done is Idle-ranked "Done", not the person's to see.
+    useAppStore.setState({
+      state: buildState([
+        [
+          machine({ id: "buildbox" }),
+          [
+            ...buildboxTerms(),
+            agentTerm({
+              address: "w9:p1",
+              status: "done",
+              name: "fixer",
+              parent: "buildbox/w1:p1",
+            }),
+          ],
+        ],
+      ]),
+    });
+    open("buildbox", "w9:p1", "fixer");
+    render(<Harness machineId="buildbox" />);
+    const tab = screen.getByRole("button", { name: /^fixer/ });
+    const sub = tab.querySelector(".session-tab-sub");
+    expect(sub).toHaveTextContent("Done");
+    expect(sub).not.toHaveTextContent("Done, unseen");
+    expect(sub).not.toHaveAttribute("data-tone");
+    expect(tab.querySelector(".sdot")).toHaveAttribute("data-status", "idle");
   });
 
   it("only_a_blocked_tab_is_marked_as_needing_you", () => {

@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { projectNames, type Row } from "../lib/grouping";
+import { projectNames, shownStatus, type Row } from "../lib/grouping";
 import { canOpenNewSession } from "../lib/newSessionTarget";
 import { useWorkboxColor } from "../lib/workboxColors";
 import { useAppStore } from "../store/appStore";
@@ -114,7 +114,8 @@ export function SessionRow({
             row,
             projects.get(rowKeyOf(tab.tabKey)) ?? null,
           );
-          const status = row?.status;
+          // A worker's done takes Idle's (no) tone, as everywhere (`shownStatus`).
+          const status = row && shownStatus(row).status;
           return (
             <Fragment key={tab.tabKey}>
               {drag.dragging && drag.dropBefore === tab.tabKey && dropLine}

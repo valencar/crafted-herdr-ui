@@ -15,7 +15,12 @@ import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Settings } from "../lib/bindings/Settings";
 import { useAppStore } from "../store/appStore";
-import { appState, buildboxTerms, machineView } from "../test/builders";
+import {
+  agentTerm,
+  appState,
+  buildboxTerms,
+  machineView,
+} from "../test/builders";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { ClosePaneHost } from "./ClosePaneHost";
 import { CommandPalette } from "./CommandPalette";
@@ -756,6 +761,36 @@ describe("CommandPalette agent frame", () => {
     expect(option).toBeDefined();
     const marks = option?.querySelectorAll("mark.palette-mark");
     expect([...(marks ?? [])].map((m) => m.textContent)).toEqual(["api"]);
+  });
+
+  it("a_workers_done_is_drawn_with_idles_dot_in_the_list", async () => {
+    useAppStore.setState({
+      state: appState([
+        [
+          { id: "buildbox", target: "buildbox" },
+          [
+            ...buildboxTerms(),
+            agentTerm({
+              address: "w9:p1",
+              status: "done",
+              name: "fixer",
+              parent: "buildbox/w1:p1",
+            }),
+          ],
+        ],
+      ]),
+    });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "fixer");
+    const option = screen
+      .getAllByRole("option")
+      .find((o) => o.querySelector(".palette-label")?.textContent === "fixer");
+    expect(option?.querySelector(".sdot")).toHaveAttribute(
+      "data-status",
+      "idle",
+    );
+    expect(option).toHaveTextContent("Done");
+    expect(option).not.toHaveTextContent("Done, unseen");
   });
 
   it("the_selected_option_shows_its_keys_and_the_footer_lists_tab", async () => {
