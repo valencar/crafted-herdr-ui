@@ -1342,3 +1342,99 @@ fn backoff_doubles_to_a_cap() {
     assert_eq!(secs, [2, 4, 8, 16, 32, 60, 60, 60]);
     assert_eq!(backoff(500).as_secs(), 60);
 }
+
+/// Try again on the onboarding screen: the core was not there at startup, the person installed
+/// it, and `retry_core_with` finds it, points the client at it, names it in the state and
+/// reconnects, without a relaunch. Real processes, so real time.
+#[tokio::test]
+async fn retry_core_finds_a_core_installed_after_startup_and_reconnects() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("spawns.log");
+
+    let client = Arc::new(CoreClient::new(Arc::new(crate::core::ProcessConnector {
+        bin: std::path::PathBuf::new(),
+        env: Vec::new(),
+    })));
+    let locator = crate::settings::CoreLocator::new();
+    locator.set_login(crate::env::parse_env_output(&format!(
+        "HOME={}\0PATH=/usr/bin:/bin\0",
+        dir.path().display()
+    )));
+    let shared = SharedSettings::new(Settings::default());
+    // Startup: nothing to find yet.
+    let status = locator.locate(None, &client).await;
+    assert_eq!(status.path, None);
+
+    let sync = CoreSync::start(
+        client.clone(),
+        shared.clone(),
+        Arc::new(Mutex::new(ActivityV2::new(None))),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    );
+    sync.set_core_path(status.path);
+    for _ in 0..100 {
+        if sync
+            .state()
+            .is_some_and(|s| s.core_state == CoreState::NotFound)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(sync.state().unwrap().core_state, CoreState::NotFound);
+
+    // Try again before installing finds nothing and keeps saying so.
+    let again = crate::commands::retry_core_with(&shared, &locator, &client, Some(&sync)).await;
+    assert_eq!(again.path, None);
+    assert!(!log.exists());
+
+    // The person runs the install line: a core appears where the search looks.
+    std::fs::create_dir_all(dir.path().join(".local/bin")).unwrap();
+    let installed = dir.path().join(".local/bin/hc");
+    std::fs::write(
+        &installed,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\n  --version) echo 'hc 0.1.18' ;;\n  connect) echo \"$0\" >> '{}' ;;\nesac\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&installed, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let found = crate::commands::retry_core_with(&shared, &locator, &client, Some(&sync)).await;
+    assert_eq!(found.path, Some(installed.display().to_string()));
+    assert_eq!(found.version.as_deref(), Some("0.1.18"));
+    assert_eq!(locator.status(), found);
+    // The sync was pointed at it and reconnected: the new core was spawned, and the state names it.
+    let mut spawned = String::new();
+    for _ in 0..200 {
+        spawned = std::fs::read_to_string(&log).unwrap_or_default();
+        if !spawned.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        spawned.contains(&installed.display().to_string()),
+        "{spawned:?}"
+    );
+    assert_eq!(
+        sync.state().unwrap().core_path,
+        Some(installed.display().to_string())
+    );
+}
+
+#[tokio::test]
+async fn retry_core_before_startup_has_located_does_nothing() {
+    let client = Arc::new(CoreClient::new(Arc::new(crate::core::ProcessConnector {
+        bin: std::path::PathBuf::new(),
+        env: Vec::new(),
+    })));
+    let locator = crate::settings::CoreLocator::new();
+    let shared = SharedSettings::new(Settings::default());
+    let status = crate::commands::retry_core_with(&shared, &locator, &client, None).await;
+    assert_eq!(status, crate::settings::CoreStatus::default());
+    assert!(!locator.is_located());
+}

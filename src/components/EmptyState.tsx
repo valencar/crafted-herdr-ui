@@ -4,7 +4,7 @@ type Props = {
   title: string;
   children: ReactNode;
   /** A single button under the text. */
-  action?: { label: string; onClick: () => void };
+  action?: { label: string; onClick: () => void; disabled?: boolean };
   /** A small picture above the title, where one is obvious. */
   icon?: "check" | "search";
 };
@@ -43,7 +43,12 @@ export function EmptyState({ title, children, action, icon }: Props) {
       <div className="empty-body">{children}</div>
       {action && (
         <div>
-          <button type="button" className="btn" onClick={action.onClick}>
+          <button
+            type="button"
+            className="btn"
+            disabled={action.disabled}
+            onClick={action.onClick}
+          >
             {action.label}
           </button>
         </div>

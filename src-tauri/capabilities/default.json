@@ -39,6 +39,7 @@
     "allow-refresh-now",
     "allow-remove-terminal",
     "allow-reply-to-agent",
+    "allow-retry-core",
     "allow-set-keep",
     "allow-set-pinned",
     "allow-set-settings",

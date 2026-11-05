@@ -12,15 +12,23 @@ import { useAppStore } from "../store/appStore";
 /** The command a person copies: shown in monospace beside a Copy button. The app never runs it. */
 function CopyLine({
   text,
+  label,
   onCopy,
 }: {
   text: string;
+  /** What the button is called, so the two commands are told apart. */
+  label: string;
   onCopy: (text: string) => void;
 }) {
   return (
     <div className="onboarding-line">
       <code className="mono onboarding-command">{text}</code>
-      <button type="button" className="btn" onClick={() => onCopy(text)}>
+      <button
+        type="button"
+        className="btn"
+        aria-label={label}
+        onClick={() => onCopy(text)}
+      >
         Copy
       </button>
     </div>
@@ -40,6 +48,8 @@ export function Onboarding() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [legacy, setLegacy] = useState<string | null>(null);
+  const [trying, setTrying] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
   // The older herdr, if one is installed, is only known to `core_status`.
   const incompatible = core?.kind === "incompatible" ? core : null;
@@ -60,6 +70,23 @@ export function Onboarding() {
       () => showToast("Copied", "info"),
       () => setError("Couldn’t copy to the clipboard."),
     );
+  };
+
+  // After the person installed or updated the core themselves. The core is otherwise located
+  // only at startup and when the saved path changes. Locates again and reconnects; nothing else.
+  const tryAgain = async () => {
+    setError(null);
+    setNote(null);
+    setTrying(true);
+    try {
+      const status = await invokeTyped("retry_core");
+      setLegacy(status?.legacy_herdr ?? null);
+      if (!status?.path) setNote("No herdr-core found yet.");
+    } catch (e) {
+      setError(actionErrorMessage(toActionError(e)));
+    } finally {
+      setTrying(false);
+    }
   };
 
   const choose = async () => {
@@ -100,6 +127,11 @@ export function Onboarding() {
       </header>
       <main className="onboarding">
         <div className="onboarding-card">
+          {!incompatible && legacy && (
+            <p>
+              {`You have herdr ${legacy}, the older CLI. This version of Crafted Herdr works with the new herdr-core.`}
+            </p>
+          )}
           {incompatible ? (
             <>
               <h1 className="section-title">
@@ -111,8 +143,12 @@ export function Onboarding() {
                 <p>Update Crafted Herdr.</p>
               ) : (
                 <>
-                  <p>Update it with this command, then come back:</p>
-                  <CopyLine text={CORE_UPDATE_COMMAND} onCopy={copy} />
+                  <p>Update it with this command, then try again:</p>
+                  <CopyLine
+                    text={CORE_UPDATE_COMMAND}
+                    label="Copy update command"
+                    onCopy={copy}
+                  />
                 </>
               )}
               {incompatible.reason && (
@@ -124,18 +160,25 @@ export function Onboarding() {
               <h1 className="section-title">
                 Crafted Herdr needs herdr-core (<code>hc</code>).
               </h1>
-              {legacy && (
-                <p>
-                  {`You have herdr ${legacy}, the older CLI. This version of Crafted Herdr works with the new herdr-core.`}
-                </p>
-              )}
-              <p>Install it with this line, then come back:</p>
-              <CopyLine text={CORE_INSTALL_LINE} onCopy={copy} />
+              <p>Install it with this line, then try again:</p>
+              <CopyLine
+                text={CORE_INSTALL_LINE}
+                label="Copy install line"
+                onCopy={copy}
+              />
             </>
           )}
           <div className="onboarding-actions">
             <button type="button" className="btn" onClick={openInstall}>
               Open herdr.dev ↗
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={trying}
+              onClick={() => void tryAgain()}
+            >
+              Try again
             </button>
             <button
               type="button"
@@ -146,6 +189,11 @@ export function Onboarding() {
               Choose binary…
             </button>
           </div>
+          {note && (
+            <p className="muted" role="status">
+              {note}
+            </p>
+          )}
           {error && (
             <p className="field-error" role="alert">
               {error}
@@ -153,7 +201,9 @@ export function Onboarding() {
           )}
           <p className="muted onboarding-note">
             The app looks in your shell’s PATH, <code>~/.local/bin</code>,{" "}
-            <code>/opt/homebrew/bin</code> and <code>/usr/local/bin</code>. It
+            <code>/opt/homebrew/bin</code>, <code>/usr/local/bin</code>,{" "}
+            <code>~/.local/share/mise/shims</code>,{" "}
+            <code>~/.nix-profile/bin</code> and <code>~/.cargo/bin</code>. It
             never installs or updates anything for you.
           </p>
         </div>

@@ -19,6 +19,7 @@ use crate::core::locate;
 use crate::core::{CoreClient, ProcessConnector};
 use crate::env::LoginEnv;
 use crate::lock;
+use crate::sync::CoreSync;
 use crate::terminal::{OpenMode, TerminalId};
 
 /// The store file, in the app data folder.
@@ -475,6 +476,23 @@ impl CoreLocator {
             legacy_herdr: located.legacy_herdr,
         };
         *lock(&self.status) = Some(status.clone());
+        status
+    }
+
+    /// `locate`, then tells the sync: the state names the core in use, and a core that was not
+    /// found, was incompatible or was stopped gets another try with the new one (a fresh
+    /// window). Used when the saved path changes and by Try again.
+    pub async fn relocate(
+        &self,
+        saved: Option<&str>,
+        core: &CoreClient,
+        sync: Option<&CoreSync>,
+    ) -> CoreStatus {
+        let status = self.locate(saved, core).await;
+        if let Some(sync) = sync {
+            sync.set_core_path(status.path.clone());
+            sync.reconnect_now();
+        }
         status
     }
 }

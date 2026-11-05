@@ -283,6 +283,7 @@ pub fn run() {
             commands::get_settings,
             commands::set_settings,
             commands::core_status,
+            commands::retry_core,
             commands::shortcut_status,
             commands::preview_launch_template,
             commands::show_main,

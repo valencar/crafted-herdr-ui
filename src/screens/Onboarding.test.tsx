@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CoreState } from "../lib/bindings/CoreState";
@@ -25,6 +25,9 @@ const openInBrowser = vi.mocked(openUrl);
 
 const INSTALL_LINE =
   "curl -fsSL https://releases.herdr.dev/core/install.sh | sh";
+
+const COPY_INSTALL = "Copy install line";
+const COPY_UPDATE = "Copy update command";
 
 const NO_CORE: CoreStatus = {
   path: null,
@@ -65,7 +68,7 @@ describe("Onboarding", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText(INSTALL_LINE)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: COPY_INSTALL })).toBeEnabled();
     // The link is text plus a button, not an anchor the webview would navigate to.
     expect(screen.queryByRole("link")).toBeNull();
     expect(
@@ -106,11 +109,37 @@ describe("Onboarding", () => {
     expect(screen.getByText(INSTALL_LINE)).toBeInTheDocument();
   });
 
+  it("the_legacy_line_leads_the_screen_before_the_heading", async () => {
+    inState({ kind: "notFound" }, { ...NO_CORE, legacy_herdr: "0.9.4" });
+    render(<Onboarding />);
+    const lead = await screen.findByText(/^You have herdr 0\.9\.4/);
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(
+      lead.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("the_footer_lists_the_places_the_search_looks", () => {
+    inState({ kind: "notFound" });
+    render(<Onboarding />);
+    const note = screen.getByText(/The app looks in/);
+    for (const where of [
+      "~/.local/bin",
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      "~/.local/share/mise/shims",
+      "~/.nix-profile/bin",
+      "~/.cargo/bin",
+    ]) {
+      expect(note).toHaveTextContent(where);
+    }
+  });
+
   it("install_line_copies_not_runs", async () => {
     inState({ kind: "notFound" });
     const user = userEvent.setup();
     render(<Onboarding />);
-    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await user.click(screen.getByRole("button", { name: COPY_INSTALL }));
     expect(copy).toHaveBeenCalledTimes(1);
     expect(copy).toHaveBeenCalledWith(INSTALL_LINE);
     expect(useAppStore.getState().toast).toBe("Copied");
@@ -124,7 +153,7 @@ describe("Onboarding", () => {
     copy.mockRejectedValue(new Error("denied"));
     const user = userEvent.setup();
     render(<Onboarding />);
-    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await user.click(screen.getByRole("button", { name: COPY_INSTALL }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Couldn’t copy to the clipboard.",
     );
@@ -148,7 +177,7 @@ describe("Onboarding", () => {
       screen.getByText("The core has no method terminal.read."),
     ).toBeInTheDocument();
     expect(screen.getByText("hc update")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await user.click(screen.getByRole("button", { name: COPY_UPDATE }));
     expect(copy).toHaveBeenCalledWith("hc update");
     expect(asked()).toEqual([]);
     // The install line is for a computer with no core; this one has one.
@@ -173,7 +202,7 @@ describe("Onboarding", () => {
     expect(screen.getByText("Update Crafted Herdr.")).toBeInTheDocument();
     // hc update won't downgrade, so it is not suggested.
     expect(screen.queryByText("hc update")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Copy/ })).toBeNull();
     expect(screen.queryByText(INSTALL_LINE)).toBeNull();
   });
 
@@ -258,5 +287,79 @@ describe("Onboarding", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "dialog unavailable",
     );
+  });
+
+  describe("Try again", () => {
+    const cases: Array<[string, CoreState, CoreStatus]> = [
+      ["no_core", { kind: "notFound" }, NO_CORE],
+      [
+        "old_herdr",
+        { kind: "notFound" },
+        { ...NO_CORE, legacy_herdr: "0.9.4" },
+      ],
+      [
+        "older_core",
+        { kind: "incompatible", reason: "no method", newer: false },
+        NO_CORE,
+      ],
+      [
+        "newer_core",
+        { kind: "incompatible", reason: "unsupported_generation", newer: true },
+        NO_CORE,
+      ],
+    ];
+
+    it.each(cases)(
+      "%s_try_again_invokes_retry_core",
+      async (_n, core, status) => {
+        inState(core, status);
+        const user = userEvent.setup();
+        render(<Onboarding />);
+        await user.click(screen.getByRole("button", { name: "Try again" }));
+        expect(invoke).toHaveBeenCalledWith("retry_core");
+        // It only reconnects: nothing is copied, opened or run.
+        expect(asked()).toEqual([["retry_core"]]);
+        expect(copy).not.toHaveBeenCalled();
+        expect(openInBrowser).not.toHaveBeenCalled();
+      },
+    );
+
+    it("says_so_when_nothing_was_found_and_shows_a_failure_inline", async () => {
+      inState({ kind: "notFound" });
+      const user = userEvent.setup();
+      render(<Onboarding />);
+      invoke.mockImplementation(async (name: string) =>
+        name === "retry_core" ? NO_CORE : NO_CORE,
+      );
+      await user.click(screen.getByRole("button", { name: "Try again" }));
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "No herdr-core found yet.",
+      );
+
+      invoke.mockImplementation(async () => {
+        throw { kind: "invalid", message: "Could not look." };
+      });
+      await user.click(screen.getByRole("button", { name: "Try again" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Could not look.",
+      );
+    });
+
+    it("is_disabled_while_the_call_is_pending", async () => {
+      inState({ kind: "notFound" });
+      let finish: (s: CoreStatus) => void = () => {};
+      invoke.mockImplementation((name: string) =>
+        name === "retry_core"
+          ? new Promise<CoreStatus>((r) => (finish = r))
+          : Promise.resolve(NO_CORE),
+      );
+      const user = userEvent.setup();
+      render(<Onboarding />);
+      const button = screen.getByRole("button", { name: "Try again" });
+      await user.click(button);
+      expect(button).toBeDisabled();
+      await act(async () => finish(NO_CORE));
+      expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+    });
   });
 });

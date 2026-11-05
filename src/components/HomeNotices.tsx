@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { formatShortcut } from "../lib/shortcuts";
 import type { MachineView } from "../lib/bindings/MachineView";
 import {
@@ -45,20 +46,32 @@ export function VersionBanner() {
 
 /**
  * Local never gets the reconnect card, so this says herdr-core isn't answering, with the last
- * error and a Reconnect button. Connecting starts the core, so it doesn't send anyone to a
- * terminal.
+ * error (`cause`, the real reason once the core is stopped, below the generic line) and a
+ * Reconnect button, disabled while its call is out. Connecting starts the core, so it doesn't
+ * send anyone to a terminal.
  */
-export function LocalDownCard({ error }: { error: string }) {
+export function LocalDownCard({
+  error,
+  cause,
+}: {
+  error: string;
+  cause?: string;
+}) {
   const report = useAppStore((s) => s.reportError);
+  const [busy, setBusy] = useState(false);
+  const reconnect = () => {
+    setBusy(true);
+    invokeTyped("reconnect_core")
+      .catch(report)
+      .finally(() => setBusy(false));
+  };
   return (
     <EmptyState
       title="Local isn’t answering"
-      action={{
-        label: "Reconnect",
-        onClick: () => invokeTyped("reconnect_core").catch(report),
-      }}
+      action={{ label: "Reconnect", onClick: reconnect, disabled: busy }}
     >
       <p>{error || "herdr-core isn’t answering yet"}</p>
+      {cause && cause !== error && <p className="muted">{cause}</p>}
     </EmptyState>
   );
 }
@@ -97,13 +110,16 @@ export function MachineNotices({
     local.terminals.length === 0 &&
     !isPending(local.health);
   const showLocalDown = stopped || retrying || unanswered;
-  const downError = localError || (stopped ? core.error.trim() : "");
+  // Once the core is stopped Local's own error is the generic sentence; the real cause is the
+  // core state's, so both are shown.
+  const downError = stopped ? "herdr-core isn't running." : localError;
+  const cause = stopped ? core.error.trim() : "";
   const attention = machines.filter(
     (m) => !m.is_local && m.health.kind === "attention",
   );
   return (
     <>
-      {showLocalDown && <LocalDownCard error={downError} />}
+      {showLocalDown && <LocalDownCard error={downError} cause={cause} />}
       {attention.map((m) => (
         <EmptyState key={m.id} title={`${m.name} needs attention`}>
           <p>

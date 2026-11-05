@@ -68,6 +68,8 @@ export type CommandResults = {
   get_settings: Settings;
   set_settings: Settings;
   core_status: CoreStatus;
+  /** Locates the core again with the settings as they are, rewires and reconnects. */
+  retry_core: CoreStatus;
   shortcut_status: ShortcutStatus;
   preview_launch_template: string;
   show_main: null;
@@ -136,6 +138,7 @@ export type CommandArgs = {
   /** Merged over the current settings; refused as a whole if any value is invalid. */
   set_settings: { patch: Partial<Settings> };
   core_status: undefined;
+  retry_core: undefined;
   shortcut_status: undefined;
   /** The script a Custom launch command runs for a sample pane. */
   preview_launch_template: { template: string };

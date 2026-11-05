@@ -25,7 +25,7 @@ use crate::settings::{
 };
 use crate::ssh_config;
 use crate::state::{AppState, Health};
-use crate::sync::SyncCell;
+use crate::sync::{CoreSync, SyncCell};
 use crate::terminal::open::{LaunchLog, launch_in_terminal};
 use crate::terminal::session::{TermEvent, TermId, TermSessions, TermSink};
 use crate::terminal::{
@@ -800,13 +800,9 @@ pub async fn set_settings(
     // Before startup has located the core, its own `locate` reads the saved path, so there is
     // nothing to resolve here (and the login environment may not be captured yet).
     if todo.core_path && locator.is_located() {
-        let status = locator.locate(new.core_path.as_deref(), &core).await;
-        // The state names the core in use, and a core that was not found or was stopped gets
-        // another try with the new one.
-        if let Some(sync) = sync.get() {
-            sync.set_core_path(status.path);
-            sync.reconnect_now();
-        }
+        locator
+            .relocate(new.core_path.as_deref(), &core, sync.get())
+            .await;
     }
     if todo.hidden_workboxes
         && let Some(sync) = sync.get()
@@ -823,6 +819,36 @@ pub async fn set_settings(
     }
     let _ = app.emit(SETTINGS_EVENT, &new);
     Ok(new)
+}
+
+/// Looks for herdr-core again with the settings as they are, points the client at what it
+/// finds, and reconnects. Onboarding's Try again, after the person installed or updated the
+/// core: the core is otherwise located only at startup and when `core_path` changes. Nothing
+/// is installed or run beyond the version probe `locate` always does. Before startup has
+/// located the core there is nothing to redo, and the current status is returned.
+pub async fn retry_core_with(
+    shared: &SharedSettings,
+    locator: &CoreLocator,
+    core: &CoreClient,
+    sync: Option<&CoreSync>,
+) -> CoreStatus {
+    // Not while a settings change is resolving the path, or startup is.
+    let _update = shared.begin_update().await;
+    if !locator.is_located() {
+        return locator.status();
+    }
+    let saved = shared.get().core_path;
+    locator.relocate(saved.as_deref(), core, sync).await
+}
+
+#[tauri::command]
+pub async fn retry_core(
+    shared: State<'_, SharedSettings>,
+    locator: State<'_, CoreLocator>,
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+) -> Result<CoreStatus, ActionError> {
+    Ok(retry_core_with(&shared, &locator, &core, sync.get()).await)
 }
 
 /// Which herdr-core binary is in use, its version, and whether the saved path was usable.

@@ -1799,16 +1799,6 @@ select.field {
 .onboarding-card p {
   margin: 0;
 }
-.onboarding-steps {
-  margin: 0;
-  padding-left: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.onboarding-url {
-  color: var(--text);
-}
 .onboarding-line {
   display: flex;
   align-items: center;

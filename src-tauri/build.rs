@@ -41,6 +41,7 @@ const COMMANDS: &[&str] = &[
     "get_settings",
     "set_settings",
     "core_status",
+    "retry_core",
     "shortcut_status",
     "preview_launch_template",
     "show_main",
