@@ -263,12 +263,20 @@ describe("AddWorkbox", () => {
       invoke.mockClear();
       useAppStore.setState({ sheet: "add-workbox", pendingAdd: null });
       addResult = async () => {
-        throw rpc(code, why);
+        throw rpc(
+          code,
+          why,
+          "check that `dev@buildbox.example echo ok` prints ok",
+        );
       };
       await addHost(user);
 
       expect(screen.getByText(lead)).toBeVisible();
       expect(screen.getByText(why)).toBeVisible();
+      // The core's next step is shown for an unreachable host, and only then.
+      const hint = screen.queryByText(/check that .* prints ok/);
+      if (code === "unreachable") expect(hint).toBeVisible();
+      else expect(hint).toBeNull();
       // No install is offered for these.
       expect(screen.queryByRole("button", { name: /Install hc/ })).toBeNull();
 
@@ -369,6 +377,84 @@ describe("AddWorkbox", () => {
       "That core is already added as devbox.",
     );
     expect(useAppStore.getState().sheet).toBe("add-workbox");
+  });
+
+  it("an_already_added_core_is_shown_by_the_custom_connection_field", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw rpc("already_added", "that core is already added as devbox");
+    };
+    await open();
+    await user.click(screen.getByText("Custom connection"));
+    await user.type(screen.getByLabelText("Connection command"), "ssh h");
+    await user.type(screen.getByLabelText("Name"), "box");
+    await user.click(screen.getByRole("button", { name: "Add workbox" }));
+    await advance(0);
+
+    expect(
+      screen.getByLabelText("Connection command"),
+    ).toHaveAccessibleDescription("That core is already added as devbox.");
+    expect(screen.getByLabelText("SSH host")).not.toHaveAttribute(
+      "aria-invalid",
+    );
+  });
+
+  it("the_words_keep_the_port", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw rpc("hc_missing", "hc is not installed");
+    };
+    await open();
+    await user.click(screen.getByRole("button", { name: "buildbox" }));
+    await user.type(screen.getByLabelText("Port"), "2222");
+    await user.click(screen.getByRole("button", { name: "Add workbox" }));
+    await advance(0);
+
+    expect(
+      screen.getByText("hc isn’t installed on buildbox:2222, or it’s too old."),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Install hc there…" }));
+    expect(
+      screen.getByRole("dialog", { name: "Install hc on buildbox:2222?" }),
+    ).toBeVisible();
+  });
+
+  it("a_failure_after_the_sheet_was_closed_is_a_toast", async () => {
+    const user = setup();
+    for (const failure of [
+      rpc("unreachable", "cannot reach dev@buildbox.example"),
+      {
+        kind: "maybeApplied",
+        argv: ["machine.add"],
+        message: "herdr-core did not answer in time. It may have been applied.",
+      } satisfies ActionError,
+    ]) {
+      cleanup();
+      useAppStore.getState().clearToast();
+      useAppStore.setState({ sheet: "add-workbox", pendingAdd: null });
+      let fail: (e: unknown) => void = () => {};
+      addResult = () =>
+        new Promise<string>((_, reject) => {
+          fail = reject;
+        });
+      await open();
+      await user.click(screen.getByRole("button", { name: "buildbox" }));
+      await user.click(screen.getByRole("button", { name: "Add workbox" }));
+      await advance(0);
+      // Cancel while the 60 s call is under way.
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(useAppStore.getState().sheet).toBeNull();
+
+      fail(failure);
+      await advance(0);
+
+      expect(useAppStore.getState().toast).toBe(
+        failure.kind === "maybeApplied"
+          ? failure.message
+          : "cannot reach dev@buildbox.example",
+      );
+      expect(useAppStore.getState().pendingAdd).toBeNull();
+    }
   });
 
   it("install_flag_only_after_click", async () => {
@@ -504,10 +590,10 @@ describe("AddWorkbox", () => {
     await advance(0);
     expect(useAppStore.getState().sheet).toBeNull();
 
-    // Nothing yet: it keeps asking for a fresh list, for as long as the person needs.
+    // Nothing yet: it waits on pushes for as long as the person needs, without polling.
     await advance(3000);
-    expect(callsTo("refresh_now").length).toBeGreaterThan(0);
     await advance(8 * 60_000);
+    expect(callsTo("refresh_now")).toEqual([]);
     expect(useAppStore.getState().pendingAdd).not.toBeNull();
     expect(useAppStore.getState().toast).toBeNull();
 
@@ -526,7 +612,8 @@ describe("AddWorkbox", () => {
       kind: "workbox",
       machineId: NEW_ID,
     });
-    expect(useTerminalStore.getState().tabs).toEqual([]);
+    // hc's last words stay readable in the tab.
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
     expect(useAppStore.getState().pendingAdd).toBeNull();
   });
 

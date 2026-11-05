@@ -78,7 +78,8 @@ export function AddWorkbox() {
         )
       : undefined;
   const canAdd = valid && !existing && !busy;
-  const shown = req.target ?? req.name ?? "";
+  // Keeps the port: `buildbox:2222` is what is being added.
+  const shown = req.target !== null ? addTarget(req) : (req.name ?? "");
 
   useEffect(() => {
     let cancelled = false;
@@ -148,8 +149,12 @@ export function AddWorkbox() {
       const id = await invokeTyped("add_machine", { req });
       handOver(null, id);
     } catch (e) {
-      if (!mounted.current) return;
-      const next = addAdvice(toActionError(e));
+      if (!mounted.current) {
+        // The sheet was closed during the call: nobody is left to show it, so the toast does.
+        useAppStore.getState().reportError(e);
+        return;
+      }
+      const next = addAdvice(toActionError(e), req.via !== null);
       if (next.kind === "other") setFailure(next.text);
       else setAdvice(next);
     } finally {
@@ -192,11 +197,13 @@ export function AddWorkbox() {
     }
   }
 
-  const inlineText = (field: "name" | "host") =>
+  const inlineText = (field: "name" | "host" | "via") =>
     advice?.kind === "inline" && advice.field === field ? advice.text : null;
   const problem = (field: AddField): string | null =>
     problems[field] ??
-    (field === "name" || field === "host" ? inlineText(field) : null);
+    (field === "name" || field === "host" || field === "via"
+      ? inlineText(field)
+      : null);
   const errorProps = (field: AddField, errorId: string) =>
     problem(field)
       ? { "aria-invalid": true as const, "aria-describedby": errorId }
@@ -446,6 +453,7 @@ export function AddWorkbox() {
                 : `Couldn’t reach ${shown}.`}
             </p>
             <p className="add-advice-why">{advice.why}</p>
+            {advice.hint && <p className="add-advice-why">{advice.hint}</p>}
             <div className="add-advice-actions">
               <button
                 type="button"

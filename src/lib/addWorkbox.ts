@@ -106,10 +106,17 @@ export function addLabel(req: AddMachineRequest): string {
 
 /**
  * The machine id a command tab of this request goes under. The machine is not added yet, so it
- * has no id: `add:` and the way in. It never equals a machine id (`local`, or 32 hex digits).
+ * has no id: `add:` and every argument that makes the command what it is (the way in, the name,
+ * the session, temporary). A retry with any of them changed is a different command, so it gets a
+ * tab of its own instead of showing the still-running old one. (`--install` is told apart by
+ * `commandTabKey`.) It never equals a machine id (`local`, or 32 hex digits).
  */
 export function addPseudoId(req: AddMachineRequest): string {
-  return `add:${req.via ? (req.name ?? "") : addTarget(req)}`;
+  const parts = [req.via ? `--via ${req.via}` : addTarget(req)];
+  if (req.name) parts.push(`--name ${req.name}`);
+  if (req.session) parts.push(`--session ${req.session}`);
+  if (req.temporary) parts.push("--temp");
+  return `add:${parts.join(" ")}`;
 }
 
 /** What the sheet does about a refused add. */
@@ -117,9 +124,15 @@ export type AddAdvice =
   /** hc is missing or too old there: offer Install hc there…. */
   | { kind: "install"; why: string }
   /** ssh wants a person (a login, a host key) or cannot reach it: offer a terminal. */
-  | { kind: "terminal"; code: "needs_login" | "unreachable"; why: string }
-  /** The name or the machine is already taken: say so by the field. */
-  | { kind: "inline"; field: "name" | "host"; text: string }
+  | {
+      kind: "terminal";
+      code: "needs_login" | "unreachable";
+      why: string;
+      /** The core's own next step, for `unreachable` only; `null` otherwise. */
+      hint: string | null;
+    }
+  /** The name or the machine is already taken: say so by the field the person used. */
+  | { kind: "inline"; field: "name" | "host" | "via"; text: string }
   | { kind: "other"; text: string };
 
 /** The core's words as a sentence: first letter up, a full stop at the end. */
@@ -130,17 +143,21 @@ function sentence(text: string): string {
   return /[.!?]$/.test(up) ? up : `${up}.`;
 }
 
-/** The next step for a failed `add_machine`, by the core's typed error (spec 7.5). */
-export function addAdvice(e: ActionError): AddAdvice {
+/**
+ * The next step for a failed `add_machine`, by the core's typed error (spec 7.5). `viaAdd` is
+ * whether the add used a custom connection, so a message about the machine is shown by that field.
+ */
+export function addAdvice(e: ActionError, viaAdd = false): AddAdvice {
   if (e.kind === "core" && e.error.kind === "rpc") {
-    const { code, message } = e.error;
+    const { code, message, hint } = e.error;
     switch (code) {
       case "hc_missing":
       case "incompatible":
         return { kind: "install", why: message };
       case "needs_login":
+        return { kind: "terminal", code, why: message, hint: null };
       case "unreachable":
-        return { kind: "terminal", code, why: message };
+        return { kind: "terminal", code, why: message, hint };
       case "name_taken":
         return {
           kind: "inline",
@@ -148,7 +165,11 @@ export function addAdvice(e: ActionError): AddAdvice {
           text: `${sentence(message)} Pick another name.`,
         };
       case "already_added":
-        return { kind: "inline", field: "host", text: sentence(message) };
+        return {
+          kind: "inline",
+          field: viaAdd ? "via" : "host",
+          text: sentence(message),
+        };
     }
   }
   return { kind: "other", text: actionErrorMessage(e) };

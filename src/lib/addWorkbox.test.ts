@@ -120,16 +120,28 @@ describe("addProblems", () => {
 });
 
 describe("addPseudoId", () => {
-  it("is_stable_per_way_in_and_never_a_machine_id", () => {
+  it("covers_every_argument_so_a_changed_retry_is_a_different_tab", () => {
     const a = addRequest(fields({ host: "buildbox", port: "2222" }));
     expect(addPseudoId(a)).toBe("add:buildbox:2222");
-    expect(addPseudoId({ ...a, name: "box", session: "qa" })).toBe(
-      "add:buildbox:2222",
-    );
+    const ids = new Set([
+      addPseudoId(a),
+      addPseudoId({ ...a, name: "box" }),
+      addPseudoId({ ...a, name: "other" }),
+      addPseudoId({ ...a, session: "qa" }),
+      addPseudoId({ ...a, temporary: true }),
+      addPseudoId({ ...a, port: null }),
+      addPseudoId({ ...a, target: "gpubox" }),
+    ]);
+    expect(ids.size).toBe(7);
+    expect(
+      addPseudoId({ ...a, name: "box", session: "qa", temporary: true }),
+    ).toBe("add:buildbox:2222 --name box --session qa --temp");
+    // The same request is the same tab.
+    expect(addPseudoId({ ...a })).toBe(addPseudoId(a));
     expect(
       addPseudoId(addRequest(fields({ via: "ssh h", name: "gpubox" }))),
-    ).toBe("add:gpubox");
-    // A machine id is 32 hex digits, `local`, or a name: none starts with `add:`.
+    ).toBe("add:--via ssh h --name gpubox");
+    // A machine id is 32 hex digits or `local`: none starts with `add:`.
     expect(addPseudoId(a).startsWith("add:")).toBe(true);
   });
 });
@@ -145,15 +157,31 @@ describe("addAdvice", () => {
   });
 
   it("needs_login_and_unreachable_offer_a_terminal", () => {
-    expect(addAdvice(rpc("needs_login", "wants a login"))).toEqual({
+    // needs_login's own hint names a `--via` command, which is wrong for a plain host, so it
+    // is not shown.
+    expect(
+      addAdvice(
+        rpc("needs_login", "wants a login", "run `hc machine add --via x`"),
+      ),
+    ).toEqual({
       kind: "terminal",
       code: "needs_login",
       why: "wants a login",
+      hint: null,
     });
-    expect(addAdvice(rpc("unreachable", "cannot reach it"))).toEqual({
+    expect(
+      addAdvice(
+        rpc(
+          "unreachable",
+          "cannot reach it",
+          "check that `h echo ok` prints ok",
+        ),
+      ),
+    ).toEqual({
       kind: "terminal",
       code: "unreachable",
       why: "cannot reach it",
+      hint: "check that `h echo ok` prints ok",
     });
   });
 
@@ -176,6 +204,17 @@ describe("addAdvice", () => {
     ).toEqual({
       kind: "inline",
       field: "host",
+      text: "That core is already added as devbox.",
+    });
+    // By the field the person used.
+    expect(
+      addAdvice(
+        rpc("already_added", "that core is already added as devbox"),
+        true,
+      ),
+    ).toEqual({
+      kind: "inline",
+      field: "via",
       text: "That core is already added as devbox.",
     });
   });

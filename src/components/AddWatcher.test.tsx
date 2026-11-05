@@ -77,11 +77,10 @@ describe("AddWatcher", () => {
     useAppStore.setState({ pendingAdd: PENDING });
     render(<AddWatcher />);
 
-    // Asks for a fresh machine list now and then; nothing new yet.
+    // It waits on pushes and never polls: the sync reads the list on its own cadence.
+    await advance(3000);
+    await advance(8 * 60_000);
     expect(calls("refresh_now")).toHaveLength(0);
-    await advance(3000);
-    await advance(3000);
-    expect(calls("refresh_now")).toHaveLength(2);
     expect(useAppStore.getState().pendingAdd).toEqual(PENDING);
 
     // Another machine appears first: not the one we are waiting for.
@@ -114,13 +113,88 @@ describe("AddWatcher", () => {
     expect(s.toast).toBe("Added buildbox");
     expect(s.toastTone).toBe("info");
     expect(s.view).toEqual({ kind: "workbox", machineId: "0000c0de" });
-    // The add's tab has done its job.
-    expect(useTerminalStore.getState().tabs).toEqual([]);
+    // The add's tab stays, so hc's last words can be read; the person was looking at it, so
+    // they are taken to the new workbox.
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
     expect(useTerminalStore.getState().activeKey).toBe(HOME);
-    // No more polling.
-    const before = calls("refresh_now").length;
     await advance(10_000);
-    expect(calls("refresh_now")).toHaveLength(before);
+    expect(calls("refresh_now")).toHaveLength(0);
+  });
+
+  it("only_a_person_waiting_for_it_is_taken_to_the_new_workbox", async () => {
+    openAddTab();
+    // They moved on to another terminal while the add went on.
+    useTerminalStore.getState().openTab({
+      tabKey: "buildbox::t7",
+      target: { kind: "terminal", machineId: "buildbox", address: "t7" },
+      title: "api-agent",
+      machineLabel: "buildbox",
+    });
+    useAppStore.setState({ pendingAdd: PENDING, view: { kind: "all" } });
+    render(<AddWatcher />);
+
+    act(() =>
+      useAppStore.setState({
+        state: stateWith([
+          { id: "0000c0de", name: "buildbox", target: "dev@buildbox.example" },
+          [],
+        ]),
+      }),
+    );
+
+    expect(useAppStore.getState().toast).toBe("Added buildbox");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    expect(useTerminalStore.getState().activeKey).toBe("buildbox::t7");
+    expect(useTerminalStore.getState().tabs).toHaveLength(2);
+  });
+
+  it("an_add_with_no_tab_takes_a_person_on_home_but_not_elsewhere", async () => {
+    useTerminalStore.getState().openTab({
+      tabKey: "buildbox::t7",
+      target: { kind: "terminal", machineId: "buildbox", address: "t7" },
+      title: "api-agent",
+      machineLabel: "buildbox",
+    });
+    useAppStore.setState({
+      pendingAdd: { ...PENDING, id: "0000c0de", tabMachineId: null },
+      view: { kind: "all" },
+    });
+    render(<AddWatcher />);
+    act(() =>
+      useAppStore.setState({
+        state: stateWith([
+          { id: "0000c0de", name: "box", target: "dev@buildbox.example" },
+          [],
+        ]),
+      }),
+    );
+    expect(useAppStore.getState().toast).toBe("Added box");
+    expect(useAppStore.getState().view).toEqual({ kind: "all" });
+  });
+
+  it("reads_the_list_once_when_the_add_tab_ends", async () => {
+    openAddTab();
+    useAppStore.setState({ pendingAdd: PENDING });
+    render(<AddWatcher />);
+    await advance(0);
+    expect(calls("refresh_now")).toHaveLength(0);
+
+    act(() =>
+      useTerminalStore
+        .getState()
+        .sessionEnded(
+          `${PSEUDO}::cmd:machine add`,
+          { code: 0, lastLine: "ok" },
+          undefined,
+          "ready",
+        ),
+    );
+    await advance(0);
+    expect(calls("refresh_now")).toEqual([["refresh_now", {}]]);
+
+    // Nothing more, however long it waits.
+    await advance(60_000);
+    expect(calls("refresh_now")).toHaveLength(1);
   });
 
   it("a_machine_that_was_already_there_is_not_the_new_one", async () => {
@@ -185,9 +259,8 @@ describe("AddWatcher", () => {
     expect(useAppStore.getState().toast).toMatch(
       /Didn’t see the new workbox yet/,
     );
-    const before = calls("refresh_now").length;
     await advance(10_000);
-    expect(calls("refresh_now")).toHaveLength(before);
+    expect(calls("refresh_now")).toHaveLength(0);
   });
 
   it("closing_the_add_tab_ends_the_wait", async () => {

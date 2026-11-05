@@ -83,6 +83,23 @@ describe("openMachineAdd", () => {
     expect(tabs[1].title).toBe("Install hc");
   });
 
+  it("a_retry_with_a_changed_name_or_session_runs_instead_of_showing_the_old_tab", async () => {
+    await openMachineAdd(REQ, false);
+    await openMachineAdd({ ...REQ, name: "box" }, false);
+    await openMachineAdd({ ...REQ, name: "box", session: "qa" }, false);
+
+    const { tabs, activeKey } = useTerminalStore.getState();
+    expect(tabs.map((t) => t.tabKey)).toEqual([
+      "add:buildbox:2222::cmd:machine add",
+      "add:buildbox:2222 --name box::cmd:machine add",
+      "add:buildbox:2222 --name box --session qa::cmd:machine add",
+    ]);
+    expect(activeKey).toBe(tabs[2].tabKey);
+    // The same request again is the same tab.
+    await openMachineAdd({ ...REQ, name: "box" }, false);
+    expect(useTerminalStore.getState().tabs).toHaveLength(3);
+  });
+
   it("an_ended_add_runs_again_in_place", async () => {
     await openMachineAdd(REQ, true);
     const key = "add:buildbox:2222::cmd:machine add --install";
