@@ -5,6 +5,7 @@
 //! task of its own. The state comes from a `watch` channel the sync's emit callback fills, never
 //! from `CoreSync` itself.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -17,7 +18,7 @@ use crate::activity::{Transition, TransitionKind};
 use crate::agents::{DisplayStatus, TerminalView};
 use crate::settings::{Settings, SharedSettings};
 use crate::state::{AppState, MachineView};
-use crate::sync::NotifySink;
+use crate::sync::{NotifySink, SyncCell};
 
 /// The event that tells the main window to select a row and show Home.
 pub const FOCUS_ROW_EVENT: &str = "focus-row";
@@ -27,16 +28,59 @@ const ROW_KEY_EXTRA: &str = "row_key";
 /// transition just before (or while) it publishes the state that shows it.
 const SETTLE: Duration = Duration::from_millis(500);
 
-/// The row the main window is showing in a terminal tab right now (`<machine id>::<address>`),
-/// as the UI last reported it with `set_visible_row`; `None` on Home, a full-UI tab or a hidden
-/// page. Whether the window also has focus is read when a notification is about to show.
+/// The row keys (`<machine id>::<address>`) the main window says it draws right now, as the UI
+/// last reported them with `set_looking`: the active terminal tab's row, and the Inspector's row
+/// while its preview shows. Empty on Home with no Inspector row and while the window is not in
+/// front. Whether the window really is in front is read again where it matters
+/// (`apply_looking`, and when a notification is about to show).
 #[derive(Default)]
-pub struct VisibleRow(pub Mutex<Option<String>>);
+pub struct Looking(Mutex<HashSet<String>>);
 
-/// Whether a notification for `row_key` is pointless: the user is looking at that terminal's tab
-/// in a focused main window.
-pub fn should_skip(main_focused: bool, visible: Option<&str>, row_key: &str) -> bool {
-    main_focused && visible == Some(row_key)
+impl Looking {
+    /// Replaces what the UI reported.
+    pub fn set(&self, keys: impl IntoIterator<Item = String>) {
+        *crate::lock(&self.0) = keys.into_iter().collect();
+    }
+
+    pub fn keys(&self) -> HashSet<String> {
+        crate::lock(&self.0).clone()
+    }
+}
+
+/// Whether a notification for `row_key` is pointless: the user is looking at that terminal in a
+/// focused main window.
+pub fn should_skip(main_focused: bool, looking: &HashSet<String>, row_key: &str) -> bool {
+    main_focused && looking.contains(row_key)
+}
+
+/// Gives the sync what the person is really looking at: what the UI reported, but nothing while
+/// the main window is unfocused, minimized or hidden (an empty room clears nobody's "done").
+/// `focused` is the new focus state when a focus event is the caller, since the window may not
+/// answer it yet. Call it whenever the report or the window changes.
+pub fn apply_looking<R: Runtime>(app: &AppHandle<R>, focused: Option<bool>) {
+    let Some(cell) = app.try_state::<SyncCell>() else {
+        return;
+    };
+    let Some(sync) = cell.get() else {
+        return;
+    };
+    let in_front = app
+        .get_webview_window(crate::tray::MAIN_WINDOW)
+        .is_some_and(|w| {
+            focused.unwrap_or_else(|| w.is_focused().unwrap_or(false))
+                && w.is_visible().unwrap_or(false)
+                && !w.is_minimized().unwrap_or(false)
+        });
+    let keys = if in_front {
+        app.try_state::<Looking>().map(|l| l.keys())
+    } else {
+        None
+    };
+    sync.set_looking(
+        keys.into_iter()
+            .flatten()
+            .filter_map(|key| crate::sync::parse_row_key(&key)),
+    );
 }
 
 /// What to show. `row_key` is `<machine id>::<address>`, the UI's key for the row.
@@ -232,12 +276,11 @@ pub fn start<R: Runtime>(
             let focused = looker
                 .get_webview_window(crate::tray::MAIN_WINDOW)
                 .is_some_and(|w| w.is_focused().unwrap_or(false));
-            let visible = looker.try_state::<VisibleRow>().and_then(|v| {
-                v.0.lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .clone()
-            });
-            should_skip(focused, visible.as_deref(), row_key)
+            let looking = looker
+                .try_state::<Looking>()
+                .map(|l| l.keys())
+                .unwrap_or_default();
+            should_skip(focused, &looking, row_key)
         },
         move |text| {
             let shown = shower
@@ -399,12 +442,28 @@ mod tests {
     }
 
     #[test]
-    fn skips_only_the_visible_row_while_focused() {
-        assert!(should_skip(true, Some("m::t1"), "m::t1"));
-        assert!(!should_skip(false, Some("m::t1"), "m::t1"));
-        assert!(!should_skip(true, Some("m::t2"), "m::t1"));
-        // Home (or a full-UI tab) is active: nothing is being looked at.
-        assert!(!should_skip(true, None, "m::t1"));
+    fn suppresses_notification_for_looked_at_key() {
+        let looking: HashSet<String> = ["m::t1".to_owned(), "m::t3".to_owned()].into();
+        // Every looked-at key (the tab's row and the Inspector's) is skipped, while focused.
+        assert!(should_skip(true, &looking, "m::t1"));
+        assert!(should_skip(true, &looking, "m::t3"));
+        assert!(!should_skip(false, &looking, "m::t1"));
+        assert!(!should_skip(true, &looking, "m::t2"));
+        // Nothing is drawn (Home, or the window is away): nothing is skipped.
+        assert!(!should_skip(true, &HashSet::new(), "m::t1"));
+    }
+
+    #[test]
+    fn the_report_replaces_the_looked_at_keys() {
+        let looking = Looking::default();
+        looking.set(["m::t1".to_owned()]);
+        looking.set(["m::t2".to_owned(), "m::t3".to_owned()]);
+        assert_eq!(
+            looking.keys(),
+            ["m::t2".to_owned(), "m::t3".to_owned()].into()
+        );
+        looking.set([]);
+        assert!(looking.keys().is_empty());
     }
 
     #[tokio::test]

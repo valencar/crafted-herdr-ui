@@ -52,7 +52,7 @@ const COMMANDS: &[&str] = &[
     "term_resize",
     "term_close",
     "show_main_open_row",
-    "set_visible_row",
+    "set_looking",
 ];
 
 fn main() {

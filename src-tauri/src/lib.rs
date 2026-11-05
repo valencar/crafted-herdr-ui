@@ -125,7 +125,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(activity.clone());
     app.manage(locator);
     app.manage(PopoverGuard::default());
-    app.manage(notify::VisibleRow::default());
+    app.manage(notify::Looking::default());
     app.manage(shared.clone());
 
     let tray_icon = tray::create_tray(&handle)?;
@@ -188,10 +188,22 @@ async fn locate_and_start(
     );
     sync.set_core_path(status.path);
     cell.set(sync);
+    // The UI may have said what it draws before the sync existed.
+    notify::apply_looking(&handle, None);
 }
 
 /// The machine list is read often only while the main window is on screen.
 fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
+    // Whether anyone is looking is decided again whenever the window's focus or state changes.
+    if let WindowEvent::Focused(_) | WindowEvent::Resized(_) = event {
+        notify::apply_looking(
+            window.app_handle(),
+            match event {
+                WindowEvent::Focused(focused) => Some(*focused),
+                _ => None,
+            },
+        );
+    }
     let visible = match event {
         WindowEvent::Focused(true) => true,
         // Losing focus does not hide the window; being minimized or hidden does.
@@ -294,7 +306,7 @@ pub fn run() {
             commands::term_resize,
             commands::term_close,
             commands::show_main_open_row,
-            commands::set_visible_row,
+            commands::set_looking,
         ])
         .menu(menu::build)
         .on_menu_event(menu::on_event)

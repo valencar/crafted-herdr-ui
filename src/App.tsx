@@ -19,7 +19,7 @@ import {
 } from "./lib/uiHelpers";
 import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { useTheme } from "./lib/useTheme";
-import { useVisibleRowReport } from "./lib/useVisibleRowReport";
+import { useLooking } from "./lib/useLooking";
 import { useAutoPickColors } from "./lib/workboxColorsSave";
 import { AddWatcher } from "./components/AddWatcher";
 import { AddWorkbox } from "./screens/AddWorkbox";
@@ -74,7 +74,7 @@ function App() {
   useStateSync();
   useSettingsSync();
   useTheme();
-  useVisibleRowReport();
+  useLooking();
   useAutoPickColors();
 
   // A just-created session is selected and opened once the state lists it, from here so it

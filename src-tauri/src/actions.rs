@@ -672,7 +672,7 @@ impl<'a> MachineActions<'a> {
 const NOT_LISTED: &str = "That terminal is no longer listed.";
 
 /// The label `herdr-app` and this app share: the last turn the person has seen. A string.
-const SEEN_LABEL: &str = "herdr.seen";
+pub(crate) const SEEN_LABEL: &str = "herdr.seen";
 /// The label for a pinned agent: `"1"` pins, `""` unpins.
 const PINNED_LABEL: &str = "herdr.pinned";
 

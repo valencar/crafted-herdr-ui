@@ -17,7 +17,7 @@ use crate::actions::{
 };
 use crate::activity::ActivityV2;
 use crate::core::{CommandLogEntry, CoreClient};
-use crate::notify::VisibleRow;
+use crate::notify::{self, Looking};
 use crate::preview::{self, PreviewManager};
 use crate::pty::TermSize;
 use crate::settings::{
@@ -896,14 +896,14 @@ pub fn show_main_open_row(app: AppHandle, machine_id: String, address: String) {
     );
 }
 
-/// Records which terminal's tab the main window is showing (`"<machineId>::<address>"`), or
-/// `None`, so a notification for that terminal is skipped while the window is focused.
+/// Records the terminals the main window draws right now (`"<machineId>::<address>"` each: the
+/// active terminal tab's, and the Inspector's while its preview shows; none while the window is
+/// unfocused, minimized or hidden). A notification for one of them is skipped while the window is
+/// focused, and the sync writes `herdr.seen` for them, once per turn.
 #[tauri::command]
-pub fn set_visible_row(key: Option<String>, visible: State<'_, VisibleRow>) {
-    *visible
-        .0
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = key;
+pub fn set_looking(keys: Vec<String>, looking: State<'_, Looking>, app: AppHandle) {
+    looking.set(keys);
+    notify::apply_looking(&app, None);
 }
 
 #[tauri::command]

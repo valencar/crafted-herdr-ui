@@ -29,6 +29,15 @@
 //! flight can't release it), for at most `HOLD_MAX`. The seen records of a machine whose
 //! terminals were just removed are kept for that long too, so a Done-unseen row stays Done.
 //! The hold ends at once when the event connection leaves Online.
+//!
+//! **Shared seen** (spec §8.1, herdr-app `docs/labels.md`). The UI says which terminals it draws
+//! (`set_looking`; empty while the window is away). For each of them `herdr.seen` is written as
+//! the turn's number, a string, through a quiet call (Ruling C79): only to raise it or when it is
+//! missing, and at most once per turn (`last_written_seen`), so a Mark as unread, here or on
+//! another client, is not overruled by a screen that stays on. The decision is made when the set
+//! changes, on a `turn` event (never a `status` one) and on a new baseline (a snapshot or a
+//! `missed`, which stand for turn events that were not seen). Every write also moves the app's own
+//! seen record (`ActivityV2::mark_seen`), after the model lock is released.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,8 +50,9 @@ use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+use crate::actions::SEEN_LABEL;
 use crate::activity::{ActivityV2, Transition};
-use crate::agents::{TerminalView, classify};
+use crate::agents::{DisplayStatus, TerminalView, classify};
 use crate::core::connection::Connection;
 use crate::core::display::display;
 use crate::core::events::parse_terminals;
@@ -81,6 +91,12 @@ pub fn split_address(full: &str) -> (Option<&str>, &str) {
         Some((machine, local)) => (Some(machine), local),
         None => (None, full),
     }
+}
+
+/// Splits a row key (`<machine id>::<address>`) into the machine id and the machine-local address.
+pub fn parse_row_key(key: &str) -> Option<(String, String)> {
+    let (machine, address) = key.split_once("::")?;
+    (!machine.is_empty() && !address.is_empty()).then(|| (machine.to_owned(), address.to_owned()))
 }
 
 /// How a machine of `machine.list` is doing (spec §4.4).
@@ -270,6 +286,12 @@ struct Inner {
     handle: Handle,
     model: Mutex<Model>,
     visible: AtomicBool,
+    /// The terminals the person is looking at (machine id, local address): what the UI draws in a
+    /// window that is in front. A leaf lock.
+    looking: Mutex<HashSet<(String, String)>>,
+    /// The turn `herdr.seen` was last decided for, by terminal: a decision is made at most once
+    /// per turn, so nothing overrules a Mark as unread before the next turn. A leaf lock.
+    last_written_seen: Mutex<HashMap<(String, String), u64>>,
     machine_wake: Notify,
     reconnect: Notify,
     throttle: Mutex<Throttle>,
@@ -325,6 +347,8 @@ impl CoreSync {
                 emitted: None,
             }),
             visible: AtomicBool::new(true),
+            looking: Mutex::default(),
+            last_written_seen: Mutex::default(),
             machine_wake: Notify::new(),
             reconnect: Notify::new(),
             throttle: Mutex::default(),
@@ -379,12 +403,23 @@ impl CoreSync {
     /// `machine_id` and a machine-local address to the address as the local core knows it
     /// (`buildbox/t7`): what the core's own calls take. `None` for an unknown machine.
     pub fn full_address(&self, machine_id: &str, address: &str) -> Option<String> {
-        if machine_id == LOCAL {
-            return Some(address.to_owned());
+        full_address_in(&lock(&self.inner.model), machine_id, address)
+    }
+
+    /// The terminals the person is really looking at, replacing the last set: the UI's drawn
+    /// rows, or none while the window is unfocused, minimized or hidden. Writes `herdr.seen` for
+    /// those that need it (see the module doc).
+    pub fn set_looking(&self, keys: impl IntoIterator<Item = (String, String)>) {
+        let keys: HashSet<(String, String)> = keys.into_iter().collect();
+        let changed = {
+            let mut looking = lock(&self.inner.looking);
+            let changed = *looking != keys;
+            *looking = keys;
+            changed
+        };
+        if changed {
+            self.inner.write_seen();
         }
-        let m = lock(&self.inner.model);
-        let machine = m.machines.iter().find(|x| x.id == machine_id)?;
-        Some(format!("{}/{address}", machine.name))
     }
 
     /// The terminal as the UI sees it.
@@ -436,6 +471,15 @@ impl Drop for CoreSync {
             task.abort();
         }
     }
+}
+
+/// A machine id and machine-local address to the address the local core knows (`buildbox/t7`).
+fn full_address_in(m: &Model, machine_id: &str, address: &str) -> Option<String> {
+    if machine_id == LOCAL {
+        return Some(address.to_owned());
+    }
+    let machine = m.machines.iter().find(|x| x.id == machine_id)?;
+    Some(format!("{}/{address}", machine.name))
 }
 
 /// The machine id and view of one terminal, or the machine name the list doesn't know yet.
@@ -806,6 +850,82 @@ impl Inner {
             .unwrap_or_default())
     }
 
+    /// Writes `herdr.seen=<turn>` for each looked-at terminal whose turn has not been decided yet
+    /// and whose label is missing or lower. A terminal is decided once per turn, whether or not a
+    /// write was needed, so later triggers at the same turn do nothing (Mark as unread stays).
+    fn write_seen(self: &Arc<Self>) {
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        let looking = lock(&self.looking).clone();
+        if looking.is_empty() {
+            return;
+        }
+        // (machine id, local address, full address, turn)
+        let mut writes: Vec<(String, String, String, u64)> = Vec::new();
+        {
+            // Lock order: the model first; `last_written_seen` is a leaf.
+            let m = lock(&self.model);
+            let mut decided = lock(&self.last_written_seen);
+            for key in &looking {
+                let Some(view) = m.views.get(key) else {
+                    continue;
+                };
+                // Nothing runs there to look at.
+                if view.status == DisplayStatus::Ended {
+                    continue;
+                }
+                // The turn went back (the terminal restarted): start over.
+                if decided.get(key).is_some_and(|d| *d > view.turn) {
+                    decided.remove(key);
+                }
+                if decided.get(key).is_some_and(|d| *d >= view.turn) {
+                    continue;
+                }
+                let Some(full) = full_address_in(&m, &key.0, &key.1) else {
+                    continue;
+                };
+                decided.insert(key.clone(), view.turn);
+                if view.seen_turn.is_none_or(|seen| seen < view.turn) {
+                    writes.push((key.0.clone(), key.1.clone(), full, view.turn));
+                }
+            }
+        }
+        if writes.is_empty() {
+            return;
+        }
+        {
+            // The app's own record moves with the label (it is what a missing label falls back
+            // to). Taken after the model lock is released, and nothing calls back into the sync.
+            let mut activity = lock(&self.activity);
+            for (machine_id, address, _, turn) in &writes {
+                activity.mark_seen(machine_id, address, *turn);
+            }
+        }
+        self.commit(None, false);
+        for (machine_id, address, full, turn) in writes {
+            let me = self.clone();
+            self.handle.spawn(async move {
+                let params = json!({"terminal": full, "labels": {(SEEN_LABEL): turn.to_string()}});
+                // Quiet (Ruling C79): a background write holds at most two pool slots and the
+                // drawer hides it unless it fails.
+                let written = me
+                    .client
+                    .call_quiet(&machine_id, "terminal.label", params)
+                    .await;
+                if written.is_err() {
+                    // Not written: the next trigger at this turn may try again.
+                    let mut decided = lock(&me.last_written_seen);
+                    let key = (machine_id, address);
+                    if decided.get(&key) == Some(&turn) {
+                        decided.remove(&key);
+                    }
+                }
+            });
+        }
+        lock(&self.activity).maybe_save();
+    }
+
     // ---- the machine task ----
 
     async fn run_machines(self: Arc<Self>) {
@@ -970,6 +1090,8 @@ impl Inner {
         // The baseline: no transition comes out of what changed while we weren't looking.
         self.commit(Some(list_id), false);
         lock(&self.activity).maybe_save();
+        // A snapshot stands for the turns that ended while the connection was down.
+        self.write_seen();
         Ok((conn, notes))
     }
 
@@ -1007,6 +1129,8 @@ impl Inner {
         let mut transitions = Vec::new();
         let mut machines_wanted = false;
         let mut deferred = false;
+        // A turn ended, or the core dropped events and sent a new baseline.
+        let mut turned = false;
         {
             let mut guard = lock(&self.model);
             let m = &mut *guard;
@@ -1032,8 +1156,10 @@ impl Inner {
                     // changed too (their state isn't in the stream).
                     self.rebuild(m, None);
                     machines_wanted = true;
+                    turned = true;
                     continue;
                 }
+                turned |= !applied.turns.is_empty();
                 // `docs` (the herdr-app document) are read once spaces exist (Task 18).
                 let mut seen = HashSet::new();
                 for address in applied.statuses.iter().chain(&applied.turns) {
@@ -1069,6 +1195,9 @@ impl Inner {
         self.commit(None, deferred);
         for transition in transitions {
             (self.notify)(transition);
+        }
+        if turned {
+            self.write_seen();
         }
         lock(&self.activity).maybe_save();
     }

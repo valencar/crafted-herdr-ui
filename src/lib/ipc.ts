@@ -81,7 +81,7 @@ export type CommandResults = {
   term_resize: null;
   term_close: null;
   show_main_open_row: null;
-  set_visible_row: null;
+  set_looking: null;
 };
 export type CommandName = keyof CommandResults;
 
@@ -158,8 +158,8 @@ export type CommandArgs = {
   /** Kills the attach client; the herdr pane keeps running. */
   term_close: { id: number };
   show_main_open_row: { machineId: string; address: string };
-  /** The terminal tab the main window is showing (`${machineId}::${address}`), or `null`; Rust skips notifications for it. */
-  set_visible_row: { key: string | null };
+  /** The rows drawn right now (`${machineId}::${address}`; none while the window is away): Rust skips their notifications and writes `herdr.seen` for them. */
+  set_looking: { keys: string[] };
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([

@@ -50,6 +50,10 @@ struct Script {
     /// The connections the fake core made, so a test can talk to one or end it.
     cores: Mutex<Vec<Option<Core>>>,
     events_core: Mutex<Option<usize>>,
+    /// The params of every `terminal.label` the app made.
+    labels: Mutex<Vec<Value>>,
+    /// `terminal.label` answers with an error (after recording the request).
+    label_fails: AtomicBool,
 }
 
 fn nth(list: &Mutex<Vec<Value>>, n: usize) -> Value {
@@ -101,6 +105,14 @@ impl Connector for TestConnector {
                         return (0, Reply::Silent);
                     }
                     (delay, Reply::Result(nth(&s.machine_list, n)))
+                }
+                Some("terminal.label") => {
+                    lock(&s.labels).push(req["params"].clone());
+                    if s.label_fails.load(Ordering::SeqCst) {
+                        let error = json!({"code": "internal", "message": "nope"});
+                        return (0, Reply::Error(error));
+                    }
+                    (0, Reply::Result(json!({"ok": true})))
                 }
                 _ => (0, Reply::Result(json!({"ok": true}))),
             });
@@ -200,6 +212,47 @@ impl Harness {
     fn drop_events(&self) {
         let index = lock(&self.script.events_core).expect("nothing subscribed");
         lock(&self.script.cores)[index] = None;
+    }
+
+    /// The `herdr.seen` values the app wrote, as `(terminal, value)`, in order.
+    fn seen_writes(&self) -> Vec<(String, String)> {
+        lock(&self.script.labels)
+            .iter()
+            .map(|p| {
+                (
+                    p["terminal"].as_str().unwrap().to_owned(),
+                    p["labels"]["herdr.seen"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect()
+    }
+
+    /// The `herdr.seen` writes for one terminal.
+    fn seen_for(&self, address: &str) -> Vec<(String, String)> {
+        self.seen_writes()
+            .into_iter()
+            .filter(|w| w.0 == address)
+            .collect()
+    }
+
+    /// The person looks at exactly these terminals of Local (none: nothing is on screen).
+    fn look(&self, addresses: &[&str]) {
+        self.sync().set_looking(
+            addresses
+                .iter()
+                .map(|a| ("local".to_owned(), (*a).to_owned())),
+        );
+    }
+
+    /// A turn ends: the status first, then the `turn` event, as the core sends them.
+    fn turn_ends(&self, seq: u64, terminal: &str, turn: u64) {
+        self.status(seq, terminal, "done");
+        self.event(
+            seq + 1,
+            "turn",
+            terminal,
+            json!({"state": "done", "turn": turn}),
+        );
     }
 
     fn emit_count(&self) -> usize {
@@ -1198,6 +1251,163 @@ async fn workers_and_turn_ends_notify_as_the_spec_says() {
     );
 }
 
+// ---- shared seen (spec §8.1) ----
+
+fn write(address: &str, turn: u64) -> (String, String) {
+    (address.to_owned(), turn.to_string())
+}
+
+#[tokio::test(start_paused = true)]
+async fn writes_seen_once_per_turn_while_looking() {
+    // t2 is codex at turn 1 with `herdr.seen=1`: seen, so nothing to write yet.
+    let h = Harness::new().up().await;
+    h.look(&["t2"]);
+    settle().await;
+    assert!(h.seen_writes().is_empty());
+
+    // A turn ends while it is on screen: one write, the turn as a string.
+    h.turn_ends(30, "t2", 2);
+    settle().await;
+    assert_eq!(h.seen_writes(), [write("t2", 2)]);
+
+    // Still on screen at the same turn (the label has not come back, and the set changes
+    // around it): no second write.
+    h.look(&["t2", "t1"]);
+    h.look(&["t2"]);
+    h.status(32, "t2", "idle");
+    settle().await;
+    assert_eq!(h.seen_writes().iter().filter(|w| w.0 == "t2").count(), 1);
+
+    // The next turn writes again.
+    h.turn_ends(40, "t2", 3);
+    settle().await;
+    let t2: Vec<_> = h
+        .seen_writes()
+        .into_iter()
+        .filter(|w| w.0 == "t2")
+        .collect();
+    assert_eq!(t2, [write("t2", 2), write("t2", 3)]);
+
+    // The app's own record moves with the label, and the write was quiet (Ruling C79).
+    assert_eq!(lock(&h.activity).peek("local", "t2"), Some(3));
+    let log = h.client.command_log();
+    let labels: Vec<_> = log
+        .iter()
+        .filter(|e| e.method == "terminal.label")
+        .collect();
+    // Two for t2, and t1 (no label yet) joined when it came on screen.
+    assert_eq!(labels.len(), 3);
+    assert!(labels.iter().all(|e| e.quiet));
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_write_when_window_unfocused() {
+    let h = Harness::new().up().await;
+    // The window is away: nothing is looked at, whatever the turns do.
+    h.look(&[]);
+    h.turn_ends(30, "t2", 2);
+    settle().await;
+    assert!(h.seen_writes().is_empty());
+    // A terminal that is not the one on screen is not written either.
+    h.look(&["t6"]);
+    settle().await;
+    h.seen_writes();
+    h.turn_ends(40, "t2", 3);
+    settle().await;
+    assert!(h.seen_writes().iter().all(|w| w.0 != "t2"));
+    // Away again, then a turn ends on the terminal that was on screen: no write.
+    let before = h.seen_writes().len();
+    h.look(&[]);
+    h.turn_ends(50, "t6", 1);
+    settle().await;
+    assert_eq!(h.seen_writes().len(), before);
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_write_when_label_at_turn() {
+    let h = Harness::new().up().await;
+    // t2: turn 1, `herdr.seen=1`.
+    h.look(&["t2"]);
+    settle().await;
+    h.look(&["t2", "t1"]);
+    settle().await;
+    assert!(h.seen_writes().iter().all(|w| w.0 != "t2"));
+    // A label higher than the turn (another client got ahead) is not lowered either.
+    h.event(30, "labels", "t2", json!({"labels": {"herdr.seen": "5"}}));
+    h.turn_ends(31, "t2", 2);
+    settle().await;
+    assert!(h.seen_writes().iter().all(|w| w.0 != "t2"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn writes_when_label_missing() {
+    // t6 is idle at turn 0 and has no `herdr.seen` label: it joins the shared state.
+    let h = Harness::new().up().await;
+    h.look(&["t6"]);
+    settle().await;
+    assert_eq!(h.seen_writes(), [write("t6", 0)]);
+    assert_eq!(
+        lock(&h.script.labels)[0]["labels"],
+        json!({"herdr.seen": "0"})
+    );
+    // Written, so the same turn is not written again.
+    h.look(&[]);
+    h.look(&["t6"]);
+    settle().await;
+    assert_eq!(h.seen_writes().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn does_not_overrule_mark_unread_until_next_turn() {
+    let h = Harness::new().up().await;
+    h.look(&["t2"]);
+    h.turn_ends(30, "t2", 2);
+    settle().await;
+    assert_eq!(h.seen_for("t2"), [write("t2", 2)]);
+
+    // Mark as unread (here or on another client): the label goes back a turn.
+    h.event(
+        32,
+        "labels",
+        "t2",
+        json!({"labels": {"herdr.seen": "1", "herdr-ui-qa": "1"}}),
+    );
+    settle().await;
+    assert_eq!(
+        terminal(&h.state(), "local", "t2").status,
+        DisplayStatus::Done
+    );
+    // The row stays on screen, the set changes, a status moves: still unread.
+    h.look(&["t2", "t1"]);
+    h.status(33, "t2", "idle");
+    h.look(&["t2"]);
+    settle().await;
+    assert_eq!(h.seen_for("t2"), [write("t2", 2)]);
+
+    // The next turn ends in front of the person: seen again.
+    h.turn_ends(40, "t2", 3);
+    settle().await;
+    assert_eq!(h.seen_for("t2"), [write("t2", 2), write("t2", 3)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_write_is_tried_again_at_the_next_trigger() {
+    let h = Harness::new().up().await;
+    h.script.label_fails.store(true, Ordering::SeqCst);
+    h.look(&["t6"]);
+    settle().await;
+    assert_eq!(h.seen_writes().len(), 1);
+    // The core is back: the next trigger at the same turn writes it.
+    h.script.label_fails.store(false, Ordering::SeqCst);
+    h.look(&["t6", "t1"]);
+    settle().await;
+    assert_eq!(h.seen_writes().iter().filter(|w| w.0 == "t6").count(), 2);
+    // Written: no more.
+    h.look(&["t6"]);
+    settle().await;
+    assert_eq!(h.seen_writes().iter().filter(|w| w.0 == "t6").count(), 2);
+}
+
 // ---- the core's answer to hello ----
 
 #[tokio::test(start_paused = true)]
@@ -1444,4 +1654,15 @@ async fn retry_core_before_startup_has_located_does_nothing() {
         crate::commands::retry_core_with(&shared, &locator, &client, &SyncCell::default()).await;
     assert_eq!(status, crate::settings::CoreStatus::default());
     assert!(!locator.is_located());
+}
+
+#[test]
+fn row_keys_split_on_the_first_double_colon() {
+    assert_eq!(
+        parse_row_key("local::t7"),
+        Some(("local".to_owned(), "t7".to_owned()))
+    );
+    assert_eq!(parse_row_key("t7"), None);
+    assert_eq!(parse_row_key("::t7"), None);
+    assert_eq!(parse_row_key("local::"), None);
 }

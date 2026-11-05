@@ -151,6 +151,8 @@ pub fn hide_main<R: Runtime>(app: &AppHandle<R>) {
         let _ = window.hide();
     }
     report_visible(app.try_state::<SyncCell>().as_deref(), false);
+    // A hidden window looks at nothing.
+    crate::notify::apply_looking(app, Some(false));
 }
 
 /// What the show/hide shortcut does: hide the window only when the user is looking at it. A
