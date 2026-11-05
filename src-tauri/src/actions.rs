@@ -468,19 +468,29 @@ impl Actions {
 
 // ---- Row actions on herdr-core (v0.9) ----
 
+/// Why a row action found no cached terminal.
+const NOT_LISTED: &str = "That terminal is no longer listed.";
+
 /// The label `herdr-app` and this app share: the last turn the person has seen. A string.
 const SEEN_LABEL: &str = "herdr.seen";
 /// The label for a pinned agent: `"1"` pins, `""` unpins.
 const PINNED_LABEL: &str = "herdr.pinned";
 
-/// A core call failed. A timeout on a mutation may have been applied, so it is `MaybeApplied`;
-/// the exception is the pool connection's own `hello`, which times out before the request was
-/// ever sent. `terminal` is the full address the call was about.
+/// A core call failed. A timeout on a mutation, or a connection that dropped during it, may
+/// have been applied (the request may have reached the core), so it is `MaybeApplied`; the
+/// exception is the pool connection's own `hello`, which times out before the request was ever
+/// sent. `terminal` is the full address the call was about.
 fn core_failure(error: CoreError, method: &str, terminal: &str) -> ActionError {
     match error {
         CoreError::Timeout { method: timed } if timed != "hello" => ActionError::MaybeApplied {
             message: format!(
                 "herdr-core did not answer in time. `{method}` on {terminal} may have been applied; refreshing."
+            ),
+            argv: vec![method.to_owned(), terminal.to_owned()],
+        },
+        CoreError::Lost => ActionError::MaybeApplied {
+            message: format!(
+                "The connection to herdr-core dropped during `{method}` on {terminal}. It may have been applied; refreshing."
             ),
             argv: vec![method.to_owned(), terminal.to_owned()],
         },
@@ -560,7 +570,7 @@ impl<'a> RowActions<'a> {
     fn cached(&self, machine_id: &str, address: &str) -> Result<TerminalView, ActionError> {
         self.sync
             .terminal(machine_id, address)
-            .ok_or_else(|| ActionError::invalid("That terminal is no longer listed."))
+            .ok_or_else(|| ActionError::invalid(NOT_LISTED))
     }
 
     /// One mutating call. A timeout asks the sync to look again.
@@ -690,8 +700,9 @@ impl<'a> RowActions<'a> {
         .map(drop)
     }
 
-    /// Removes every ended terminal of one workbox, and says how many went. One already gone
-    /// (`not_found`) is skipped; any other failure stops the sweep.
+    /// Removes every ended terminal of one workbox, and says how many went. A terminal already
+    /// gone (`not_found`, or no longer in the cache) is skipped. Any other failure does not
+    /// stop the sweep; if one happened, the error says how many were removed.
     pub async fn clear_ended(&self, machine_id: &str) -> Result<u32, ActionError> {
         let state = self
             .sync
@@ -708,17 +719,30 @@ impl<'a> RowActions<'a> {
             .filter(|t| t.status == DisplayStatus::Ended)
             .map(|t| t.address.clone())
             .collect();
-        let mut removed = 0;
+        let mut removed = 0u32;
+        let mut failed: Vec<ActionError> = Vec::new();
         for address in ended {
             match self.remove_terminal(machine_id, &address).await {
                 Ok(()) => removed += 1,
                 Err(ActionError::Core {
                     error: CoreError::Rpc { code, .. },
                 }) if code == "not_found" => {}
-                Err(error) => return Err(error),
+                Err(ActionError::Invalid { message }) if message == NOT_LISTED => {}
+                Err(error) => failed.push(error),
             }
         }
-        Ok(removed)
+        let Some(first) = failed.first() else {
+            return Ok(removed);
+        };
+        self.sync.refresh_machines();
+        Err(ActionError::MaybeApplied {
+            message: format!(
+                "Removed {removed} ended terminal{}, but {} could not be removed: {first}",
+                if removed == 1 { "" } else { "s" },
+                failed.len()
+            ),
+            argv: vec!["clear_ended".to_owned(), machine_id.to_owned()],
+        })
     }
 
     /// Keeps a live terminal after its shell is lost, or stops keeping it.
@@ -746,13 +770,17 @@ impl<'a> RowActions<'a> {
     pub async fn mark_seen(&self, machine_id: &str, address: &str) -> Result<(), ActionError> {
         let full = self.full(machine_id, address)?;
         let view = self.cached(machine_id, address)?;
-        if view.seen_turn.is_none_or(|seen| seen < view.turn) {
+        let written = if view.seen_turn.is_none_or(|seen| seen < view.turn) {
             self.label(machine_id, &full, SEEN_LABEL, view.turn.to_string())
-                .await?;
-        }
+                .await
+        } else {
+            Ok(())
+        };
+        // The app's own record is the fallback when the shared label is missing, so it moves
+        // even when the write failed; the write's error is still the answer.
         crate::lock(self.activity).mark_seen(machine_id, address, view.turn);
         self.sync.refresh_view();
-        Ok(())
+        written
     }
 
     /// The one write that lowers the shared label: the seen turn goes back by one.
@@ -997,12 +1025,15 @@ mod tests {
                 error: timeout("hello")
             }
         );
-        assert_eq!(
+        // The request may have reached the core before the connection dropped.
+        assert!(matches!(
             core_failure(CoreError::Lost, "terminal.kill", "t7"),
-            ActionError::Core {
-                error: CoreError::Lost
-            }
-        );
+            ActionError::MaybeApplied { .. }
+        ));
+        assert!(matches!(
+            core_failure(CoreError::NotFound, "terminal.kill", "t7"),
+            ActionError::Core { .. }
+        ));
     }
 
     #[test]

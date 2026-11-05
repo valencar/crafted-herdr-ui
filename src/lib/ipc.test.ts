@@ -80,7 +80,7 @@ describe("invokeTyped types", () => {
   it("requires each command's arguments", () => {
     invoke.mockResolvedValue(null);
     // These only need to compile; the calls are never awaited for a result.
-    // @ts-expect-error close_pane needs machineId and paneId
+    // @ts-expect-error close_terminal needs machineId and address
     void invokeTyped("close_terminal");
     // @ts-expect-error argument keys are camelCase
     void invokeTyped("close_terminal", { machine_id: "a", address: "b" });

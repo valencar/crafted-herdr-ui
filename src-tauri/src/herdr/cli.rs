@@ -16,7 +16,6 @@ use crate::{LOCAL, lock, now_ms};
 pub const T_DEFAULT: Duration = Duration::from_secs(10);
 pub const T_CREATE: Duration = Duration::from_secs(30);
 pub const T_AGENT_START: Duration = Duration::from_secs(45);
-pub const T_PROMPT: Duration = Duration::from_secs(30);
 
 const MAX_CONCURRENT_PER_MACHINE: usize = 4;
 /// The single door to the `herdr` binary.

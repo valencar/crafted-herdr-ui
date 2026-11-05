@@ -467,11 +467,20 @@ struct CoreHarness {
 
 impl CoreHarness {
     async fn start(dir: TempDir) -> Self {
+        Self::start_seen(dir, &[]).await
+    }
+
+    /// Like `start`, with the app's own seen record already holding `seen` (address, turn), so
+    /// a terminal's first sight doesn't set it to the current turn.
+    async fn start_seen(dir: TempDir, seen: &[(&str, u64)]) -> Self {
         let core = Arc::new(CoreClient::new(Arc::new(ProcessConnector {
             bin: common::fake_hc_bin(),
             env: common::fake_hc_env(dir.path()),
         })));
         let activity = Arc::new(Mutex::new(ActivityV2::new(None)));
+        for (address, turn) in seen {
+            activity.lock().unwrap().mark_seen("local", address, *turn);
+        }
         let sync = CoreSync::start(
             core.clone(),
             SharedSettings::new(Settings::default()),
@@ -678,11 +687,44 @@ async fn mark_seen_only_raises_and_writes_string() {
     assert!(h.requests("terminal.label").is_empty());
     assert_eq!(h.activity.lock().unwrap().peek("local", "t2"), Some(1));
 
-    // A terminal that isn't listed is refused.
+    // A terminal that isn't listed is refused, and the core hears nothing.
     assert_eq!(
         invalid_message(h.rows().mark_seen("local", "t99").await),
         "That terminal is no longer listed."
     );
+    assert!(h.requests("terminal.label").is_empty());
+    assert!(!h.all_requests().contains("t99"), "{}", h.all_requests());
+
+    // Only raises: a shared label already past the turn is left alone.
+    let h = CoreHarness::start(fake_core(|snap| {
+        snap["terminals"][1]["turn"] = json!(3);
+        snap["terminals"][1]["labels"]["herdr.seen"] = json!("5");
+    }))
+    .await;
+    h.rows().mark_seen("local", "t2").await.unwrap();
+    assert!(h.requests("terminal.label").is_empty());
+    assert_eq!(h.activity.lock().unwrap().peek("local", "t2"), Some(3));
+}
+
+#[tokio::test]
+async fn mark_seen_records_even_when_the_label_write_fails() {
+    // t2 is Done: turn 3, seen label "1". The core refuses the write.
+    let h = CoreHarness::start_seen(
+        fake_core(|snap| {
+            snap["terminals"][1]["turn"] = json!(3);
+        }),
+        &[("t2", 1)],
+    )
+    .await;
+    assert_eq!(h.activity.lock().unwrap().peek("local", "t2"), Some(1));
+    h.put("terminal.label.json", &hc_fixture("errors/not_found.json"));
+
+    let err = h.rows().mark_seen("local", "t2").await.unwrap_err();
+
+    assert!(matches!(err, ActionError::Core { .. }), "{err:?}");
+    assert_eq!(h.requests("terminal.label").len(), 1);
+    // The app's own record is the fallback, so it moved anyway.
+    assert_eq!(h.activity.lock().unwrap().peek("local", "t2"), Some(3));
 }
 
 #[tokio::test]
@@ -796,4 +838,80 @@ async fn close_keep_and_interrupt_call_the_core() {
         h.rows().close_terminal("local", "t8").await,
         Err(ActionError::Core { .. })
     ));
+}
+
+#[tokio::test]
+async fn clear_ended_keeps_going_past_a_failure_and_says_how_many_went() {
+    // Three ended terminals; the core refuses the second remove.
+    let h = CoreHarness::start(fake_core(|snap| {
+        for address in ["t9", "t10"] {
+            let mut more = snap["terminals"][7].clone();
+            more["address"] = json!(address);
+            snap["terminals"].as_array_mut().unwrap().push(more);
+        }
+    }))
+    .await;
+    h.put("terminal.rm@2.json", &hc_fixture("errors/unavailable.json"));
+
+    let err = h.rows().clear_ended("local").await.unwrap_err();
+
+    let mut rms: Vec<_> = h
+        .requests("terminal.rm")
+        .iter()
+        .map(|r| r["params"]["terminal"].as_str().unwrap().to_owned())
+        .collect();
+    // All three were tried, whatever order the list came in.
+    rms.sort();
+    assert_eq!(
+        rms,
+        ["t10", "t8", "t9"],
+        "the sweep went on after the failure"
+    );
+    match err {
+        ActionError::MaybeApplied { message, .. } => {
+            assert!(
+                message.starts_with("Removed 2 ended terminals"),
+                "{message}"
+            );
+            assert!(message.contains("1 could not be removed"), "{message}");
+        }
+        other => panic!("expected MaybeApplied, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_connection_lost_mid_kill_may_have_been_applied() {
+    let h = CoreHarness::new().await;
+    // The core logs the request, then dies without answering.
+    h.put("terminal.kill.json", r#"{"exit":true}"#);
+
+    let err = h.rows().close_terminal("local", "t1").await.unwrap_err();
+
+    assert!(matches!(err, ActionError::MaybeApplied { .. }), "{err:?}");
+    assert_eq!(h.requests("terminal.kill").len(), 1, "never retried");
+}
+
+#[tokio::test]
+async fn send_and_interrupt_get_connections_of_their_own() {
+    let h = CoreHarness::new().await;
+    let connects = || {
+        h.all_requests()
+            .lines()
+            .filter(|l| l.starts_with("argv ") && l.contains("connect"))
+            .count()
+    };
+
+    // Two pooled calls: the second reuses the first's connection.
+    h.rows().close_terminal("local", "t1").await.unwrap();
+    let pooled = connects();
+    h.rows().set_keep("local", "t1", true).await.unwrap();
+    assert_eq!(connects(), pooled, "a pooled call opens no process");
+
+    h.rows()
+        .reply_to_agent("local", "t6", "go on")
+        .await
+        .unwrap();
+    assert_eq!(connects(), pooled + 1, "terminal.send is a one-shot");
+    h.rows().interrupt_terminal("local", "t1").await.unwrap();
+    assert_eq!(connects(), pooled + 2, "terminal.interrupt is a one-shot");
 }
