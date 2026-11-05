@@ -1166,6 +1166,82 @@ it("onboarding_when_the_core_is_incompatible", async () => {
   expect(await screen.findByRole("searchbox")).toBeInTheDocument();
 });
 
+it("onboarding_stays_up_through_a_retry_and_keeps_its_note", async () => {
+  useAppStore.setState({ view: { kind: "all" } });
+  const missing = appState([], { path: null, version: null });
+  ipc.getState.mockResolvedValue(missing);
+  ipc.invokeTyped.mockImplementation(async (name: string) =>
+    name === "retry_core" || name === "core_status"
+      ? { path: null, version: null, saved_missing: false, legacy_herdr: null }
+      : null,
+  );
+  const user = userEvent.setup();
+  render(<App />);
+  const heading = () =>
+    screen.queryByRole("heading", {
+      name: "Crafted Herdr needs herdr-core (hc).",
+    });
+  await screen.findByRole("heading", {
+    name: "Crafted Herdr needs herdr-core (hc).",
+  });
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "No herdr-core found yet.",
+  );
+
+  // Rust answers a retry with `connecting` at once and `notFound` about 100 ms later. The
+  // screen must not go away and come back: that would lose the note.
+  const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+  act(() => push({ ...missing, core_state: { kind: "connecting" } }));
+  expect(heading()).toBeInTheDocument();
+  expect(screen.queryByText("Connecting to herdr-core…")).toBeNull();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "No herdr-core found yet.",
+  );
+  act(() => push(missing));
+  expect(heading()).toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "No herdr-core found yet.",
+  );
+
+  // Once the core is usable the gate lets go.
+  act(() => push(state));
+  expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+  expect(heading()).toBeNull();
+});
+
+it("an_incompatible_core_keeps_its_own_screen_through_a_connecting_blip", async () => {
+  useAppStore.setState({ view: { kind: "all" } });
+  const old = {
+    ...appState([]),
+    core_state: {
+      kind: "incompatible" as const,
+      reason: "no such method",
+      newer: false,
+    },
+  };
+  ipc.getState.mockResolvedValue(old);
+  render(<App />);
+  await screen.findByRole("heading", {
+    name: "This herdr-core is too old for Crafted Herdr.",
+  });
+  const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+  act(() => push({ ...old, core_state: { kind: "connecting" } }));
+  expect(
+    screen.getByRole("heading", {
+      name: "This herdr-core is too old for Crafted Herdr.",
+    }),
+  ).toBeInTheDocument();
+  // A stopped core is not onboarding's to explain: the shell and the Local card are.
+  act(() =>
+    push({
+      ...state,
+      core_state: { kind: "stopped", error: "Could not start herdr-core." },
+    }),
+  );
+  expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+});
+
 it("shows_nothing_but_the_connecting_state_before_the_first_state", () => {
   render(<App />);
   expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();

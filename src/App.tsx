@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { CoreState } from "./lib/bindings/CoreState";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { AppSidebar } from "./components/AppSidebar";
 import { ClosePaneHost } from "./components/ClosePaneHost";
@@ -31,6 +32,24 @@ import { useAppStore } from "./store/appStore";
 import { HOME, useTerminalStore } from "./terminal/terminalStore";
 import { Workspace } from "./terminal/Workspace";
 
+/**
+ * The `notFound` or `incompatible` core state onboarding is for, held through the `connecting`
+ * that Try again (and a chosen binary) starts: Rust answers a reconnect with `connecting` at
+ * once and the verdict about 100 ms later. Without the hold the screen would give way to the
+ * shell and come back with its note and error gone. Only `ready` or `stopped` lets go; before
+ * the first state there is nothing. Kept here, not in Onboarding, which would be unmounted.
+ */
+function useHeldMissingCore(): CoreState | null {
+  const core = useAppStore((s) => s.state?.core_state);
+  const [held, setHeld] = useState<CoreState | null>(null);
+  let next = held;
+  if (core?.kind === "notFound" || core?.kind === "incompatible") next = core;
+  else if (core?.kind === "ready" || core?.kind === "stopped") next = null;
+  // Adjusting state while rendering: React re-renders at once, without a frame in between.
+  if (next !== held) setHeld(next);
+  return next;
+}
+
 function App() {
   const view = useAppStore((s) => s.view);
   const sheet = useAppStore((s) => s.sheet);
@@ -49,13 +68,8 @@ function App() {
   const compact = useAppStore((s) => s.settings?.row_density === "compact");
   const { current: terminal, installed } = useTerminals();
   // herdr-core was not found, or the one found can't be used (too old, or newer than this
-  // app); before the first state there is nothing to say yet. The state names these only
-  // after the core has been located, so `core_path` alone would flash this.
-  const herdrMissing = useAppStore(
-    (s) =>
-      s.state?.core_state.kind === "notFound" ||
-      s.state?.core_state.kind === "incompatible",
-  );
+  // app); before the first state there is nothing to say yet.
+  const missingCore = useHeldMissingCore();
 
   useStateSync();
   useSettingsSync();
@@ -135,10 +149,10 @@ function App() {
     };
   }, []);
 
-  if (herdrMissing) {
+  if (missingCore) {
     return (
       <>
-        <Onboarding />
+        <Onboarding core={missingCore} />
         <StoreToast />
       </>
     );

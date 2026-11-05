@@ -1,5 +1,6 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
+import type { CoreState } from "../lib/bindings/CoreState";
 import { actionErrorMessage } from "../lib/format";
 import { copyText, invokeTyped, toActionError } from "../lib/ipc";
 import {
@@ -42,8 +43,10 @@ function CopyLine({
  * own. The app never installs or updates anything: the install line and `hc update` are copied,
  * never run, and the install page opens in the default browser.
  */
-export function Onboarding() {
-  const core = useAppStore((s) => s.state?.core_state);
+export function Onboarding({ core: held }: { core?: CoreState } = {}) {
+  // `App` holds the verdict through a reconnect's `connecting`; alone, the store's is used.
+  const fromStore = useAppStore((s) => s.state?.core_state);
+  const core = held ?? fromStore;
   const showToast = useAppStore((s) => s.showToast);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

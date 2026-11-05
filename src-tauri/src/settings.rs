@@ -422,15 +422,32 @@ pub struct CoreStatus {
 
 /// Finds the core again when the saved path changes, and points the `CoreClient` at it. It keeps
 /// what only startup can learn (the login environment) and the last result.
-#[derive(Default)]
 pub struct CoreLocator {
     login: Mutex<LoginEnv>,
     status: Mutex<Option<CoreStatus>>,
+    /// The system directories searched after `~/.local/bin`. Tests give their own.
+    system_dirs: Vec<PathBuf>,
+}
+
+impl Default for CoreLocator {
+    fn default() -> Self {
+        Self::with_system_dirs(locate::system_dirs())
+    }
 }
 
 impl CoreLocator {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A locator whose search of the system directories (`/opt/homebrew/bin` and the like) uses
+    /// `dirs`, so a test never reaches a binary installed on the machine it runs on.
+    pub fn with_system_dirs(dirs: Vec<PathBuf>) -> Self {
+        CoreLocator {
+            login: Mutex::default(),
+            status: Mutex::default(),
+            system_dirs: dirs,
+        }
     }
 
     /// Sets the login environment, once startup has captured it.
@@ -457,7 +474,7 @@ impl CoreLocator {
     /// `NotFound`).
     pub async fn locate(&self, saved: Option<&str>, core: &CoreClient) -> CoreStatus {
         let login = self.login();
-        let located = locate::locate(&login, saved.map(Path::new)).await;
+        let located = locate::locate(&login, saved.map(Path::new), &self.system_dirs).await;
         let (bin, path, version) = match located.core {
             Some((bin, version)) => {
                 let path = bin.display().to_string();

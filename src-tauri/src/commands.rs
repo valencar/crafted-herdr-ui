@@ -25,7 +25,7 @@ use crate::settings::{
 };
 use crate::ssh_config;
 use crate::state::{AppState, Health};
-use crate::sync::{CoreSync, SyncCell};
+use crate::sync::SyncCell;
 use crate::terminal::open::{LaunchLog, launch_in_terminal};
 use crate::terminal::session::{TermEvent, TermId, TermSessions, TermSink};
 use crate::terminal::{
@@ -830,15 +830,16 @@ pub async fn retry_core_with(
     shared: &SharedSettings,
     locator: &CoreLocator,
     core: &CoreClient,
-    sync: Option<&CoreSync>,
+    sync: &SyncCell,
 ) -> CoreStatus {
-    // Not while a settings change is resolving the path, or startup is.
+    // Not while a settings change is resolving the path, or startup is. The cell is read under
+    // the guard, as `set_settings` does: startup fills it before it lets go.
     let _update = shared.begin_update().await;
     if !locator.is_located() {
         return locator.status();
     }
     let saved = shared.get().core_path;
-    locator.relocate(saved.as_deref(), core, sync).await
+    locator.relocate(saved.as_deref(), core, sync.get()).await
 }
 
 #[tauri::command]
@@ -848,7 +849,7 @@ pub async fn retry_core(
     core: State<'_, Arc<CoreClient>>,
     sync: State<'_, SyncCell>,
 ) -> Result<CoreStatus, ActionError> {
-    Ok(retry_core_with(&shared, &locator, &core, sync.get()).await)
+    Ok(retry_core_with(&shared, &locator, &core, &sync).await)
 }
 
 /// Which herdr-core binary is in use, its version, and whether the saved path was usable.

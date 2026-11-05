@@ -112,7 +112,7 @@ export function MachineNotices({
   const showLocalDown = stopped || retrying || unanswered;
   // Once the core is stopped Local's own error is the generic sentence; the real cause is the
   // core state's, so both are shown.
-  const downError = stopped ? "herdr-core isn't running." : localError;
+  const downError = stopped ? "herdr-core isn’t running." : localError;
   const cause = stopped ? core.error.trim() : "";
   const attention = machines.filter(
     (m) => !m.is_local && m.health.kind === "attention",

@@ -328,9 +328,7 @@ describe("Onboarding", () => {
       inState({ kind: "notFound" });
       const user = userEvent.setup();
       render(<Onboarding />);
-      invoke.mockImplementation(async (name: string) =>
-        name === "retry_core" ? NO_CORE : NO_CORE,
-      );
+      invoke.mockImplementation(async () => NO_CORE);
       await user.click(screen.getByRole("button", { name: "Try again" }));
       expect(await screen.findByRole("status")).toHaveTextContent(
         "No herdr-core found yet.",

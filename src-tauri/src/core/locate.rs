@@ -45,18 +45,33 @@ pub fn parse_core_version(stdout: &str) -> Option<String> {
     (groups.len() == 3 && groups.iter().all(digits)).then(|| version.to_owned())
 }
 
+/// The system directories the search and the legacy search look in, after `~/.local/bin`.
+/// Tests pass their own, so a machine's real install can't change a result.
+pub fn system_dirs() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]
+}
+
 /// Where to look for the core, best first: the saved path, the login shell's hits, then
 /// `herdr-core` and `hc` in each usual directory. A repeat is dropped. Paths are kept as
 /// given; nothing is canonicalized.
-pub fn candidates(saved: Option<&Path>, login_hits: &[PathBuf], home: &Path) -> Vec<PathBuf> {
-    let dirs = [
-        home.join(".local/bin"),
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-        home.join(".local/share/mise/shims"),
-        home.join(".nix-profile/bin"),
-        home.join(".cargo/bin"),
-    ];
+pub fn candidates(
+    saved: Option<&Path>,
+    login_hits: &[PathBuf],
+    home: &Path,
+    system: &[PathBuf],
+) -> Vec<PathBuf> {
+    let dirs: Vec<PathBuf> = [home.join(".local/bin")]
+        .into_iter()
+        .chain(system.iter().cloned())
+        .chain([
+            home.join(".local/share/mise/shims"),
+            home.join(".nix-profile/bin"),
+            home.join(".cargo/bin"),
+        ])
+        .collect();
     let mut all: Vec<PathBuf> = saved.map(Path::to_path_buf).into_iter().collect();
     all.extend(login_hits.iter().cloned());
     for dir in &dirs {
@@ -101,14 +116,11 @@ async fn login_hits(env: &LoginEnv) -> Vec<PathBuf> {
 }
 
 /// The legacy `herdr` candidates, in the old order: the login shell's hit, then the usual places.
-fn legacy_candidates(login_hit: Option<PathBuf>, home: &Path) -> Vec<PathBuf> {
+fn legacy_candidates(login_hit: Option<PathBuf>, home: &Path, system: &[PathBuf]) -> Vec<PathBuf> {
     login_hit
         .into_iter()
-        .chain([
-            home.join(".local/bin/herdr"),
-            PathBuf::from("/opt/homebrew/bin/herdr"),
-            PathBuf::from("/usr/local/bin/herdr"),
-        ])
+        .chain([home.join(".local/bin/herdr")])
+        .chain(system.iter().map(|dir| dir.join("herdr")))
         .collect()
 }
 
@@ -126,12 +138,12 @@ async fn legacy_among(
 /// Finds a herdr 0.9 binary (automatic discovery only) and its version. `locate` uses it for good,
 /// to report a retired herdr to onboarding (spec 9.2); only the `lib.rs` call that points
 /// `HerdrCli` and the poller at the result is interim (until v0.9 Task 6c).
-pub async fn find_legacy_herdr(env: &LoginEnv) -> Option<(PathBuf, String)> {
+pub async fn find_legacy_herdr(env: &LoginEnv, system: &[PathBuf]) -> Option<(PathBuf, String)> {
     let hit = match shell_of(env) {
         Some(shell) => crate::env::login_command_v(&shell, "herdr").await,
         None => None,
     };
-    let candidates = legacy_candidates(hit, &home_of(env));
+    let candidates = legacy_candidates(hit, &home_of(env), system);
     legacy_among(
         &candidates,
         &crate::env::legacy_forwarded_env(env),
@@ -143,14 +155,16 @@ pub async fn find_legacy_herdr(env: &LoginEnv) -> Option<(PathBuf, String)> {
 /// Finds herdr-core: the saved path, then the login shell's `herdr-core` and `hc`, then the
 /// usual directories. The first candidate whose `--version` prints `hc X.Y.Z` wins. When none
 /// does, a legacy `herdr` is looked for, so onboarding can say herdr was retired.
-pub async fn locate(env: &LoginEnv, saved: Option<&Path>) -> Located {
+pub async fn locate(env: &LoginEnv, saved: Option<&Path>, system: &[PathBuf]) -> Located {
     let home = home_of(env);
     let hits = login_hits(env).await;
-    let core_candidates = candidates(saved, &hits, &home);
+    let core_candidates = candidates(saved, &hits, &home, system);
     let forwarded = crate::env::forwarded_env(env);
     let mut found = locate_with(&forwarded, saved, &core_candidates, &[], PROBE_TIMEOUT).await;
     if found.core.is_none() {
-        found.legacy_herdr = find_legacy_herdr(env).await.map(|(_, version)| version);
+        found.legacy_herdr = find_legacy_herdr(env, system)
+            .await
+            .map(|(_, version)| version);
     }
     found
 }
@@ -255,7 +269,7 @@ mod tests {
             PathBuf::from("/login/bin/herdr-core"),
             PathBuf::from("/login/bin/hc"),
         ];
-        let got = candidates(Some(&saved), &hits, home);
+        let got = candidates(Some(&saved), &hits, home, &system_dirs());
         let mut want = vec![
             PathBuf::from("/opt/mine/hc"),
             PathBuf::from("/login/bin/herdr-core"),
@@ -275,13 +289,14 @@ mod tests {
         assert_eq!(got, want);
 
         // No saved path and no login hits: only the usual directories.
-        assert_eq!(candidates(None, &[], home), want[3..]);
+        assert_eq!(candidates(None, &[], home, &system_dirs()), want[3..]);
 
         // A repeat is dropped, keeping its first place; the path is compared as given.
         let again = candidates(
             Some(Path::new("/usr/local/bin/hc")),
             &[PathBuf::from("/opt/homebrew/bin/herdr-core")],
             home,
+            &system_dirs(),
         );
         assert_eq!(again[0], Path::new("/usr/local/bin/hc"));
         assert_eq!(again[1], Path::new("/opt/homebrew/bin/herdr-core"));
@@ -404,7 +419,7 @@ mod tests {
             d.display(),
             shell.display()
         ));
-        let found = locate(&env, None).await;
+        let found = locate(&env, None, &[]).await;
         assert_eq!(found.core, Some((core, "0.1.18".to_owned())));
         assert_eq!(found.legacy_herdr, None);
     }

@@ -99,7 +99,7 @@ describe("the Local card", () => {
   it("stopped_names_the_cause_as_well_as_the_generic_line", () => {
     show(STOPPED, stoppedLocal());
     const card = screen.getByRole("region", { name: "Local isn’t answering" });
-    expect(card).toHaveTextContent("herdr-core isn't running.");
+    expect(card).toHaveTextContent("herdr-core isn’t running.");
     expect(card).toHaveTextContent("Could not start herdr-core.");
   });
 

@@ -1356,7 +1356,11 @@ async fn retry_core_finds_a_core_installed_after_startup_and_reconnects() {
         bin: std::path::PathBuf::new(),
         env: Vec::new(),
     })));
-    let locator = crate::settings::CoreLocator::new();
+    // The search of /opt/homebrew/bin and /usr/local/bin is pointed at an empty directory, so a
+    // real hc, herdr-core or herdr on this machine can't change the result (or be run).
+    let system = dir.path().join("system-bin");
+    std::fs::create_dir_all(&system).unwrap();
+    let locator = crate::settings::CoreLocator::with_system_dirs(vec![system]);
     locator.set_login(crate::env::parse_env_output(&format!(
         "HOME={}\0PATH=/usr/bin:/bin\0",
         dir.path().display()
@@ -1366,13 +1370,15 @@ async fn retry_core_finds_a_core_installed_after_startup_and_reconnects() {
     let status = locator.locate(None, &client).await;
     assert_eq!(status.path, None);
 
-    let sync = CoreSync::start(
+    let cell = SyncCell::default();
+    cell.set(CoreSync::start(
         client.clone(),
         shared.clone(),
         Arc::new(Mutex::new(ActivityV2::new(None))),
         Arc::new(|_| {}),
         Arc::new(|_| {}),
-    );
+    ));
+    let sync = cell.get().unwrap();
     sync.set_core_path(status.path);
     for _ in 0..100 {
         if sync
@@ -1386,7 +1392,7 @@ async fn retry_core_finds_a_core_installed_after_startup_and_reconnects() {
     assert_eq!(sync.state().unwrap().core_state, CoreState::NotFound);
 
     // Try again before installing finds nothing and keeps saying so.
-    let again = crate::commands::retry_core_with(&shared, &locator, &client, Some(&sync)).await;
+    let again = crate::commands::retry_core_with(&shared, &locator, &client, &cell).await;
     assert_eq!(again.path, None);
     assert!(!log.exists());
 
@@ -1403,7 +1409,7 @@ async fn retry_core_finds_a_core_installed_after_startup_and_reconnects() {
     .unwrap();
     std::fs::set_permissions(&installed, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    let found = crate::commands::retry_core_with(&shared, &locator, &client, Some(&sync)).await;
+    let found = crate::commands::retry_core_with(&shared, &locator, &client, &cell).await;
     assert_eq!(found.path, Some(installed.display().to_string()));
     assert_eq!(found.version.as_deref(), Some("0.1.18"));
     assert_eq!(locator.status(), found);
@@ -1432,9 +1438,10 @@ async fn retry_core_before_startup_has_located_does_nothing() {
         bin: std::path::PathBuf::new(),
         env: Vec::new(),
     })));
-    let locator = crate::settings::CoreLocator::new();
+    let locator = crate::settings::CoreLocator::with_system_dirs(Vec::new());
     let shared = SharedSettings::new(Settings::default());
-    let status = crate::commands::retry_core_with(&shared, &locator, &client, None).await;
+    let status =
+        crate::commands::retry_core_with(&shared, &locator, &client, &SyncCell::default()).await;
     assert_eq!(status, crate::settings::CoreStatus::default());
     assert!(!locator.is_located());
 }
