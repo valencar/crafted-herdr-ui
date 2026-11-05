@@ -650,9 +650,9 @@ esac"#
             ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
             ("HERDR_APP_HOME".to_owned(), "/home/dev/scratch".to_owned()),
         ];
-        // A variable of this very process must not reach the child (`env_clear`).
-        // SAFETY: a name nothing else reads or writes, set before the child is spawned.
-        unsafe { std::env::set_var("HERDR_UI_TEST_SENTINEL_T19", "leaked") };
+        // A variable of this very process must not reach the child (`env_clear`): cargo sets
+        // `CARGO_PKG_NAME` for every test process, so nothing needs to be set here.
+        assert!(std::env::var_os("CARGO_PKG_NAME").is_some());
         open_in_herdr(&app, &env, &core, "buildbox", "buildbox/t7")
             .await
             .unwrap();
@@ -663,7 +663,7 @@ esac"#
         // Exactly the env it was given, nothing of the app's own.
         assert!(rest.contains("HERDR_APP_HOME=/home/dev/scratch\n"));
         assert!(!rest.contains("HC_"), "{rest}");
-        assert!(!rest.contains("HERDR_UI_TEST_SENTINEL_T19"), "{rest}");
+        assert!(!rest.contains("CARGO_PKG_NAME"), "{rest}");
 
         let log = core.command_log();
         assert_eq!(log.len(), 1);

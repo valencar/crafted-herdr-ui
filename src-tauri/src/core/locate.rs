@@ -340,8 +340,10 @@ mod tests {
         std::fs::set_permissions(&hang, std::fs::Permissions::from_mode(0o755)).unwrap();
         let core = script(dir.path(), "core", HC, 0);
         let started = std::time::Instant::now();
-        let found = locate_with(&[], None, &[hang, core.clone()], Duration::from_millis(300)).await;
-        assert!(started.elapsed() < Duration::from_secs(5));
+        // The limit applies to each probe, the good one too: 2 s leaves a loaded CI machine room
+        // to start a shell, while the hang (30 s) is still cut off well before its end.
+        let found = locate_with(&[], None, &[hang, core.clone()], Duration::from_secs(2)).await;
+        assert!(started.elapsed() < Duration::from_secs(20));
         assert_eq!(found.core.map(|(p, _)| p), Some(core));
     }
 
