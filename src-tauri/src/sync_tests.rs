@@ -1090,6 +1090,59 @@ async fn a_server_stop_ending_with_the_stream_open_20_s_later_is_no_stop() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_refused_layout_read_keeps_the_layout_and_a_false_alarm_reads_it_again() {
+    let h = Harness::new().doc("", doc_of(DOC_HERDR_APP), 1).up().await;
+    assert!(layout_of(&h.state(), "local").is_some());
+    // Two slow seen writes hold both quiet slots (t6 and t7 have no `herdr.seen` yet).
+    h.script.label_delay_ms.store(1000, Ordering::SeqCst);
+    h.look(&["t6", "t7"]);
+    settle().await;
+    // The document moved: its read waits for a slot.
+    let gets = h.doc_gets().len();
+    h.doc_event(29, "herdr-app", "");
+    settle().await;
+    assert_eq!(h.doc_gets().len(), gets);
+    // A `server_stop` ending closes the gate (here an unkeep, so a false alarm). The writes end;
+    // the queued read is refused. That is no answer: the layout stays.
+    unkeep_ending(&h, 30);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(h.doc_gets().len(), gets);
+    assert!(layout_of(&h.state(), "local").is_some());
+    // The core shows it is alive: the layouts are read again, as after a subscribe.
+    h.event(
+        31,
+        "created",
+        "t9",
+        json!({"address": "t9", "state": "live", "reported": false, "turn": 0,
+            "argv": ["sh"], "cwd": "/home/dev/infra"}),
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(h.doc_gets().len() > gets);
+    assert!(layout_of(&h.state(), "local").is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_false_alarm_writes_the_seen_marks_it_held() {
+    let h = Harness::new().up().await;
+    unkeep_ending(&h, 29);
+    settle().await;
+    // t7 comes on screen while the gate is closed: no write yet.
+    h.look(&["t7"]);
+    settle().await;
+    assert!(h.seen_for("t7").is_empty());
+    // The core turns out to be alive: what was held is written now.
+    h.event(
+        30,
+        "created",
+        "t9",
+        json!({"address": "t9", "state": "live", "reported": false, "turn": 0,
+            "argv": ["sh"], "cwd": "/home/dev/infra"}),
+    );
+    settle().await;
+    assert_eq!(h.seen_for("t7"), [write("t7", 0)]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_clients_background_gate_follows_the_link_and_the_stop() {
     let h = Harness::new();
     assert!(

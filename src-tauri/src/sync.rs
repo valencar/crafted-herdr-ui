@@ -26,7 +26,9 @@
 //! the stream ends). That lasts until the core shows it is alive after all, by starting a local
 //! terminal (`created`, `restarted`) or by keeping the stream open `STOP_GRACE` longer: an
 //! unkeep of a terminal still pending after a stop ends it with `server_stop` too (Ruling
-//! C118). Then the stream's end is a plain drop again.
+//! C118). Then the stream's end is a plain drop again, and what was held is done as after a
+//! subscribe: every layout is read and the seen writes are decided. A layout read the gate
+//! refused is no answer and keeps the old layout.
 //!
 //! Reconnect (`reconnect_now`) counts its clicks; a wait for Reconnect after the app stopped
 //! trying counts only the clicks after it began (Ruling C116).
@@ -358,6 +360,10 @@ enum LayoutAnswer {
     Unreadable(u64),
     /// The call failed.
     Failed,
+    /// No answer: background calls were held (the connection down, or the core stopping), so
+    /// the client refused it. The layout stays as it was; the reads that follow the connection
+    /// coming back, or a false alarm ending, read it again.
+    Held,
 }
 
 /// A state held back for a machine name nobody has resolved yet.
@@ -1121,8 +1127,11 @@ impl Inner {
             params["on"] = json!(name);
         }
         let answer = match self.client.call_quiet(id, "doc.get", params.clone()).await {
-            // Any error is no layout for the machine (a remote that needs an update says so
-            // with an error of its own), and the call is in the log. Health is never touched.
+            // Refused by the gate (or lost as it closed): nothing was learned, so nothing is
+            // erased. Should the gate open again in between, a re-read is already due.
+            Err(_) if !self.client.background_allowed() => LayoutAnswer::Held,
+            // Any other error is no layout for the machine (a remote that needs an update says
+            // so with an error of its own), and the call is in the log. Health is never touched.
             Err(_) => LayoutAnswer::Failed,
             Ok(result) => match result.get("value").filter(|v| !v.is_null()) {
                 None => LayoutAnswer::Never,
@@ -1160,6 +1169,7 @@ impl Inner {
                     m.layouts.remove(id);
                     None
                 }
+                LayoutAnswer::Held => None,
             }
         };
         if let Some(version) = say {
@@ -1574,6 +1584,7 @@ impl Inner {
                             stop_seen = None;
                         }
                     }
+                    let resumed = was_stopping && stop_seen.is_none();
                     if stop_seen.is_some() != was_stopping {
                         // Background calls stop now, this batch's own included, or resume; what
                         // the UI shows changes only when the stream ends.
@@ -1582,6 +1593,13 @@ impl Inner {
                         self.allow_background(&m);
                     }
                     self.apply(&batch);
+                    if resumed {
+                        // A false alarm (C118): do what was held meanwhile, as `connect` does
+                        // after a subscribe. The model lock is free again here.
+                        let targets = Self::layout_targets(&lock(&self.model));
+                        self.read_layouts(targets);
+                        self.write_seen();
+                    }
                 }
                 () = tokio::time::sleep_until(deadline) => {
                     let error = "herdr-core stopped sending events.".to_owned();
