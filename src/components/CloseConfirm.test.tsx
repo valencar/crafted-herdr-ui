@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
+import { agentTerm, appState } from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -22,7 +23,7 @@ const row = {
 
 beforeEach(() => {
   invoke.mockReset().mockResolvedValue(null);
-  useAppStore.setState({ toast: null, dialogOpen: 0 });
+  useAppStore.setState({ toast: null, dialogOpen: 0, state: null });
 });
 
 it("asks first, closes the pane on confirm and says it is done", async () => {
@@ -99,4 +100,54 @@ it("keeps Remove too when an ended row is somehow listed as running again", () =
     <CloseConfirm row={{ ...ended, status: "working" }} onDone={() => {}} />,
   );
   expect(screen.getByRole("dialog", { name: "Remove shell?" })).toBeVisible();
+});
+
+it("counts_the_whole_worker_chain_hidden_workboxes_included", () => {
+  // planner (buildbox/t1) started fixer (t2), which started linter (t3); it also started a worker
+  // on gpubox, which the person hid. `terminal.kill` ends them all. An ended worker is already
+  // over, and a terminal under it no longer ends with planner.
+  useAppStore.setState({
+    state: appState([
+      [
+        { id: "buildbox", target: "buildbox" },
+        [
+          agentTerm({ address: "t1", status: "working", name: "planner" }),
+          agentTerm({
+            address: "t2",
+            status: "working",
+            parent: "buildbox/t1",
+          }),
+          agentTerm({ address: "t3", status: "done", parent: "buildbox/t2" }),
+          agentTerm({ address: "t4", status: "ended", parent: "buildbox/t1" }),
+          agentTerm({
+            address: "t5",
+            status: "working",
+            parent: "buildbox/t4",
+          }),
+          agentTerm({ address: "t6", status: "idle" }),
+        ],
+      ],
+      [
+        { id: "gpubox", target: "gpubox", health: { kind: "hidden" } },
+        [
+          agentTerm({
+            address: "t1",
+            status: "working",
+            parent: "buildbox/t1",
+          }),
+        ],
+      ],
+    ]),
+  });
+  const planner = {
+    ...row,
+    key: "buildbox::t1",
+    address: "t1",
+    name: "planner",
+    status: "working",
+  } as Row;
+  render(<CloseConfirm row={planner} onDone={() => {}} />);
+  expect(
+    screen.getByRole("dialog", { name: "Close planner?" }),
+  ).toHaveTextContent("It has 3 workers.");
 });

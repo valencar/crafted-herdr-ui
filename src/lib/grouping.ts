@@ -102,14 +102,15 @@ function parentKey(state: AppState, full: string | null): string | null {
 }
 
 /**
- * One row per terminal, in the order the machines list them. Hidden machines give none; a
+ * One row per terminal, in the order the machines list them. Hidden machines give none, unless
+ * `opts.hidden` asks for them too (what a core call reaches regardless of what is shown); a
  * machine that is failing or reconnecting keeps its last terminals; one that never answered
  * has none.
  */
-export function toRows(state: AppState): Row[] {
+export function toRows(state: AppState, opts?: { hidden?: boolean }): Row[] {
   const rows: Row[] = [];
   for (const m of state.machines) {
-    if (m.health.kind === "hidden") continue;
+    if (m.health.kind === "hidden" && opts?.hidden !== true) continue;
     for (const t of m.terminals) {
       rows.push({
         key: `${m.id}::${t.address}`,
@@ -525,6 +526,31 @@ export function groupByStatus(rows: Row[]): Group[] {
     });
   }
   return out;
+}
+
+/**
+ * Every terminal that ends when `rowKey`'s does (`terminal.kill` ends the terminal's workers,
+ * theirs too): its live workers, their live workers, and so on, on every machine, hidden ones
+ * included. An ended worker is already over, and a terminal under it no longer ends with this
+ * one, so the chain stops there. A loop of parents is counted once.
+ */
+export function workerChain(state: AppState, rowKey: string): Row[] {
+  const rows = toRows(state, { hidden: true }).filter(
+    (r) => r.status !== "ended",
+  );
+  const chain: Row[] = [];
+  const seen = new Set([rowKey]);
+  let parents = [rowKey];
+  while (parents.length > 0) {
+    const next = rows.filter(
+      (r) =>
+        r.parent !== null && parents.includes(r.parent) && !seen.has(r.key),
+    );
+    for (const r of next) seen.add(r.key);
+    chain.push(...next);
+    parents = next.map((r) => r.key);
+  }
+  return chain;
 }
 
 /** A row with the workers that report to it, in the list's own order. */

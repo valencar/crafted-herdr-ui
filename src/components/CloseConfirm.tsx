@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { plural } from "../lib/format";
-import { toRows, type Row } from "../lib/grouping";
+import { workerChain, type Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -11,12 +11,14 @@ type Props = {
   onDone: () => void;
 };
 
-/** How many terminals report to `row` as workers right now. */
+/**
+ * How many workers end with `row` right now: the whole live chain under it, on every machine,
+ * hidden ones included, since `terminal.kill` takes them all (`workerChain`).
+ */
 function useWorkerCount(row: Row): number {
   const state = useAppStore((s) => s.state);
   return useMemo(
-    () =>
-      state ? toRows(state).filter((r) => r.parent === row.key).length : 0,
+    () => (state ? workerChain(state, row.key).length : 0),
     [state, row.key],
   );
 }
