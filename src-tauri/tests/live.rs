@@ -31,10 +31,10 @@
 //! installed. It adds that machine to the sandbox core as a *temporary* machine named
 //! `herdr-ui-qa-remote` on the remote's `herdr-ui-qa` session (never its default session, which is
 //! the person's own core there), and checks from `machine.list` that the machine really is on
-//! that session before it runs anything there. The temporary machine goes away with the sandbox
-//! core when the test stops it (so it stays, with the core, when the test did not start the core).
-//! A name or address that is already taken, or a target the core cannot reach, skips the leg and
-//! says why.
+//! that session before it runs anything there. Stopping the core does not delete the temporary
+//! machine (herdr-core's `docs/machines.md`: the temporary marker "does not delete anything"):
+//! its record stays in the sandbox's scratch state until those dirs are deleted. A name or
+//! address that is already taken, or a target the core cannot reach, skips the leg and says why.
 
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -342,8 +342,8 @@ enum Added {
 
 /// Adds `target` as a temporary machine named `REMOTE_NAME` on the remote's `herdr-ui-qa`
 /// session, then proves from `machine.list` that it is on that session. Anything else is an
-/// error (and the caller stops the sandbox core when it started it, which takes the temporary
-/// machine with it).
+/// error. The machine is never removed: its record stays in the sandbox's scratch state until
+/// those dirs are deleted, whether or not the caller stops the core.
 async fn add_remote(client: &CoreClient, target: &str) -> Result<Added, String> {
     let params = json!({
         "target": target,
@@ -459,6 +459,23 @@ impl SandboxCore {
     }
 }
 
+/// What `server stop`'s answer says happened. Piped, `hc` prints JSON: `{"stopped":true}` when it
+/// stopped a core, `{"stopped":false}` when none was running. Only the first is a stop.
+fn stop_report(stdout: &str) -> String {
+    let stopped = serde_json::from_str::<Value>(stdout)
+        .ok()
+        .and_then(|v| v.get("stopped").and_then(Value::as_bool));
+    match stopped {
+        Some(true) => format!("stopped the sandbox core the test started: {stdout}"),
+        Some(false) => format!(
+            "the sandbox core the test started was not running any more; nothing was stopped: {stdout}"
+        ),
+        None => {
+            format!("server stop ran, but its answer doesn't say it stopped a core: {stdout:?}")
+        }
+    }
+}
+
 impl Drop for SandboxCore {
     fn drop(&mut self) {
         if !self.started_by_us {
@@ -466,7 +483,7 @@ impl Drop for SandboxCore {
             return;
         }
         match self.stop() {
-            Ok(out) => println!("stopped the sandbox core the test started: {out}"),
+            Ok(out) => println!("{}", stop_report(&out)),
             // Printed, not panicked: a panic in drop while unwinding would abort the run.
             Err(why) => println!("COULD NOT STOP the sandbox core the test started: {why}"),
         }
@@ -551,4 +568,15 @@ async fn live_round_trip() {
     // The events connection first, then (when this test started it) the core, by the guard.
     drop(conn);
     result.expect("the live round trip");
+}
+
+/// The guard's report is honest about what `server stop` answered. Pure: no core is touched.
+#[test]
+fn the_stop_report_says_whether_a_core_was_stopped() {
+    assert!(stop_report(r#"{"stopped":true}"#).starts_with("stopped the sandbox core"));
+    let none = stop_report(r#"{"stopped":false}"#);
+    assert!(none.contains("nothing was stopped"), "{none}");
+    assert!(!none.starts_with("stopped"), "{none}");
+    let odd = stop_report("core stopped");
+    assert!(odd.contains("doesn't say it stopped"), "{odd}");
 }
