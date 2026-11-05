@@ -65,6 +65,8 @@ pub fn timeout_for(method: &str) -> Duration {
         // The core waits up to three minutes for the person's draft.
         "terminal.send" => Duration::from_secs(200),
         "terminal.interrupt" | "machine.exec" => Duration::from_secs(20),
+        // Dialing a remote machine can take about 20 s.
+        "machine.connect" => Duration::from_secs(30),
         _ => Duration::from_secs(10),
     }
 }
@@ -602,6 +604,8 @@ mod tests {
         assert_eq!(secs("terminal.send"), 200);
         assert_eq!(secs("terminal.interrupt"), 20);
         assert_eq!(secs("machine.exec"), 20);
+        // A dial to a remote machine can hold the call for about 20 s.
+        assert_eq!(secs("machine.connect"), 30);
         assert_eq!(secs("machine.list"), 10);
         assert_eq!(secs("anything.else"), 10);
     }
