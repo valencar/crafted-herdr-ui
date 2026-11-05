@@ -98,7 +98,7 @@ beforeEach(() => {
       ...useAppStore.getState().settings,
       ...args.patch,
     }),
-    read_pane_tail: (args: { paneId: string }) => `tail of ${args.paneId}`,
+    read_tail: (args: { address: string }) => `tail of ${args.address}`,
   };
   invoke.mockReset();
   invoke.mockImplementation(async (name: string, args: never) => {
@@ -501,23 +501,23 @@ describe("Workbox pane tails", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    const first = calls("read_pane_tail") as { paneId: string }[];
+    const first = calls("read_tail") as { address: string }[];
     expect(first).toHaveLength(12);
     // All four agents are among the twelve.
     for (const id of ["w1:p1", "w1:p2", "w2:p1", "w2:p2"]) {
-      expect(first.map((c) => c.paneId)).toContain(id);
+      expect(first.map((c) => c.address)).toContain(id);
     }
-    expect(new Set(first.map((c) => c.paneId)).size).toBe(12);
+    expect(new Set(first.map((c) => c.address)).size).toBe(12);
 
     invoke.mockClear();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(9_000);
     });
-    expect(calls("read_pane_tail")).toHaveLength(0);
+    expect(calls("read_tail")).toHaveLength(0);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
-    expect(calls("read_pane_tail")).toHaveLength(12);
+    expect(calls("read_tail")).toHaveLength(12);
   });
 
   it("tails_pause_while_a_terminal_tab_hides_the_screen_and_resume_when_Home_shows", async () => {
@@ -531,7 +531,7 @@ describe("Workbox pane tails", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(calls("read_pane_tail").length).toBeGreaterThan(0);
+    expect(calls("read_tail").length).toBeGreaterThan(0);
 
     // A terminal tab is active: the screen is still mounted, but nobody sees it.
     act(() =>
@@ -562,13 +562,13 @@ describe("Workbox pane tails", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(35_000);
     });
-    expect(calls("read_pane_tail")).toHaveLength(0);
+    expect(calls("read_tail")).toHaveLength(0);
 
     act(() => useTerminalStore.setState({ activeKey: HOME }));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_500);
     });
-    expect(calls("read_pane_tail").length).toBeGreaterThan(0);
+    expect(calls("read_tail").length).toBeGreaterThan(0);
     useTerminalStore.setState({ tabs: [], lastTermKey: null });
   });
 
@@ -588,7 +588,7 @@ describe("Workbox pane tails", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
-    expect(calls("read_pane_tail")).toHaveLength(0);
+    expect(calls("read_tail")).toHaveLength(0);
   });
 
   it("a_machine_that_is_not_answering_is_not_read", async () => {
@@ -604,17 +604,15 @@ describe("Workbox pane tails", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(25_000);
     });
-    expect(calls("read_pane_tail")).toHaveLength(0);
+    expect(calls("read_tail")).toHaveLength(0);
   });
 
   it("a_failed_tail_read_is_silent", async () => {
-    answers.read_pane_tail = () => {
+    answers.read_tail = () => {
       throw serverError("pane_not_found", "pane gone");
     };
     setup();
-    await waitFor(() =>
-      expect(calls("read_pane_tail").length).toBeGreaterThan(0),
-    );
+    await waitFor(() => expect(calls("read_tail").length).toBeGreaterThan(0));
     expect(useAppStore.getState().toast).toBeNull();
   });
 
@@ -630,7 +628,7 @@ describe("Workbox pane tails", () => {
   });
 
   it("describes_a_box_with_no_tail_by_its_status_alone", () => {
-    answers.read_pane_tail = () => {
+    answers.read_tail = () => {
       throw serverError("pane_not_found", "pane gone");
     };
     setup();
@@ -706,13 +704,13 @@ describe("Workbox pane tails", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
-      expect(calls("read_pane_tail")).toEqual([]);
+      expect(calls("read_tail")).toEqual([]);
 
       hide(false);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
-      expect(calls("read_pane_tail").length).toBeGreaterThan(0);
+      expect(calls("read_tail").length).toBeGreaterThan(0);
     });
   });
 });

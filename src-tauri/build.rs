@@ -34,7 +34,7 @@ const COMMANDS: &[&str] = &[
     "start_machine_add",
     "answer_machine_setup",
     "cancel_machine_setup",
-    "read_pane_tail",
+    "read_tail",
     "get_terminals",
     "list_terminals",
     "copy_attach_command",

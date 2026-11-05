@@ -30,7 +30,7 @@
     "allow-preview-machine-add",
     "allow-preview-new-session",
     "allow-preview-reconnect",
-    "allow-read-pane-tail",
+    "allow-read-tail",
     "allow-refresh-now",
     "allow-rename-session",
     "allow-reply-to-agent",

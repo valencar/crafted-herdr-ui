@@ -475,8 +475,7 @@ describe("Inspector live preview", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("start_preview", {
         machineId: "buildbox",
-        paneId: "w1:p1",
-        isAgent: true,
+        address: "w1:p1",
       }),
     );
     unmount();
@@ -535,8 +534,7 @@ describe("Inspector live preview", () => {
       await waitFor(() =>
         expect(invoke).toHaveBeenCalledWith("start_preview", {
           machineId: "buildbox",
-          paneId: "w1:p1",
-          isAgent: true,
+          address: "w1:p1",
         }),
       );
       expect(names()).not.toContain("stop_preview");
@@ -605,8 +603,7 @@ describe("Inspector live preview", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("start_preview", {
         machineId: "buildbox",
-        paneId: "w1:p3",
-        isAgent: false,
+        address: "w1:p3",
       }),
     );
   });
@@ -670,8 +667,7 @@ describe("Inspector live preview", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("start_preview", {
         machineId: "buildbox",
-        paneId: "w2:p2",
-        isAgent: true,
+        address: "w2:p2",
       }),
     );
   });

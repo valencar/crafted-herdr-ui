@@ -24,8 +24,7 @@ export function Preview({ row }: { row: Row }) {
   const frame = useAppStore((s) => s.preview);
   const setPreview = useAppStore((s) => s.setPreview);
   const reportError = useAppStore((s) => s.reportError);
-  const { key, machineId, paneId } = row;
-  const { isAgent } = row;
+  const { key, machineId, address } = row;
   const visible = useHomeVisible();
   const started = useRef(false);
 
@@ -46,7 +45,7 @@ export function Preview({ row }: { row: Row }) {
         // Rust only emits changed frames, so the first one must find the listener in place.
         started.current = true;
         inOrder(() =>
-          invokeTyped("start_preview", { machineId, paneId, isAgent }),
+          invokeTyped("start_preview", { machineId, address }),
         ).catch((e) => {
           if (alive) {
             setPreview({
@@ -66,7 +65,7 @@ export function Preview({ row }: { row: Row }) {
       alive = false;
       unlisten?.();
     };
-  }, [visible, key, machineId, paneId, isAgent, setPreview, reportError]);
+  }, [visible, key, machineId, address, setPreview, reportError]);
 
   // Hidden Home: nobody sees the frames, so Rust stops reading the pane.
   useEffect(() => {

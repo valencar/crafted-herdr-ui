@@ -794,8 +794,7 @@ describe("AllAgents", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("start_preview", {
         machineId: "gpubox",
-        paneId: "w1:p1",
-        isAgent: true,
+        address: "w1:p1",
       }),
     );
     expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument();

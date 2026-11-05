@@ -3,7 +3,7 @@ import { useHomeVisible } from "../terminal/useHomeVisible";
 import type { Row } from "./grouping";
 import { invokeTyped } from "./ipc";
 
-/** How often the pane boxes re-read their last line, and how many panes are read. */
+/** How often the boxes re-read their last line, and how many terminals are read. */
 const TAIL_EVERY_MS = 10_000;
 const MAX_TAIL_PANES = 12;
 
@@ -19,8 +19,8 @@ const STATUS_PRIORITY = [
 ];
 
 /**
- * The panes whose last line is read: agents before shells, the ones that need you first, and
- * no more than twelve so a big workbox does not flood herdr.
+ * The terminals whose last line is read: agents before shells, the ones that need you first, and
+ * no more than twelve so a big workbox does not flood the core.
  */
 export function tailTargets(rows: Row[]): string[] {
   return [...rows]
@@ -29,7 +29,7 @@ export function tailTargets(rows: Row[]): string[] {
         STATUS_PRIORITY.indexOf(a.status) - STATUS_PRIORITY.indexOf(b.status),
     )
     .slice(0, MAX_TAIL_PANES)
-    .map((r) => r.paneId);
+    .map((r) => r.address);
 }
 
 /**
@@ -38,7 +38,7 @@ export function tailTargets(rows: Row[]): string[] {
  * under a terminal tab (the Workbox screen stays mounted then). A failed read is ignored: the
  * box keeps its old line and the next round tries again.
  */
-export function usePaneTails(
+export function useTails(
   machineId: string,
   targets: string[],
 ): Record<string, string> {
@@ -52,22 +52,22 @@ export function usePaneTails(
   const shown = useRef(visible);
 
   const read = useCallback(
-    async (paneIds: string[]) => {
-      const todo = paneIds.filter((id) => !inflight.current.has(id));
+    async (addresses: string[]) => {
+      const todo = addresses.filter((id) => !inflight.current.has(id));
       todo.forEach((id) => inflight.current.add(id));
       const found: Record<string, string> = {};
       await Promise.all(
-        todo.map(async (paneId) => {
+        todo.map(async (address) => {
           try {
-            found[paneId] = await invokeTyped("read_pane_tail", {
+            found[address] = await invokeTyped("read_tail", {
               machineId,
-              paneId,
+              address,
             });
-            fetched.current.add(paneId);
+            fetched.current.add(address);
           } catch {
             // Keep the old line.
           } finally {
-            inflight.current.delete(paneId);
+            inflight.current.delete(address);
           }
         }),
       );

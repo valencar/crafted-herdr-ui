@@ -104,8 +104,10 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let cell = SyncCell::default();
     let preview_handle = handle.clone();
     let visible_cell = cell.clone();
+    let address_cell = cell.clone();
     app.manage(PreviewManager::new(
-        cli.clone(),
+        core.clone(),
+        Arc::new(move |machine, address| address_cell.get()?.full_address(machine, address)),
         Arc::new(move || {
             visible_cell
                 .get()
@@ -276,7 +278,7 @@ pub fn run() {
             commands::start_machine_add,
             commands::answer_machine_setup,
             commands::cancel_machine_setup,
-            commands::read_pane_tail,
+            commands::read_tail,
             commands::get_terminals,
             commands::list_terminals,
             commands::copy_attach_command,

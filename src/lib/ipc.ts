@@ -51,7 +51,7 @@ export type CommandResults = {
   start_machine_add: null;
   answer_machine_setup: null;
   cancel_machine_setup: null;
-  read_pane_tail: string;
+  read_tail: string;
   get_terminals: TerminalList;
   list_terminals: TerminalList;
   copy_attach_command: string;
@@ -126,11 +126,11 @@ export type CommandArgs = {
   /** `"yes"` or `"no"` for a confirmation, the session's index (as text) for the picker. */
   answer_machine_setup: { choice: string };
   cancel_machine_setup: undefined;
-  read_pane_tail: { machineId: string; paneId: string };
+  read_tail: { machineId: string; address: string };
   get_terminals: undefined;
   list_terminals: undefined;
   copy_attach_command: { machineId: string; address: string };
-  start_preview: { machineId: string; paneId: string; isAgent: boolean };
+  start_preview: { machineId: string; address: string };
   stop_preview: undefined;
   get_settings: undefined;
   /** Merged over the current settings; refused as a whole if any value is invalid. */

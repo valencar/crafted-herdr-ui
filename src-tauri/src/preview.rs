@@ -1,18 +1,21 @@
-//! The live preview: what the UI shows of a pane's recent output.
+//! The live preview and the tails: what the UI shows of a terminal's screen.
 //!
-//! `PreviewManager` reads one pane every 2 s while the window is visible and emits a
+//! Both read `terminal.read {terminal, lines: 0}` through `CoreClient::call_quiet`, so a read
+//! is logged (quiet) and nothing else touches the core. `lines` is always 0: a history read
+//! (`lines > 0`) scrolls an idle full-screen program and holds the person's keys.
+//! `PreviewManager` reads one terminal every 2 s while the window is visible and emits a
 //! `PreviewFrame` when the text changed.
 
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tokio::task::JoinHandle;
 use ts_rs::TS;
 
 use crate::actions::ActionError;
-use crate::herdr::cli::{HerdrCli, T_DEFAULT};
-use crate::herdr::errors::HerdrError;
+use crate::core::{CoreClient, CoreError};
 use crate::lock;
 
 const PREVIEW_EVERY: Duration = Duration::from_secs(2);
@@ -20,7 +23,7 @@ const PREVIEW_EVERY: Duration = Duration::from_secs(2);
 pub(crate) const PREVIEW_EVENT: &str = "preview";
 
 /// One frame of the live preview, sent to the UI as the `"preview"` event. `key` is
-/// `<machineId>::<paneId>`, the same key the UI uses for a row.
+/// `<machineId>::<address>`, the same key the UI uses for a row.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct PreviewFrame {
@@ -34,37 +37,82 @@ pub struct PreviewFrame {
 
 pub type PreviewEmit = Arc<dyn Fn(PreviewFrame) + Send + Sync>;
 pub type IsVisible = Arc<dyn Fn() -> bool + Send + Sync>;
+/// (machine id, machine-local address) to the address the local core takes (`buildbox/t7`),
+/// looked up at every read so a renamed machine keeps working. `None` is an unknown machine.
+pub type FullAddress = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
 
-/// The row key the UI uses for a pane.
-pub(crate) fn preview_key(machine_id: &str, pane_id: &str) -> String {
-    format!("{machine_id}::{pane_id}")
+/// The row key the UI uses for a terminal.
+pub(crate) fn preview_key(machine_id: &str, address: &str) -> String {
+    format!("{machine_id}::{address}")
 }
 
-/// The read command for a pane: `agent read` for an agent, `pane read` for a shell.
-pub(crate) fn preview_argv(pane_id: &str, is_agent: bool) -> Vec<String> {
-    let group = if is_agent { "agent" } else { "pane" };
-    [
-        group,
-        "read",
-        pane_id,
-        "--source",
-        "recent-unwrapped",
-        "--lines",
-        "60",
-        "--format",
-        "text",
-    ]
-    .map(str::to_owned)
-    .to_vec()
+/// What the app reads of `terminal.read`'s `{complete, how, text}`.
+#[derive(Deserialize)]
+struct ScreenRead {
+    text: String,
 }
 
-fn preview_error(e: &HerdrError) -> String {
+/// The screen of one terminal: `terminal.read` with `lines: 0` (never history; see the module
+/// docs), a quiet call on `machine_id`'s core connection.
+pub async fn read_screen(
+    core: &CoreClient,
+    machine_id: &str,
+    full_address: &str,
+) -> Result<String, CoreError> {
+    let result = core
+        .call_quiet(
+            machine_id,
+            "terminal.read",
+            json!({"terminal": full_address, "lines": 0}),
+        )
+        .await?;
+    serde_json::from_value::<ScreenRead>(result)
+        .map(|r| r.text)
+        .map_err(|e| CoreError::Protocol {
+            message: format!("terminal.read: {e}"),
+        })
+}
+
+/// The last line with something on it, trimmed; empty when the screen is blank.
+pub fn last_non_empty_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// The last non-empty line of a terminal's screen, for its box in the Workbox screen.
+pub async fn read_tail(
+    core: &CoreClient,
+    machine_id: &str,
+    full_address: &str,
+) -> Result<String, CoreError> {
+    read_screen(core, machine_id, full_address)
+        .await
+        .map(|text| last_non_empty_line(&text))
+}
+
+/// A sentence for a failed preview read, shown in the Inspector.
+pub(crate) fn preview_error(e: &CoreError) -> String {
     match e {
-        HerdrError::Server { message, .. } | HerdrError::Usage { message } => message.clone(),
-        HerdrError::NotFound => "herdr was not found.".to_owned(),
-        HerdrError::Timeout { .. } => "herdr did not answer in time.".to_owned(),
-        other => other.to_string(),
+        CoreError::Rpc { code, .. } if code == "not_found" => "This terminal is gone.".to_owned(),
+        CoreError::Rpc { code, message, .. } if code == "unavailable" => {
+            format!("Can't read this terminal right now: {message}")
+        }
+        CoreError::Rpc { message, .. }
+        | CoreError::Spawn { message }
+        | CoreError::Protocol { message } => message.clone(),
+        CoreError::NotFound => "herdr-core was not found.".to_owned(),
+        CoreError::Timeout { .. } => "herdr-core did not answer in time.".to_owned(),
+        CoreError::Lost => "The connection to herdr-core was lost.".to_owned(),
+        CoreError::Incompatible { reason, .. } => reason.clone(),
     }
+}
+
+/// Whether `address` can be read: not empty, and not something a flag parser would take.
+pub(crate) fn readable(machine_id: &str, address: &str) -> bool {
+    !machine_id.trim().is_empty() && !address.trim().is_empty() && !address.starts_with('-')
 }
 
 struct Active {
@@ -73,12 +121,13 @@ struct Active {
     task: Option<JoinHandle<()>>,
 }
 
-/// The live preview: at most one pane is read every 2 s, and only while the window is visible.
-/// Starting another pane, or stopping, cancels the old read, and a frame for the old pane is
-/// never emitted after `start` or `stop` has returned.
+/// The live preview: at most one terminal is read every 2 s, and only while the window is
+/// visible. Starting another terminal, or stopping, cancels the old read, and a frame for the
+/// old one is never emitted after `start` or `stop` has returned.
 #[derive(Clone)]
 pub struct PreviewManager {
-    cli: HerdrCli,
+    core: Arc<CoreClient>,
+    full_address: FullAddress,
     visible: IsVisible,
     emit: PreviewEmit,
     every: Duration,
@@ -86,9 +135,15 @@ pub struct PreviewManager {
 }
 
 impl PreviewManager {
-    pub fn new(cli: HerdrCli, visible: IsVisible, emit: PreviewEmit) -> Self {
+    pub fn new(
+        core: Arc<CoreClient>,
+        full_address: FullAddress,
+        visible: IsVisible,
+        emit: PreviewEmit,
+    ) -> Self {
         Self {
-            cli,
+            core,
+            full_address,
             visible,
             emit,
             every: PREVIEW_EVERY,
@@ -105,15 +160,10 @@ impl PreviewManager {
         self
     }
 
-    /// Previews one pane, replacing any other. Must be called inside a tokio runtime.
-    pub fn start(
-        &self,
-        machine_id: &str,
-        pane_id: &str,
-        is_agent: bool,
-    ) -> Result<(), ActionError> {
-        if machine_id.trim().is_empty() || pane_id.trim().is_empty() || pane_id.starts_with('-') {
-            return Err(ActionError::invalid("Pick a pane to preview."));
+    /// Previews one terminal, replacing any other. Must be called inside a tokio runtime.
+    pub fn start(&self, machine_id: &str, address: &str) -> Result<(), ActionError> {
+        if !readable(machine_id, address) {
+            return Err(ActionError::invalid("Pick a terminal to preview."));
         }
         let mut active = lock(&self.active);
         if let Some(old) = active.task.take() {
@@ -123,9 +173,9 @@ impl PreviewManager {
         let generation = active.generation;
         let this = self.clone();
         let machine = machine_id.to_owned();
-        let pane = pane_id.to_owned();
+        let address = address.to_owned();
         active.task = Some(tokio::spawn(async move {
-            this.run(generation, machine, pane, is_agent).await;
+            this.run(generation, machine, address).await;
         }));
         Ok(())
     }
@@ -148,25 +198,34 @@ impl PreviewManager {
         }
     }
 
-    async fn run(&self, generation: u64, machine: String, pane: String, is_agent: bool) {
-        let key = preview_key(&machine, &pane);
-        let args = preview_argv(&pane, is_agent);
+    async fn read_frame(&self, key: &str, machine: &str, address: &str) -> PreviewFrame {
+        let read = match (self.full_address)(machine, address) {
+            Some(full) => read_screen(&self.core, machine, &full)
+                .await
+                .map_err(|e| preview_error(&e)),
+            None => Err("This workbox is gone.".to_owned()),
+        };
+        match read {
+            Ok(text) => PreviewFrame {
+                key: key.to_owned(),
+                text: Some(text),
+                error: None,
+            },
+            Err(error) => PreviewFrame {
+                key: key.to_owned(),
+                text: None,
+                error: Some(error),
+            },
+        }
+    }
+
+    async fn run(&self, generation: u64, machine: String, address: String) {
+        let key = preview_key(&machine, &address);
         // An unchanged frame is not sent again: the UI would re-render for nothing.
         let mut last: Option<PreviewFrame> = None;
         loop {
             if (self.visible)() {
-                let frame = match self.cli.run_text(Some(&machine), &args, T_DEFAULT).await {
-                    Ok(text) => PreviewFrame {
-                        key: key.clone(),
-                        text: Some(text),
-                        error: None,
-                    },
-                    Err(e) => PreviewFrame {
-                        key: key.clone(),
-                        text: None,
-                        error: Some(preview_error(&e)),
-                    },
-                };
+                let frame = self.read_frame(&key, &machine, &address).await;
                 if last.as_ref() != Some(&frame) {
                     self.emit_current(generation, frame.clone());
                     last = Some(frame);
@@ -181,26 +240,58 @@ impl PreviewManager {
 mod tests {
     use super::*;
 
-    #[test]
-    fn preview_reads_agents_and_shells_with_the_agreed_flags() {
-        assert_eq!(
-            preview_argv("w1:p1", true).join(" "),
-            "agent read w1:p1 --source recent-unwrapped --lines 60 --format text"
-        );
-        assert_eq!(
-            preview_argv("w1:p2", false).join(" "),
-            "pane read w1:p2 --source recent-unwrapped --lines 60 --format text"
-        );
-        assert_eq!(preview_key("buildbox", "w1:p1"), "buildbox::w1:p1");
+    fn rpc(fixture: &str) -> CoreError {
+        let v: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        let e = &v["error"];
+        CoreError::Rpc {
+            code: e["data"]["kind"].as_str().unwrap().to_owned(),
+            message: e["message"].as_str().unwrap().to_owned(),
+            hint: e["data"]["hint"].as_str().map(str::to_owned),
+        }
     }
 
     #[test]
-    fn preview_errors_read_as_sentences() {
-        let server = HerdrError::Server {
-            code: "pane_not_found".into(),
-            message: "pane w1:p9 not found".into(),
-        };
-        assert_eq!(preview_error(&server), "pane w1:p9 not found");
-        assert_eq!(preview_error(&HerdrError::NotFound), "herdr was not found.");
+    fn preview_error_words_for_not_found_and_unavailable() {
+        let gone = rpc(include_str!("../tests/fixtures/hc/errors/not_found.json"));
+        assert_eq!(preview_error(&gone), "This terminal is gone.");
+
+        let lost = rpc(include_str!(
+            "../tests/fixtures/hc/errors/unavailable_lost.json"
+        ));
+        assert_eq!(
+            preview_error(&lost),
+            "Can't read this terminal right now: t1b is lost, waiting for its new shell"
+        );
+        let unreachable = rpc(include_str!("../tests/fixtures/hc/errors/unavailable.json"));
+        assert!(preview_error(&unreachable).starts_with("Can't read this terminal right now: "));
+
+        assert_eq!(
+            preview_error(&CoreError::NotFound),
+            "herdr-core was not found."
+        );
+        assert_eq!(
+            preview_error(&CoreError::Lost),
+            "The connection to herdr-core was lost."
+        );
+    }
+
+    #[test]
+    fn the_last_line_is_the_last_non_empty_one_trimmed() {
+        assert_eq!(
+            last_non_empty_line("  ready on :3000  \n\n  \n"),
+            "ready on :3000"
+        );
+        assert_eq!(last_non_empty_line("one\ntwo\n"), "two");
+        assert_eq!(last_non_empty_line("\n \n"), "");
+        assert_eq!(last_non_empty_line(""), "");
+    }
+
+    #[test]
+    fn keys_and_addresses() {
+        assert_eq!(preview_key("buildbox", "t7"), "buildbox::t7");
+        assert!(readable("local", "t7"));
+        assert!(!readable("local", "--help"));
+        assert!(!readable("local", " "));
+        assert!(!readable("", "t7"));
     }
 }

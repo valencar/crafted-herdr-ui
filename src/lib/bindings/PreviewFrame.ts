@@ -2,7 +2,7 @@
 
 /**
  * One frame of the live preview, sent to the UI as the `"preview"` event. `key` is
- * `<machineId>::<paneId>`, the same key the UI uses for a row.
+ * `<machineId>::<address>`, the same key the UI uses for a row.
  */
 export type PreviewFrame = { key: string, 
 /**

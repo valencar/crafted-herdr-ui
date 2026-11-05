@@ -9,7 +9,7 @@ import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
 import { isNeedsYou, isShell, toRows } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
-import { tailTargets, usePaneTails } from "../lib/usePaneTails";
+import { tailTargets, useTails } from "../lib/useTails";
 import { isEditable, isInTerminal, saveSettings } from "../lib/uiHelpers";
 import { useNow } from "../lib/useNow";
 import { useAppStore } from "../store/appStore";
@@ -43,7 +43,7 @@ export function Workbox({ machineId }: { machineId: string }) {
     () => (online ? tailTargets(rows) : []),
     [online, rows],
   );
-  const tails = usePaneTails(machineId, targets);
+  const tails = useTails(machineId, targets);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -149,7 +149,7 @@ export function Workbox({ machineId }: { machineId: string }) {
                   <PaneBox
                     key={row.key}
                     row={row}
-                    tail={tails[row.paneId] ?? null}
+                    tail={tails[row.address] ?? null}
                     onOpen={openRow}
                   />
                 ))}

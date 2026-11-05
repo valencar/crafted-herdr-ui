@@ -20,7 +20,7 @@ use crate::herdr::cli::HerdrCli;
 use crate::herdr::model::MachineStatusEntry;
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::notify::VisibleRow;
-use crate::preview::PreviewManager;
+use crate::preview::{self, PreviewManager};
 use crate::pty::TermSize;
 use crate::settings::{
     self, CoreLocator, CoreStatus, Settings, SharedSettings, ShortcutState, ShortcutStatus, changes,
@@ -182,16 +182,35 @@ pub fn preview_reconnect() -> Result<String, ActionError> {
     Err(not_yet())
 }
 
-/// Task 9.
+/// The last non-empty line a terminal's screen shows, for its box in the Workbox screen.
+/// A quiet `terminal.read` with `lines: 0`.
 #[tauri::command]
-pub fn read_pane_tail() -> Result<String, ActionError> {
-    Err(not_yet())
+pub async fn read_tail(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    machine_id: String,
+    address: String,
+) -> Result<String, ActionError> {
+    if !preview::readable(&machine_id, &address) {
+        return Err(ActionError::invalid("Pick a terminal to read."));
+    }
+    let full = sync
+        .get()
+        .and_then(|s| s.full_address(&machine_id, &address))
+        .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))?;
+    preview::read_tail(&core, &machine_id, &full)
+        .await
+        .map_err(|error| ActionError::Core { error })
 }
 
-/// Task 9.
+/// Starts the live preview of one terminal, replacing any other.
 #[tauri::command]
-pub fn start_preview() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn start_preview(
+    preview: State<'_, PreviewManager>,
+    machine_id: String,
+    address: String,
+) -> Result<(), ActionError> {
+    preview.start(&machine_id, &address)
 }
 
 /// The last 200 herdr calls, oldest first.
