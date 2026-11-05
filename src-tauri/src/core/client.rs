@@ -914,9 +914,11 @@ mod tests {
         (client, opened, reads)
     }
 
-    #[tokio::test]
+    /// Tokio's clock is paused: the fake core's 300 ms replies and the test's waits are exact,
+    /// so the order below never depends on how loaded the machine is.
+    #[tokio::test(start_paused = true)]
     async fn a_background_call_queued_before_the_gate_closes_never_runs() {
-        let (client, opened, reads) = slow_reads();
+        let (client, _, reads) = slow_reads();
         let read = |i: usize| {
             let client = client.clone();
             tokio::spawn(async move {
@@ -939,10 +941,10 @@ mod tests {
         client.set_background(false);
         assert!(a.await.unwrap().is_ok());
         assert!(b.await.unwrap().is_ok());
-        // The queued read got its slot after that: it is refused, never sent, and opens nothing.
+        // The queued read got its slot after that: it is refused and never reaches a core (an
+        // idle connection was there to reuse, so only the reads tell).
         assert!(queued.await.unwrap().is_err());
         assert_eq!(reads.load(Ordering::SeqCst), 2);
-        assert_eq!(opened.load(Ordering::SeqCst), 2);
         // A refusal is not a call: nothing for it in the log.
         assert_eq!(client.command_log().len(), 2);
         // A new one is refused at once.
@@ -952,7 +954,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert_eq!(opened.load(Ordering::SeqCst), 2);
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
