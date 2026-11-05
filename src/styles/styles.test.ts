@@ -1128,3 +1128,58 @@ describe("workbox colors", () => {
     );
   });
 });
+
+describe("page scroll", () => {
+  // Elements whose scroll container is positioned by something other than a `position:`
+  // declaration in a rule with the same selector. Keep this list as short as the truth allows.
+  const POSITIONED_ELSEWHERE: Record<string, string> = {
+    // The element also carries `.menu` (windows.css: `position: absolute`), and PINNED
+    // (`lib/useMenuBehavior.ts`) pins the body-rendered menus inline; a second position here
+    // would only fight `.menu` by stylesheet order.
+    ".tab-menu": "positioned by .menu on the same element",
+  };
+  const normalize = (selector: string) => selector.replace(/\s+/g, " ").trim();
+  const OVERFLOW = /(?:^|[\s;])overflow(?:-x|-y)?:\s*(?:auto|scroll)\b/;
+  const POSITIONED = /(?:^|[\s;])position:\s*(?:relative|absolute|fixed|sticky)\b/;
+
+  it("positions_every_scroll_container_so_hidden_text_cannot_stretch_the_page", () => {
+    // An absolutely positioned child (`.sr-only`) with no positioned ancestor escapes its
+    // scroller's clip and stretches the scrollable overflow of every ancestor up to the page.
+    const unpositioned: string[] = [];
+    for (const file of ["app.css", "windows.css"]) {
+      const text = stripComments(read(file));
+      const rules = [...text.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({
+        selector: normalize(m[1]),
+        body: m[2],
+      }));
+      for (const { selector, body } of rules) {
+        if (!OVERFLOW.test(body)) continue;
+        if (selector in POSITIONED_ELSEWHERE) continue;
+        const positioned = rules.some(
+          (r) => r.selector === selector && POSITIONED.test(r.body),
+        );
+        if (!positioned) unpositioned.push(`${file}: ${selector}`);
+      }
+    }
+    expect(unpositioned).toEqual([]);
+  });
+
+  it("keeps_the_allowlisted_scroller_positioned_by_its_other_rule", () => {
+    const windows = stripComments(read("windows.css"));
+    const menu = [...windows.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+      (m) => normalize(m[1]) === ".menu",
+    );
+    expect(menu?.[2]).toMatch(/position:\s*absolute/);
+  });
+
+  it("keeps_the_page_itself_from_scrolling", () => {
+    // Every window is a 100%-height shell that scrolls only inside its own containers.
+    const global = stripComments(read("global.css"));
+    const match = [...global.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+      (m) => normalize(m[1]) === "html, body",
+    );
+    expect(match, "no `html, body` rule in global.css").toBeDefined();
+    expect(match?.[2]).toMatch(/overflow:\s*hidden/);
+    expect(match?.[2]).toMatch(/overscroll-behavior:\s*none/);
+  });
+});
