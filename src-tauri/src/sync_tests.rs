@@ -1015,6 +1015,80 @@ async fn background_calls_stop_as_soon_as_a_stop_is_seen() {
     assert!(h.sync().machine_online("local"));
 }
 
+/// What `terminal.keep {keep: false}` sends for a kept terminal still pending after a stop: it
+/// ends with its stored reason, `server_stop`, on a core that keeps running.
+fn unkeep_ending(h: &Harness, seq: u64) {
+    h.event(
+        seq,
+        "finished",
+        "t6",
+        json!({"reason": "server_stop", "exit_code": null, "signal": null, "finished_ms": 1}),
+    );
+}
+
+/// How many `machine.list` calls the app made.
+fn lists(h: &Harness) -> usize {
+    methods(h).iter().filter(|m| *m == "machine.list").count()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_server_stop_ending_then_a_new_terminal_is_no_stop() {
+    let h = Harness::new().up().await;
+    unkeep_ending(&h, 29);
+    settle().await;
+    assert!(!h.sync().is_online());
+    // The core starts a terminal: it refuses spawns while it stops, so it is alive (C118).
+    h.event(
+        30,
+        "created",
+        "t9",
+        json!({"address": "t9", "state": "live", "reported": false, "turn": 0,
+            "argv": ["sh"], "cwd": "/home/dev/infra"}),
+    );
+    settle().await;
+    assert!(h.sync().is_online());
+    assert!(h.sync().machine_online("local"));
+    // Background calls resume.
+    let before = lists(&h);
+    h.sync().refresh_machines();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(lists(&h), before + 1);
+    // And a drop now is a plain one: retried, not Stopped.
+    h.drop_events();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(h.state().core_state, CoreState::Connecting);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(h.state().core_state, CoreState::Ready);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_server_stop_ending_with_the_stream_open_20_s_later_is_no_stop() {
+    let h = Harness::new().up().await;
+    unkeep_ending(&h, 29);
+    settle().await;
+    assert!(!h.sync().is_online());
+    // A heartbeat inside the 20 s changes nothing: a real stop can take a while.
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    h.send(r#"{"jsonrpc":"2.0","method":"heartbeat","params":{"seq":30}}"#);
+    settle().await;
+    assert!(!h.sync().is_online());
+    // The next one, past 20 s, shows the core is still running.
+    tokio::time::sleep(Duration::from_secs(11)).await;
+    h.send(r#"{"jsonrpc":"2.0","method":"heartbeat","params":{"seq":31}}"#);
+    settle().await;
+    assert!(h.sync().is_online());
+    let before = lists(&h);
+    h.sync().refresh_machines();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(lists(&h), before + 1);
+    // A drop now is a plain one.
+    h.drop_events();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(h.state().core_state, CoreState::Connecting);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(h.state().core_state, CoreState::Ready);
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_remote_machine_stopping_is_not_a_stop_of_this_core() {
     let h = Harness::new().up().await;

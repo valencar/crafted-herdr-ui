@@ -15,13 +15,16 @@
 //! - the **machine task** runs `machine.list` every 10 s (30 s while the window is hidden), and
 //!   on demand: after a `missed`, a machine action, or a terminal whose machine isn't known yet.
 //!
-//! Background calls run only while the event connection is up (`online`), and stop as soon as
-//! the stream shows a local `server_stop` ending, before the stream ends (the core removes its
-//! socket before it exits): the layout reads, the `herdr.seen` writes and `machine.list` here;
-//! the preview through `SyncCell::may_preview`; the New session sheet's check and templates
-//! through `CoreSync::machine_online`. A call while it is down would start `hc connect`, which
-//! starts a stopped core, and fill the command log for nothing. The UI sees the stop only when
-//! the stream ends.
+//! Background calls run only while the event connection is up (`online`): the layout reads,
+//! the `herdr.seen` writes and `machine.list` here; the preview through `SyncCell::may_preview`;
+//! the New session sheet's check and templates through `CoreSync::machine_online`. A call while
+//! it is down would start `hc connect`, which starts a stopped core, and fill the command log
+//! for nothing. They also stop as soon as the stream shows a local `server_stop` ending, before
+//! the stream ends (the core removes its socket before it exits; the UI sees the stop only when
+//! the stream ends). That lasts until the core shows it is alive after all, by starting a local
+//! terminal (`created`, `restarted`) or by keeping the stream open `STOP_GRACE` longer: an
+//! unkeep of a terminal still pending after a stop ends it with `server_stop` too (Ruling
+//! C118). Then the stream's end is a plain drop again.
 //!
 //! Reconnect (`reconnect_now`) counts its clicks; a wait for Reconnect after the app stopped
 //! trying counts only the clicks after it began (Ruling C116).
@@ -117,6 +120,11 @@ const UNREACHABLE_ATTENTION_MS: u64 = 120_000;
 const NOT_RUNNING: &str = "herdr-core isn't running.";
 /// Why, when the person stopped the core (`hc server stop`).
 const STOPPED_ON_PURPOSE: &str = "herdr-core was stopped.";
+/// A stream still open this long after a local `server_stop` ending shows the core kept running
+/// (Ruling C118): `terminal.keep {keep: false}` ends a kept terminal still pending after a stop
+/// with that reason too. A real stop ends the stream well within it. Checked on the next event
+/// or heartbeat (one comes every 15 s).
+const STOP_GRACE: Duration = Duration::from_secs(20);
 
 /// Receives each new state (see the module doc for what it must not call).
 pub type Emit = Arc<dyn Fn(&AppState) + Send + Sync>;
@@ -203,6 +211,16 @@ fn is_server_stop(note: &Notification) -> bool {
     )
 }
 
+/// Whether a notification shows the core starting a local terminal: a stopping core refuses to
+/// (herdr-core 0.1.18 `runtime.rs:269`), so it is alive after all.
+fn is_local_start(note: &Notification) -> bool {
+    matches!(
+        note,
+        Notification::Event { ty, terminal: Some(address), .. }
+            if (ty == "created" || ty == "restarted") && split_address(address).0.is_none()
+    )
+}
+
 /// How the event stream ended.
 struct StreamEnd {
     /// Why, for the UI.
@@ -252,6 +270,7 @@ struct Model {
     /// The stream has shown a local `server_stop` ending: the core is being stopped. The link
     /// still shows Online until the stream ends, but background calls stop at once (`online`):
     /// the core removes its socket before it exits, so a new connection would start a fresh one.
+    /// Cleared when the core shows it is alive after all (`STOP_GRACE`, Ruling C118).
     stopping: bool,
     /// Reconnect clicks that found the link not Online, counted. A wait for Reconnect counts
     /// only the clicks after it began: a click during a connect attempt leaves a permit in the
@@ -1503,33 +1522,47 @@ impl Inner {
         notes: &mut mpsc::UnboundedReceiver<Notification>,
     ) -> StreamEnd {
         let mut deadline = Instant::now() + WATCHDOG;
-        // Every program is ended before the core goes (up to about 15 s): the drop that
-        // follows is the stop's.
-        let mut stopped = false;
+        // When the first local `server_stop` ending of a stop in progress came. Every program is
+        // ended before the core goes (up to about 15 s): the drop that follows is the stop's.
+        // The core showing it is alive (a terminal started, or the stream still open after
+        // `STOP_GRACE`) forgets it (Ruling C118).
+        let mut stop_seen: Option<Instant> = None;
         loop {
             tokio::select! {
                 note = notes.recv() => {
                     let Some(first) = note else {
-                        return StreamEnd { error: describe(&CoreError::Lost), stopped };
+                        let error = describe(&CoreError::Lost);
+                        return StreamEnd { error, stopped: stop_seen.is_some() };
                     };
-                    deadline = Instant::now() + WATCHDOG;
+                    let now = Instant::now();
+                    deadline = now + WATCHDOG;
                     // Everything that has arrived is one change, so a rename (removed, then
                     // created) is not shown half done.
                     let mut batch = vec![first];
                     while let Ok(next) = notes.try_recv() {
                         batch.push(next);
                     }
-                    if !stopped && batch.iter().any(is_server_stop) {
-                        stopped = true;
-                        // Background calls stop now, this batch's own included; what the UI
-                        // shows changes when the stream ends.
-                        lock(&self.model).stopping = true;
+                    let was_stopping = stop_seen.is_some();
+                    if stop_seen.is_some_and(|at| now.duration_since(at) >= STOP_GRACE) {
+                        stop_seen = None;
+                    }
+                    for note in &batch {
+                        if is_server_stop(note) {
+                            stop_seen.get_or_insert(now);
+                        } else if is_local_start(note) {
+                            stop_seen = None;
+                        }
+                    }
+                    if stop_seen.is_some() != was_stopping {
+                        // Background calls stop now, this batch's own included, or resume; what
+                        // the UI shows changes only when the stream ends.
+                        lock(&self.model).stopping = stop_seen.is_some();
                     }
                     self.apply(&batch);
                 }
                 () = tokio::time::sleep_until(deadline) => {
                     let error = "herdr-core stopped sending events.".to_owned();
-                    return StreamEnd { error, stopped };
+                    return StreamEnd { error, stopped: stop_seen.is_some() };
                 }
             }
         }
