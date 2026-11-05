@@ -30,7 +30,7 @@ it("asks first, closes the pane on confirm and says it is done", async () => {
   render(<CloseConfirm row={row} onDone={onDone} />);
   expect(screen.getByRole("dialog", { name: "Close shell?" })).toBeVisible();
   expect(invoke).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole("button", { name: "Close session" }));
+  await userEvent.click(screen.getByRole("button", { name: "Close terminal" }));
   expect(invoke).toHaveBeenCalledWith("close_terminal", {
     machineId: "buildbox",
     address: "w1:p3",
@@ -49,7 +49,7 @@ it("does nothing on cancel", async () => {
 it("reports a failed close", async () => {
   invoke.mockRejectedValue({ kind: "invalid", message: "pane is gone" });
   render(<CloseConfirm row={row} onDone={() => {}} />);
-  await userEvent.click(screen.getByRole("button", { name: "Close session" }));
+  await userEvent.click(screen.getByRole("button", { name: "Close terminal" }));
   await vi.waitFor(() =>
     expect(useAppStore.getState().toast).toBe("pane is gone"),
   );
@@ -60,4 +60,43 @@ it("flags a dialog as open while it is mounted", () => {
   expect(useAppStore.getState().dialogOpen).toBe(1);
   unmount();
   expect(useAppStore.getState().dialogOpen).toBe(0);
+});
+
+it("keeps the kind it opened with when the row ends under the dialog", async () => {
+  invoke.mockRejectedValue({
+    kind: "invalid",
+    message: "That terminal has already ended.",
+  });
+  const onDone = vi.fn();
+  const live = { ...row, status: "working" } as Row;
+  const { rerender } = render(<CloseConfirm row={live} onDone={onDone} />);
+  expect(screen.getByRole("dialog", { name: "Close shell?" })).toBeVisible();
+
+  // The state pushes the row as ended while the dialog is open.
+  rerender(<CloseConfirm row={{ ...live, status: "ended" }} onDone={onDone} />);
+  expect(screen.getByRole("dialog", { name: "Close shell?" })).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Remove shell?" })).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", { name: "Close terminal" }));
+  expect(invoke).toHaveBeenCalledWith("close_terminal", {
+    machineId: "buildbox",
+    address: "w1:p3",
+  });
+  expect(invoke).not.toHaveBeenCalledWith("remove_terminal", expect.anything());
+  // The core's refusal is shown in words.
+  await vi.waitFor(() =>
+    expect(useAppStore.getState().toast).toBe(
+      "That terminal has already ended.",
+    ),
+  );
+});
+
+it("keeps Remove too when an ended row is somehow listed as running again", () => {
+  const ended = { ...row, status: "ended" } as Row;
+  const { rerender } = render(<CloseConfirm row={ended} onDone={() => {}} />);
+  expect(screen.getByRole("dialog", { name: "Remove shell?" })).toBeVisible();
+  rerender(
+    <CloseConfirm row={{ ...ended, status: "working" }} onDone={() => {}} />,
+  );
+  expect(screen.getByRole("dialog", { name: "Remove shell?" })).toBeVisible();
 });

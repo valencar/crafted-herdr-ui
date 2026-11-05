@@ -567,7 +567,7 @@ describe("AllAgents", () => {
     );
 
     await user.keyboard("{Backspace}");
-    await user.click(screen.getByRole("button", { name: "Close session" }));
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
     expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
       address: "w1:p3",

@@ -312,8 +312,18 @@ describe("agentActions", () => {
       label: "Remove…",
       danger: true,
     });
-    expect(ended.map((a) => a.id)).not.toContain("close");
-    expect(ended.map((a) => a.id)).not.toContain("reply");
+    // Ended (C60, C64): no attach, no keep, and nothing to open or reply to.
+    expect(ended.map((a) => a.id)).toEqual([
+      "copy-address",
+      "pin",
+      "show-in-all",
+      "remove",
+    ]);
+    // Any other status still opens.
+    expect(ids(row({ status: "working" })).slice(0, 2)).toEqual([
+      "open",
+      "open-alt",
+    ]);
   });
 
   it("palette_actions_match_menu", () => {

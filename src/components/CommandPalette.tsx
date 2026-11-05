@@ -408,7 +408,12 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (inFrame && frameRow) {
-        const id = e.metaKey ? "open-alt" : actions[at]?.id;
+        // ⌘↩ is the second way to open; an ended terminal has none.
+        const id = e.metaKey
+          ? frameAltLabel === undefined
+            ? undefined
+            : "open-alt"
+          : actions[at]?.id;
         if (id) runAction(frameRow, id);
       } else run(results[at], e.metaKey ? "alt" : "default");
     } else if (e.key === "Tab") {
@@ -591,14 +596,20 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         </div>
         <p className="palette-hint">
           <Kbd keys="↑" /> <Kbd keys="↓" /> Move · <Kbd keys="↵" />{" "}
-          {inFrame ? "Run" : "Open"} · <Kbd id="palette-open-alt" />{" "}
-          {inFrame
-            ? (frameAltLabel ?? "")
-            : (results[at]?.alt ??
-                  (openTarget === "app" ? "external" : "app")) === "external"
-              ? `Open in ${terminalLabel}`
-              : "Open here"}{" "}
-          ·{" "}
+          {inFrame ? "Run" : "Open"} ·{" "}
+          {(!inFrame || frameAltLabel !== undefined) && (
+            <>
+              <Kbd id="palette-open-alt" />{" "}
+              {inFrame
+                ? frameAltLabel
+                : (results[at]?.alt ??
+                      (openTarget === "app" ? "external" : "app")) ===
+                    "external"
+                  ? `Open in ${terminalLabel}`
+                  : "Open here"}{" "}
+              ·{" "}
+            </>
+          )}
           {inFrame ? (
             <>
               <Kbd keys="⌫" /> Back

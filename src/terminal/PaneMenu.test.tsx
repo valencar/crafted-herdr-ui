@@ -203,7 +203,12 @@ describe("PaneMenu", () => {
     const user = userEvent.setup();
     render(<PaneMenu row={{ ...row, status: "ended", exitCode: 1 }} />);
     await user.click(more());
-    expect(screen.queryByRole("menuitem", { name: "Close…" })).toBeNull();
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
+      "Copy address",
+      "Pin",
+      "Show in All agents",
+      "Remove…",
+    ]);
     await user.click(screen.getByRole("menuitem", { name: "Remove…" }));
     expect(
       screen.getByRole("dialog", { name: "Remove planner?" }),
@@ -255,7 +260,7 @@ describe("PaneMenu", () => {
       "close_terminal",
       expect.anything(),
     );
-    await user.click(screen.getByRole("button", { name: "Close session" }));
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
     expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
       address: "w1:p1",

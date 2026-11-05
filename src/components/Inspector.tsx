@@ -6,12 +6,7 @@ import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { markSeen } from "../lib/openRow";
 import { paneMenuItems } from "../lib/paneMenu";
-import {
-  interruptRow,
-  markUnread,
-  setKeep,
-  setPinned,
-} from "../lib/rowActions";
+import { interruptRow, markUnread, setPinned } from "../lib/rowActions";
 import { REPLY_BOX_ID } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 import { CommandBox, CopyButton } from "./CommandBox";
@@ -39,6 +34,9 @@ export function Inspector({
   const reportError = useAppStore((s) => s.reportError);
   const { machineId, isAgent } = row;
   const target = { machineId, address: row.address };
+  // The ⋯ menu's list: what this row can be offered.
+  const items = paneMenuItems(row);
+  const canAttach = items.includes("copy-attach");
 
   // What "Open" runs; the text comes from Rust.
   // Rust's refusal is kept too, so "Copy command" can say why there is nothing to copy.
@@ -46,8 +44,11 @@ export function Inspector({
     command: string | null;
     refusal: { error: unknown } | null;
   }>({ command: null, refusal: null });
-  const { command, refusal } = attach;
+  const command = canAttach ? attach.command : null;
+  const refusal = canAttach ? attach.refusal : null;
   useEffect(() => {
+    // A finished terminal can't be attached to: there is no command to fetch or show.
+    if (!canAttach) return;
     let alive = true;
     invokeTyped("copy_attach_command", { machineId, address: row.address })
       .then(
@@ -64,7 +65,7 @@ export function Inspector({
     return () => {
       alive = false;
     };
-  }, [machineId, row.address]);
+  }, [machineId, row.address, canAttach]);
 
   // Reply
   const hintId = useId();
@@ -91,7 +92,6 @@ export function Inspector({
   };
 
   const [closing, setClosing] = useState(false);
-  const items = paneMenuItems(row);
 
   return (
     <aside className="inspector" aria-label="Selected agent">
@@ -173,18 +173,21 @@ export function Inspector({
       )}
 
       <div className="inspector-actions">
-        <OpenButton
-          row={row}
-          terminalName={terminalName}
-          wide
-          kbd={formatShortcut("open-selected")}
-        />
+        {/* A finished terminal has nothing to open; its preview above still reads. */}
+        {row.status !== "ended" && (
+          <OpenButton
+            row={row}
+            terminalName={terminalName}
+            wide
+            kbd={formatShortcut("open-selected")}
+          />
+        )}
         {/* The ⋯ menu's list (`paneMenuItems`), as buttons: what changes the row, apart from
             the two that end it. */}
         <div className="inspector-secondary">
           {items.includes("mark-seen") && (
             <button type="button" className="btn" onClick={() => markSeen(row)}>
-              Mark seen
+              Mark as seen
             </button>
           )}
           {items.includes("mark-unread") && (
@@ -193,7 +196,7 @@ export function Inspector({
               className="btn"
               onClick={() => markUnread(row)}
             >
-              Mark unread
+              Mark as unread
             </button>
           )}
           {items.includes("interrupt") && (
@@ -205,23 +208,18 @@ export function Inspector({
               Interrupt
             </button>
           )}
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setPinned(row, !row.pinned)}
-          >
-            {row.pinned ? "Unpin" : "Pin"}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setKeep(row, !row.keep)}
-          >
-            {row.keep ? "Don't keep" : "Keep"}
-          </button>
+          {(items.includes("pin") || items.includes("unpin")) && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setPinned(row, !row.pinned)}
+            >
+              {items.includes("unpin") ? "Unpin" : "Pin"}
+            </button>
+          )}
         </div>
         <div className="inspector-secondary">
-          {refusal ? (
+          {!items.includes("copy-attach") ? null : refusal ? (
             <button
               type="button"
               className="btn"

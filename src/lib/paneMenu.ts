@@ -38,19 +38,23 @@ export function isDangerItem(item: PaneMenuItem): boolean {
 /**
  * What the ⋯ menu lists for a terminal, and what the palette's action frame lists after its open
  * actions and Reply…: nothing without a row, otherwise
- * Copy attach command, Copy address, Mark as seen (a done agent) or Mark as unread (an idle
- * one, once a turn has finished), Pin or Unpin, Interrupt (a working agent), Keep or Don't keep,
+ * Copy attach command (not for an ended one), Copy address, Mark as seen (a done agent) or Mark as unread (an idle
+ * one, once a turn has finished), Pin or Unpin, Interrupt (a working agent), Keep or Don't keep (not for an ended one),
  * Show in All agents, and last Remove… (an ended terminal) or Close…, which both ask first.
  */
 export function paneMenuItems(row: Row | null): PaneMenuItem[] {
   if (!row) return [];
-  const items: PaneMenuItem[] = ["copy-attach", "copy-address"];
+  // A finished terminal can't be attached to, and keeping it means nothing.
+  const ended = row.status === "ended";
+  const items: PaneMenuItem[] = ended
+    ? ["copy-address"]
+    : ["copy-attach", "copy-address"];
   if (row.status === "done") items.push("mark-seen");
   else if (row.status === "idle" && row.turn > 0) items.push("mark-unread");
   items.push(row.pinned ? "unpin" : "pin");
   if (row.status === "working") items.push("interrupt");
-  items.push(row.keep ? "unkeep" : "keep");
+  if (!ended) items.push(row.keep ? "unkeep" : "keep");
   items.push("show-in-all");
-  items.push(row.status === "ended" ? "remove" : "close");
+  items.push(ended ? "remove" : "close");
   return items;
 }

@@ -76,9 +76,19 @@ describe("paneMenuItems", () => {
       ],
     );
     // Ended: Remove replaces Close, and it is still last.
-    const ended = paneMenuItems(row("ended"));
-    expect(ended.slice(-2)).toEqual(["show-in-all", "remove"]);
-    expect(ended).not.toContain("close");
+    // Ended (Ruling C60): nothing to attach to, nothing to keep.
+    expect(paneMenuItems(row("ended"))).toEqual([
+      "copy-address",
+      "pin",
+      "show-in-all",
+      "remove",
+    ]);
+    expect(paneMenuItems(row("ended", { pinned: true, keep: true }))).toEqual([
+      "copy-address",
+      "unpin",
+      "show-in-all",
+      "remove",
+    ]);
     for (const s of ["unknown", "shell"] as const) {
       const items = paneMenuItems(row(s));
       for (const only of ["mark-seen", "mark-unread", "interrupt"] as const) {

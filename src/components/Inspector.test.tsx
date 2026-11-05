@@ -347,7 +347,7 @@ describe("Inspector actions", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Close" }));
-    await user.click(screen.getByRole("button", { name: "Close session" }));
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
     expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
       address: "w1:p1",
@@ -377,14 +377,16 @@ describe("Inspector actions", () => {
 
   it("mark_seen_is_offered_only_for_done_agents", async () => {
     const first = setup(DONE);
-    await first.user.click(screen.getByRole("button", { name: "Mark seen" }));
+    await first.user.click(
+      screen.getByRole("button", { name: "Mark as seen" }),
+    );
     expect(invoke).toHaveBeenCalledWith("mark_seen", {
       machineId: "buildbox",
       address: "w2:p1",
     });
     first.unmount();
     setup(BLOCKED);
-    expect(screen.queryByRole("button", { name: "Mark seen" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark as seen" })).toBeNull();
   });
 
   it("failed_actions_show_the_error", async () => {
@@ -399,7 +401,7 @@ describe("Inspector actions", () => {
     });
     const { user } = setup();
     await user.click(screen.getByRole("button", { name: "Close" }));
-    await user.click(screen.getByRole("button", { name: "Close session" }));
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
     await waitFor(() =>
       expect(useAppStore.getState().toast).toBe("pane is gone"),
     );
@@ -485,18 +487,51 @@ describe("Inspector row actions", () => {
       address: "w1:p2",
       pinned: true,
     });
-    await first.user.click(screen.getByRole("button", { name: "Keep" }));
-    expect(invoke).toHaveBeenCalledWith("set_keep", {
-      machineId: "buildbox",
-      address: "w1:p2",
-      keep: true,
-    });
     first.unmount();
     setup({ ...WORKING, pinned: true, keep: true });
     expect(screen.getByRole("button", { name: "Unpin" })).toBeInTheDocument();
+  });
+
+  it("keep_is_in_the_menu_only", () => {
+    // Spec 7.2 puts Keep in the ⋯ menu; the Inspector has no button for it.
+    for (const r of [WORKING, { ...WORKING, keep: true }]) {
+      const { unmount } = setup(r);
+      expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Don't keep" })).toBeNull();
+      unmount();
+    }
+  });
+
+  it("an_ended_row_offers_only_what_works", async () => {
+    const ended = { ...SHELL, status: "ended" as const };
+    const { user } = setup(ended);
+    // No Open (C64), no Copy command (C60: nothing to attach to), no Keep.
+    expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Don't keep" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /^More ways to open/ }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy command" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+    expect(document.querySelector(".cmdbox")).toBeNull();
+    // Pin and Remove stay, and the preview is still read: terminal.read works when finished.
+    expect(screen.getByRole("button", { name: "Pin" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("start_preview", {
+        machineId: "buildbox",
+        address: "w1:p3",
+      }),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      "copy_attach_command",
+      expect.anything(),
+    );
+    await user.click(screen.getByRole("button", { name: "Pin" }));
+    expect(invoke).toHaveBeenCalledWith("set_pinned", {
+      machineId: "buildbox",
+      address: "w1:p3",
+      pinned: true,
+    });
   });
 
   it("interrupt_and_mark_unread_follow_the_status", async () => {
@@ -512,19 +547,21 @@ describe("Inspector row actions", () => {
     await waitFor(() =>
       expect(useAppStore.getState().toast).toBe("It stopped."),
     );
-    expect(screen.queryByRole("button", { name: "Mark unread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark as unread" })).toBeNull();
     working.unmount();
 
     const idle = setup({ ...IDLE, turn: 2 });
     expect(screen.queryByRole("button", { name: "Interrupt" })).toBeNull();
-    await idle.user.click(screen.getByRole("button", { name: "Mark unread" }));
+    await idle.user.click(
+      screen.getByRole("button", { name: "Mark as unread" }),
+    );
     expect(invoke).toHaveBeenCalledWith("mark_unread", {
       machineId: "buildbox",
       address: "w2:p2",
     });
     idle.unmount();
     setup({ ...IDLE, turn: 0 });
-    expect(screen.queryByRole("button", { name: "Mark unread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark as unread" })).toBeNull();
   });
 });
 

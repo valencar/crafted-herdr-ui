@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { plural } from "../lib/format";
 import { toRows, type Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
@@ -36,7 +36,7 @@ function CloseTerminalConfirm({ row, onDone }: Props) {
     <ConfirmDialog
       title={`Close ${row.name}?`}
       body={body}
-      confirmLabel="Close session"
+      confirmLabel="Close terminal"
       onConfirm={() => {
         invokeTyped("close_terminal", {
           machineId: row.machineId,
@@ -71,11 +71,13 @@ function RemoveTerminalConfirm({ row, onDone }: Props) {
 
 /**
  * The confirmation every way to end a row renders (the Inspector's Close or Remove button, ⌫ on
- * a row, the ⋯ menu, the palette): Remove for an ended terminal, Close for any other. It follows
- * the row's status as it is drawn, so the dialog always asks about the call it will make.
+ * a row, the ⋯ menu, the palette): Remove for an ended terminal, Close for any other. The kind is
+ * fixed when the dialog opens: if the row ends while it is up, it still asks, and sends, the call
+ * the person read, and the core's answer is shown in words.
  */
 export function CloseConfirm(props: Props) {
-  return props.row.status === "ended" ? (
+  const [removing] = useState(props.row.status === "ended");
+  return removing ? (
     <RemoveTerminalConfirm {...props} />
   ) : (
     <CloseTerminalConfirm {...props} />

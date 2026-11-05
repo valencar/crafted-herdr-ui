@@ -856,7 +856,7 @@ describe("CommandPalette agent frame", () => {
       "close_terminal",
       expect.anything(),
     );
-    await user.click(screen.getByRole("button", { name: "Close session" }));
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
     expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
       address: "w2:p1",
@@ -897,7 +897,7 @@ describe("CommandPalette agent frame", () => {
     await user.type(screen.getByRole("combobox"), "tester");
     await user.keyboard("{Tab}");
     await user.click(screen.getByRole("option", { name: /Close…/ }));
-    await user.click(screen.getByRole("button", { name: "Close session" }));
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
     await waitFor(() => expect(again).toHaveFocus());
   });
 
@@ -973,8 +973,12 @@ describe("CommandPalette agent frame", () => {
     );
     await user.type(screen.getByRole("combobox"), "tester");
     await user.keyboard("{Tab}");
-    expect(labels()).not.toContain("Close…");
-    expect(labels()).not.toContain("Reply…");
+    expect(labels()).toEqual([
+      "Copy address",
+      "Pin",
+      "Show in All agents",
+      "Remove…",
+    ]);
     await user.click(screen.getByRole("option", { name: /Remove…/ }));
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.getByText("Remove tester?")).toBeInTheDocument();

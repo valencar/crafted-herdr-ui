@@ -216,35 +216,39 @@ export function agentActions(
   // With a tab open, Enter goes to it and the other way is always the terminal app (as the
   // Open button's menu has both); without one, the two are the "Open sessions" setting and
   // the opposite of it.
-  const actions: AgentAction[] = ctx.hasTab
-    ? [
-        { id: "open", label: "Go to tab", keys: "↵", how: "app" },
-        {
-          id: "open-alt",
-          label: external,
-          keys: formatShortcut("palette-open-alt"),
-          how: "external",
-        },
-      ]
-    : ctx.openTarget === "app"
-      ? [
-          { id: "open", label: here, keys: "↵", how: "app" },
-          {
-            id: "open-alt",
-            label: external,
-            keys: formatShortcut("palette-open-alt"),
-            how: "external",
-          },
-        ]
-      : [
-          { id: "open", label: external, keys: "↵", how: "external" },
-          {
-            id: "open-alt",
-            label: here,
-            keys: formatShortcut("palette-open-alt"),
-            how: "app",
-          },
-        ];
+  // A finished terminal has nothing to open (attaching to it fails).
+  const actions: AgentAction[] =
+    row.status === "ended"
+      ? []
+      : ctx.hasTab
+        ? [
+            { id: "open", label: "Go to tab", keys: "↵", how: "app" },
+            {
+              id: "open-alt",
+              label: external,
+              keys: formatShortcut("palette-open-alt"),
+              how: "external",
+            },
+          ]
+        : ctx.openTarget === "app"
+          ? [
+              { id: "open", label: here, keys: "↵", how: "app" },
+              {
+                id: "open-alt",
+                label: external,
+                keys: formatShortcut("palette-open-alt"),
+                how: "external",
+              },
+            ]
+          : [
+              { id: "open", label: external, keys: "↵", how: "external" },
+              {
+                id: "open-alt",
+                label: here,
+                keys: formatShortcut("palette-open-alt"),
+                how: "app",
+              },
+            ];
   if (row.status === "idle" || row.status === "done") {
     actions.push({ id: "reply", label: "Reply…" });
   }
