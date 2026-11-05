@@ -18,6 +18,12 @@ export function defaultOpenHow(): OpenHow {
  * once it really opened. Errors go to the toast.
  */
 export async function openRow(row: Row, how?: OpenHow): Promise<void> {
+  // A finished terminal can't be attached to. The buttons don't offer it; this covers the ways
+  // a click or a notification can still reach it (a race with the state, a just-created session).
+  if (row.status === "ended") {
+    useAppStore.getState().showToast("This terminal has ended.", "info");
+    return;
+  }
   try {
     if ((how ?? defaultOpenHow()) === "app") {
       useTerminalStore.getState().openTab({

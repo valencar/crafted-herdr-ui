@@ -16,7 +16,7 @@ type Props = {
   clicked: "Reattach" | "Retry";
   onReattach: () => void;
   onClose: () => void;
-  /** The default button, which takes focus so Enter reattaches. */
+  /** The default button, which takes focus so Enter reattaches (Close tab when there is nothing to reattach). */
   buttonRef: Ref<HTMLButtonElement>;
 };
 
@@ -35,6 +35,10 @@ export function TermBar({
   buttonRef,
 }: Props) {
   const { current } = useTerminals();
+  // A finished terminal can't be attached to, so Reattach, Copy attach command and Open would
+  // all fail: Close tab is the way out, as for a terminal that is gone from the list.
+  const ended = row?.status === "ended";
+  const closeOnly = gone || ended;
   const opening = tab.state === "opening";
   const failed = tab.state === "error";
   const retryWord = failed ? "Retry" : "Reattach";
@@ -72,7 +76,7 @@ export function TermBar({
         {hint && <span className="term-bar-hint">{hint}</span>}
       </div>
       <div className="term-bar-actions">
-        {!gone && (
+        {!closeOnly && (
           <button
             type="button"
             className="btn btn-primary"
@@ -83,7 +87,7 @@ export function TermBar({
             {retryWord}
           </button>
         )}
-        {!gone && row && (
+        {!closeOnly && row && (
           <button
             type="button"
             className="btn"
@@ -93,7 +97,7 @@ export function TermBar({
             Copy attach command
           </button>
         )}
-        {!gone && row && (
+        {!closeOnly && row && (
           <button
             type="button"
             className="btn"
@@ -105,8 +109,8 @@ export function TermBar({
         )}
         <button
           type="button"
-          className={gone ? "btn btn-primary" : "btn"}
-          ref={gone ? buttonRef : undefined}
+          className={closeOnly ? "btn btn-primary" : "btn"}
+          ref={closeOnly ? buttonRef : undefined}
           onClick={onClose}
         >
           Close tab

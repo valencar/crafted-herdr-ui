@@ -721,7 +721,8 @@ describe("CommandPalette agent frame", () => {
     expect(screen.getAllByRole("option")[0]).toHaveTextContent("↵ Open");
     expect(screen.getAllByRole("option")[0]).not.toHaveTextContent("Actions");
     expect(document.querySelector(".palette-hint")).toHaveTextContent(
-      "Move · ↵ Open · ⌘↩ Open in Ghostty · ⇥ Actions · esc Close",
+      // A command has no second way to open, so the footer names none.
+      "Move · ↵ Open · ⇥ Actions · esc Close",
     );
   });
 
@@ -1138,6 +1139,50 @@ describe("CommandPalette agent frame", () => {
     });
 
     it("a_live_agents_footer_still_names_both_ways", async () => {
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      expect(hint()).toHaveTextContent(altKeys);
+    });
+  });
+
+  describe("the footer's second way to open", () => {
+    const hint = () => document.querySelector(".palette-hint")!;
+    const altKeys = formatShortcut("palette-open-alt");
+
+    it("is_left_out_for_items_that_have_no_second_way", async () => {
+      const user = userEvent.setup();
+      // An open tab with no row, and a command: both ignore ⌘↩'s second way.
+      useTerminalStore.setState({
+        tabs: [
+          {
+            tabKey: "buildbox::t9",
+            target: { kind: "terminal", machineId: "buildbox", address: "t9" },
+            title: "scratch",
+            machineLabel: "buildbox",
+            state: "live",
+            error: null,
+            termId: 1,
+            exitCode: null,
+            lastLine: null,
+            waiting: null,
+            attempts: 0,
+          },
+        ],
+        activeKey: HOME,
+      });
+      render(<CommandPalette onClose={onClose} />);
+      await user.type(screen.getByRole("combobox"), "scratch");
+      expect(screen.getAllByRole("option")[0]).toHaveTextContent("Open tabs");
+      expect(hint()).not.toHaveTextContent(altKeys);
+      expect(hint()).not.toHaveTextContent("Open in");
+      await user.clear(screen.getByRole("combobox"));
+      await user.type(screen.getByRole("combobox"), "refresh");
+      expect(screen.getAllByRole("option")[0]).toHaveTextContent("Command");
+      expect(hint()).not.toHaveTextContent(altKeys);
+      expect(hint()).not.toHaveTextContent("Open in");
+    });
+
+    it("stays_for_an_agent", async () => {
       const user = open();
       await user.type(screen.getByRole("combobox"), "tester");
       expect(hint()).toHaveTextContent(altKeys);

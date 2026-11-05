@@ -326,6 +326,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const count = inFrame ? actions.length : results.length;
   const at = Math.min(active, Math.max(0, count - 1));
   // The active item is an ended agent: Enter shows its actions, and there is no second way to open.
+  // Only an agent has a second way to open; a tab, a command, a project or a workbox has none.
+  const hasAlt = !inFrame && results[at]?.alt !== undefined;
   const framedHere = !inFrame && results[at]?.framed === true;
   const optionId = (index: number) => `${listId}-${index}`;
 
@@ -604,14 +606,12 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         <p className="palette-hint">
           <Kbd keys="↑" /> <Kbd keys="↓" /> Move · <Kbd keys="↵" />{" "}
           {inFrame ? "Run" : framedHere ? "Actions" : "Open"} ·{" "}
-          {(inFrame ? frameAltLabel !== undefined : !framedHere) && (
+          {(inFrame ? frameAltLabel !== undefined : hasAlt) && (
             <>
               <Kbd id="palette-open-alt" />{" "}
               {inFrame
                 ? frameAltLabel
-                : (results[at]?.alt ??
-                      (openTarget === "app" ? "external" : "app")) ===
-                    "external"
+                : results[at]?.alt === "external"
                   ? `Open in ${terminalLabel}`
                   : "Open here"}{" "}
               ·{" "}

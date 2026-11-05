@@ -49,6 +49,20 @@ beforeEach(() => {
 
 afterEach(() => useAppStore.setState({ settings: null }));
 
+describe("openRow on an ended terminal", () => {
+  it("attaches_nothing_and_says_so", async () => {
+    for (const how of ["app", "external", undefined] as const) {
+      invoke.mockClear();
+      useAppStore.setState({ toast: null });
+      await openRow(row("ended"), how);
+      expect(useTerminalStore.getState().tabs).toEqual([]);
+      expect(invoke).not.toHaveBeenCalled();
+      expect(useAppStore.getState().toast).toBe("This terminal has ended.");
+      expect(useAppStore.getState().toastTone).toBe("info");
+    }
+  });
+});
+
 describe("openRow", () => {
   it("app target opens a tab and marks done rows seen", async () => {
     openSessionsIn("app");
