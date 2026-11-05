@@ -70,6 +70,8 @@ struct Script {
     /// How long `doc.get` takes to answer, by the machine it was asked on, in milliseconds. The
     /// answer is the document as it is when the call arrives.
     doc_delay_ms: Mutex<std::collections::HashMap<String, u64>>,
+    /// How long `events.subscribe` takes to answer, in milliseconds: a slow connect attempt.
+    subscribe_delay_ms: AtomicU64,
     /// Every method the app called, in order.
     methods: Mutex<Vec<String>>,
 }
@@ -112,7 +114,8 @@ impl Connector for TestConnector {
                     Some("events.subscribe") => {
                         let n = s.subscribes.fetch_add(1, Ordering::SeqCst) + 1;
                         *lock(&s.events_core) = Some(index);
-                        (0, Reply::Result(nth(&s.subscribe, n)))
+                        let delay = s.subscribe_delay_ms.load(Ordering::SeqCst);
+                        (delay, Reply::Result(nth(&s.subscribe, n)))
                     }
                     Some("machine.list") => {
                         let n = s.lists.fetch_add(1, Ordering::SeqCst) + 1;
@@ -938,6 +941,78 @@ async fn a_stop_on_purpose_stays_stopped_until_reconnect() {
     settle().await;
     assert_eq!(h.state().core_state, CoreState::Ready);
     assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reconnect_clicked_during_an_attempt_does_not_undo_a_later_stop() {
+    let h = Harness::new().up().await;
+    // A plain drop; the retry 2 s on takes a second to subscribe.
+    h.script.subscribe_delay_ms.store(1000, Ordering::SeqCst);
+    h.drop_events();
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    // Reconnect is pressed (twice) while that attempt is on its way; nothing waits for it.
+    h.sync().reconnect_now();
+    h.sync().reconnect_now();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(h.state().core_state, CoreState::Ready);
+    assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 2);
+
+    // Later the person stops the core: the old clicks must not reconnect it (Ruling C116).
+    for line in server_stop_lines() {
+        h.send(&line);
+    }
+    settle().await;
+    h.drop_events();
+    settle().await;
+    let attempts = h.script.attempts.load(Ordering::SeqCst);
+    assert!(matches!(h.state().core_state, CoreState::Stopped { .. }));
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(h.script.attempts.load(Ordering::SeqCst), attempts);
+    assert!(matches!(h.state().core_state, CoreState::Stopped { .. }));
+
+    // A click after the stop connects.
+    h.script.subscribe_delay_ms.store(0, Ordering::SeqCst);
+    h.sync().reconnect_now();
+    settle().await;
+    assert_eq!(h.state().core_state, CoreState::Ready);
+    assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn background_calls_stop_as_soon_as_a_stop_is_seen() {
+    let h = Harness::new().up().await;
+    assert!(h.sync().is_online());
+    assert!(h.sync().machine_online("local"));
+    assert!(h.sync().machine_online(BUILDBOX));
+    let calls = methods(&h).len();
+
+    // The core ends its terminals; the stream is still open (the core is still stopping, and
+    // its socket may already be gone, so a new connection would start a fresh core).
+    for line in server_stop_lines() {
+        h.send(&line);
+    }
+    settle().await;
+    assert!(!h.sync().is_online());
+    assert!(!h.sync().machine_online("local"));
+    assert!(!h.sync().machine_online(BUILDBOX));
+    // The batch held a `turn` event and a row is on screen: no `herdr.seen` write, no list.
+    h.look(&["t6"]);
+    h.sync().refresh_machines();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(methods(&h).len(), calls, "{:?}", &methods(&h)[calls..]);
+    // What the UI shows waits for the stream's end.
+    let state = h.state();
+    assert_eq!(state.core_state, CoreState::Ready);
+    assert_eq!(state.machines[0].health, Health::Online);
+    h.drop_events();
+    settle().await;
+    assert!(matches!(h.state().core_state, CoreState::Stopped { .. }));
+
+    // Back after Reconnect: online again.
+    h.sync().reconnect_now();
+    settle().await;
+    assert!(h.sync().is_online());
+    assert!(h.sync().machine_online("local"));
 }
 
 #[tokio::test(start_paused = true)]

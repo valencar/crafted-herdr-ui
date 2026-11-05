@@ -25,7 +25,7 @@ use crate::settings::{
     self, CoreLocator, CoreStatus, Settings, SharedSettings, ShortcutState, ShortcutStatus, changes,
 };
 use crate::ssh_config;
-use crate::state::{AppState, Health};
+use crate::state::AppState;
 use crate::sync::SyncCell;
 use crate::terminal::open::{LaunchLog, launch_in_terminal};
 use crate::terminal::session::{TermEvent, TermId, TermSessions, TermSink};
@@ -89,12 +89,7 @@ fn refresh_if_maybe_applied<T>(result: &Result<T, ActionError>, refresh: impl Fn
 /// templates, are asked of those only). Every workbox is offline while the event connection is
 /// down.
 fn machine_online(sync: &SyncCell, machine_id: &str) -> bool {
-    sync.get().and_then(|s| s.state()).is_some_and(|state| {
-        state
-            .machines
-            .iter()
-            .any(|m| m.id == machine_id && matches!(m.health, Health::Online))
-    })
+    sync.get().is_some_and(|s| s.machine_online(machine_id))
 }
 
 /// Starts a terminal (`terminal.run`). The address answered is local to its machine.

@@ -15,11 +15,16 @@
 //! - the **machine task** runs `machine.list` every 10 s (30 s while the window is hidden), and
 //!   on demand: after a `missed`, a machine action, or a terminal whose machine isn't known yet.
 //!
-//! Background calls run only while the event connection is up (`online`): the layout reads,
-//! the `herdr.seen` writes and `machine.list` here; the preview through `SyncCell::may_preview`;
-//! the New session sheet's check and templates through `machine_online` (no machine is Online
-//! while the connection is down). A call while it is down would start `hc connect`, which
-//! starts a stopped core, and fill the command log for nothing.
+//! Background calls run only while the event connection is up (`online`), and stop as soon as
+//! the stream shows a local `server_stop` ending, before the stream ends (the core removes its
+//! socket before it exits): the layout reads, the `herdr.seen` writes and `machine.list` here;
+//! the preview through `SyncCell::may_preview`; the New session sheet's check and templates
+//! through `CoreSync::machine_online`. A call while it is down would start `hc connect`, which
+//! starts a stopped core, and fill the command log for nothing. The UI sees the stop only when
+//! the stream ends.
+//!
+//! Reconnect (`reconnect_now`) counts its clicks; a wait for Reconnect after the app stopped
+//! trying counts only the clicks after it began (Ruling C116).
 //!
 //! `emit` is called when what the UI shows changes: at once for the first change, and for further
 //! changes within the next 100 ms, once at the end of that window. It runs under an internal lock
@@ -244,6 +249,14 @@ impl Link {
 struct Model {
     core_state: CoreState,
     link: Link,
+    /// The stream has shown a local `server_stop` ending: the core is being stopped. The link
+    /// still shows Online until the stream ends, but background calls stop at once (`online`):
+    /// the core removes its socket before it exits, so a new connection would start a fresh one.
+    stopping: bool,
+    /// Reconnect clicks that found the link not Online, counted. A wait for Reconnect counts
+    /// only the clicks after it began: a click during a connect attempt leaves a permit in the
+    /// `Notify` that nothing consumed (Ruling C116).
+    reconnect_asks: u64,
     info: Option<HelloInfo>,
     core_path: Option<String>,
     map: TerminalMap,
@@ -422,6 +435,8 @@ impl CoreSync {
             model: Mutex::new(Model {
                 core_state: CoreState::Connecting,
                 link: Link::Pending,
+                stopping: false,
+                reconnect_asks: 0,
                 info: None,
                 core_path: None,
                 map: TerminalMap::default(),
@@ -470,9 +485,14 @@ impl CoreSync {
     /// Reconnect button: try again now, with a fresh 2-minute window. Does nothing while the
     /// connection is up.
     pub fn reconnect_now(&self) {
-        if lock(&self.inner.model).link != Link::Online {
-            self.inner.reconnect.notify_one();
+        {
+            let mut m = lock(&self.inner.model);
+            if m.link == Link::Online {
+                return;
+            }
+            m.reconnect_asks += 1;
         }
+        self.inner.reconnect.notify_one();
     }
 
     /// Whether the main window is on screen: `machine.list` runs every 10 s then, 30 s otherwise.
@@ -542,9 +562,22 @@ impl CoreSync {
         self.inner.visible.load(Ordering::Relaxed)
     }
 
-    /// Whether the event connection is up. Background calls wait for it (see the module doc).
+    /// Whether the event connection is up and the core isn't being stopped. Background calls
+    /// wait for it (see the module doc).
     pub fn is_online(&self) -> bool {
         self.inner.online()
+    }
+
+    /// Whether background calls may go to this machine now (the New session sheet's check and
+    /// Local's templates): the event connection is up, the core isn't being stopped, and the
+    /// machine shows Online.
+    pub fn machine_online(&self, machine_id: &str) -> bool {
+        let m = lock(&self.inner.model);
+        Inner::online_in(&m)
+            && m.state
+                .machines
+                .iter()
+                .any(|x| x.id == machine_id && x.health == Health::Online)
     }
 }
 
@@ -880,8 +913,10 @@ impl Inner {
         (self.emit)(&state);
     }
 
-    fn set_link(self: &Arc<Self>, link: Link, core_state: Option<CoreState>) {
-        {
+    /// Sets the link and the core state. Returns the Reconnect clicks counted so far, read under
+    /// the same lock, so a wait that begins here can tell later clicks from earlier ones.
+    fn set_link(self: &Arc<Self>, link: Link, core_state: Option<CoreState>) -> u64 {
+        let asks = {
             let mut m = lock(&self.model);
             m.link = link;
             if let Some(core_state) = core_state {
@@ -891,12 +926,20 @@ impl Inner {
                 // Nothing will answer a hold now; never keep the UI from seeing that.
                 m.hold = None;
             }
-        }
+            m.reconnect_asks
+        };
         self.commit(None, false);
+        asks
     }
 
+    /// Whether background calls may run: the event connection is up and the core isn't being
+    /// stopped.
     fn online(&self) -> bool {
-        lock(&self.model).link == Link::Online
+        Self::online_in(&lock(&self.model))
+    }
+
+    fn online_in(m: &Model) -> bool {
+        m.link == Link::Online && !m.stopping
     }
 
     /// Takes a new machine list. A machine whose name changed keeps its seen records and its
@@ -1010,7 +1053,7 @@ impl Inner {
                 let mut m = lock(&self.model);
                 let next_number = m.next_read + 1;
                 let next_on = Self::layout_on(&m, &id);
-                let online = m.link == Link::Online;
+                let online = Self::online_in(&m);
                 match m.layout_reads.get_mut(&id) {
                     // Overtaken: the machine left, and a read of its return has the entry now.
                     Some(read) if read.number == number => match next_on {
@@ -1157,7 +1200,8 @@ impl Inner {
         // (machine id, local address, full address, turn)
         let mut writes: Vec<(String, String, String, u64)> = Vec::new();
         {
-            // Lock order: the model first; `last_written_seen` is a leaf.
+            // Lock order: the model, then `ActivityV2`, then `last_written_seen`, then
+            // `seen_in_flight` (`ActivityV2` isn't taken here).
             let m = lock(&self.model);
             let mut decided = lock(&self.last_written_seen);
             let mut in_flight = lock(&self.seen_in_flight);
@@ -1369,10 +1413,18 @@ impl Inner {
         }
     }
 
-    /// Stops trying until the Reconnect button, then goes back to connecting.
+    /// Stops trying until the Reconnect button, then goes back to connecting. Only a click made
+    /// after the link went down counts: one made during an earlier connect attempt left a permit
+    /// in the `Notify`, which would otherwise reconnect (and start a stopped core) with no click
+    /// (Ruling C116). The count and the link change under one lock, so no click falls between.
     async fn wait_for_reconnect(self: &Arc<Self>, core_state: CoreState, error: String) {
-        self.set_link(Link::Down { error }, Some(core_state));
-        self.reconnect.notified().await;
+        let before = self.set_link(Link::Down { error }, Some(core_state));
+        loop {
+            self.reconnect.notified().await;
+            if lock(&self.model).reconnect_asks > before {
+                break;
+            }
+        }
         self.set_link(Link::Pending, Some(CoreState::Connecting));
     }
 
@@ -1429,6 +1481,7 @@ impl Inner {
                 Self::set_machines(&mut m, machines);
             }
             m.link = Link::Online;
+            m.stopping = false;
             m.core_state = CoreState::Ready;
         }
         // The baseline: no transition comes out of what changed while we weren't looking.
@@ -1466,7 +1519,12 @@ impl Inner {
                     while let Ok(next) = notes.try_recv() {
                         batch.push(next);
                     }
-                    stopped |= batch.iter().any(is_server_stop);
+                    if !stopped && batch.iter().any(is_server_stop) {
+                        stopped = true;
+                        // Background calls stop now, this batch's own included; what the UI
+                        // shows changes when the stream ends.
+                        lock(&self.model).stopping = true;
+                    }
                     self.apply(&batch);
                 }
                 () = tokio::time::sleep_until(deadline) => {
