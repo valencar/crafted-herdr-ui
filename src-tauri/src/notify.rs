@@ -102,17 +102,22 @@ fn non_empty(s: Option<&str>) -> Option<&str> {
     s.map(str::trim).filter(|s| !s.is_empty())
 }
 
-/// The name, then the terminal title, then `<kind> · <address>`; the same order the UI uses
-/// (`displayName` in `lib/grouping.ts`).
-fn display_name(t: &TerminalView) -> String {
+/// The name, then Herdr's name for the terminal's tab (`tab_name`, from the machine's layout),
+/// then the terminal title, then `<kind> · <address>` (`shell` for a plain shell): the order rows
+/// use (`displayName` in `lib/grouping.ts`, Ruling C98), so a notification names a terminal the
+/// way its row does.
+fn display_name(t: &TerminalView, tab_name: Option<&str>) -> String {
     non_empty(t.name.as_deref())
+        .or_else(|| non_empty(tab_name))
         .or_else(|| non_empty(t.title.as_deref()))
         .map(str::to_owned)
         .unwrap_or_else(|| {
-            let kind = non_empty(t.kind.as_deref())
-                .or_else(|| non_empty(t.program.as_deref()))
-                .unwrap_or("agent");
-            format!("{kind} · {}", t.address)
+            if t.is_agent {
+                let kind = non_empty(t.kind.as_deref()).unwrap_or("agent");
+                format!("{kind} · {}", t.address)
+            } else {
+                "shell".to_owned()
+            }
         })
 }
 
@@ -164,7 +169,13 @@ pub fn notification_for(
     }
     let found = find_terminal(state, transition);
     let name = match found {
-        Some((_, terminal)) => display_name(terminal),
+        Some((machine, terminal)) => {
+            let place = machine
+                .layout
+                .as_ref()
+                .and_then(|layout| layout.by_address.get(&terminal.address));
+            display_name(terminal, place.map(|p| p.tab_name.as_str()))
+        }
         None => format!("agent · {}", transition.address),
     };
     let machine = match found {
@@ -365,6 +376,53 @@ mod tests {
         let errored =
             notification_for(&transition("t1", TransitionKind::Error), &state, &settings).unwrap();
         assert_eq!(errored.title, "planner hit an error");
+    }
+
+    #[test]
+    fn titles_name_the_terminal_in_the_rows_order() {
+        // name, then Herdr's tab name, then the title, then `<kind> · <address>` (Ruling C98,
+        // `displayName` in `lib/grouping.ts`).
+        let mut state = state_with(DisplayStatus::Blocked);
+        let place = |tab_name: &str| crate::state::SpacePlace {
+            space_id: "s1".into(),
+            space_name: "api-service".into(),
+            space_folder: "/home/dev/api-service".into(),
+            tab_name: tab_name.into(),
+            first_in_space: true,
+        };
+        let mut layout = crate::state::SpaceLayout::default();
+        layout.by_address.insert("t1".into(), place("review"));
+        layout.by_address.insert("t2".into(), place("deploy"));
+        state.machines[1].layout = Some(layout);
+        let title = |state: &AppState, address: &str| {
+            notification_for(
+                &transition(address, TransitionKind::Blocked),
+                state,
+                &Settings::default(),
+            )
+            .unwrap()
+            .title
+        };
+        // Its own name wins over the tab's.
+        assert_eq!(title(&state, "t1"), "planner needs you");
+        // No name: the tab's name, before the title.
+        assert_eq!(title(&state, "t2"), "deploy needs you");
+        // An unnamed tab gives way to the title.
+        state.machines[1]
+            .layout
+            .as_mut()
+            .unwrap()
+            .by_address
+            .insert("t2".into(), place(""));
+        assert_eq!(title(&state, "t2"), "copilot: terraform plan needs you");
+        // No title either: the kind and the address, never the program.
+        let copilot = &mut state.machines[1].terminals[1];
+        copilot.title = None;
+        copilot.program = Some("node".into());
+        assert_eq!(title(&state, "t2"), "copilot · t2 needs you");
+        let copilot = &mut state.machines[1].terminals[1];
+        copilot.kind = None;
+        assert_eq!(title(&state, "t2"), "agent · t2 needs you");
     }
 
     #[test]
