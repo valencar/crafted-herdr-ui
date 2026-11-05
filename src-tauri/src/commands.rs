@@ -419,7 +419,7 @@ pub async fn start_preview(
     preview.start(&machine_id, &address)
 }
 
-/// The last 200 herdr calls, oldest first.
+/// The last 200 core calls, oldest first.
 #[tauri::command]
 pub fn get_command_log(core: State<'_, Arc<CoreClient>>) -> Vec<CommandLogEntry> {
     core.command_log()

@@ -20,7 +20,7 @@ import type { TerminalList } from "./bindings/TerminalList";
 
 /** Every Tauri command the UI may call, mapped to its result. A Rust `()` arrives as `null`. */
 export type CommandResults = {
-  /** `null` while startup is still looking for herdr; a "state" event follows. */
+  /** `null` while startup is still looking for herdr-core; a "state" event follows. */
   get_state: AppState | null;
   create_session: CreatedSession;
   /** The `hc run …` line, built in Rust. */
@@ -158,7 +158,7 @@ export type CommandArgs = {
   /** Keystrokes and pastes only; the command a tab runs is built on the Rust side. */
   term_write: { id: number; data: string };
   term_resize: { id: number; cols: number; rows: number };
-  /** Kills the attach client; the herdr pane keeps running. */
+  /** Kills the attach client; the core's terminal keeps running. */
   term_close: { id: number };
   show_main_open_row: { machineId: string; address: string };
   /** The rows drawn right now (`${machineId}::${address}`; none while the window is away): Rust skips their notifications and writes `herdr.seen` for them. */

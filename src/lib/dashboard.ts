@@ -75,8 +75,8 @@ export type ResponseStats = {
 };
 
 /**
- * Median duration and failure count of the herdr calls in the last `windowMs`. Entries with a
- * `note` are commands handed to the user's terminal, not herdr calls, so they don't count.
+ * Median duration and failure count of the herdr-core calls in the last `windowMs`. Entries with a
+ * `note` are commands handed to the user's terminal, not core calls, so they don't count.
  */
 export function responseStats(
   log: CommandLogEntry[],

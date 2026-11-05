@@ -28,7 +28,7 @@ type Props = {
 
 /**
  * A small form for naming things (rename, new tab, new workspace). Every field must be
- * non-empty; an error from herdr or the app stays in the sheet so the user can fix the value.
+ * non-empty; an error from herdr-core or the app stays in the sheet so the user can fix the value.
  */
 export function NameSheet({
   title,

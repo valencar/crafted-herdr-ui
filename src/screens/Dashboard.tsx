@@ -47,7 +47,7 @@ import { useHomeVisible } from "../terminal/useHomeVisible";
 
 /** The terminal tab limit; the cap itself is `MAX_SESSIONS` in Rust. */
 const MAX_TABS = 16;
-/** Dashboard cards show no terminal preview: reading pane output would be a herdr call each. */
+/** Dashboard cards show no terminal preview: reading terminal output would be a core call each. */
 const NO_LINES: readonly string[] = [];
 const NO_ROWS: Row[] = [];
 const NOOP = () => {};

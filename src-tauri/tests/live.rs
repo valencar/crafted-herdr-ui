@@ -15,12 +15,21 @@
 //! ```
 //!
 //! It touches only what it creates: a terminal labelled `herdr-ui-qa=1`. It kills and removes
-//! that one, checks its label first, and never stops or restarts a core (the one who set the
-//! sandbox up stops it). The remote leg runs only when `HERDR_UI_TEST_MACHINE` is an ssh target
-//! (or Host alias) `machine.add` can reach, and forgets the machine it added; otherwise it is
-//! skipped and says why.
+//! that one, checks its label first, and waits for it to finish before it removes it. At the end
+//! it stops the sandbox core (`<core> server stop`, spawned with the same cleared sandbox
+//! environment, which is the one `hc server stop` that rule 4 allows). It never runs
+//! `machine rm`, `update`, `restart` or a bare `hc`.
+//!
+//! The remote leg runs only when `HERDR_UI_TEST_MACHINE` is an ssh Host alias or target with hc
+//! installed. It adds that machine to the sandbox core as a *temporary* machine named
+//! `herdr-ui-qa-remote` on the remote's `herdr-ui-qa` session (never its default session, which is
+//! the person's own core there), and checks from `machine.list` that the machine really is on
+//! that session before it runs anything there. The temporary machine goes away with the sandbox
+//! core when the test stops it. A name or address that is already taken, or a target the core
+//! cannot reach, skips the leg and says why.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -115,12 +124,23 @@ async fn see(
     }
 }
 
-fn address_of(reply: &Value) -> Result<String, String> {
-    reply
+fn address_of(reply: &Value, on: Option<&str>) -> Result<String, String> {
+    let address = reply
         .get("address")
         .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| format!("terminal.run gave no address: {reply}"))
+        .ok_or_else(|| format!("terminal.run gave no address: {reply}"))?;
+    // The app's own `machine_local_address` accepts either form for a remote terminal; as seen
+    // from here the address is `<machine>/<t7>`.
+    Ok(match on {
+        Some(name) if !address.contains('/') => format!("{name}/{address}"),
+        _ => address.to_owned(),
+    })
+}
+
+/// The `state` and the `labels` of a `terminal.get` answer, wherever it keeps them.
+fn field<'a>(got: &'a Value, path: &str) -> Option<&'a Value> {
+    got.pointer(path)
+        .or_else(|| got.pointer(&format!("/terminal{path}")))
 }
 
 /// Steps 1 to 6 of the brief, on this machine's core (`on` is `None`) or on a remote one.
@@ -139,11 +159,18 @@ async fn round_trip(
         params["on"] = json!(on);
     }
     // 2. run
-    let reply = client
-        .call_long("local", "terminal.run", params)
-        .await
-        .map_err(|e| format!("terminal.run: {e:?}"))?;
-    let full = address_of(&reply)?;
+    let reply = match client.call_long("local", "terminal.run", params).await {
+        Ok(reply) => reply,
+        Err(e) => {
+            // A timeout may still have started it: find anything this test labelled.
+            if matches!(e, CoreError::Timeout { .. }) {
+                println!("  terminal.run timed out; looking for a {LABEL}=1 terminal to clean up");
+                sweep(client).await;
+            }
+            return Err(format!("terminal.run: {e:?}"));
+        }
+    };
+    let full = address_of(&reply, on)?;
     *created = Some(full.clone());
     println!("  created {full}");
 
@@ -183,47 +210,192 @@ async fn round_trip(
 }
 
 /// Kills and removes `full`, but only if it carries the test's label. Used after a failure, so a
-/// failed run leaves nothing behind. Errors are ignored: it may be gone already.
-async fn clean_up(client: &CoreClient, full: &str) {
-    let Ok(got) = client
+/// failed run leaves nothing behind. It waits for the terminal to be `finished` before it removes
+/// it, and says so when it could not.
+async fn clean_up(client: &CoreClient, full: &str) -> Result<(), String> {
+    let got = match client
         .call_quiet("local", "terminal.get", json!({"terminal": full}))
         .await
-    else {
-        return;
+    {
+        Ok(got) => got,
+        // Gone already, or never there.
+        Err(_) => return Ok(()),
     };
-    let ours = got
-        .pointer(&format!("/labels/{LABEL}"))
-        .or_else(|| got.pointer(&format!("/terminal/labels/{LABEL}")))
-        .and_then(Value::as_str)
-        == Some("1");
+    let ours = field(&got, &format!("/labels/{LABEL}")).and_then(Value::as_str) == Some("1");
     if !ours {
         println!("  not cleaning {full}: it has no {LABEL}=1 label");
-        return;
+        return Ok(());
     }
-    let _ = client
-        .call("local", "terminal.kill", json!({"terminal": full}))
-        .await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let _ = client
+    if field(&got, "/state").and_then(Value::as_str) != Some("finished") {
+        client
+            .call("local", "terminal.kill", json!({"terminal": full}))
+            .await
+            .map_err(|e| format!("cleaning {full}: terminal.kill: {e:?}"))?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            let now = client
+                .call_quiet("local", "terminal.get", json!({"terminal": full}))
+                .await
+                .map_err(|e| format!("cleaning {full}: terminal.get: {e:?}"))?;
+            if field(&now, "/state").and_then(Value::as_str) == Some("finished") {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!("cleaning {full}: it did not finish in 15 s"));
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+    client
         .call("local", "terminal.rm", json!({"terminal": full}))
-        .await;
+        .await
+        .map_err(|e| format!("cleaning {full}: terminal.rm: {e:?}"))?;
+    Ok(())
 }
 
-/// Adds `target` as a machine named `REMOTE_NAME`, for the remote leg. `Ok(false)` when the core
-/// can't reach it (the leg is skipped); the machine is forgotten again by the caller if `true`.
-async fn add_remote(client: &CoreClient, target: &str) -> Result<bool, String> {
-    let params = json!({"target": target, "name": REMOTE_NAME, "temporary": true});
+/// Cleans up every terminal in a fresh snapshot that carries `herdr-ui-qa=1`, for when a
+/// `terminal.run` timed out and the address was never learned. Failures are printed.
+async fn sweep(client: &CoreClient) {
+    let result: Result<(), String> = async {
+        let (conn, _notes, _info) = client.open_events().await.map_err(|e| format!("{e:?}"))?;
+        let snapshot = conn
+            .call(
+                "events.subscribe",
+                json!({}),
+                timeout_for("events.subscribe"),
+            )
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        let ours: Vec<String> = snapshot
+            .get("terminals")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|t| {
+                t.pointer(&format!("/labels/{LABEL}"))
+                    .and_then(Value::as_str)
+                    == Some("1")
+            })
+            .filter_map(|t| t.get("address").and_then(Value::as_str).map(str::to_owned))
+            .collect();
+        for address in ours {
+            clean_up(client, &address).await?;
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(why) = result {
+        println!("  sweep: {why}");
+    }
+}
+
+/// What the remote leg found out about adding `target`.
+enum Added {
+    /// On the sandbox session, checked against `machine.list`.
+    Yes,
+    /// Skipped, with the reason already printed.
+    No,
+}
+
+/// Adds `target` as a temporary machine named `REMOTE_NAME` on the remote's `herdr-ui-qa`
+/// session, then proves from `machine.list` that it is on that session. Anything else is an
+/// error (and the caller stops the sandbox core, which takes the temporary machine with it).
+async fn add_remote(client: &CoreClient, target: &str) -> Result<Added, String> {
+    let params = json!({
+        "target": target,
+        "name": REMOTE_NAME,
+        "session": SESSION,
+        "temporary": true,
+    });
     match client.call_long("local", "machine.add", params).await {
-        Ok(_) => Ok(true),
+        Ok(_) => {}
         Err(CoreError::Rpc { code, message, .. })
-            if ["unreachable", "needs_login", "hc_missing", "incompatible"]
-                .contains(&code.as_str()) =>
+            if [
+                "unreachable",
+                "needs_login",
+                "hc_missing",
+                "incompatible",
+                "name_taken",
+                "already_added",
+            ]
+            .contains(&code.as_str()) =>
         {
             println!("remote leg skipped: machine.add said {code}: {message}");
-            Ok(false)
+            return Ok(Added::No);
         }
-        Err(e) => Err(format!("machine.add: {e:?}")),
+        Err(e) => return Err(format!("machine.add: {e:?}")),
     }
+    let list = client
+        .call_quiet("local", "machine.list", json!({}))
+        .await
+        .map_err(|e| format!("machine.list: {e:?}"))?;
+    let session = list
+        .get("machines")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|m| m.get("name").and_then(Value::as_str) == Some(REMOTE_NAME))
+        .map(|m| m.get("session").and_then(Value::as_str));
+    match session {
+        Some(Some(got)) if got == SESSION => Ok(Added::Yes),
+        other => Err(format!(
+            "the added machine is not on the {SESSION} session ({other:?}); nothing was run there"
+        )),
+    }
+}
+
+/// `<core> server stop` with exactly the sandbox environment: the one stop that rule 4 allows,
+/// of the sandbox core this test used. `env` passed `sandbox_env`, so it names the sandbox
+/// session and its own XDG dirs and nothing that could reach another core.
+fn stop_sandbox_core(bin: &Path, env: &[(String, String)]) {
+    let out = Command::new(bin)
+        .args(["server", "stop"])
+        .env_clear()
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .stdin(Stdio::null())
+        .output();
+    match out {
+        Ok(o) => println!(
+            "stopped the sandbox core: {}",
+            String::from_utf8_lossy(&o.stdout).trim()
+        ),
+        Err(e) => println!("could not stop the sandbox core: {e}"),
+    }
+}
+
+/// The local leg, then the remote one when there is a target. Errors are returned so the caller
+/// can stop the sandbox core first.
+async fn legs(
+    client: &CoreClient,
+    notes: &mut UnboundedReceiver<Notification>,
+) -> Result<(), String> {
+    println!("local leg");
+    let mut created = None;
+    let local = round_trip(client, notes, None, &mut created).await;
+    let cleaned = match &created {
+        Some(full) => clean_up(client, full).await,
+        None => Ok(()),
+    };
+    local?;
+    cleaned?;
+
+    // The remote leg (Ruling C3): only against a target `machine.add` can reach.
+    let Some(target) = var("HERDR_UI_TEST_MACHINE") else {
+        println!("remote leg skipped: HERDR_UI_TEST_MACHINE is not set");
+        return Ok(());
+    };
+    if let Added::No = add_remote(client, &target).await? {
+        return Ok(());
+    }
+    println!("remote leg on {REMOTE_NAME} (session {SESSION})");
+    let mut created = None;
+    let remote = round_trip(client, notes, Some(REMOTE_NAME), &mut created).await;
+    let cleaned = match &created {
+        Some(full) => clean_up(client, full).await,
+        None => Ok(()),
+    };
+    remote?;
+    cleaned
 }
 
 #[tokio::test]
@@ -235,7 +407,10 @@ async fn live_round_trip() {
     }
     let env = sandbox_env().unwrap_or_else(|why| panic!("not a sandbox, refusing: {why}"));
     let bin = core_bin().unwrap();
-    let client = CoreClient::new(Arc::new(ProcessConnector { bin, env }));
+    let client = CoreClient::new(Arc::new(ProcessConnector {
+        bin: bin.clone(),
+        env: env.clone(),
+    }));
 
     // 1. connect and subscribe (`events.subscribe {}` on a connection of its own, as the app does).
     let (conn, mut notes, info) = client.open_events().await.expect("hello");
@@ -248,32 +423,9 @@ async fn live_round_trip() {
     .await
     .expect("events.subscribe");
 
-    println!("local leg");
-    let mut created = None;
-    let local = round_trip(&client, &mut notes, None, &mut created).await;
-    if let Some(full) = &created {
-        clean_up(&client, full).await;
-    }
-    local.expect("the local round trip");
-
-    // The remote leg (Ruling C3): only against a target `machine.add` can reach.
-    match var("HERDR_UI_TEST_MACHINE") {
-        None => println!("remote leg skipped: HERDR_UI_TEST_MACHINE is not set"),
-        Some(target) => match add_remote(&client, &target).await.expect("add") {
-            false => {}
-            true => {
-                println!("remote leg on {REMOTE_NAME}");
-                let mut created = None;
-                let remote = round_trip(&client, &mut notes, Some(REMOTE_NAME), &mut created).await;
-                if let Some(full) = &created {
-                    clean_up(&client, full).await;
-                }
-                // Forget the machine we added; its terminals live on there, and we removed ours.
-                let _ = client
-                    .call("local", "machine.rm", json!({"machine": REMOTE_NAME}))
-                    .await;
-                remote.expect("the remote round trip");
-            }
-        },
-    }
+    let result = legs(&client, &mut notes).await;
+    // Whatever happened, the sandbox core goes (and the temporary machine with it).
+    drop(conn);
+    stop_sandbox_core(&bin, &env);
+    result.expect("the live round trip");
 }

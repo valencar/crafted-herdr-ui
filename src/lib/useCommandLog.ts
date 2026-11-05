@@ -5,7 +5,7 @@ import { invokeTyped } from "./ipc";
 export const COMMAND_LOG_EVERY_MS = 5_000;
 
 /**
- * The command log (every herdr call the app made), read while `enabled`. Each read is
+ * The command log (every herdr-core call the app made), read while `enabled`. Each read is
  * scheduled `COMMAND_LOG_EVERY_MS` after the previous one ends, so a slow call never overlaps
  * the next. While the window is hidden the read is skipped but the beat goes on. `null` until
  * the first answer; a failed read, or `enabled` turning false, keeps the last value.
