@@ -67,6 +67,8 @@ export function useTermSession(
       exitCode: null,
       lastLine: null,
       waiting: null,
+      restartsAtOpen:
+        rowFor(useAppStore.getState().state, tabKey)?.restarts ?? null,
       attempts: again ? attempts + 1 : attempts,
     });
     sentSize.current = { cols: term.cols, rows: term.rows };

@@ -122,7 +122,7 @@ beforeEach(() => {
           if (kinds === "fail") throw { kind: "invalid", message: "No herdr." };
           return kinds;
         case "preview_launch_template":
-          return `${(args as { template: string }).template.replace("{attach}", "ssh -t buildbox 'sh -c …'")}`;
+          return `${(args as { template: string }).template.replace("{attach}", "hc attach buildbox/t7")}`;
         case "set_settings":
           return {
             ...useAppStore.getState().settings,
@@ -287,7 +287,7 @@ describe("Settings", () => {
 
     await user.type(field, "myterm -e {{attach}");
     expect(
-      await screen.findByText(/myterm -e ssh -t buildbox/),
+      await screen.findByText(/myterm -e hc attach buildbox\/t7/),
     ).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
     await user.tab();

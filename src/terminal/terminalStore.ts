@@ -36,6 +36,12 @@ export type TermTab = {
   exitCode: number | null;
   /** The last non-empty line the last session printed (`[detached from t7]`); null while one runs. */
   lastLine: string | null;
+  /**
+   * The row's `restarts` when the last session opened, the baseline a kept-loss wait compares
+   * against: the restart can reach the UI before the attach's exit does. Absent until a session
+   * has opened.
+   */
+  restartsAtOpen?: number | null;
   /** What the tab waits for before it reattaches on its own; null when only the button reattaches. */
   waiting: Waiting | null;
   /** Reattach and Retry clicks since a session last ended normally (exit 0); the first open does not count. */
@@ -133,6 +139,7 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
     })),
   sessionEnded: (tabKey, end, row, core) => {
     const ending = endingOf(end.code ?? -1, end.lastLine);
+    const opened = get().tabs.find((t) => t.tabKey === tabKey)?.restartsAtOpen;
     let waiting: Waiting | null = null;
     if (
       ending.kind === "finished" &&
@@ -140,7 +147,7 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
       row?.keep &&
       row.status !== "ended"
     ) {
-      waiting = { kind: "restart", restarts: row.restarts };
+      waiting = { kind: "restart", restarts: opened ?? row.restarts };
     } else if (ending.kind === "server-stop" || ending.kind === "core-lost") {
       waiting = { kind: "core", sawDown: core !== "ready" };
     }

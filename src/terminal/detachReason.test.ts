@@ -98,6 +98,33 @@ describe("endingOf", () => {
     expect(endingOf(1, "[detached from t7]")).toEqual({ kind: "unknown" });
   });
 
+  it("reads_an_ending_that_follows_other_text_on_its_line", () => {
+    // On a real pty the ending can come right after what was on the screen.
+    expect(endingOf(0, "$ prompt[detached from t7]")).toEqual({
+      kind: "detached",
+    });
+    expect(endingOf(0, "x[t9 finished: exited]")).toEqual({
+      kind: "finished",
+      reason: "exited",
+    });
+    expect(endingOf(0, "x[t12 finished: signaled]")).toEqual({
+      kind: "finished",
+      reason: "signaled",
+    });
+    expect(endingOf(0, "x[t1 finished: server_stop]")).toEqual({
+      kind: "server-stop",
+    });
+    expect(
+      endingOf(0, "x[lost the core; it keeps t6 running: hc attach t6]"),
+    ).toEqual({ kind: "core-lost" });
+    expect(detachReason(0, "$ [detached from t7]")).toBe("Detached.");
+    expect(detachReason(0, "x[t9 finished: killed]")).toBe(
+      "The program ended (killed).",
+    );
+    // Text after the closing bracket is not an ending.
+    expect(endingOf(0, "[detached from t7] more")).toEqual({ kind: "unknown" });
+  });
+
   it("waiting_words", () => {
     expect(WAITING_FOR_SHELL).toBe("Waiting for a new shell…");
   });

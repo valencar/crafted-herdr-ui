@@ -267,6 +267,16 @@ fn term_launch(
     }
 }
 
+/// Why a session could not start. The core is run directly, so a core that has vanished since
+/// it was located fails at spawn, where `hc attach` could never say exit 127 itself.
+fn open_error(core: &Path, message: String) -> String {
+    if core.exists() {
+        message
+    } else {
+        "herdr-core not found.".to_owned()
+    }
+}
+
 /// The core in use, or why there is none.
 fn resolved_core(locator: &CoreLocator) -> Result<PathBuf, ActionError> {
     locator
@@ -369,12 +379,13 @@ pub async fn term_open(
     let sink: TermSink = Arc::new(move |event| on_event.send(event).is_ok());
     let sessions = Arc::clone(&sessions);
     let argv = launch.argv;
+    let core_path = PathBuf::from(&argv[0]);
     let id = tauri::async_runtime::spawn_blocking(move || {
         sessions.open(&argv, &env, TermSize { cols, rows }, sink)
     })
     .await
     .map_err(|e| ActionError::invalid(e.to_string()))?
-    .map_err(ActionError::invalid)?;
+    .map_err(|message| ActionError::invalid(open_error(&core_path, message)))?;
     core.log_note(
         &launch.machine_id,
         launch.display,
@@ -954,6 +965,26 @@ mod tests {
             resolved_core(&locator),
             Err(ActionError::Invalid { .. })
         ));
+    }
+
+    #[test]
+    fn a_vanished_core_is_named_instead_of_the_os_text() {
+        use crate::pty::PortablePty;
+        let gone = Path::new("/home/dev/.local/bin/no-such-herdr-core");
+        let launch = term_launch(gone, &terminal("local", "t7"), false, names).unwrap();
+        // It really does fail at spawn, with the OS's words.
+        let sessions = TermSessions::new(Arc::new(PortablePty));
+        let sink: TermSink = Arc::new(|_| true);
+        let message = sessions
+            .open(&launch.argv, &[], TermSize { cols: 80, rows: 24 }, sink)
+            .unwrap_err();
+        assert!(
+            message.starts_with("Could not start the terminal"),
+            "{message}"
+        );
+        assert_eq!(open_error(gone, message), "herdr-core not found.");
+        // A core that is there keeps its own message.
+        assert_eq!(open_error(Path::new("/bin/sh"), "boom".to_owned()), "boom");
     }
 
     #[test]

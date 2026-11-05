@@ -12,7 +12,7 @@ import { useTerminalStore, type TermTab } from "./terminalStore";
 
 type Props = {
   tab: TermTab;
-  /** The agent the tab shows; `null` for the full herdr UI, or when the pane is gone. */
+  /** The agent the tab shows; `null` when the terminal is gone. */
   row: Row | null;
   onFind: () => void;
 };

@@ -38,7 +38,7 @@ export function TermBar({
   const opening = tab.state === "opening";
   const failed = tab.state === "error";
   const retryWord = failed ? "Retry" : "Reattach";
-  const reason = detachReason(tab.exitCode ?? 0, tab.lastLine);
+  const reason = detachReason(tab.exitCode ?? -1, tab.lastLine);
   // A kept terminal whose shell was lost comes back by itself; the core's own loss too.
   const waitingForShell = tab.waiting?.kind === "restart";
   const waitingForCore = tab.waiting?.kind === "core";

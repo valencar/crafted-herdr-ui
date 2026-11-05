@@ -290,6 +290,23 @@ describe("terminalStore", () => {
       expect(store().settle(KEY, live({ restarts: 3 }), "ready")).toBe(false);
     });
 
+    it("a_restart_that_lands_before_the_exit_still_reattaches_once", () => {
+      // The session opened when the row had restarted once; the `restarted` event reaches the UI
+      // before the attach's exit does, so the row already says 2 when the exit arrives.
+      store().openTab(tab("t12"));
+      store().updateTab(KEY, { restartsAtOpen: 1 });
+      store().sessionEnded(
+        KEY,
+        { code: 0, lastLine: LOSS },
+        live({ restarts: 2 }),
+        "ready",
+      );
+      expect(tabOf().waiting).toEqual({ kind: "restart", restarts: 1 });
+      expect(store().settle(KEY, live({ restarts: 2 }), "ready")).toBe(true);
+      expect(tabOf().waiting).toBeNull();
+      expect(store().settle(KEY, live({ restarts: 3 }), "ready")).toBe(false);
+    });
+
     it("a_loss_line_without_keep_or_with_an_ended_row_does_not_wait", () => {
       end(0, LOSS, live({ keep: false }));
       expect(tabOf().waiting).toBeNull();

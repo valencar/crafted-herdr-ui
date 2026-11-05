@@ -74,13 +74,17 @@ fn every_captured_ending_reaches_the_ui_as_exit_code_and_last_line() {
         let raw = ending["last_line"].as_str().unwrap();
         match (name.as_str(), raw) {
             (_, "") => assert_eq!(last_line, None, "{name}"),
-            // A hint gives way to the error line before it.
-            (_, hint) if hint.starts_with("hint: ") => assert!(
-                last_line
-                    .as_deref()
-                    .is_some_and(|l| l.starts_with("error: ")),
-                "{name}: {last_line:?}"
-            ),
+            // A hint gives way to the last `error:` line before it.
+            (_, hint) if hint.starts_with("hint: ") => {
+                let error = ending["stderr_lines"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|l| l.as_str().unwrap())
+                    .rfind(|l| l.starts_with("error: "))
+                    .expect("a hint follows an error");
+                assert_eq!(last_line.as_deref(), Some(error), "{name}");
+            }
             _ => assert_eq!(last_line.as_deref(), Some(raw), "{name}"),
         }
     }

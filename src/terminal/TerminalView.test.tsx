@@ -678,7 +678,7 @@ describe("TerminalView", () => {
   });
 
   describe("a session that has not printed yet", () => {
-    // ssh still connecting: the session runs, nothing has come back.
+    // `hc attach` still dialing: the session runs, nothing has come back.
     beforeEach(() => {
       let next = 7;
       open.mockImplementation(async (_target, _c, _r, onEvent) => {
@@ -690,7 +690,7 @@ describe("TerminalView", () => {
     it("is_opening_until_its_first_output_then_live", async () => {
       render(<Harness />);
       await flush();
-      // ssh may still be connecting: the session exists, but nothing has come back.
+      // `hc attach` may still be dialing: the session exists, but nothing has come back.
       expect(tabState()).toMatchObject({ state: "opening", termId: 7 });
       emit({ kind: "data", data: "herdr" });
       expect(tabState()).toMatchObject({ state: "live", termId: 7 });
@@ -726,7 +726,7 @@ describe("TerminalView", () => {
       emit({ kind: "exit", code: 255, last_line: null });
       await user.click(screen.getByRole("button", { name: "Reattach" }));
       await flush();
-      // The network is still down: ssh runs, but the tab is not left blank.
+      // The network is still down: `hc attach` runs, but the tab is not left blank.
       expect(screen.getByText("Reattaching…")).toBeVisible();
       expect(screen.getByRole("button", { name: "Reattach" })).toBeDisabled();
       expect(screen.getByRole("button", { name: "Close tab" })).toBeEnabled();
@@ -900,6 +900,21 @@ describe("TerminalView", () => {
         attempts: 0,
       });
       // It happened once: more restarts do not reattach a live tab.
+      kept(3);
+      await flush();
+      expect(open).toHaveBeenCalledTimes(2);
+    });
+
+    it("a_restart_that_arrives_before_the_exit_still_reattaches_once", async () => {
+      kept(1);
+      render(<Harness />);
+      await flush();
+      // The new shell is announced first; the attach notices its old one is gone afterwards.
+      kept(2);
+      emit({ kind: "exit", code: 0, last_line: "[w1:p1 finished: signaled]" });
+      await flush();
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(tabState()).toMatchObject({ state: "live", waiting: null });
       kept(3);
       await flush();
       expect(open).toHaveBeenCalledTimes(2);
@@ -1238,7 +1253,7 @@ describe("TerminalView", () => {
       }
       // A hung open always has a way out.
       expect(screen.getByRole("button", { name: "Close tab" })).toBeEnabled();
-      // Started, but nothing back yet (ssh still connecting): still reattaching.
+      // Started, but nothing back yet (`hc attach` still dialing): still reattaching.
       await act(async () => finish(60));
       expect(screen.getByText("Reattaching…")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Close tab" })).toBeEnabled();
@@ -1338,7 +1353,7 @@ describe("TerminalView", () => {
       listed();
       const user = userEvent.setup();
       invoke.mockImplementation(async (name: string) =>
-        name === "copy_attach_command" ? "ssh -t buildbox herdr attach" : null,
+        name === "copy_attach_command" ? "hc attach buildbox/t1" : null,
       );
       render(<Harness />);
       await flush();
@@ -1350,7 +1365,7 @@ describe("TerminalView", () => {
         machineId: "buildbox",
         address: "w1:p1",
       });
-      expect(copy).toHaveBeenCalledWith("ssh -t buildbox herdr attach");
+      expect(copy).toHaveBeenCalledWith("hc attach buildbox/t1");
     });
 
     it("Open_in_the_terminal_opens_the_row_outside_the_app", async () => {
