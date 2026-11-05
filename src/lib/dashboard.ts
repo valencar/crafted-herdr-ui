@@ -1,7 +1,7 @@
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { MachineView } from "./bindings/MachineView";
 import { formatStaleness } from "./format";
-import { bySinceThenKey, isShell, type Row } from "./grouping";
+import { bySinceThenKey, isShell, shownStatus, type Row } from "./grouping";
 
 export type StatusCounts = {
   blocked: number;
@@ -13,7 +13,10 @@ export type StatusCounts = {
   total: number;
 };
 
-/** Counts agents only; plain shells, ended or not, are left out of every field. */
+/**
+ * Counts agents only; plain shells, ended or not, are left out of every field. A worker's done
+ * counts with idle (`shownStatus`).
+ */
 export function statusCounts(rows: Row[]): StatusCounts {
   const counts: StatusCounts = {
     blocked: 0,
@@ -27,12 +30,13 @@ export function statusCounts(rows: Row[]): StatusCounts {
   for (const r of rows) {
     if (isShell(r)) continue;
     counts.total += 1;
-    if (r.status === "blocked") counts.blocked += 1;
-    else if (r.status === "error") counts.error += 1;
-    else if (r.status === "ended") counts.ended += 1;
-    else if (r.status === "done") counts.done += 1;
-    else if (r.status === "working") counts.working += 1;
-    else if (r.status === "idle") counts.idle += 1;
+    const { status } = shownStatus(r);
+    if (status === "blocked") counts.blocked += 1;
+    else if (status === "error") counts.error += 1;
+    else if (status === "ended") counts.ended += 1;
+    else if (status === "done") counts.done += 1;
+    else if (status === "working") counts.working += 1;
+    else if (status === "idle") counts.idle += 1;
   }
   return counts;
 }

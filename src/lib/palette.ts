@@ -1,10 +1,11 @@
 import type { MachineView } from "./bindings/MachineView";
-import { shortPath, STATUS_LABEL } from "./format";
+import { shortPath } from "./format";
 import { fuzzyMatch, fuzzyScore } from "./fuzzy";
 import {
   groupByProject,
   needsYou,
   partitionPinned,
+  shownStatus,
   sortPinnedFirst,
   type Row,
 } from "./grouping";
@@ -79,9 +80,7 @@ export const PALETTE_LIMIT = 50;
 export function buildItems(ctx: Context): PaletteItem[] {
   const urgent = sortPinnedFirst(needsYou(ctx.rows));
   const urgentKeys = new Set(urgent.map((r) => r.key));
-  const other = sortPinnedFirst(
-    ctx.rows.filter((r) => !urgentKeys.has(r.key)),
-  );
+  const other = sortPinnedFirst(ctx.rows.filter((r) => !urgentKeys.has(r.key)));
   const tabKeys = new Set(ctx.openTabs.map((t) => t.key));
 
   // The rule of `agentActions` and the Open button: with a tab open, Enter goes to it and ⌘Enter
@@ -98,7 +97,7 @@ export function buildItems(ctx: Context): PaletteItem[] {
       detail: [
         row.machineLabel,
         row.folder === null ? null : shortPath(row.folder),
-        STATUS_LABEL[row.status],
+        shownStatus(row).label,
       ]
         .filter((part) => part !== null)
         .join(" · "),

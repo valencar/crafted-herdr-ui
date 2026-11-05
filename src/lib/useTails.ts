@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHomeVisible } from "../terminal/useHomeVisible";
-import type { Row } from "./grouping";
+import { shownStatus, type Row } from "./grouping";
 import { invokeTyped } from "./ipc";
 
 /** How often the boxes re-read their last line, and how many terminals are read. */
@@ -26,7 +26,8 @@ export function tailTargets(rows: Row[]): string[] {
   return [...rows]
     .sort(
       (a, b) =>
-        STATUS_PRIORITY.indexOf(a.status) - STATUS_PRIORITY.indexOf(b.status),
+        STATUS_PRIORITY.indexOf(shownStatus(a).status) -
+        STATUS_PRIORITY.indexOf(shownStatus(b).status),
     )
     .slice(0, MAX_TAIL_PANES)
     .map((r) => r.address);

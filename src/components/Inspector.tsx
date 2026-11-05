@@ -107,7 +107,7 @@ export function Inspector({
     <aside className="inspector" aria-label="Selected agent">
       <header className="inspector-head">
         <div className="inspector-badges">
-          <StatusPill status={row.status} />
+          <StatusPill status={row.status} isWorker={row.isWorker} />
           <KindBadge kind={row.kind} isAgent={isAgent} named />
           <span className="muted">
             {row.kind ?? (isAgent ? "Agent" : "Shell")}
@@ -172,7 +172,7 @@ export function Inspector({
                     >
                       {w.name}
                     </button>
-                    <StatusPill status={w.status} />
+                    <StatusPill status={w.status} isWorker={w.isWorker} />
                   </li>
                 ))}
               </ul>

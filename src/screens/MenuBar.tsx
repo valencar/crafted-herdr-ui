@@ -3,11 +3,12 @@ import { PinGlyph } from "../components/PinGlyph";
 import { HealthDot, StatusDot } from "../components/StatusDot";
 import { useMemo } from "react";
 import { StoreToast } from "../components/Toast";
-import { HEALTH_LABEL, STATUS_LABEL, formatAge, plural } from "../lib/format";
+import { HEALTH_LABEL, formatAge, plural } from "../lib/format";
 import {
   isShell,
   needsYou,
   projectNames,
+  shownStatus,
   sortPinnedFirst,
   toRows,
   type Row,
@@ -44,14 +45,14 @@ function RowItem({ row, project, nowMs, primary }: RowItemProps) {
   const detail = [project, row.machineLabel, age].filter(Boolean).join(" · ");
   return (
     <li className="pop-row" data-row-key={row.key}>
-      <StatusDot status={row.status} />
+      <StatusDot status={shownStatus(row).status} />
       <span className="pop-row-text">
         <span className="pop-row-name">
           {row.name}
           {row.pinned && <PinGlyph />}
         </span>
         <span className="mono muted pop-row-detail">
-          <span className="pop-row-status">{STATUS_LABEL[row.status]}</span> ·{" "}
+          <span className="pop-row-status">{shownStatus(row).label}</span> ·{" "}
           {detail}
         </span>
       </span>

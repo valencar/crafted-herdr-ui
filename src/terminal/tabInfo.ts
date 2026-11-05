@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { AppState } from "../lib/bindings/AppState";
-import { shortPath, STATUS_LABEL } from "../lib/format";
-import { isNeedsYou, toRows, type Row } from "../lib/grouping";
+import { shortPath } from "../lib/format";
+import { isNeedsYou, shownStatus, toRows, type Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import type { DotStatus } from "../components/StatusDot";
 import { rowKeyOf, type TermTab } from "./terminalStore";
@@ -39,7 +39,7 @@ const STATE_WORDS: Record<Exclude<TermTab["state"], "live">, string> = {
  * there is nothing to say (a terminal whose row is gone).
  */
 export function tabStatus(tab: TermTab, row: Row | undefined): string | null {
-  const rowLabel = row ? STATUS_LABEL[row.status] : null;
+  const rowLabel = row ? shownStatus(row).label : null;
   if (tab.state === "live") return rowLabel;
   const state = STATE_WORDS[tab.state];
   return row && isNeedsYou(row) ? `${state} · ${rowLabel}` : state;
@@ -58,7 +58,7 @@ export function tabDotStatus(
   tab: TermTab,
   row: Row | undefined,
 ): DotStatus | undefined {
-  if (tab.state === "live") return row?.status;
+  if (tab.state === "live") return row && shownStatus(row).status;
   return tab.state === "error" ? "failed" : tab.state;
 }
 

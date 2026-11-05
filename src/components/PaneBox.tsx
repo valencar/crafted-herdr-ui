@@ -35,7 +35,7 @@ export function PaneBox({ row, tail, onOpen, worker = false }: Props) {
         <span className="mono pane-box-name">{row.name}</span>
       </span>
       <span id={statusId}>
-        <StatusPill status={row.status} />
+        <StatusPill status={row.status} isWorker={row.isWorker} />
       </span>
       {/* What a blocked agent waits on, or a working agent's progress. */}
       {detail && (

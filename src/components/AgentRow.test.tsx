@@ -42,6 +42,12 @@ function renderRow(r: Row, note: string | null = null) {
 }
 
 describe("AgentRow", () => {
+  it("a_workers_done_reads_done_not_unseen", () => {
+    renderRow(row({ status: "done", isWorker: true, parent: "buildbox::t1" }));
+    expect(screen.getByText("Done")).toHaveAttribute("data-status", "idle");
+    expect(screen.queryByText("Done, unseen")).toBeNull();
+  });
+
   it("pin_glyph_is_not_inside_the_ellipsized_title", () => {
     renderRow(
       row({ pinned: true, status: "idle", title: "a long title ".repeat(20) }),

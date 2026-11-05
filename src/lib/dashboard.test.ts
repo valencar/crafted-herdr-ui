@@ -87,6 +87,25 @@ describe("statusCounts", () => {
   });
 });
 
+describe("statusCounts and workers", () => {
+  it("a_workers_done_counts_with_idle", () => {
+    const workerDone = {
+      ...row("w", "done"),
+      isWorker: true,
+      parent: "local::p",
+    };
+    expect(statusCounts([workerDone, row("p", "working")])).toEqual({
+      blocked: 0,
+      error: 0,
+      done: 0,
+      working: 1,
+      idle: 1,
+      ended: 0,
+      total: 2,
+    });
+  });
+});
+
 describe("statusCounts and ended shells", () => {
   it("an_ended_shell_is_not_counted_as_an_agent", () => {
     const endedShell = { ...row("s", "ended"), isAgent: false, kind: null };

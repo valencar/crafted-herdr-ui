@@ -26,6 +26,7 @@ import {
   nestWorkers,
   projectNames,
   projectNamesOf,
+  shownStatus,
   sortPinnedFirst,
   toRows,
   blockedKindLabel,
@@ -765,6 +766,45 @@ describe("groupByStatus", () => {
       "Shell",
     ]);
     expect(groups.find((g) => g.name === "Shell")?.rows).toHaveLength(2);
+  });
+});
+
+describe("a worker's done", () => {
+  const worker = (status: Row["status"], key = "m::t5") =>
+    row({
+      key,
+      address: key.slice(3),
+      status,
+      isWorker: true,
+      parent: "m::t1",
+    });
+
+  it("reads_done_and_ranks_with_idle", () => {
+    // Spec section 4.5: it reports to its parent, so it is Idle-ranked "Done".
+    expect(shownStatus(worker("done"))).toEqual({
+      status: "idle",
+      label: "Done",
+    });
+    // Anything else is the row's own status, a worker's blocker included.
+    expect(shownStatus(worker("blocked"))).toEqual({
+      status: "blocked",
+      label: "Needs input",
+    });
+    expect(shownStatus(row({ status: "done" }))).toEqual({
+      status: "done",
+      label: "Done, unseen",
+    });
+  });
+
+  it("groups_with_idle_by_status", () => {
+    const rows = [
+      worker("done"),
+      row({ key: "m::t1", address: "t1", status: "working" }),
+    ];
+    const groups = groupByStatus(rows);
+    expect(groups.map((g) => g.name)).toEqual(["Working", "Idle"]);
+    expect(groups[1].rows.map((r) => r.key)).toEqual(["m::t5"]);
+    expect(groups[1].tier).toBe(2);
   });
 });
 

@@ -8,7 +8,12 @@ import { tabShortcutId, type ShortcutId } from "../lib/shortcuts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { isShell, STATUS_ORDER, type Group } from "../lib/grouping";
+import {
+  isShell,
+  shownStatus,
+  STATUS_ORDER,
+  type Group,
+} from "../lib/grouping";
 import { toggleSidebar } from "../lib/uiHelpers";
 import { shownMachines } from "../lib/workbox";
 import { useWorkboxColor } from "../lib/workboxColors";
@@ -105,7 +110,9 @@ function RailWorkbox({
 
 function worstStatus(group: Group): RowStatus {
   return (
-    STATUS_ORDER.find((s) => group.rows.some((r) => r.status === s)) ?? "shell"
+    STATUS_ORDER.find((s) =>
+      group.rows.some((r) => shownStatus(r).status === s),
+    ) ?? "shell"
   );
 }
 

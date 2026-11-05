@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { rowOf } from "../test/builders";
 import type { Row } from "../lib/grouping";
-import { countNeeds, tabDotStatus, tabSubline } from "./tabInfo";
+import { countNeeds, tabDotStatus, tabStatus, tabSubline } from "./tabInfo";
 import type { TermTab } from "./terminalStore";
 
 function tab(over: Partial<TermTab> = {}): TermTab {
@@ -113,6 +113,20 @@ describe("countNeeds with a Watch tab", () => {
     expect(countNeeds(tabs, rows)).toBe(1);
     // A Watch tab alone counts too.
     expect(countNeeds(tabs.slice(1), rows)).toBe(1);
+  });
+});
+
+describe("a worker's done", () => {
+  it("reads_done_with_the_idle_dot", () => {
+    const worker = row({
+      status: "done",
+      isWorker: true,
+      parent: "buildbox::t1",
+    });
+    expect(tabStatus(tab(), worker)).toBe("Done");
+    expect(tabDotStatus(tab(), worker)).toBe("idle");
+    // An agent's own done is still unseen.
+    expect(tabStatus(tab(), row({ status: "done" }))).toBe("Done, unseen");
   });
 });
 

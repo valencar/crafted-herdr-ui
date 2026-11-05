@@ -59,7 +59,7 @@ export type Group = {
 export const LOOSE_NAME = "Loose sessions";
 export const NO_SPACE_NAME = "Not in a space";
 
-/** Most urgent first: needs-you statuses, then the rest, ended last. */
+/** Most urgent first: needs-you statuses, then the rest, ended last. Rank a row by `shownStatus`. */
 export const STATUS_ORDER: RowStatus[] = [
   "blocked",
   "error",
@@ -157,6 +157,25 @@ export function isNeedsYou(r: Row): boolean {
     r.status === "error" ||
     (r.status === "done" && !r.isWorker)
   );
+}
+
+/** What a worker's done reads: it isn't the person's to see, so it is never "unseen". */
+export const WORKER_DONE_LABEL = "Done";
+
+/**
+ * A row's status as it is ranked, counted and drawn, with its words: its own, except a worker's
+ * done, which ranks and counts with Idle and reads "Done" (spec section 4.5: a worker reports to
+ * its parent, not to the person). Everything that orders, counts or labels rows by status uses
+ * this, so a worker's done is never shown as needing anyone.
+ */
+export function shownStatus(r: Pick<Row, "status" | "isWorker">): {
+  status: RowStatus;
+  label: string;
+} {
+  if (r.status === "done" && r.isWorker) {
+    return { status: "idle", label: WORKER_DONE_LABEL };
+  }
+  return { status: r.status, label: STATUS_LABEL[r.status] };
 }
 
 /**
@@ -489,11 +508,11 @@ export function groupBySpace(
   return [...groups, ...[...none.values()].sort(byNameThenMachine)];
 }
 
-/** One group per status that has rows, needs-you first and ended last. */
+/** One group per status that has rows, needs-you first and ended last (by `shownStatus`). */
 export function groupByStatus(rows: Row[]): Group[] {
   const out: Group[] = [];
   for (const status of STATUS_ORDER) {
-    const inStatus = rows.filter((r) => r.status === status);
+    const inStatus = rows.filter((r) => shownStatus(r).status === status);
     if (inStatus.length === 0) continue;
     out.push({
       key: `status::${status}`,

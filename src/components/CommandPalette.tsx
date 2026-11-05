@@ -3,9 +3,9 @@ import { PinGlyph } from "./PinGlyph";
 import { StatusDot } from "./StatusDot";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { fuzzyMatch } from "../lib/fuzzy";
-import { STATUS_LABEL, shortPath } from "../lib/format";
+import { shortPath } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
-import { toRows, type Row } from "../lib/grouping";
+import { shownStatus, toRows, type Row } from "../lib/grouping";
 import { runMenuAction } from "../lib/menuActions";
 import { openRow } from "../lib/openRow";
 import {
@@ -521,13 +521,13 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
               <span className="palette-crumb-back" aria-hidden="true">
                 ‹
               </span>
-              <StatusDot status={frameRow.status} live />
+              <StatusDot status={shownStatus(frameRow).status} live />
               <span className="palette-crumb-name">{frameRow.name}</span>
               <span className="palette-detail mono">
                 {[
                   frameRow.machineLabel,
                   frameRow.folder === null ? null : shortPath(frameRow.folder),
-                  STATUS_LABEL[frameRow.status],
+                  shownStatus(frameRow).label,
                 ]
                   .filter((part) => part !== null)
                   .join(" · ")}

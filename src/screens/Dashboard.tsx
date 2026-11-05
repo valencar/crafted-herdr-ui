@@ -228,7 +228,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
                       const age = formatAge(r.sinceMs, nowMs);
                       return (
                         <li key={r.key} className="dash-row">
-                          <StatusPill status={r.status} />
+                          <StatusPill status={r.status} isWorker={r.isWorker} />
                           <span className="mono dash-name">{r.name}</span>
                           <span className="muted">{where(r)}</span>
                           {age && (

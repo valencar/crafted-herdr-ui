@@ -436,6 +436,33 @@ describe("Sidebar", () => {
     );
   });
 
+  it("a_workers_done_ranks_after_working_in_a_projects_dot", () => {
+    const rows = (["working", "done"] as const).map((status, i) =>
+      rowOf({
+        key: `buildbox::api-service:${i}`,
+        machineId: "buildbox",
+        machineLabel: "buildbox",
+        address: `api-service:${i}`,
+        name: "api-service",
+        status,
+        isWorker: status === "done",
+        parent: status === "done" ? "buildbox::api-service:0" : null,
+      }),
+    );
+    renderSidebar(false, {
+      projects: [{ ...project("api-service"), rows }],
+    });
+    const nav = screen.getByRole("navigation", { name: "Sidebar" });
+    const item = within(nav)
+      .getByText("api-service", { selector: ".nav-label" })
+      .closest("button")!;
+    expect(item).toHaveTextContent("Working:");
+    expect(item.querySelector(".sdot")).toHaveAttribute(
+      "data-status",
+      "working",
+    );
+  });
+
   it("three_or_fewer_projects_have_no_more_button", () => {
     renderSidebar(false, {
       projects: ["api-service", "web-app", "infra"].map(project),

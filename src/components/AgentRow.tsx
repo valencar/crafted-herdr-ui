@@ -60,7 +60,7 @@ export const AgentRow = memo(function AgentRow({
         aria-current={selected ? "true" : undefined}
         onClick={() => onSelect(row.key)}
       >
-        <StatusPill status={row.status} />
+        <StatusPill status={row.status} isWorker={row.isWorker} />
         <KindBadge kind={row.kind} isAgent={row.isAgent} />
         <span className="row-text">
           {/* The pin sits beside the title, not in it: a long title ellipsizes. */}

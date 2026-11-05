@@ -815,7 +815,9 @@ describe("Inspector workers and status details", () => {
     expect(items[0]).toHaveTextContent("linter");
     expect(items[0]).toHaveTextContent("Needs input");
     expect(items[1]).toHaveTextContent("fixer");
-    expect(items[1]).toHaveTextContent("Done, unseen");
+    // A worker's done is Idle-ranked "Done" (spec section 4.5), never "unseen".
+    expect(items[1]).toHaveTextContent("Done");
+    expect(items[1]).not.toHaveTextContent("Done, unseen");
     expect(items[2]).toHaveTextContent("builder");
     expect(items[2]).toHaveTextContent("Working");
     expect(screen.queryByText("Started by")).toBeNull();
