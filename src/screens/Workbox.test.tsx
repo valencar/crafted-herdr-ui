@@ -12,12 +12,14 @@ import type { AppState } from "../lib/bindings/AppState";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
+import type { SpaceLayout } from "../lib/bindings/SpaceLayout";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import {
   agentTerm,
   appState as buildState,
   buildboxTerms,
+  layoutOf,
   machineView,
   shellTerm,
   unanswered,
@@ -46,6 +48,7 @@ function machine(
     via?: boolean;
     host?: string;
     since?: number;
+    layout?: SpaceLayout | null;
   } = {},
   health: Health = { kind: "online" },
 ): MachineView {
@@ -63,6 +66,7 @@ function machine(
       via: over.via,
       host: over.host,
       stateSinceMs: over.since,
+      layout: over.layout,
     },
     over.terms ?? buildboxTerms(),
   );
@@ -190,6 +194,48 @@ describe("Workbox", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "infra" }),
     ).toBeInTheDocument();
+  });
+
+  it("groups_by_herdr_space_when_the_machine_has_a_layout", () => {
+    const layout = layoutOf([
+      { id: "s1", name: "Release work", terminals: ["w1:p1", "w2:p1"] },
+      { id: "s2", folder: "/home/dev/infra", terminals: ["w1:p2"] },
+    ]);
+    setup(appState(machine("local"), machine("buildbox", { layout })));
+    const groups = screen.getAllByRole("region", {
+      name: /^(Release work|infra|Not in a space)$/,
+    });
+    // Needs-you first, then working, then the rest, "Not in a space" last.
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
+      "Release work",
+      "infra",
+      "Not in a space",
+    ]);
+    const boxesIn = (g: HTMLElement) =>
+      within(g)
+        .getAllByRole("button", { name: /^Open / })
+        .map((b) => b.getAttribute("aria-label"));
+    expect(boxesIn(groups[0])).toEqual(["Open planner", "Open tester"]);
+    expect(boxesIn(groups[1])).toEqual(["Open copilot: terraform plan"]);
+    expect(boxesIn(groups[2])).toEqual(["Open zsh", "Open claude", "Open zsh"]);
+    // No project group is left.
+    expect(screen.queryByRole("region", { name: "api-service" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Loose sessions" })).toBeNull();
+  });
+
+  it("keeps_project_groups_for_a_machine_without_a_layout", () => {
+    // Another machine's layout changes nothing here.
+    const layout = layoutOf([
+      { id: "s1", name: "Elsewhere", terminals: ["w1:p1"] },
+    ]);
+    setup(appState(machine("local", { layout }), machine("buildbox")));
+    expect(
+      screen
+        .getAllByRole("region", {
+          name: /^(api-service|web-app|infra|Loose sessions|Not in a space)$/,
+        })
+        .map((g) => g.getAttribute("aria-label")),
+    ).toEqual(["api-service", "web-app", "infra", "Loose sessions"]);
   });
 
   it("renders_the_machines_terminals_as_pane_boxes", async () => {

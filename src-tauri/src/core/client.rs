@@ -289,9 +289,10 @@ impl CoreClient {
         Ok((conn, notes, info))
     }
 
-    /// Adds a command handed to the user's terminal, with where it went. The app can't see how
-    /// it ends, so the entry has no exit code and no error. It has no argv either: `display` is
-    /// the whole command.
+    /// Adds an entry the app makes about something that is not a call it made: a command handed
+    /// to the user's terminal, with where it went (the app can't see how it ends), or a note about
+    /// what a read found (a layout document that isn't understood). The entry has no exit code, no
+    /// error and no argv: `display` is the whole command, and `note` says what happened.
     pub fn log_note(&self, machine_id: &str, display: String, note: &str) {
         self.log.push(CommandLogEntry {
             at_ms: now_ms(),

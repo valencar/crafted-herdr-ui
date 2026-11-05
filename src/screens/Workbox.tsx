@@ -11,6 +11,7 @@ import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
 import { shortPath } from "../lib/format";
 import {
   groupByProject,
+  groupBySpace,
   isNeedsYou,
   isShell,
   nestWorkers,
@@ -50,8 +51,16 @@ export function Workbox({ machineId }: { machineId: string }) {
     () => allRows.filter((r) => r.machineId === machineId),
     [allRows, machineId],
   );
-  // The terminals by project folder, the same rule as everywhere else.
-  const groups = useMemo(() => groupByProject(rows), [rows]);
+  // The terminals by Herdr space when this machine has a layout (spec 7.4, 8.6), else by project
+  // folder, the same rule as everywhere else.
+  const layout = machine?.layout ?? null;
+  const groups = useMemo(
+    () =>
+      layout !== null && machine
+        ? groupBySpace(rows, [machine])
+        : groupByProject(rows),
+    [rows, layout, machine],
+  );
   // Inside a project each worker sits with the agent that started it.
   const nestedGroups = useMemo(
     () => groups.map((g) => ({ group: g, nested: nestWorkers(g.rows) })),

@@ -66,6 +66,9 @@ struct Script {
     doc_gets: Mutex<Vec<Value>>,
     /// `doc.get` answers with an error.
     doc_fails: AtomicBool,
+    /// How long `doc.get` takes to answer, by the machine it was asked on, in milliseconds. The
+    /// answer is the document as it is when the call arrives.
+    doc_delay_ms: Mutex<std::collections::HashMap<String, u64>>,
     /// Every method the app called, in order.
     methods: Mutex<Vec<String>>,
 }
@@ -141,8 +144,9 @@ impl Connector for TestConnector {
                         }
                         let on = req["params"]["on"].as_str().unwrap_or_default();
                         let doc = lock(&s.docs).get(on).cloned();
+                        let delay = lock(&s.doc_delay_ms).get(on).copied().unwrap_or(0);
                         (
-                            0,
+                            delay,
                             Reply::Result(
                                 doc.unwrap_or_else(|| json!({"value": null, "version": 0})),
                             ),
@@ -2059,4 +2063,149 @@ async fn never_calls_doc_set() {
             .all(|m| !m.starts_with("doc.") || m == "doc.get")
     );
     assert!(!crate::core::USES.contains(&"doc.set"));
+}
+
+/// A `doc.get` result for a one-space layout.
+fn doc_result(space_name: &str, terminal: &str, version: u64) -> Value {
+    json!({"value": one_space("s1", space_name, terminal), "version": version})
+}
+
+fn set_doc(h: &Harness, on: &str, result: Value) {
+    lock(&h.script.docs).insert(on.to_owned(), result);
+}
+
+fn space_name_of(state: &AppState, id: &str, address: &str) -> Option<String> {
+    layout_of(state, id).map(|l| l.by_address[address].space_name.clone())
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_burst_of_doc_events_keeps_one_read_in_flight_and_the_newer_value_wins() {
+    let h = Harness::new()
+        .doc("buildbox", one_space("s1", "first", "t2"), 1)
+        .up()
+        .await;
+    let before = h.doc_gets().len();
+    // The first read is slow and carries what the document says when it arrives.
+    lock(&h.script.doc_delay_ms).insert("buildbox".into(), 500);
+    set_doc(&h, "buildbox", doc_result("second", "t2", 2));
+    h.doc_event(40, "herdr-app", "buildbox");
+    settle().await;
+    // The document moves on, and more events arrive while the read is out.
+    lock(&h.script.doc_delay_ms).insert("buildbox".into(), 0);
+    set_doc(&h, "buildbox", doc_result("third", "t2", 3));
+    h.doc_event(41, "herdr-app", "buildbox");
+    h.doc_event(42, "herdr-app", "buildbox");
+    h.doc_event(43, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    // One read in flight, none piled up behind it.
+    assert_eq!(h.doc_gets().len() - before, 1);
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    // One more read after the first ended, and its newer answer is what shows.
+    assert_eq!(h.doc_gets().len() - before, 2);
+    assert_eq!(
+        space_name_of(&h.state(), BUILDBOX, "t2").as_deref(),
+        Some("third")
+    );
+    // Quiet again: a later event reads once more.
+    h.doc_event(44, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    assert_eq!(h.doc_gets().len() - before, 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_machine_that_leaves_and_returns_does_not_take_the_old_answer() {
+    let h = Harness::new()
+        .doc("buildbox", one_space("s1", "old", "t2"), 1)
+        .up()
+        .await;
+    let without = {
+        let mut list = json_of(MACHINE_LIST);
+        list["machines"].as_array_mut().unwrap().remove(0);
+        list
+    };
+    *lock(&h.script.machine_list) = vec![json_of(MACHINE_LIST), without, json_of(MACHINE_LIST)];
+    // A slow read is out when the machine leaves the list.
+    lock(&h.script.doc_delay_ms).insert("buildbox".into(), 1_000);
+    set_doc(&h, "buildbox", doc_result("stale", "t2", 2));
+    h.doc_event(40, "herdr-app", "buildbox");
+    settle().await;
+    h.sync().refresh_machines();
+    settle().await;
+    settle().await;
+    assert!(h.state().machines.iter().all(|m| m.id != BUILDBOX));
+    // It comes back, with a document of its own, read at once.
+    lock(&h.script.doc_delay_ms).insert("buildbox".into(), 0);
+    set_doc(&h, "buildbox", doc_result("fresh", "t2", 3));
+    h.sync().refresh_machines();
+    settle().await;
+    settle().await;
+    assert_eq!(
+        space_name_of(&h.state(), BUILDBOX, "t2").as_deref(),
+        Some("fresh")
+    );
+    // The slow answer lands after that and is dropped.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(
+        space_name_of(&h.state(), BUILDBOX, "t2").as_deref(),
+        Some("fresh")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_event_under_an_old_machine_name_reads_by_the_current_name() {
+    let h = Harness::new().up().await;
+    *lock(&h.script.machine_list) =
+        vec![json_of(MACHINE_LIST), list_with_buildbox_named("ci-runner")];
+    h.sync().refresh_machines();
+    settle().await;
+    settle().await;
+    set_doc(&h, "ci-runner", doc_result("ops", "t2", 1));
+    // The core still says the old name until its own events catch up.
+    h.doc_event(40, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    assert_eq!(h.doc_gets().last().map(String::as_str), Some("ci-runner"));
+    assert_eq!(
+        space_name_of(&h.state(), BUILDBOX, "t2").as_deref(),
+        Some("ops")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_read_between_two_bad_reads_of_one_version_does_not_say_it_twice() {
+    let garbage = json!({"value": {"spaces": "no"}, "version": 3});
+    let h = Harness::new().up().await;
+    let said = |h: &Harness| {
+        h.notes()
+            .into_iter()
+            .filter(|n| n.contains("not understood"))
+            .count()
+    };
+    set_doc(&h, "buildbox", garbage.clone());
+    h.doc_event(40, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    assert_eq!(said(&h), 1);
+    // A timeout or an error in between: no layout, and the version is still the one said.
+    h.script.doc_fails.store(true, Ordering::SeqCst);
+    h.doc_event(41, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    h.script.doc_fails.store(false, Ordering::SeqCst);
+    h.doc_event(42, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    assert_eq!(said(&h), 1);
+    // A good read forgets it: the same version bad again would be new.
+    set_doc(&h, "buildbox", doc_result("ops", "t2", 4));
+    h.doc_event(43, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    set_doc(&h, "buildbox", garbage);
+    h.doc_event(44, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    assert_eq!(said(&h), 2);
 }

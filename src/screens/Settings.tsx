@@ -322,11 +322,12 @@ function General({
   update: Update;
 }) {
   const groupId = useId();
-  const state = useAppStore((s) => s.state);
   // Space comes with Herdr's layouts; a saved choice stays on the list so the field isn't blank.
-  const showSpace =
-    (state !== null && hasSpaceLayouts(state.machines)) ||
-    settings.group_by === "space";
+  // A boolean, so the section doesn't re-render with every state.
+  const hasLayouts = useAppStore(
+    (s) => s.state !== null && hasSpaceLayouts(s.state.machines),
+  );
+  const showSpace = hasLayouts || settings.group_by === "space";
   return (
     <div className="settings-stack">
       <Field id={groupId} label="Group sessions by">

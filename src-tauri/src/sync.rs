@@ -34,10 +34,16 @@
 //! each terminal is in. `doc.get` is a quiet read, made for the local core and for each connected
 //! machine (`on` is its name; the result is kept by machine id): after each subscribe, after a
 //! `missed`, on a `doc` event for `herdr-app` from that machine, and when a machine turns
-//! `connected`. Reads run on their own tasks, and only the newest read of a machine is kept (a
-//! slow older one can't overwrite it). A read that fails, a document that was never written, or
-//! one that doesn't parse leaves the machine with no layout; none of them touches its health. A
-//! parse failure is noted once per (machine, document version). The app never writes the document.
+//! `connected`. Reads run on their own tasks, at most one per machine at a time: a request that
+//! comes while one is in flight only marks the machine dirty, and one more read follows when the
+//! current one ends (a burst of events while someone drags a split can't pile up reads on the
+//! quiet slots). Each read has a number from one counter that never repeats, and its result is
+//! kept only while it is still the machine's current read, so a machine that leaves and comes back
+//! can't take an old answer. `on` is the machine's name in the list now, not the one an event
+//! used. A read that fails, a document that was never written, or one that doesn't parse leaves
+//! the machine with no layout; none of them touches its health. A parse failure is noted once
+//! per (machine, document version); only a good read or a never-written document forgets it.
+//! The app never writes the document.
 //!
 //! **Shared seen** (spec §8.1, herdr-app `docs/labels.md`). The UI says which terminals it draws
 //! (`set_looking`; empty while the window is away). For each of them `herdr.seen` is written as
@@ -220,8 +226,11 @@ struct Model {
     aliases: Vec<Alias>,
     /// Each machine's spaces, by machine id. A machine with no entry has no layout.
     layouts: HashMap<String, SpaceLayout>,
-    /// The newest `doc.get` started for each machine; an older one that answers later is dropped.
-    layout_reads: HashMap<String, u64>,
+    /// The `doc.get` of each machine that has one going or due. A leaf of the model lock.
+    layout_reads: HashMap<String, LayoutRead>,
+    /// The number the next read takes. Never repeats, so a machine that leaves and returns can't
+    /// reuse one.
+    next_read: u64,
     /// The document version that failed to parse, by machine id: said once.
     layout_unreadable: HashMap<String, u64>,
     state: AppState,
@@ -257,8 +266,25 @@ fn machine_id<'a>(
         })
 }
 
-/// A machine whose layout is to be read: its id, and its name for `on` (`None`: the local core).
-type LayoutTarget = (String, Option<String>);
+/// The layout read of one machine: the one in flight, and whether another is wanted after it.
+#[derive(Debug, Clone, Copy)]
+struct LayoutRead {
+    /// The read that is in flight; its result counts only while this is still its number.
+    number: u64,
+    /// Asked for again meanwhile: one more read when this one ends.
+    dirty: bool,
+}
+
+/// What a `doc.get herdr-app` came to.
+enum LayoutAnswer {
+    Layout(SpaceLayout),
+    /// The document was never written.
+    Never,
+    /// It didn't parse: the version it had.
+    Unreadable(u64),
+    /// The call failed.
+    Failed,
+}
 
 /// A state held back for a machine name nobody has resolved yet.
 #[derive(Debug, Clone, Copy)]
@@ -368,6 +394,7 @@ impl CoreSync {
                 aliases: Vec::new(),
                 layouts: HashMap::new(),
                 layout_reads: HashMap::new(),
+                next_read: 0,
                 layout_unreadable: HashMap::new(),
                 state,
                 emitted: None,
@@ -822,9 +849,9 @@ impl Inner {
     /// Takes a new machine list. A machine whose name changed keeps its seen records and its
     /// terminals meanwhile: the stream still calls it by the old name until its `removed` and
     /// `created` arrive (Rename asks for a list right after `machine.rename`). Returns the
-    /// machines that are connected now and were not in the list before (id, name): their
-    /// layouts are due.
-    fn set_machines(m: &mut Model, machines: Vec<CoreMachine>) -> Vec<LayoutTarget> {
+    /// machines that are connected now and were not in the list before (ids): their layouts are
+    /// due.
+    fn set_machines(m: &mut Model, machines: Vec<CoreMachine>) -> Vec<String> {
         let until = Instant::now() + HOLD_MAX;
         let was_connected: HashSet<String> = m
             .machines
@@ -847,7 +874,7 @@ impl Inner {
         let newly = machines
             .iter()
             .filter(|x| x.state == "connected" && !was_connected.contains(&x.id))
-            .map(|x| (x.id.clone(), Some(x.name.clone())))
+            .map(|x| x.id.clone())
             .collect();
         // A machine that left the list leaves nothing behind.
         let listed: HashSet<&str> = machines.iter().map(|x| x.id.as_str()).collect();
@@ -861,81 +888,152 @@ impl Inner {
 
     // ---- layouts ----
 
-    /// The local core and each connected machine: the machine id, and the name `doc.get` takes
-    /// as `on` (none for the local core).
-    fn layout_targets(m: &Model) -> Vec<LayoutTarget> {
-        std::iter::once((LOCAL.to_owned(), None))
+    /// The local core and each connected machine, by id.
+    fn layout_targets(m: &Model) -> Vec<String> {
+        std::iter::once(LOCAL.to_owned())
             .chain(
                 m.machines
                     .iter()
                     .filter(|x| x.state == "connected")
-                    .map(|x| (x.id.clone(), Some(x.name.clone()))),
+                    .map(|x| x.id.clone()),
             )
             .collect()
     }
 
-    /// Starts reading the layout of each target, each on its own task.
-    fn read_layouts(self: &Arc<Self>, targets: Vec<LayoutTarget>) {
+    /// The `on` of a machine's `doc.get`: its name in the list now (none for the local core).
+    /// `None` outside the list: nothing to read.
+    fn layout_on(m: &Model, id: &str) -> Option<Option<String>> {
+        if id == LOCAL {
+            return Some(None);
+        }
+        m.machines
+            .iter()
+            .find(|x| x.id == id)
+            .map(|x| Some(x.name.clone()))
+    }
+
+    /// Wants the layout of each machine read. One that already has a read in flight is marked
+    /// dirty instead, and read once more when that one ends.
+    fn read_layouts(self: &Arc<Self>, targets: Vec<String>) {
         if self.closed.load(Ordering::SeqCst) {
             return;
         }
-        for (id, on) in targets {
-            let read = {
+        for id in targets {
+            let start = {
                 let mut m = lock(&self.model);
-                let n = m.layout_reads.entry(id.clone()).or_default();
-                *n += 1;
-                *n
+                let Some(on) = Self::layout_on(&m, &id) else {
+                    continue;
+                };
+                if let Some(read) = m.layout_reads.get_mut(&id) {
+                    read.dirty = true;
+                    None
+                } else {
+                    m.next_read += 1;
+                    let number = m.next_read;
+                    m.layout_reads.insert(
+                        id.clone(),
+                        LayoutRead {
+                            number,
+                            dirty: false,
+                        },
+                    );
+                    Some((number, on))
+                }
             };
-            let me = self.clone();
-            self.handle
-                .spawn(async move { me.read_layout(id, on, read).await });
+            if let Some((number, on)) = start {
+                let me = self.clone();
+                self.handle
+                    .spawn(async move { me.read_layout(id, on, number).await });
+            }
         }
     }
 
-    /// One `doc.get herdr-app`. A read that has been overtaken by a newer one is dropped.
-    async fn read_layout(self: Arc<Self>, id: String, on: Option<String>, read: u64) {
+    /// Reads a machine's layout, and again for as long as it was asked for meanwhile.
+    async fn read_layout(self: Arc<Self>, id: String, mut on: Option<String>, mut number: u64) {
+        loop {
+            self.read_layout_once(&id, on, number).await;
+            let next = {
+                let mut m = lock(&self.model);
+                let next_number = m.next_read + 1;
+                let next_on = Self::layout_on(&m, &id);
+                match m.layout_reads.get_mut(&id) {
+                    // Overtaken: the machine left, and a read of its return has the entry now.
+                    Some(read) if read.number == number => match next_on {
+                        Some(on) if read.dirty => {
+                            read.dirty = false;
+                            read.number = next_number;
+                            m.next_read = next_number;
+                            Some((next_number, on))
+                        }
+                        _ => {
+                            m.layout_reads.remove(&id);
+                            None
+                        }
+                    },
+                    _ => None,
+                }
+            };
+            match next {
+                Some((next_number, next_on)) => {
+                    number = next_number;
+                    on = next_on;
+                }
+                None => return,
+            }
+        }
+    }
+
+    /// One `doc.get herdr-app`. Its answer is dropped when the machine's current read isn't it.
+    async fn read_layout_once(self: &Arc<Self>, id: &str, on: Option<String>, number: u64) {
         let mut params = json!({"name": LAYOUT_DOC});
         if let Some(name) = &on {
             params["on"] = json!(name);
         }
-        let answer = self.client.call_quiet(&id, "doc.get", params.clone()).await;
-        // Any error is no layout for the machine (a remote that needs an update says so with
-        // an error of its own), and the call is in the log. Health is never touched.
-        let (layout, unreadable) = match &answer {
+        let answer = match self.client.call_quiet(id, "doc.get", params.clone()).await {
+            // Any error is no layout for the machine (a remote that needs an update says so
+            // with an error of its own), and the call is in the log. Health is never touched.
+            Err(_) => LayoutAnswer::Failed,
             Ok(result) => match result.get("value").filter(|v| !v.is_null()) {
-                // Never written.
-                None => (None, None),
+                None => LayoutAnswer::Never,
                 Some(value) => match layout_doc::parse(value) {
-                    Some(layout) => (Some(layout), None),
-                    None => (
-                        None,
-                        result.get("version").and_then(Value::as_u64).or(Some(0)),
+                    Some(layout) => LayoutAnswer::Layout(layout),
+                    None => LayoutAnswer::Unreadable(
+                        result.get("version").and_then(Value::as_u64).unwrap_or(0),
                     ),
                 },
             },
-            Err(_) => (None, None),
         };
         let say = {
             let mut m = lock(&self.model);
-            if m.layout_reads.get(&id) != Some(&read) {
+            if m.layout_reads.get(id).map(|read| read.number) != Some(number) {
                 return;
             }
-            match layout {
-                Some(layout) => m.layouts.insert(id.clone(), layout),
-                None => m.layouts.remove(&id),
-            };
-            match unreadable {
-                Some(version) => (m.layout_unreadable.insert(id.clone(), version) != Some(version))
-                    .then_some(version),
-                None => {
-                    m.layout_unreadable.remove(&id);
+            match answer {
+                LayoutAnswer::Layout(layout) => {
+                    m.layouts.insert(id.to_owned(), layout);
+                    m.layout_unreadable.remove(id);
+                    None
+                }
+                LayoutAnswer::Never => {
+                    m.layouts.remove(id);
+                    m.layout_unreadable.remove(id);
+                    None
+                }
+                LayoutAnswer::Unreadable(version) => {
+                    m.layouts.remove(id);
+                    (m.layout_unreadable.insert(id.to_owned(), version) != Some(version))
+                        .then_some(version)
+                }
+                // A timeout between two bad reads of one version doesn't make it new.
+                LayoutAnswer::Failed => {
+                    m.layouts.remove(id);
                     None
                 }
             }
         };
         if let Some(version) = say {
             self.client.log_note(
-                &id,
+                id,
                 display("doc.get", &params, "hc"),
                 &format!(
                     "{LAYOUT_DOC} layout not understood (version {version}); no spaces for this machine"
@@ -1293,7 +1391,7 @@ impl Inner {
         let mut turned = false;
         // The layouts to read: all of them after a `missed`, else those whose document moved.
         let mut all_layouts = false;
-        let mut layouts: Vec<LayoutTarget> = Vec::new();
+        let mut layouts: Vec<String> = Vec::new();
         {
             let mut guard = lock(&self.model);
             let m = &mut *guard;
@@ -1326,11 +1424,11 @@ impl Inner {
                 turned |= !applied.turns.is_empty();
                 for doc in &applied.docs {
                     let target = match doc {
-                        None => Some((LOCAL.to_owned(), None)),
+                        None => Some(LOCAL.to_owned()),
                         // A machine the list doesn't know has nothing to read yet; it is read
-                        // when the list shows it connected.
-                        Some(name) => machine_id(&m.machines, &m.aliases, name)
-                            .map(|id| (id.to_owned(), Some(name.clone()))),
+                        // when the list shows it connected. An event can use a name the list
+                        // has since changed: the read is by the name the list has now.
+                        Some(name) => machine_id(&m.machines, &m.aliases, name).map(str::to_owned),
                     };
                     if let Some(target) = target
                         && !layouts.contains(&target)

@@ -15,6 +15,15 @@
 //! `children` are walked on any node, in order, then `floating`. A mod block's `content.props`
 //! can have a `terminal` key of its own; `props` is never read, so that is not a terminal leaf.
 //! Addresses in a machine's document are bare and local to that machine (`t7`).
+//!
+//! `first_in_space` follows herdr-app's `Model::space_name`: the first terminal of
+//! `root.terminals()` over the space's tabs, and `Node::walk` goes through `children` only, never
+//! `floating`. So only block terminals can be first, and which one is first doesn't depend on
+//! whether another space already placed it.
+
+/// How deep `collect` goes. A real layout is a few levels; this keeps `parse`, which takes any
+/// `Value`, from recursing without bound whatever its caller built.
+const MAX_DEPTH: usize = 64;
 
 use std::collections::BTreeMap;
 
@@ -38,7 +47,8 @@ pub fn parse(value: &Value) -> Option<SpaceLayout> {
         let space_id = text(space, "id").unwrap_or_else(|| format!("space-{}", index + 1));
         let space_name = text(space, "name").unwrap_or_default();
         let space_folder = text(space, "folder").unwrap_or_default();
-        let mut first = true;
+        // The terminal herdr-app names an unnamed space after: the first block terminal.
+        let mut first_block: Option<String> = None;
         for tab in space
             .get("tabs")
             .and_then(Value::as_array)
@@ -51,19 +61,22 @@ pub fn parse(value: &Value) -> Option<SpaceLayout> {
             let tab_name = text(tab, "name").unwrap_or_default();
             let mut terminals = Vec::new();
             if let Some(root) = tab.get("root") {
-                collect(root, &mut terminals);
+                collect(root, 0, &mut terminals);
             }
-            for address in terminals {
-                by_address.entry(address).or_insert_with(|| {
-                    // The first terminal that finds a place in the space, in document order.
-                    let first_in_space = std::mem::take(&mut first);
-                    SpacePlace {
-                        space_id: space_id.to_owned(),
-                        space_name: space_name.to_owned(),
-                        space_folder: space_folder.to_owned(),
-                        tab_name: tab_name.to_owned(),
-                        first_in_space,
-                    }
+            if first_block.is_none() {
+                first_block = terminals
+                    .iter()
+                    .find(|(_, in_block)| *in_block)
+                    .map(|(address, _)| address.clone());
+            }
+            for (address, _) in terminals {
+                let first_in_space = first_block.as_deref() == Some(address.as_str());
+                by_address.entry(address).or_insert_with(|| SpacePlace {
+                    space_id: space_id.to_owned(),
+                    space_name: space_name.to_owned(),
+                    space_folder: space_folder.to_owned(),
+                    tab_name: tab_name.to_owned(),
+                    first_in_space,
                 });
             }
         }
@@ -75,13 +88,17 @@ fn text(object: &Map<String, Value>, key: &str) -> Option<String> {
     object.get(key)?.as_str().map(str::to_owned)
 }
 
-/// The terminals under `node`, in document order.
-fn collect(node: &Value, out: &mut Vec<String>) {
+/// The terminals under `node`, in document order, each with whether it is a block's (not a
+/// floating one's).
+fn collect(node: &Value, depth: usize, out: &mut Vec<(String, bool)>) {
     let Some(node) = node.as_object() else {
         return;
     };
+    if depth > MAX_DEPTH {
+        return;
+    }
     if node.get("type").and_then(Value::as_str) == Some("block") {
-        push_terminal(node.get("content"), out);
+        push_terminal(node.get("content"), true, out);
     }
     for child in node
         .get("children")
@@ -89,7 +106,7 @@ fn collect(node: &Value, out: &mut Vec<String>) {
         .into_iter()
         .flatten()
     {
-        collect(child, out);
+        collect(child, depth + 1, out);
     }
     for float in node
         .get("floating")
@@ -97,18 +114,18 @@ fn collect(node: &Value, out: &mut Vec<String>) {
         .into_iter()
         .flatten()
     {
-        push_terminal(float.get("content"), out);
+        push_terminal(float.get("content"), false, out);
     }
 }
 
 /// `content.terminal`, when it is a non-empty string. Nothing else of `content` is read.
-fn push_terminal(content: Option<&Value>, out: &mut Vec<String>) {
+fn push_terminal(content: Option<&Value>, in_block: bool, out: &mut Vec<(String, bool)>) {
     if let Some(address) = content
         .and_then(|c| c.get("terminal"))
         .and_then(Value::as_str)
         .filter(|a| !a.is_empty())
     {
-        out.push(address.to_owned());
+        out.push((address.to_owned(), in_block));
     }
 }
 
@@ -200,6 +217,63 @@ mod tests {
         assert!(layout.by_address["t9"].first_in_space);
         assert!(!layout.by_address["t2"].first_in_space);
         assert!(layout.by_address["t1"].first_in_space);
+    }
+
+    #[test]
+    fn first_in_space_is_the_first_block_terminal_not_a_floating_one() {
+        // A floating terminal that comes before the first block terminal in document order (it
+        // floats over the first child) is not first: upstream's `terminals()` never walks it.
+        let doc = json!({"spaces": [{"id": "s1", "tabs": [{"root": {
+        "type": "row",
+        "children": [
+            {"type": "column", "children": [],
+             "floating": [{"id": "f", "content": {"terminal": "t9"}}]},
+            {"type": "block", "content": {"terminal": "t1"}}
+        ]}}]}]});
+        let layout = parse(&doc).unwrap();
+        assert!(layout.by_address["t1"].first_in_space);
+        assert!(!layout.by_address["t9"].first_in_space);
+
+        // A space with only floating terminals has no first one (herdr-app uses the folder).
+        let only = json!({"spaces": [{"id": "s", "tabs": [{"root": {
+            "type": "row", "children": [],
+            "floating": [{"id": "f", "content": {"terminal": "t5"}}]}}]}]});
+        let layout = parse(&only).unwrap();
+        assert!(layout.by_address.values().all(|p| !p.first_in_space));
+    }
+
+    #[test]
+    fn first_in_space_does_not_depend_on_another_space_placing_it_first() {
+        // t1 is s1's place (first seen); it is also the first block terminal of s2. s2's first is
+        // still t1, so t2 is not first in s2, and s2 doesn't hand the flag to its next terminal.
+        let doc = json!({"spaces": [
+            {"id": "s1", "tabs": [{"root": {"type": "block", "content": {"terminal": "t1"}}}]},
+            {"id": "s2", "tabs": [{"root": {"type": "row", "children": [
+                {"type": "block", "content": {"terminal": "t1"}},
+                {"type": "block", "content": {"terminal": "t2"}}]}}]}
+        ]});
+        let layout = parse(&doc).unwrap();
+        assert_eq!(layout.by_address["t1"].space_id, "s1");
+        assert!(layout.by_address["t1"].first_in_space);
+        assert_eq!(layout.by_address["t2"].space_id, "s2");
+        assert!(!layout.by_address["t2"].first_in_space);
+    }
+
+    #[test]
+    fn a_tree_deeper_than_the_cap_is_cut_off_without_overflowing() {
+        // Built as a value, so serde_json's own parse limit doesn't apply.
+        let mut node = json!({"type": "block", "content": {"terminal": "t-deep"}});
+        for _ in 0..200 {
+            let mut row = serde_json::Map::new();
+            row.insert("type".into(), Value::String("row".into()));
+            row.insert("children".into(), Value::Array(vec![node]));
+            node = Value::Object(row);
+        }
+        let shallow = json!({"type": "block", "content": {"terminal": "t-top"}});
+        let doc = json!({"spaces": [{"id": "s", "tabs": [
+            {"root": node}, {"root": shallow}]}]});
+        let layout = parse(&doc).unwrap();
+        assert_eq!(layout.by_address.keys().collect::<Vec<_>>(), ["t-top"]);
     }
 
     #[test]
