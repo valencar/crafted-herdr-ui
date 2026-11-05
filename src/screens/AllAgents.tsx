@@ -159,7 +159,7 @@ export function AllAgents() {
         {state === null ? (
           <SkeletonList />
         ) : !hasAnyRows ? (
-          <NoAgentsYet machines={state.machines} />
+          <NoAgentsYet machines={shownMachines(state.machines)} />
         ) : (
           <>
             <section

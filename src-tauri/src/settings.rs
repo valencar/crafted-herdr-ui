@@ -209,7 +209,7 @@ impl Settings {
         if id.is_empty() {
             return Err("Pick a workbox to hide or show.".to_owned());
         }
-        if id == "local" {
+        if id == crate::LOCAL {
             return Err("This computer can’t be hidden.".to_owned());
         }
         let mut ids: Vec<&str> = self

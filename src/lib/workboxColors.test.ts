@@ -97,6 +97,20 @@ describe("assignColors", () => {
     ).toBe("violet");
   });
 
+  it("a_migrating_id_is_not_beaten_to_its_color_by_a_new_one_listed_before_it", () => {
+    // v0.8 colors by name; `staging-id` is new and listed before `buildbox-id`.
+    const names = { "staging-id": "staging", "buildbox-id": "buildbox" };
+    const result = assignColors(
+      ["local", "staging-id", "buildbox-id"],
+      { local: "violet", buildbox: "pink" },
+      names,
+    );
+    expect(result["buildbox-id"]).toBe("pink");
+    // The new one takes the first color nobody has, not the migrating one's.
+    expect(result["staging-id"]).toBe("lime");
+    expect(new Set(Object.values(result)).size).toBe(3);
+  });
+
   it("resolves_a_saved_name_key_for_a_listed_machine", () => {
     const id = "000000000000000000000000c0de0002";
     const machines = [

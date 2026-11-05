@@ -30,7 +30,7 @@ export function commandWords(tab: Pick<TermTab, "target" | "machineLabel">): {
 /**
  * Opens `machine login <name>` or `machine update <name>` in an in-app tab. Rust builds the
  * arguments (the machine's current name, checked), and checks them again when the tab starts.
- * A tab of the same command that has already ended is replaced, so the click runs it afresh;
+ * A tab of the same command that has already ended is run again in place (`rerunTab`);
  * one still running is shown. For `update`, the caller has asked the person first.
  */
 export async function openMachineCommand(
@@ -50,12 +50,19 @@ export async function openMachineCommand(
     };
     const tabKey = commandTabKey(machine.id, args);
     const store = useTerminalStore.getState();
+    const next = {
+      target,
+      machineLabel: machine.name,
+      title: commandWords({ target, machineLabel: machine.name }).title,
+    };
     const old = store.tabs.find((t) => t.tabKey === tabKey);
     if (old && (old.state === "detached" || old.state === "error")) {
-      store.closeTab(tabKey);
+      // The same tab starts over with a new session. (Closing it and opening the key again in
+      // one go would batch into no change: the view is keyed by the tab key and would stay.)
+      store.rerunTab(tabKey, next);
+    } else {
+      store.openTab({ tabKey, ...next });
     }
-    const tab = { tabKey, target, machineLabel: machine.name };
-    store.openTab({ ...tab, title: commandWords(tab).title });
   } catch (e) {
     useAppStore.getState().reportError(e);
   }

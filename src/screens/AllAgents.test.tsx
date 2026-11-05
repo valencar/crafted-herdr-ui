@@ -946,6 +946,19 @@ describe("Home states", () => {
     ).toBeNull();
   });
 
+  it("with_every_remote_hidden_it_is_the_local_only_empty_state", () => {
+    // The sidebar and the Dashboard see one workbox; All agents must too.
+    setup(
+      appState(
+        LOCAL(noAgents),
+        machine("gpubox", { kind: "hidden" }, noAgents),
+      ),
+    );
+    expect(
+      screen.getByRole("region", { name: "Only this computer so far" }),
+    ).toBeVisible();
+  });
+
   it("stale_label_from_last_ok", () => {
     setup(
       appState(

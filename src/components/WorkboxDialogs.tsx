@@ -1,4 +1,5 @@
 import type { MachineView } from "../lib/bindings/MachineView";
+import { terminalNameProblem } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
 import { openMachineCommand } from "../terminal/commandTabs";
 import { useAppStore } from "../store/appStore";
@@ -61,7 +62,15 @@ export function WorkboxDialogs({
       {machine && dialog?.kind === "rename-box" && (
         <NameSheet
           title="Rename workbox"
-          fields={[{ key: "name", label: "Name", initial: machine.name }]}
+          fields={[
+            {
+              key: "name",
+              label: "Name",
+              initial: machine.name,
+              // The same rule as Rust `validate_name`; Rust still answers after submit.
+              validate: terminalNameProblem,
+            },
+          ]}
           submitLabel="Rename"
           onSubmit={(v) =>
             invokeTyped("machine_rename", {

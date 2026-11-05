@@ -597,19 +597,53 @@ describe("Workbox", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("the_rename_sheet_checks_the_name_as_it_is_typed", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: "Rename…" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename workbox" });
+    const field = within(dialog).getByLabelText("Name");
+    const rename = within(dialog).getByRole("button", { name: "Rename" });
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+
+    // Shapes Rust `validate_name` refuses, told before anything is sent.
+    await user.clear(field);
+    await user.type(field, "Build Box");
+    expect(within(dialog).getByText(/Use 1 to 32 of a-z/)).toBeVisible();
+    expect(rename).toBeDisabled();
+    await user.clear(field);
+    await user.type(field, "t7");
+    expect(
+      within(dialog).getByText(/looks like a terminal address/),
+    ).toBeVisible();
+    expect(rename).toBeDisabled();
+    await user.click(rename);
+    expect(calls("machine_rename")).toEqual([]);
+
+    await user.clear(field);
+    await user.type(field, "ci-runner");
+    expect(within(dialog).queryByText(/Use 1 to 32/)).toBeNull();
+    expect(rename).toBeEnabled();
+  });
+
   it("a_refused_rename_keeps_the_sheet_open_with_the_message", async () => {
     answers.machine_rename = () => {
-      throw { kind: "invalid", message: "Use 1 to 32 of a-z 0-9 - _ ." };
+      throw {
+        kind: "invalid",
+        message: "There is already a workbox called taken.",
+      };
     };
     const user = setup();
     await user.click(screen.getByRole("button", { name: "Rename…" }));
     const dialog = screen.getByRole("dialog", { name: "Rename workbox" });
     const field = within(dialog).getByLabelText("Name");
     await user.clear(field);
-    await user.type(field, "Bad Name");
+    await user.type(field, "taken");
     await user.click(within(dialog).getByRole("button", { name: "Rename" }));
+    // The backstop: a name the sheet accepts but Rust refuses stays in the sheet.
     expect(
-      await within(dialog).findByText("Use 1 to 32 of a-z 0-9 - _ ."),
+      await within(dialog).findByText(
+        "There is already a workbox called taken.",
+      ),
     ).toBeInTheDocument();
   });
 

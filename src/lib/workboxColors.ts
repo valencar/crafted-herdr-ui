@@ -54,16 +54,19 @@ export function assignColors(
   const ordered = machineIds.includes("local")
     ? ["local", ...machineIds.filter((id) => id !== "local")]
     : machineIds;
+  // First every migration, so a new workbox listed before a migrating one can't take the color
+  // that one is about to be given. A v0.8 entry under the name is the same workbox, so the same
+  // color. Local was always an id.
+  for (const id of ordered) {
+    if (hasOwn(result, id) || id === "local" || !hasOwn(names, id)) continue;
+    const name = names[id];
+    if (!hasOwn(saved, name) || saved[name] === undefined) continue;
+    const color = saved[name];
+    result[id] = color;
+    uses.set(color, (uses.get(color) ?? 0) + 1);
+  }
   for (const id of ordered) {
     if (hasOwn(result, id)) continue;
-    // A v0.8 entry under the name: the same workbox, so the same color. Local was always an id.
-    const name = id === "local" || !hasOwn(names, id) ? null : names[id];
-    if (name !== null && hasOwn(saved, name) && saved[name] !== undefined) {
-      const color = saved[name];
-      result[id] = color;
-      uses.set(color, (uses.get(color) ?? 0) + 1);
-      continue;
-    }
     let pick = WORKBOX_COLORS[0];
     let fewest = uses.get(pick) ?? 0;
     for (const color of WORKBOX_COLORS) {

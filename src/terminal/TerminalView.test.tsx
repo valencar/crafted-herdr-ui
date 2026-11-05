@@ -15,6 +15,7 @@ type FakeTerm = {
   rows: number;
   options: Record<string, unknown>;
   write: ReturnType<typeof vi.fn>;
+  reset: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
   keyHandler: ((e: Partial<KeyboardEvent>) => boolean) | null;
@@ -51,6 +52,7 @@ vi.mock("@xterm/xterm", () => ({
     rows = 24;
     options: Record<string, unknown>;
     write = vi.fn();
+    reset = vi.fn();
     dispose = vi.fn();
     focus = vi.fn();
     // xterm 6.0.0 fires onSelectionChange for a mouse selection in one place: its document
@@ -169,6 +171,7 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
 }));
 import { copyText, invokeTyped, openTerm } from "../lib/ipc";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
+import { openMachineCommand } from "./commandTabs";
 import { HOME, useTerminalStore } from "./terminalStore";
 import { xtermTheme } from "./xtermTheme";
 import { useResolvedTheme } from "../lib/theme";
@@ -184,12 +187,14 @@ function Harness({
   active = true,
   handle,
   font = "hack",
+  tabKey = KEY,
 }: {
   active?: boolean;
   handle?: React.Ref<TerminalHandle>;
   font?: TerminalFont;
+  tabKey?: string;
 }) {
-  const tab = useTerminalStore((s) => s.tabs.find((t) => t.tabKey === KEY));
+  const tab = useTerminalStore((s) => s.tabs.find((t) => t.tabKey === tabKey));
   if (!tab) return null;
   return (
     <TerminalView
@@ -338,6 +343,53 @@ describe("TerminalView", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "The command finished.",
     );
+  });
+
+  it("a_finished_command_tab_runs_again_in_a_new_session", async () => {
+    const args = ["machine", "login", "buildbox"];
+    invoke.mockImplementation(async (name: string) =>
+      name === "machine_login_args" ? args : null,
+    );
+    useTerminalStore.setState({ tabs: [], activeKey: HOME });
+    const commandKey = "buildbox::cmd:machine login";
+    useTerminalStore.getState().openTab({
+      tabKey: commandKey,
+      target: { kind: "command", machineId: "buildbox", args },
+      title: "Log in",
+      machineLabel: "buildbox",
+    });
+    // The workspace mounts one view per tab, keyed by the tab's key.
+    render(<Harness tabKey={commandKey} />);
+    await flush();
+    expect(open).toHaveBeenCalledTimes(1);
+    emit({ kind: "exit", code: 1, last_line: null });
+    expect(tabState()).toMatchObject({ state: "detached", exitCode: 1 });
+    const first = term();
+
+    // The next Log in… click, as the Workbox screen makes it.
+    await act(async () => {
+      await openMachineCommand({ id: "buildbox", name: "buildbox" }, "login");
+    });
+    await flush();
+
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenLastCalledWith(
+      { kind: "command", args },
+      100,
+      30,
+      expect.any(Function),
+      false,
+    );
+    // The same tab and terminal, cleared for the new run, live again with no bar.
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
+    expect(term()).toBe(first);
+    expect(first.reset).toHaveBeenCalledTimes(1);
+    expect(tabState()).toMatchObject({
+      state: "live",
+      exitCode: null,
+      termId: 8,
+    });
+    expect(screen.queryByRole("button", { name: "Close tab" })).toBeNull();
   });
 
   it("an_option_drag_always_makes_a_selection_even_while_herdr_reports_the_mouse", async () => {

@@ -435,4 +435,41 @@ describe("terminalStore", () => {
     expect(wireTarget(command.target)).toEqual({ kind: "command", args });
     expect(wireTarget(tab("t1").target)).toEqual(tab("t1").target);
   });
+
+  it("rerun_starts_a_finished_tab_over_in_place", () => {
+    const args = ["machine", "login", "buildbox"];
+    const key = commandTabKey("buildbox", args);
+    const target = { kind: "command" as const, machineId: "buildbox", args };
+    store().openTab({
+      tabKey: key,
+      target,
+      title: "Log in",
+      machineLabel: "buildbox",
+    });
+    store().openTab(tab("t1"));
+    store().sessionEnded(key, { code: 1, lastLine: "x" }, undefined, "ready");
+    store().rerunTab(key, {
+      target,
+      title: "Log in",
+      machineLabel: "buildbox",
+    });
+    expect(keys()).toEqual([key, "buildbox::t1"]);
+    expect(store().activeKey).toBe(key);
+    expect(store().tabs[0]).toMatchObject({
+      state: "opening",
+      exitCode: null,
+      lastLine: null,
+      termId: null,
+      run: 1,
+    });
+    store().rerunTab(key, {
+      target,
+      title: "Log in",
+      machineLabel: "buildbox",
+    });
+    expect(store().tabs[0].run).toBe(2);
+    // An unknown key changes nothing.
+    store().rerunTab("nope", { target, title: "x", machineLabel: "x" });
+    expect(keys()).toHaveLength(2);
+  });
 });

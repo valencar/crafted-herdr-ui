@@ -13,6 +13,7 @@ import {
 import { invokeTyped } from "../lib/ipc";
 import { defaultOpenHow, openRow } from "../lib/openRow";
 import { useNow } from "../lib/useNow";
+import { shownMachines } from "../lib/workbox";
 import { useTheme } from "../lib/useTheme";
 import { useAppStore } from "../store/appStore";
 
@@ -109,7 +110,11 @@ export function MenuBar() {
         {state && (
           <span className="muted pop-count">
             {plural(agentCount, "agent", "agents")} ·{" "}
-            {plural(state.machines.length, "workbox", "workboxes")}
+            {plural(
+              shownMachines(state.machines).length,
+              "workbox",
+              "workboxes",
+            )}
           </span>
         )}
       </header>
@@ -171,7 +176,7 @@ export function MenuBar() {
 
       {state && (
         <ul className="pop-boxes" aria-label="Workboxes">
-          {state.machines.map((m) => (
+          {shownMachines(state.machines).map((m) => (
             <li key={m.id} className="health" data-health={m.health.kind}>
               <HealthDot health={m.health} />
               {m.name}

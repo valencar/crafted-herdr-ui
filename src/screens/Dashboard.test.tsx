@@ -638,9 +638,11 @@ describe("Dashboard", () => {
     await user.click(
       within(card("gpubox")).getByRole("button", { name: "Retry now" }),
     );
-    expect(calls("refresh_now")).toEqual([
-      ["refresh_now", { machineId: "gpubox" }],
+    // A remote workbox dials the machine (`machine.connect`); it does not just re-read the list.
+    expect(calls("machine_connect")).toEqual([
+      ["machine_connect", { machineId: "gpubox" }],
     ]);
+    expect(calls("refresh_now")).toEqual([]);
 
     // A hidden workbox has no card at all (spec 7.4).
     expect(

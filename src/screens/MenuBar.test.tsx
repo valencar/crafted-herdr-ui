@@ -81,6 +81,20 @@ afterEach(() => {
 });
 
 describe("MenuBar", () => {
+  it("a_hidden_workbox_is_not_counted_or_listed", () => {
+    const hidden = machineView(
+      { id: "gpubox", health: { kind: "hidden" }, lastOkMs: NOW },
+      fixtureTerms(),
+    );
+    setup(appState(machine("buildbox"), hidden));
+    // One workbox of two, and only it in the list at the bottom.
+    expect(screen.getByText(/· 1 workbox$/)).toBeInTheDocument();
+    const boxes = within(screen.getByRole("list", { name: "Workboxes" }));
+    expect(boxes.getAllByRole("listitem")).toHaveLength(1);
+    expect(boxes.getByText("buildbox")).toBeInTheDocument();
+    expect(boxes.queryByText("gpubox")).toBeNull();
+  });
+
   it("menubar_lists_needs_you_then_working", () => {
     setup(appState(machine("buildbox"), machine("gpubox")));
 

@@ -87,7 +87,12 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
           type="button"
           className="btn btn-small"
           onClick={() =>
-            invokeTyped("refresh_now", { machineId: machine.id }).catch(report)
+            // A remote workbox is dialed again (`machine.connect`); Local has no such call, so
+            // it re-reads (Task 14 owns its card).
+            (machine.is_local
+              ? invokeTyped("refresh_now", { machineId: machine.id })
+              : invokeTyped("machine_connect", { machineId: machine.id })
+            ).catch(report)
           }
         >
           Retry now

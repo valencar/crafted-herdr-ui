@@ -10,6 +10,11 @@ export type NameField = {
   placeholder?: string;
   /** Paths and ids read better in monospace. */
   mono?: boolean;
+  /**
+   * Why a non-empty (trimmed) value is refused, or `null`. Checked as the person types; the
+   * sheet won't submit a refused value. An empty value is the sheet's own "can't be empty".
+   */
+  validate?: (value: string) => string | null;
 };
 
 type Props = {
@@ -40,9 +45,18 @@ export function NameSheet({
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // What `validate` says of the values as typed (empty ones are left to `submit`).
+  const live: Record<string, string> = {};
+  for (const f of fields) {
+    const value = values[f.key].trim();
+    const problem = value === "" ? null : (f.validate?.(value) ?? null);
+    if (problem) live[f.key] = problem;
+  }
+  const refused = Object.keys(live).length > 0;
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy) return;
+    if (busy || refused) return;
     const trimmed = Object.fromEntries(
       fields.map((f) => [f.key, values[f.key].trim()]),
     );
@@ -81,7 +95,7 @@ export function NameSheet({
             type="submit"
             form={formId}
             className="btn btn-primary"
-            disabled={busy}
+            disabled={busy || refused}
           >
             {submitLabel}
           </button>
@@ -91,7 +105,7 @@ export function NameSheet({
       <form id={formId} className="name-form" onSubmit={submit} noValidate>
         {fields.map((f, i) => {
           const inputId = `${formId}-${f.key}`;
-          const problem = problems[f.key];
+          const problem = problems[f.key] ?? live[f.key];
           return (
             <div key={f.key} className="sheet-field">
               <label htmlFor={inputId} className="sheet-label">

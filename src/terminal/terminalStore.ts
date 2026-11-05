@@ -65,6 +65,11 @@ export type TermTab = {
    * has opened.
    */
   restartsAtOpen?: number | null;
+  /**
+   * Which run of a command tab this is; `rerunTab` raises it, and the session opens again when it
+   * changes. Absent (0) for a tab that was never rerun.
+   */
+  run?: number;
   /** What the tab waits for before it reattaches on its own; null when only the button reattaches. */
   waiting: Waiting | null;
   /** Reattach and Retry clicks since a session last ended normally (exit 0); the first open does not count. */
@@ -87,6 +92,15 @@ type TerminalStore = {
   /** Focuses the tab with that key if there is one, else appends it; either way it becomes active. */
   openTab: (t: NewTab) => void;
   updateTab: (tabKey: string, patch: Partial<TermTab>) => void;
+  /**
+   * Starts a finished tab over in the same tab: it becomes active, shows "opening" with no old
+   * session state, and its `run` goes up so its view opens a new session (and clears the old
+   * output). `next` is what it runs now. Does nothing for an unknown key.
+   */
+  rerunTab: (
+    tabKey: string,
+    next: Pick<TermTab, "target" | "title" | "machineLabel">,
+  ) => void;
   /**
    * A session ended: the tab is detached with its exit code and last line, and waits to
    * reattach by itself in the two cases the spec names. `row` is the tab's row now (`undefined`
@@ -161,6 +175,33 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => (t.tabKey === tabKey ? { ...t, ...patch } : t)),
     })),
+  rerunTab: (tabKey, next) =>
+    set((s) => {
+      const old = s.tabs.find((t) => t.tabKey === tabKey);
+      if (!old) return {};
+      const again: TermTab = {
+        ...old,
+        ...next,
+        state: "opening",
+        error: null,
+        termId: null,
+        exitCode: null,
+        lastLine: null,
+        restartsAtOpen: undefined,
+        waiting: null,
+        attempts: 0,
+        run: (old.run ?? 0) + 1,
+      };
+      return {
+        tabs: s.tabs.map((t) => (t.tabKey === tabKey ? again : t)),
+        activeKey: tabKey,
+        lastTermKey: tabKey,
+        lastByMachine: {
+          ...s.lastByMachine,
+          [again.target.machineId]: tabKey,
+        },
+      };
+    }),
   sessionEnded: (tabKey, end, row, core) => {
     const ending = endingOf(end.code ?? -1, end.lastLine);
     const tab = get().tabs.find((t) => t.tabKey === tabKey);

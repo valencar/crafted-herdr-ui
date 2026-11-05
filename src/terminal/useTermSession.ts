@@ -29,10 +29,13 @@ type Writer = { id: number; busy: boolean; pending: string };
  * session opens.
  */
 export function useTermSession(
-  tab: Pick<TermTab, "tabKey" | "target">,
+  tab: Pick<TermTab, "tabKey" | "target" | "run">,
   termRef: RefObject<Terminal | null>,
 ) {
   const { tabKey } = tab;
+  const run = tab.run ?? 0;
+  // The run whose output the terminal shows; a new run clears it (a Reattach keeps it).
+  const shownRun = useRef(run);
   // Compared by value: the store builds new tab objects, but the session must outlive them.
   const targetJson = JSON.stringify(tab.target);
   const idRef = useRef<number | null>(null);
@@ -58,6 +61,10 @@ export function useTermSession(
     const term = termRef.current;
     if (!term) return;
     const target = wireTarget(JSON.parse(targetJson) as TabTarget);
+    if (shownRun.current !== run) {
+      shownRun.current = run;
+      term.reset();
+    }
     const mine = ++generation.current;
     const { updateTab } = useTerminalStore.getState();
     const again = asked.current;
@@ -143,7 +150,7 @@ export function useTermSession(
         error: actionErrorMessage(toActionError(e)),
       });
     }
-  }, [tabKey, targetJson, termRef, resize]);
+  }, [tabKey, targetJson, run, termRef, resize]);
 
   useEffect(() => {
     void open();
