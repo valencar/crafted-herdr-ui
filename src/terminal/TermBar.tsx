@@ -20,6 +20,16 @@ type Props = {
   buttonRef: Ref<HTMLButtonElement>;
 };
 
+/** How a command tab ended, in a sentence. */
+function commandEnding(tab: TermTab): string | null {
+  if (tab.state === "error") return tab.error;
+  return tab.exitCode === 0
+    ? "The command finished."
+    : tab.exitCode === null
+      ? "The command ended."
+      : `The command ended with exit code ${tab.exitCode}.`;
+}
+
 /**
  * The bar docked at the bottom of a tab whose session is not running: why it ended, what to try,
  * and the ways out. It sits over the last rows only, so the output the attach command printed
@@ -37,8 +47,11 @@ export function TermBar({
   const { current } = useTerminals();
   // A finished terminal can't be attached to, so Reattach, Copy attach command and Open would
   // all fail: Close tab is the way out, as for a terminal that is gone from the list.
+  // A command tab (Log in, Update hc) has no terminal to attach to again: it ends, and Close tab
+  // is the only way out, so running it again is a fresh click on the workbox.
+  const command = tab.target.kind === "command";
   const ended = row?.status === "ended";
-  const closeOnly = gone || ended;
+  const closeOnly = command || gone || ended;
   const opening = tab.state === "opening";
   const failed = tab.state === "error";
   const retryWord = failed ? "Retry" : "Reattach";
@@ -46,17 +59,19 @@ export function TermBar({
   // A kept terminal whose shell was lost comes back by itself; the core's own loss too.
   const waitingForShell = tab.waiting?.kind === "restart";
   const waitingForCore = tab.waiting?.kind === "core";
-  const title = opening
-    ? "Reattaching…"
-    : gone
-      ? `This terminal no longer exists on ${tab.machineLabel}.`
-      : failed
-        ? tab.error
-        : waitingForShell
-          ? WAITING_FOR_SHELL
-          : reason;
+  const title = command
+    ? commandEnding(tab)
+    : opening
+      ? "Reattaching…"
+      : gone
+        ? `This terminal no longer exists on ${tab.machineLabel}.`
+        : failed
+          ? tab.error
+          : waitingForShell
+            ? WAITING_FOR_SHELL
+            : reason;
   const hint =
-    opening || gone || failed
+    command || opening || gone || failed
       ? null
       : waitingForShell
         ? "It reattaches by itself when the new shell starts."
@@ -64,7 +79,7 @@ export function TermBar({
           ? "It reattaches by itself when herdr-core is back."
           : null;
   const attempt =
-    !opening && !gone && tab.attempts > 0
+    !command && !opening && !gone && tab.attempts > 0
       ? `${clicked} failed (attempt ${tab.attempts}).`
       : null;
 

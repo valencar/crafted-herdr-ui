@@ -338,4 +338,32 @@ describe("ContextBar", () => {
         .map((b) => b.getAttribute("aria-label") ?? b.textContent),
     ).toEqual(["Find in terminal (⌘F)", "Detach"]);
   });
+
+  it("a_command_tab_names_the_workbox_and_the_verb_and_has_no_pane_menu", async () => {
+    const user = userEvent.setup();
+    const login: TermTab = {
+      ...paneTab,
+      tabKey: "buildbox::cmd:machine login",
+      target: {
+        kind: "command",
+        machineId: "buildbox",
+        args: ["machine", "login", "buildbox"],
+      },
+      title: "Log in",
+    };
+    useTerminalStore.setState({
+      tabs: [login, otherTab],
+      activeKey: login.tabKey,
+    });
+    render(<ContextBar tab={login} row={null} onFind={() => {}} />);
+    expect(screen.getByText("Logging in to buildbox")).toBeInTheDocument();
+    // No agent, no Open in a terminal, no Detach, no ⋯ menu.
+    expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Detach" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /more|pane/i })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Close tab" }));
+    expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+      otherTab.tabKey,
+    ]);
+  });
 });

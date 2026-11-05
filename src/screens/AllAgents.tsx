@@ -26,6 +26,7 @@ import { markSeen } from "../lib/openRow";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import { terminalName as terminalLabel, useTerminals } from "../lib/uiHelpers";
 import { useNow } from "../lib/useNow";
+import { shownMachines } from "../lib/workbox";
 import { useAppStore, type GroupBy } from "../store/appStore";
 
 const GROUP_TITLE: Record<GroupBy, string> = {
@@ -151,7 +152,10 @@ export function AllAgents() {
           />
           <Kbd id="find" />
         </label>
-        <MachineNotices machines={state?.machines ?? []} nowMs={nowMs} />
+        <MachineNotices
+          machines={shownMachines(state?.machines ?? [])}
+          nowMs={nowMs}
+        />
         {state === null ? (
           <SkeletonList />
         ) : !hasAnyRows ? (

@@ -64,6 +64,59 @@ function bar(r: Row | null, gone = false) {
 }
 
 describe("TermBar", () => {
+  it("a_command_tab_offers_only_close_tab_and_says_how_it_ended", () => {
+    const command: TermTab = {
+      ...tab,
+      tabKey: "buildbox::cmd:machine login",
+      target: {
+        kind: "command",
+        machineId: "buildbox",
+        args: ["machine", "login", "buildbox"],
+      },
+      title: "Log in",
+      exitCode: 255,
+    };
+    const ref = createRef<HTMLButtonElement>();
+    const { rerender } = render(
+      <TermBar
+        tab={command}
+        row={null}
+        // The tab's machine is listed, so a terminal would be "gone": a command is not a terminal.
+        gone
+        clicked="Reattach"
+        onReattach={() => {}}
+        onClose={() => {}}
+        buttonRef={ref}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Copy attach command" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+    const close = screen.getByRole("button", { name: "Close tab" });
+    expect(close).toHaveClass("btn-primary");
+    expect(ref.current).toBe(close);
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("The command ended with exit code 255.");
+    expect(status).not.toHaveTextContent(/terminal|attach/i);
+
+    rerender(
+      <TermBar
+        tab={{ ...command, exitCode: 0 }}
+        row={null}
+        gone={false}
+        clicked="Reattach"
+        onReattach={() => {}}
+        onClose={() => {}}
+        buttonRef={ref}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "The command finished.",
+    );
+  });
+
   it("an_ended_row_offers_only_close_tab", async () => {
     const ref = bar(row("ended"));
     // Give the terminal's name time to arrive: no button may appear for it.

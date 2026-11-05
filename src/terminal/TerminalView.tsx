@@ -333,6 +333,7 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
   );
   const gone =
     ended &&
+    tab.target.kind === "terminal" &&
     !row &&
     machine?.last_ok_ms != null &&
     machine.health.kind !== "hidden";

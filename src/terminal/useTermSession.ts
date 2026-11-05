@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { Terminal } from "@xterm/xterm";
-import type { TermTarget } from "../lib/bindings/TermTarget";
 import { actionErrorMessage } from "../lib/format";
 import { invokeTyped, openTerm, toActionError } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
 import { rowFor } from "./tabInfo";
-import { useTerminalStore, type TermTab } from "./terminalStore";
+import {
+  useTerminalStore,
+  wireTarget,
+  type TabTarget,
+  type TermTab,
+} from "./terminalStore";
 
 type Size = { cols: number; rows: number };
 
@@ -53,7 +57,7 @@ export function useTermSession(
   const open = useCallback(async () => {
     const term = termRef.current;
     if (!term) return;
-    const target = JSON.parse(targetJson) as TermTarget;
+    const target = wireTarget(JSON.parse(targetJson) as TabTarget);
     const mine = ++generation.current;
     const { updateTab } = useTerminalStore.getState();
     const again = asked.current;

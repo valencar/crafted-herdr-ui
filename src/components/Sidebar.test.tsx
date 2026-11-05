@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Health } from "../lib/bindings/Health";
@@ -126,6 +133,37 @@ beforeEach(() => {
 });
 
 describe("Sidebar", () => {
+  it("temporary_badge_shown", () => {
+    const temp = machineView(
+      { id: "edgebox", target: "edgebox", temporary: true },
+      null,
+    );
+    renderSidebar(false, { machines: [machine("buildbox", "online"), temp] });
+    const row = screen.getByRole("button", { name: /^edgebox/ });
+    expect(within(row).getByText("Temporary")).toBeInTheDocument();
+    // Only a temporary one has it.
+    const plain = screen.getByRole("button", { name: /^buildbox/ });
+    expect(within(plain).queryByText("Temporary")).toBeNull();
+    cleanup();
+    // The rail has no room for words, so its name says so.
+    renderSidebar(true, { machines: [temp] });
+    expect(
+      screen.getByRole("button", { name: "edgebox: Online, temporary" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a_hidden_workbox_is_not_listed_in_either_sidebar", () => {
+    const hidden = machine("gpubox", "hidden");
+    const machines = [machine("buildbox", "online"), hidden];
+    renderSidebar(false, { machines });
+    expect(screen.queryByRole("button", { name: /^gpubox/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^buildbox/ })).toBeVisible();
+    cleanup();
+    renderSidebar(true, { machines });
+    expect(screen.queryByRole("button", { name: /^gpubox/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^buildbox/ })).toBeVisible();
+  });
+
   it("collapsed rail keeps labels for screen readers", async () => {
     const onWorkbox = vi.fn();
     renderSidebar(true, { onWorkbox });

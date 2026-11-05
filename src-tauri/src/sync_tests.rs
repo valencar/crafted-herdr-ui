@@ -333,6 +333,27 @@ async fn builds_state_from_subscribe_and_machine_list() {
     assert_eq!(buildbox.hc_version.as_deref(), Some("0.1.18"));
     assert_eq!(addresses(&state, BUILDBOX), ["t2", "t3", "t4"]);
 
+    // The core's own word for each machine, and the flags the Workbox screen shows. Local has
+    // no state of its own: its health follows the event connection.
+    assert_eq!(local.state, None);
+    let words: Vec<_> = state.machines[1..]
+        .iter()
+        .map(|m| m.state.as_deref())
+        .collect();
+    assert_eq!(
+        words,
+        [
+            Some("connected"),
+            Some("connecting"),
+            Some("needs_login"),
+            Some("needs_update"),
+            Some("unreachable"),
+        ]
+    );
+    assert!(!buildbox.temporary && !buildbox.via);
+    let edgebox = &state.machines[4];
+    assert!(edgebox.temporary && edgebox.via);
+
     let health = |i: usize| state.machines[i].health.clone();
     assert!(matches!(
         health(2),

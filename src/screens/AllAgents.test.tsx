@@ -29,9 +29,8 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
   onPreview: vi.fn(),
-  copyText: vi.fn(),
 }));
-import { copyText, invokeTyped, onPreview } from "../lib/ipc";
+import { invokeTyped, onPreview } from "../lib/ipc";
 
 // AgentRow and NeedsYouCard each call formatAge once per render and Home never does, so its
 // call count says how many rows rendered.
@@ -143,7 +142,7 @@ beforeEach(() => {
     settings: { open_target: "external" } as unknown as Settings,
   });
   invoke.mockReset();
-  invoke.mockImplementation(async (name: string, args?: { id?: string }) =>
+  invoke.mockImplementation(async (name: string) =>
     name === "get_terminals"
       ? { installed: ["ghostty"], default: "ghostty" }
       : name === "list_run_choices"
@@ -152,10 +151,7 @@ beforeEach(() => {
             templates: [],
             kindsChecked: true,
           }
-        : // The text Rust builds from the profile id.
-          name === "preview_reconnect"
-          ? `herdr machine reconnect ${args?.id}`
-          : null,
+        : null,
   );
 });
 
@@ -1059,34 +1055,32 @@ describe("Home states", () => {
         ),
       );
 
-    it("gets_one_card_with_the_error_staleness_and_a_copyable_reconnect_command", async () => {
+    it("gets_one_card_with_the_error_staleness_and_a_connect_now_button", async () => {
       const user = setup(attention());
       const card = screen.getByRole("region", {
         name: "gpu box needs attention",
       });
       expect(card).toHaveTextContent("ssh: connection refused");
       expect(card).toHaveTextContent("last updated 40s ago");
-      // The profile id, which is what the Reconnect button runs, not the label.
+      // Connect now replaces the command to copy; nothing is offered that does not apply.
       expect(
-        await within(card).findByText(/herdr machine reconnect gpubox/),
-      ).toBeVisible();
-      expect(invoke).toHaveBeenCalledWith("preview_reconnect", {
-        id: "gpubox",
-      });
-      // Exactly one reconnect line on the whole screen, and the online rows are still there.
-      expect(screen.getAllByText(/herdr machine reconnect/)).toHaveLength(1);
+        within(card).queryByRole("button", { name: "Log in…" }),
+      ).toBeNull();
+      expect(
+        within(card).queryByRole("button", { name: "Update hc there…" }),
+      ).toBeNull();
+      expect(
+        screen.getAllByRole("button", { name: "Connect now" }),
+      ).toHaveLength(1);
       expect(rowItem("buildbox::w1:p1")).toBeInTheDocument();
-      expect(document.querySelector(".agent-row .cmdbox")).toBeNull();
-      expect(document.querySelector(".card .cmdbox")).toBeNull();
+      expect(document.querySelector(".cmdbox")).toBeNull();
 
-      vi.mocked(copyText).mockResolvedValue(undefined);
       await user.click(
-        within(card).getByRole("button", { name: /^Copy command/ }),
+        within(card).getByRole("button", { name: "Connect now" }),
       );
-      expect(copyText).toHaveBeenCalledWith("herdr machine reconnect gpubox");
-      expect(
-        await within(card).findByRole("button", { name: "Copied" }),
-      ).toBeVisible();
+      expect(invoke).toHaveBeenCalledWith("machine_connect", {
+        machineId: "gpubox",
+      });
     });
 
     it("keeps_the_card_on_top_when_the_machine_has_cached_rows_that_stay_dim", async () => {
@@ -1101,12 +1095,12 @@ describe("Home states", () => {
         ),
       );
       expect(
-        await screen.findAllByText(/herdr machine reconnect/),
+        screen.getAllByRole("button", { name: "Connect now" }),
       ).toHaveLength(1);
       const dim = rowItem("gpubox::w1:p1");
       expect(dim).toHaveAttribute("data-dim", "true");
       expect(dim).toHaveTextContent("ssh: connection refused");
-      expect(dim).not.toHaveTextContent("herdr machine reconnect");
+      expect(dim).not.toHaveTextContent("Connect now");
       // Under the search box, above everything else.
       const main = screen.getByRole("main");
       expect(main.children[1]).toBe(

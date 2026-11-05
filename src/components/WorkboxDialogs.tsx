@@ -1,11 +1,13 @@
 import type { MachineView } from "../lib/bindings/MachineView";
 import { invokeTyped } from "../lib/ipc";
+import { openMachineCommand } from "../terminal/commandTabs";
 import { useAppStore } from "../store/appStore";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NameSheet } from "./NameSheet";
 
 /** Which dialog the Workbox screen has open. */
-export type WorkboxDialog = { kind: "rename-box" } | { kind: "remove" };
+export type WorkboxDialog =
+  { kind: "rename-box" } | { kind: "remove" } | { kind: "update" };
 
 type Props = {
   dialog: WorkboxDialog | null;
@@ -14,6 +16,37 @@ type Props = {
   /** The workbox was removed: leave its screen. */
   onRemoved: () => void;
 };
+
+/** What Update hc there… says before it copies hc to a machine and restarts its core (spec 7.4). */
+export const UPDATE_BODY =
+  "Copies this hc there and restarts its core. Its terminals keep running.";
+
+/** What Remove… says before it forgets a machine (spec 7.4). */
+export const REMOVE_BODY =
+  "Forgets this machine here. Its terminals keep running there.";
+
+/** The confirm before `hc machine update <name>` runs in a tab; confirming opens the tab. */
+export function UpdateConfirm({
+  machine,
+  onClose,
+}: {
+  machine: MachineView;
+  onClose: () => void;
+}) {
+  return (
+    <ConfirmDialog
+      title={`Update hc on ${machine.name}?`}
+      body={UPDATE_BODY}
+      confirmLabel="Update hc there"
+      danger={false}
+      onConfirm={() => {
+        onClose();
+        void openMachineCommand(machine, "update");
+      }}
+      onCancel={onClose}
+    />
+  );
+}
 
 /** The confirm and name sheet the Workbox screen can open, one at a time. */
 export function WorkboxDialogs({
@@ -31,7 +64,10 @@ export function WorkboxDialogs({
           fields={[{ key: "name", label: "Name", initial: machine.name }]}
           submitLabel="Rename"
           onSubmit={(v) =>
-            invokeTyped("machine_rename", { id: machine.id, label: v.name })
+            invokeTyped("machine_rename", {
+              machineId: machine.id,
+              newName: v.name,
+            })
           }
           onClose={close}
         />
@@ -39,17 +75,20 @@ export function WorkboxDialogs({
       {machine && dialog?.kind === "remove" && (
         <ConfirmDialog
           title={`Remove ${machine.name}?`}
-          body="Removing forgets this workbox here. Its sessions and agents keep running on the machine."
+          body={REMOVE_BODY}
           confirmLabel="Remove workbox"
           danger
           onConfirm={() => {
             close();
-            invokeTyped("machine_remove", { id: machine.id })
+            invokeTyped("machine_remove", { machineId: machine.id })
               .then(goHome)
               .catch(report);
           }}
           onCancel={close}
         />
+      )}
+      {machine && dialog?.kind === "update" && (
+        <UpdateConfirm machine={machine} onClose={close} />
       )}
     </>
   );

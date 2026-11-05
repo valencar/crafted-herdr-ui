@@ -27,9 +27,8 @@ import { Workbox } from "./Workbox";
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
-  copyText: vi.fn(),
 }));
-import { copyText, invokeTyped } from "../lib/ipc";
+import { invokeTyped } from "../lib/ipc";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
@@ -37,7 +36,16 @@ const NOW = Date.now();
 
 function machine(
   id: string,
-  over: { name?: string; terms?: TermSpec[]; hcVersion?: string } = {},
+  over: {
+    name?: string;
+    terms?: TermSpec[];
+    hcVersion?: string;
+    state?: string;
+    temporary?: boolean;
+    via?: boolean;
+    host?: string;
+    since?: number;
+  } = {},
   health: Health = { kind: "online" },
 ): MachineView {
   return machineView(
@@ -49,13 +57,22 @@ function machine(
       health,
       lastOkMs: NOW,
       hcVersion: over.hcVersion ?? "0.1.18",
+      state: over.state,
+      temporary: over.temporary,
+      via: over.via,
+      host: over.host,
+      stateSinceMs: over.since,
     },
     over.terms ?? buildboxTerms(),
   );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return { ...buildState([], { generatedAtMs: NOW }), machines };
+  return {
+    ...buildState([], { generatedAtMs: NOW }),
+    core_version: "0.1.18",
+    machines,
+  };
 }
 
 const serverError = (code: string, message: string) => ({
@@ -99,8 +116,12 @@ beforeEach(() => {
   });
   answers = {
     get_terminals: () => ({ installed: ["ghostty"], default: "ghostty" }),
-    preview_reconnect: (args: { id: string }) =>
-      `herdr machine reconnect ${args.id}`,
+    machine_login_args: () => ["machine", "login", "buildbox"],
+    machine_update_args: () => ["machine", "update", "buildbox"],
+    set_workbox_hidden: (args: { hidden: boolean }) => ({
+      ...useAppStore.getState().settings,
+      hidden_workboxes: args.hidden ? ["buildbox"] : [],
+    }),
     set_settings: (args: { patch: Partial<Settings> }) => ({
       ...useAppStore.getState().settings,
       ...args.patch,
@@ -142,18 +163,39 @@ describe("Workbox", () => {
     expect(heading).toHaveTextContent(/^buildbox$/);
   });
 
-  it("renders_the_machines_terminals_as_a_flat_list_of_pane_boxes", async () => {
+  it("terminal_list_grouped_by_project", () => {
     setup(appState(machine("local"), machine("buildbox")));
-    // Every terminal of this machine, in the order the core lists them, and none from Local.
-    const boxes = screen.getAllByRole("button", { name: /^Open (?!full)/ });
-    expect(boxes.map((b) => b.getAttribute("aria-label"))).toEqual([
-      "Open planner",
-      "Open copilot: terraform plan",
-      "Open zsh",
-      "Open tester",
-      "Open claude",
-      "Open zsh",
+    // The project rule of everywhere else, limited to this machine: needs-you groups first, then
+    // working, then the rest, loose sessions last; a shell inside a project joins it.
+    const groups = screen.getAllByRole("region", {
+      name: /^(api-service|web-app|infra|Loose sessions)$/,
+    });
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
+      "api-service",
+      "web-app",
+      "infra",
+      "Loose sessions",
     ]);
+    const boxesIn = (g: HTMLElement) =>
+      within(g)
+        .getAllByRole("button", { name: /^Open / })
+        .map((b) => b.getAttribute("aria-label"));
+    expect(boxesIn(groups[0])).toEqual(["Open planner", "Open zsh"]);
+    expect(boxesIn(groups[1])).toEqual(["Open tester"]);
+    expect(boxesIn(groups[2])).toEqual(["Open copilot: terraform plan"]);
+    expect(boxesIn(groups[3])).toEqual(["Open claude", "Open zsh"]);
+    // A project shows its folder; every group is a heading too.
+    expect(within(groups[0]).getByText("~/projects/api-service")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "infra" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders_the_machines_terminals_as_pane_boxes", async () => {
+    setup(appState(machine("local"), machine("buildbox")));
+    // Every terminal of this machine and none from Local.
+    const boxes = screen.getAllByRole("button", { name: /^Open (?!full)/ });
+    expect(boxes).toHaveLength(6);
 
     // A pane box: kind badge, name, status label (text, not color alone), last line, address.
     const planner = screen.getByRole("button", { name: /planner/ });
@@ -220,7 +262,6 @@ describe("Workbox", () => {
       { kind: "reconnecting", retry_in_ms: 4000, error: "timed out" },
       "Reconnecting",
     ],
-    [{ kind: "hidden" }, "Hidden"],
   ] as [Health, string][])("health_%j_reads_%s", (health, label) => {
     setup(appState(machine("local"), machine("buildbox", {}, health)));
     expect(
@@ -228,33 +269,36 @@ describe("Workbox", () => {
     ).toBeInTheDocument();
   });
 
-  it("an_attention_machine_shows_its_error_and_keeps_its_last_panes", () => {
+  it("an_unreachable_machine_shows_its_why_and_since_and_keeps_its_last_panes", () => {
     setup(
       appState(
-        machine("buildbox", {}, { kind: "attention", error: "ssh: denied" }),
+        machine(
+          "buildbox",
+          { since: NOW - 3 * 60_000 },
+          { kind: "attention", error: "ssh: denied" },
+        ),
       ),
     );
-    expect(screen.getByText("ssh: denied")).toBeInTheDocument();
+    expect(
+      screen.getByText("Unreachable · ssh: denied · since 3m"),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open planner" })).toBeVisible();
   });
 
-  it("a_hidden_machine_offers_show_and_no_terminals", async () => {
-    useAppStore.setState({
-      settings: {
-        open_target: "external",
-        hidden_workboxes: ["buildbox", "gpubox"],
-      } as unknown as Settings,
-    });
+  it("a_hidden_machine_is_not_shown", async () => {
     const user = setup(appState(machine("buildbox", {}, { kind: "hidden" })));
+    // No terminals, no actions, no counts: Settings brings it back.
     expect(screen.queryByRole("button", { name: /^Open (?!full)/ })).toBeNull();
-    expect(screen.getByText(/is hidden/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "buildbox" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Show" }));
-    // An app setting, with no core call; other hidden workboxes stay hidden.
-    expect(calls("set_settings")).toEqual([
-      { patch: { hidden_workboxes: ["gpubox"] } },
-    ]);
-    expect(calls("machine_set_enabled")).toEqual([]);
+    expect(screen.queryByRole("button", { name: "Show" })).toBeNull();
+    expect(
+      screen.getByText(/is hidden. Show it again in Settings/),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Back to all workboxes" }),
+    );
+    expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
   });
 
   it("the_meta_names_the_hc_version_the_machine_reports", () => {
@@ -264,9 +308,16 @@ describe("Workbox", () => {
     ).toBeInTheDocument();
   });
 
-  it("local_hides_rename_hide_and_remove", () => {
+  it("local_hides_the_machine_actions", () => {
     setup(appState(machine("local", { name: "This computer" })), "local");
-    for (const name of ["Rename", "Hide", "Remove…"]) {
+    for (const name of [
+      "Connect now",
+      "Log in…",
+      "Update hc there…",
+      "Rename…",
+      "Hide",
+      "Remove…",
+    ]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     expect(
@@ -274,20 +325,176 @@ describe("Workbox", () => {
     ).toBeInTheDocument();
   });
 
-  it("remote_machine_offers_all_machine_actions", () => {
+  it("a_connected_machine_offers_connect_rename_hide_and_remove", () => {
     setup();
-    for (const name of ["Check now", "Rename", "Hide", "Remove…"]) {
+    for (const name of ["Connect now", "Rename…", "Hide", "Remove…"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+    // Nothing to log in to or update, and the old Check now is gone.
+    for (const name of ["Log in…", "Update hc there…", "Check now"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
     }
   });
 
-  it("remove_requires_confirm_and_copy", async () => {
+  it("the_meta_shows_host_and_a_custom_connection", () => {
+    setup(appState(machine("buildbox", { host: "build-host", via: true })));
+    expect(
+      screen.getByText(
+        "host build-host · custom connection · session default · hc 0.1.18",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("connect_calls_machine_connect", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: "Connect now" }));
+    expect(calls("machine_connect")).toEqual([{ machineId: "buildbox" }]);
+    expect(useAppStore.getState().toast).toBeNull();
+  });
+
+  it("a_refused_connect_goes_to_the_toast", async () => {
+    answers.machine_connect = () => {
+      throw { kind: "invalid", message: "Unknown workbox buildbox." };
+    };
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: "Connect now" }));
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("Unknown workbox buildbox."),
+    );
+  });
+
+  it("needs_login_shows_log_in", async () => {
+    const user = setup(
+      appState(
+        machine(
+          "buildbox",
+          { state: "needs_login", since: NOW - 2 * 60_000 },
+          { kind: "attention", error: "Needs login" },
+        ),
+      ),
+    );
+    expect(screen.getByText("Needs login · since 2m")).toBeInTheDocument();
+    // Nothing opens until the click.
+    expect(calls("machine_login_args")).toEqual([]);
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Log in…" }));
+
+    expect(calls("machine_login_args")).toEqual([{ machineId: "buildbox" }]);
+    // A command tab, one per workbox and verb, active at once.
+    await waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe(
+        "buildbox::cmd:machine login",
+      ),
+    );
+    expect(useTerminalStore.getState().tabs).toMatchObject([
+      {
+        tabKey: "buildbox::cmd:machine login",
+        target: {
+          kind: "command",
+          machineId: "buildbox",
+          args: ["machine", "login", "buildbox"],
+        },
+        title: "Log in",
+        machineLabel: "buildbox",
+      },
+    ]);
+    // No update is offered for a login.
+    expect(
+      screen.queryByRole("button", { name: "Update hc there…" }),
+    ).toBeNull();
+  });
+
+  it("update_asks_first_then_opens_a_command_tab", async () => {
+    const user = setup(
+      appState(
+        machine(
+          "buildbox",
+          { state: "needs_update", hcVersion: "0.1.12" },
+          { kind: "attention", error: "Needs an hc update" },
+        ),
+      ),
+    );
+    expect(screen.queryByRole("button", { name: "Log in…" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Update hc there…" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Update hc on buildbox?",
+    });
+    expect(
+      within(dialog).getByText(
+        "Copies this hc there and restarts its core. Its terminals keep running.",
+      ),
+    ).toBeInTheDocument();
+    expect(calls("machine_update_args")).toEqual([]);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(calls("machine_update_args")).toEqual([]);
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Update hc there…" }));
+    await user.click(screen.getByRole("button", { name: "Update hc there" }));
+    await waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe(
+        "buildbox::cmd:machine update",
+      ),
+    );
+    expect(calls("machine_update_args")).toEqual([{ machineId: "buildbox" }]);
+    expect(useTerminalStore.getState().tabs[0]).toMatchObject({
+      title: "Update hc",
+      target: { args: ["machine", "update", "buildbox"] },
+    });
+  });
+
+  it("a_connected_machine_on_another_hc_is_offered_the_update", () => {
+    // Connected, but not the hc running here (0.1.18).
+    setup(appState(machine("buildbox", { hcVersion: "0.1.12" })));
+    expect(
+      screen.getByRole("button", { name: "Update hc there…" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a_finished_command_tab_is_replaced_by_the_next_click", async () => {
+    const user = setup(
+      appState(
+        machine(
+          "buildbox",
+          { state: "needs_login" },
+          { kind: "attention", error: "Needs login" },
+        ),
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Log in…" }));
+    await waitFor(() =>
+      expect(useTerminalStore.getState().tabs).toHaveLength(1),
+    );
+    // Still running: a second click shows it again, not a second one.
+    await user.click(screen.getByRole("button", { name: "Log in…" }));
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
+    // Ended: the click starts it afresh.
+    act(() =>
+      useTerminalStore
+        .getState()
+        .sessionEnded(
+          "buildbox::cmd:machine login",
+          { code: 1, lastLine: null },
+          undefined,
+          "ready",
+        ),
+    );
+    await user.click(screen.getByRole("button", { name: "Log in…" }));
+    await waitFor(() =>
+      expect(useTerminalStore.getState().tabs[0].state).toBe("opening"),
+    );
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
+  });
+
+  it("remove_requires_confirm_then_calls_rm", async () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: "Remove…" }));
     const dialog = screen.getByRole("dialog", { name: "Remove buildbox?" });
     expect(
       within(dialog).getByText(
-        "Removing forgets this workbox here. Its sessions and agents keep running on the machine.",
+        "Forgets this machine here. Its terminals keep running there.",
       ),
     ).toBeInTheDocument();
     // The confirm uses the danger style, and nothing has been removed yet.
@@ -306,7 +513,7 @@ describe("Workbox", () => {
 
     await user.click(screen.getByRole("button", { name: "Remove…" }));
     await user.click(screen.getByRole("button", { name: "Remove workbox" }));
-    expect(calls("machine_remove")).toEqual([{ id: "buildbox" }]);
+    expect(calls("machine_remove")).toEqual([{ machineId: "buildbox" }]);
     // The workbox is gone, so the screen goes back to Home.
     await waitFor(() =>
       expect(useAppStore.getState().view).toEqual({ kind: "dashboard" }),
@@ -326,21 +533,29 @@ describe("Workbox", () => {
     expect(useAppStore.getState().view.kind).toBe("workbox");
   });
 
-  it("hide_writes_the_setting_and_makes_no_core_call", async () => {
-    useAppStore.setState({
-      settings: {
-        open_target: "external",
-        hidden_workboxes: ["gpubox"],
-      } as unknown as Settings,
-    });
+  it("hide_writes_setting_only", async () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: "Hide" }));
-    // No confirm: it only changes what this app shows, and Show undoes it.
+    // No confirm: it only changes what this app shows, and Settings undoes it.
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(calls("set_settings")).toEqual([
-      { patch: { hidden_workboxes: ["gpubox", "buildbox"] } },
+    expect(calls("set_workbox_hidden")).toEqual([
+      { machineId: "buildbox", hidden: true },
     ]);
-    expect(calls("machine_set_enabled")).toEqual([]);
+    // An app setting: no core call of any kind.
+    for (const name of [
+      "machine_connect",
+      "machine_rename",
+      "machine_remove",
+    ]) {
+      expect(calls(name)).toEqual([]);
+    }
+    // The saved settings reach the store, and a hidden workbox has no screen to stay on.
+    await waitFor(() =>
+      expect(useAppStore.getState().view).toEqual({ kind: "dashboard" }),
+    );
+    expect(useAppStore.getState().settings?.hidden_workboxes).toEqual([
+      "buildbox",
+    ]);
   });
 
   it("there_is_no_full_herdr_button_any_more", () => {
@@ -350,46 +565,18 @@ describe("Workbox", () => {
     ).toBeNull();
   });
 
-  it("check_now_stores_the_time_and_counts_up", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
-    answers.machine_status = () => [
-      { id: "buildbox", label: "buildbox", status: "ok", error: null },
-    ];
-    const user = userEvent.setup({
-      advanceTimers: (ms) => vi.advanceTimersByTime(ms),
-    });
-    useAppStore.setState({
-      state: appState(machine("buildbox")),
-      view: { kind: "workbox", machineId: "buildbox" },
-      dialogOpen: 0,
-    });
-    render(<Workbox machineId="buildbox" />);
-    expect(screen.queryByText(/^checked/)).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Check now" }));
-    expect(calls("machine_status")).toEqual([{ id: "buildbox" }]);
-    expect(await screen.findByText("checked 0s ago")).toBeInTheDocument();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(14_000);
-    });
-    expect(screen.getByText("checked 14s ago")).toBeInTheDocument();
+  it("temporary_badge_shown", () => {
+    setup(appState(machine("buildbox", { temporary: true })));
+    const summary = screen.getByRole("region", { name: "buildbox" });
+    expect(within(summary).getByText("Temporary")).toBeInTheDocument();
+    cleanup();
+    setup();
+    expect(screen.queryByText("Temporary")).toBeNull();
   });
 
-  it("a_failed_check_reports_and_shows_no_time", async () => {
-    answers.machine_status = () => {
-      throw serverError("unreachable", "cannot reach buildbox");
-    };
+  it("rename_validates_and_calls", async () => {
     const user = setup();
-    await user.click(screen.getByRole("button", { name: "Check now" }));
-    await waitFor(() =>
-      expect(useAppStore.getState().toast).toBe("cannot reach buildbox"),
-    );
-    expect(screen.queryByText(/^checked/)).toBeNull();
-  });
-
-  it("rename_workbox_validates_then_renames", async () => {
-    const user = setup();
-    await user.click(screen.getByRole("button", { name: "Rename" }));
+    await user.click(screen.getByRole("button", { name: "Rename…" }));
     const dialog = screen.getByRole("dialog", { name: "Rename workbox" });
     const field = within(dialog).getByLabelText("Name");
     expect(field).toHaveValue("buildbox");
@@ -400,11 +587,11 @@ describe("Workbox", () => {
     ).toBeInTheDocument();
     expect(calls("machine_rename")).toEqual([]);
 
-    await user.type(field, "  gpu runner ");
+    await user.type(field, "  ci-runner ");
     await user.click(within(dialog).getByRole("button", { name: "Rename" }));
     await waitFor(() =>
       expect(calls("machine_rename")).toEqual([
-        { id: "buildbox", label: "gpu runner" },
+        { machineId: "buildbox", newName: "ci-runner" },
       ]),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -412,17 +599,17 @@ describe("Workbox", () => {
 
   it("a_refused_rename_keeps_the_sheet_open_with_the_message", async () => {
     answers.machine_rename = () => {
-      throw { kind: "invalid", message: "Name can't start with '-'." };
+      throw { kind: "invalid", message: "Use 1 to 32 of a-z 0-9 - _ ." };
     };
     const user = setup();
-    await user.click(screen.getByRole("button", { name: "Rename" }));
+    await user.click(screen.getByRole("button", { name: "Rename…" }));
     const dialog = screen.getByRole("dialog", { name: "Rename workbox" });
     const field = within(dialog).getByLabelText("Name");
     await user.clear(field);
-    await user.type(field, "-x");
+    await user.type(field, "Bad Name");
     await user.click(within(dialog).getByRole("button", { name: "Rename" }));
     expect(
-      await within(dialog).findByText("Name can't start with '-'."),
+      await within(dialog).findByText("Use 1 to 32 of a-z 0-9 - _ ."),
     ).toBeInTheDocument();
   });
 
@@ -646,54 +833,6 @@ describe("Workbox pane tails", () => {
     expect(
       document.getElementById(planner.getAttribute("aria-describedby")!),
     ).toHaveTextContent("Needs input");
-  });
-
-  it("a_hidden_machine_with_held_terminals_counts_zero_in_all_three", () => {
-    setup(appState(machine("buildbox", {}, { kind: "hidden" })));
-    const summary = screen.getByRole("region", { name: "buildbox" });
-    const count = (term: string) =>
-      within(summary).getByText(term).parentElement?.querySelector("dd")
-        ?.textContent;
-    expect(["Sessions", "Agents", "Needs you"].map(count)).toEqual([
-      "0",
-      "0",
-      "0",
-    ]);
-  });
-
-  it("an_attention_machine_suggests_the_reconnect_command_with_copy", async () => {
-    const user = setup(
-      appState(
-        machine("buildbox", {}, { kind: "attention", error: "ssh: denied" }),
-      ),
-    );
-    vi.mocked(copyText).mockResolvedValue(undefined);
-    const summary = screen.getByRole("region", { name: "buildbox" });
-    expect(
-      await within(summary).findByText(/herdr machine reconnect buildbox/),
-    ).toBeVisible();
-    await user.click(
-      within(summary).getByRole("button", { name: /^Copy command/ }),
-    );
-    expect(copyText).toHaveBeenCalledWith("herdr machine reconnect buildbox");
-  });
-
-  it("a_failed_re_check_clears_the_old_checked_note", async () => {
-    answers.machine_status = () => [
-      { id: "buildbox", label: "buildbox", status: "ok", error: null },
-    ];
-    const user = setup();
-    await user.click(screen.getByRole("button", { name: "Check now" }));
-    expect(await screen.findByText(/^checked/)).toBeInTheDocument();
-
-    answers.machine_status = () => {
-      throw serverError("unreachable", "cannot reach buildbox");
-    };
-    await user.click(screen.getByRole("button", { name: "Check now" }));
-    await waitFor(() =>
-      expect(useAppStore.getState().toast).toBe("cannot reach buildbox"),
-    );
-    expect(screen.queryByText(/^checked/)).toBeNull();
   });
 
   describe("while the window is hidden", () => {

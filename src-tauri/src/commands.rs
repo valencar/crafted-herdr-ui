@@ -1,9 +1,6 @@
 //! The Tauri commands the UI calls. Each is a thin wrapper: it looks up what it needs in Tauri
 //! state and hands off to the sync or the launchers. Names are snake_case in Rust and in
 //! `invoke()`; argument keys are camelCase, which is Tauri's default.
-//!
-//! The commands in the "Interim stubs" block answer `ActionError::Invalid` until the v0.9 task
-//! named next to each one replaces them with a herdr-core call.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -15,13 +12,12 @@ use ts_rs::TS;
 
 use crate::LOCAL;
 use crate::actions::{
-    ActionError, CreatedSession, KindsCache, NewSessionRequest, NewSessions, RowActions,
-    RunChoices, preview,
+    ActionError, CreatedSession, KindsCache, MachineActions, NewSessionRequest, NewSessions,
+    RowActions, RunChoices, machine_command_args, preview,
 };
 use crate::activity::ActivityV2;
 use crate::core::{CommandLogEntry, CoreClient};
 use crate::herdr::cli::HerdrCli;
-use crate::herdr::model::MachineStatusEntry;
 use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::notify::VisibleRow;
 use crate::preview::{self, PreviewManager};
@@ -39,13 +35,6 @@ use crate::terminal::{
     checked_core_argv, checked_machine_add_args,
 };
 use crate::tray;
-
-/// What an interim stub answers.
-const NOT_YET: &str = "Not available on herdr-core yet";
-
-fn not_yet() -> ActionError {
-    ActionError::invalid(NOT_YET)
-}
 
 /// The current state, for a UI that started listening after the first `"state"` event.
 /// `None` while startup is still looking for herdr-core; the first `"state"` event follows.
@@ -298,34 +287,106 @@ pub async fn set_pinned(
         .await
 }
 
-/// Task 12.
-#[tauri::command]
-pub fn machine_rename() -> Result<(), ActionError> {
-    Err(not_yet())
+// ---- Workboxes (Task 12) ----
+
+/// The actions on saved machines, which need the core and the sync it started.
+macro_rules! machines {
+    ($core:expr, $sync:expr) => {
+        MachineActions::new(
+            &$core,
+            $sync
+                .get()
+                .ok_or_else(|| ActionError::invalid("herdr-core hasn’t started yet."))?,
+        )
+    };
 }
 
-/// Task 12.
+/// Connect now (`machine.connect`).
 #[tauri::command]
-pub fn machine_set_enabled() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn machine_connect(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    machine_id: String,
+) -> Result<(), ActionError> {
+    machines!(core, sync).connect(&machine_id).await
 }
 
-/// Task 12.
+/// Rename… (`machine.rename`). Rows, tabs and colors survive: they are keyed by machine id.
 #[tauri::command]
-pub fn machine_remove() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn machine_rename(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    machine_id: String,
+    new_name: String,
+) -> Result<(), ActionError> {
+    machines!(core, sync).rename(&machine_id, &new_name).await
 }
 
-/// Task 12.
+/// Remove… (`machine.rm`); the UI confirms first.
 #[tauri::command]
-pub fn machine_status() -> Result<Vec<MachineStatusEntry>, ActionError> {
-    Err(not_yet())
+pub async fn machine_remove(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    machine_id: String,
+) -> Result<(), ActionError> {
+    machines!(core, sync).remove(&machine_id).await
 }
 
-/// Task 12.
+/// Hide or show a workbox: an app setting (`hidden_workboxes`) and no core call.
 #[tauri::command]
-pub fn preview_reconnect() -> Result<String, ActionError> {
-    Err(not_yet())
+pub async fn set_workbox_hidden(
+    app: AppHandle,
+    shared: State<'_, SharedSettings>,
+    sync: State<'_, SyncCell>,
+    machine_id: String,
+    hidden: bool,
+) -> Result<Settings, ActionError> {
+    let _update = shared.begin_update().await;
+    let old = shared.get();
+    let new = old
+        .with_hidden(&machine_id, hidden)
+        .map_err(ActionError::invalid)?;
+    if new == old {
+        return Ok(new);
+    }
+    settings::save(&app, &new).map_err(ActionError::invalid)?;
+    shared.set(new.clone());
+    if let Some(sync) = sync.get() {
+        sync.refresh_view();
+    }
+    let _ = app.emit(SETTINGS_EVENT, &new);
+    Ok(new)
+}
+
+/// What follows the core in `machine login <name>`, for the Log in… tab. The name is the
+/// machine's current one, checked like any name; the UI hands the arguments back to `term_open`.
+#[tauri::command]
+pub fn machine_login_args(
+    sync: State<'_, SyncCell>,
+    machine_id: String,
+) -> Result<Vec<String>, ActionError> {
+    machine_args("login", &sync, &machine_id)
+}
+
+/// What follows the core in `machine update <name>`, for the Update hc there… tab. The UI asks
+/// for a confirmation before it opens the tab.
+#[tauri::command]
+pub fn machine_update_args(
+    sync: State<'_, SyncCell>,
+    machine_id: String,
+) -> Result<Vec<String>, ActionError> {
+    machine_args("update", &sync, &machine_id)
+}
+
+fn machine_args(verb: &str, sync: &SyncCell, machine_id: &str) -> Result<Vec<String>, ActionError> {
+    if machine_id == LOCAL {
+        return Err(ActionError::invalid("This computer isn’t a saved workbox."));
+    }
+    let name = sync
+        .get()
+        .and_then(|s| s.machine_name(machine_id))
+        .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))?;
+    machine_command_args(verb, &name).map_err(ActionError::invalid)
 }
 
 /// The last non-empty line a terminal's screen shows, for its box in the Workbox screen.
@@ -992,11 +1053,16 @@ mod tests {
     }
 
     #[test]
-    fn interim_stubs_say_so() {
-        let e = machine_rename().unwrap_err();
-        assert_eq!(e.to_string(), NOT_YET);
-        assert!(matches!(e, ActionError::Invalid { .. }));
-        assert!(machine_status().is_err());
+    fn login_and_update_args_need_a_listed_saved_machine() {
+        // Before the core has started there is no machine list, and Local is never saved.
+        let cell = SyncCell::default();
+        for verb in ["login", "update"] {
+            assert!(machine_args(verb, &cell, "m-1").is_err());
+            assert_eq!(
+                machine_args(verb, &cell, LOCAL).unwrap_err().to_string(),
+                "This computer isn’t a saved workbox."
+            );
+        }
     }
 
     #[test]

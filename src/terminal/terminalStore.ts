@@ -6,8 +6,31 @@ import { endingOf } from "./detachReason";
 
 export type TabState = "opening" | "live" | "detached" | "error";
 
-/** The terminal a tab attaches to. (A `command` target has no tab: it has no terminal row.) */
-export type TabTarget = Extract<TermTarget, { kind: "terminal" }>;
+/**
+ * What a tab runs: the attach to one terminal, or a core command that needs a person at the
+ * keyboard (`machine login`, `machine update`; Task 13 adds install). A command tab belongs to a
+ * workbox (`machineId`) but has no terminal row; `args` follow the core binary, and Rust checks
+ * them again. The wire target (`TermTarget`) has no machine id, so `wireTarget` drops it.
+ */
+export type TabTarget =
+  | Extract<TermTarget, { kind: "terminal" }>
+  | { kind: "command"; machineId: string; args: string[] };
+
+/** What `term_open` takes for a tab's target. */
+export function wireTarget(target: TabTarget): TermTarget {
+  return target.kind === "command"
+    ? { kind: "command", args: target.args }
+    : target;
+}
+
+/**
+ * The key of a command tab: `${machineId}::cmd:${verb words}`, for example
+ * `buildbox::cmd:machine login`. One tab per workbox and command. It can't equal a row key: an
+ * address never contains a colon followed by a space-separated verb.
+ */
+export function commandTabKey(machineId: string, args: string[]): string {
+  return `${machineId}::cmd:${args.slice(0, 2).join(" ")}`;
+}
 
 export type CoreKind = CoreState["kind"];
 
@@ -23,7 +46,7 @@ export type Waiting =
   { kind: "restart"; restarts: number } | { kind: "core"; sawDown: boolean };
 
 export type TermTab = {
-  /** `${machineId}::${address}`, the row's key. */
+  /** `${machineId}::${address}`, the row's key (a command tab's key is `commandTabKey`). */
   tabKey: string;
   target: TabTarget;
   title: string;
@@ -140,9 +163,13 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
     })),
   sessionEnded: (tabKey, end, row, core) => {
     const ending = endingOf(end.code ?? -1, end.lastLine);
-    const opened = get().tabs.find((t) => t.tabKey === tabKey)?.restartsAtOpen;
+    const tab = get().tabs.find((t) => t.tabKey === tabKey);
+    const opened = tab?.restartsAtOpen;
     let waiting: Waiting | null = null;
-    if (
+    // A command tab (login, update) has nothing to wait for: it ends, and Close tab is the way out.
+    if (tab?.target.kind === "command") {
+      waiting = null;
+    } else if (
       ending.kind === "finished" &&
       ending.reason === "signaled" &&
       row?.keep &&

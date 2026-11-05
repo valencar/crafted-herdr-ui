@@ -38,6 +38,7 @@ import {
 import { useNow } from "../lib/useNow";
 import { useCommandLog } from "../lib/useCommandLog";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
+import { shownMachines } from "../lib/workbox";
 import { useAppStore } from "../store/appStore";
 import { groupTabs } from "../terminal/tabOrder";
 import { useTerminalStore } from "../terminal/terminalStore";
@@ -121,7 +122,8 @@ export function Dashboard({ narrow = false, visible }: Props) {
     enabled: !narrow,
   });
 
-  const machines = useMemo(() => state?.machines ?? [], [state]);
+  // A hidden workbox is not shown (spec 7.4).
+  const machines = useMemo(() => shownMachines(state?.machines ?? []), [state]);
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const projectOf = useMemo(() => projectNamesOf(groupByProject(rows)), [rows]);
   const counts = statusCounts(rows);

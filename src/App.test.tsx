@@ -1572,7 +1572,7 @@ describe("the window chrome", () => {
       ).toBeNull();
     });
 
-    it("dims_a_hidden_workbox_and_labels_it", async () => {
+    it("does_not_show_a_hidden_workbox", async () => {
       listBoxes("0.9.4", box("buildbox"), box("gpubox", { kind: "hidden" }));
       render(<App />);
       const sidebar = await screen.findByRole("navigation", {
@@ -1580,14 +1580,11 @@ describe("the window chrome", () => {
       });
       expect(
         within(sidebar).getByRole("button", {
-          name: /^gpubox\s*Hidden\s*\d+$/,
-        }),
-      ).toHaveClass("is-dim");
-      expect(
-        within(sidebar).getByRole("button", {
           name: /^buildbox\s*Online\s*\d+$/,
         }),
-      ).not.toHaveClass("is-dim");
+      ).toBeInTheDocument();
+      expect(within(sidebar).queryByText("gpubox")).toBeNull();
+      expect(within(sidebar).queryByText("Hidden")).toBeNull();
     });
 
     it("gives_each_project_dot_its_status_in_words", async () => {

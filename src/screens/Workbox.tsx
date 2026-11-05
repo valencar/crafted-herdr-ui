@@ -7,32 +7,33 @@ import {
   type WorkboxDialog,
 } from "../components/WorkboxDialogs";
 import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
-import { isNeedsYou, isShell, toRows } from "../lib/grouping";
+import { shortPath } from "../lib/format";
+import { groupByProject, isNeedsYou, isShell, toRows } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
 import { tailTargets, useTails } from "../lib/useTails";
-import { isEditable, isInTerminal, saveSettings } from "../lib/uiHelpers";
+import { isEditable, isInTerminal } from "../lib/uiHelpers";
 import { useNow } from "../lib/useNow";
 import { useAppStore } from "../store/appStore";
+import { openMachineCommand } from "../terminal/commandTabs";
 
-/** The Workbox screen: one machine's health and actions, and its terminals as a flat list. */
+/** The Workbox screen: one machine's state and actions, and its terminals grouped by project. */
 export function Workbox({ machineId }: { machineId: string }) {
   const state = useAppStore((s) => s.state);
-  const settings = useAppStore((s) => s.settings);
   const sheet = useAppStore((s) => s.sheet);
   const setView = useAppStore((s) => s.setView);
+  const setSettings = useAppStore((s) => s.setSettings);
   const openNewSession = useAppStore((s) => s.openNewSession);
   const report = useAppStore((s) => s.reportError);
 
   const nowMs = useNow(30_000);
   const [dialog, setDialog] = useState<WorkboxDialog | null>(null);
-  const [checkedAtMs, setCheckedAtMs] = useState<number | null>(null);
-  const [checkError, setCheckError] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [clearing, setClearing] = useState(false);
 
   const machine = state?.machines.find((m) => m.id === machineId) ?? null;
   const online = machine?.health.kind === "online";
+  // A hidden workbox is not shown (spec 7.4): it comes back from Settings.
   const hidden = machine?.health.kind === "hidden";
 
   const allRows = useMemo(() => (state ? toRows(state) : []), [state]);
@@ -40,6 +41,8 @@ export function Workbox({ machineId }: { machineId: string }) {
     () => allRows.filter((r) => r.machineId === machineId),
     [allRows, machineId],
   );
+  // The terminals by project folder, the same rule as everywhere else.
+  const groups = useMemo(() => groupByProject(rows), [rows]);
   // A machine that is not answering is not read; its boxes keep their last line.
   const targets = useMemo(
     () => (online ? tailTargets(rows) : []),
@@ -66,39 +69,29 @@ export function Workbox({ machineId }: { machineId: string }) {
 
   const goHome = () => setView({ kind: "dashboard" });
 
-  const check = async () => {
-    setChecking(true);
-    try {
-      const entries = await invokeTyped("machine_status", { id: machineId });
-      setCheckedAtMs(Date.now());
-      setCheckError(entries.find((e) => e.id === machineId)?.error ?? null);
-    } catch (e) {
-      // The last check no longer says anything about now.
-      setCheckedAtMs(null);
-      setCheckError(null);
-      report(e);
-    } finally {
-      setChecking(false);
-    }
+  const connect = () => {
+    setConnecting(true);
+    invokeTyped("machine_connect", { machineId })
+      .catch(report)
+      .finally(() => setConnecting(false));
   };
 
-  // Hide and Show are an app setting with no core call behind them (spec section 7.4).
-  const setHidden = (hide: boolean) => {
-    const others = (settings?.hidden_workboxes ?? []).filter(
-      (id) => id !== machineId,
-    );
-    saveSettings({ hidden_workboxes: hide ? [...others, machineId] : others });
+  // Hide is an app setting with no core call behind it (spec section 7.4). The workbox is then
+  // not shown anywhere, so the screen goes back to Home; Settings shows it again.
+  const hide = () => {
+    invokeTyped("set_workbox_hidden", { machineId, hidden: true })
+      .then((saved) => {
+        setSettings(saved);
+        goHome();
+      })
+      .catch(report);
   };
 
-  // A hidden machine shows no terminals, even when some are still held, so its counts are all
-  // zero rather than a mix.
-  const counts: Counts = hidden
-    ? { sessions: 0, agents: 0, needsYou: 0 }
-    : {
-        sessions: rows.length,
-        agents: rows.filter((r) => !isShell(r)).length,
-        needsYou: rows.filter(isNeedsYou).length,
-      };
+  const counts: Counts = {
+    sessions: rows.length,
+    agents: rows.filter((r) => !isShell(r)).length,
+    needsYou: rows.filter(isNeedsYou).length,
+  };
 
   let content;
   if (state === null) {
@@ -112,6 +105,15 @@ export function Workbox({ machineId }: { machineId: string }) {
         </button>
       </div>
     );
+  } else if (hidden) {
+    content = (
+      <div className="empty">
+        <p>{machine.name} is hidden. Show it again in Settings.</p>
+        <button type="button" className="btn" onClick={goHome}>
+          Back to all workboxes
+        </button>
+      </div>
+    );
   } else {
     content = (
       <>
@@ -119,44 +121,53 @@ export function Workbox({ machineId }: { machineId: string }) {
           machine={machine}
           counts={counts}
           nowMs={nowMs}
-          checkedAtMs={checkedAtMs}
-          checkError={checkError}
-          checking={checking}
-          onCheck={() => void check()}
+          coreVersion={state.core_version}
+          connecting={connecting}
+          onConnect={connect}
+          onLogIn={() => void openMachineCommand(machine, "login")}
+          onUpdate={() => setDialog({ kind: "update" })}
           onRename={() => setDialog({ kind: "rename-box" })}
-          onHide={() => setHidden(true)}
-          onShow={() => setHidden(false)}
+          onHide={hide}
           onRemove={() => setDialog({ kind: "remove" })}
         />
-        {hidden && (
-          <p className="empty">
-            {machine.name} is hidden. Show it to see its terminals.
-          </p>
-        )}
-        {!hidden && machine.last_ok_ms === null && rows.length === 0 && (
+        {machine.last_ok_ms === null && rows.length === 0 && (
           <p className="empty">
             Waiting for {machine.name} to report its terminals…
           </p>
         )}
-        {!hidden && (machine.last_ok_ms !== null || rows.length > 0) && (
+        {(machine.last_ok_ms !== null || rows.length > 0) && (
           <div className={online ? "workbox-layout" : "workbox-layout is-dim"}>
             {rows.length === 0 && (
               <p className="empty">
                 No terminals yet. Start one with “+ New session”.
               </p>
             )}
-            {rows.length > 0 && (
-              <div className="workbox-terminals">
-                {rows.map((row) => (
-                  <PaneBox
-                    key={row.key}
-                    row={row}
-                    tail={tails[row.address] ?? null}
-                    onOpen={openRow}
-                  />
-                ))}
-              </div>
-            )}
+            {groups.map((g) => (
+              <section
+                key={g.key}
+                className="workbox-group"
+                aria-label={g.name}
+              >
+                <div className="workbox-group-head">
+                  <h2 className="workbox-group-name">{g.name}</h2>
+                  {g.folder && (
+                    <span className="mono muted workbox-group-path">
+                      {shortPath(g.folder)}
+                    </span>
+                  )}
+                </div>
+                <div className="workbox-terminals">
+                  {g.rows.map((row) => (
+                    <PaneBox
+                      key={row.key}
+                      row={row}
+                      tail={tails[row.address] ?? null}
+                      onOpen={openRow}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </>

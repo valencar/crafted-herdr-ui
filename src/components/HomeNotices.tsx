@@ -95,7 +95,7 @@ export function MachineNotices({
             {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
             {formatStaleness(m.last_ok_ms, nowMs)}
           </p>
-          <ReconnectBox machineId={m.id} />
+          <ReconnectBox machine={m} />
         </EmptyState>
       ))}
     </>

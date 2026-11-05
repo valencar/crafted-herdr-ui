@@ -1,10 +1,5 @@
-//! Runs the real `Actions` and `HerdrCli` against `scripts/fake-herdr`. The refresh hook is
-//! recorded instead of reaching the sync.
-//!
-//! fake-herdr names its files after the joined argv, so the folders used here have no `/`.
-//!
-//! The last section runs the row actions (`RowActions`) against `scripts/fake-hc` with a real
-//! `CoreSync`, so the cached statuses they check come from a real snapshot.
+//! Runs the row actions (`RowActions`) against `scripts/fake-hc` with a real `CoreSync`, so the
+//! cached statuses they check come from a real snapshot.
 
 mod common;
 
@@ -13,158 +8,14 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crafted_herdr_ui_lib::actions::{ActionError, Actions, RowActions};
+use crafted_herdr_ui_lib::actions::{ActionError, RowActions};
 use crafted_herdr_ui_lib::activity::ActivityV2;
 use crafted_herdr_ui_lib::core::{CoreClient, CoreError, ProcessConnector};
-use crafted_herdr_ui_lib::herdr::cli::HerdrCli;
-use crafted_herdr_ui_lib::herdr::errors::HerdrError;
 use crafted_herdr_ui_lib::settings::{Settings, SharedSettings};
 use crafted_herdr_ui_lib::state::CoreState;
 use crafted_herdr_ui_lib::sync::CoreSync;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-
-fn fixture(name: &str) -> String {
-    fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures")
-            .join(name),
-    )
-    .unwrap()
-}
-
-struct Harness {
-    dir: TempDir,
-    actions: Actions,
-    cli: HerdrCli,
-    refreshed: Arc<Mutex<Vec<Option<String>>>>,
-}
-
-impl Harness {
-    fn new() -> Self {
-        let dir = TempDir::new().unwrap();
-        let env = vec![
-            (
-                "FAKE_HERDR_DIR".to_string(),
-                dir.path().display().to_string(),
-            ),
-            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
-        ];
-        let bin = Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/fake-herdr");
-        let refreshed: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
-        let sink = refreshed.clone();
-        let cli = HerdrCli::new(bin, env);
-        let actions = Actions::new(
-            cli.clone(),
-            Arc::new(move |m| sink.lock().unwrap().push(m.map(str::to_owned))),
-        );
-        Self {
-            dir,
-            actions,
-            cli,
-            refreshed,
-        }
-    }
-
-    fn put(&self, file: &str, contents: &str) {
-        fs::write(self.dir.path().join(file), contents).unwrap();
-    }
-
-    fn calls(&self) -> Vec<String> {
-        fs::read_to_string(self.dir.path().join("calls.log"))
-            .unwrap_or_default()
-            .lines()
-            .map(str::to_owned)
-            .collect()
-    }
-
-    fn refreshed(&self) -> Vec<Option<String>> {
-        self.refreshed.lock().unwrap().clone()
-    }
-}
-
-#[tokio::test]
-async fn machine_commands_are_local_and_tolerate_plain_text_output() {
-    let h = Harness::new();
-    h.put("machine_rename_buildbox_--label_Build box.json", "Renamed.");
-    h.put("machine_disable_buildbox.json", "");
-    h.put("machine_remove_buildbox.exit", "0");
-    h.put(
-        "machine_status_buildbox_--json.json",
-        &fixture("machine_status.json"),
-    );
-
-    h.actions
-        .machine_rename("buildbox", "Build box")
-        .await
-        .unwrap();
-    h.actions
-        .machine_set_enabled("buildbox", false)
-        .await
-        .unwrap();
-    h.actions.machine_remove("buildbox").await.unwrap();
-    let status = h.actions.machine_status("buildbox").await.unwrap();
-
-    assert_eq!(status.len(), 3);
-    assert_eq!(
-        h.calls(),
-        [
-            "machine rename buildbox --label Build box",
-            "machine disable buildbox",
-            "machine remove buildbox",
-            "machine status buildbox --json",
-        ]
-    );
-    // Config changes refresh every machine and the machine list.
-    assert_eq!(h.refreshed(), [None, None, None]);
-}
-
-#[tokio::test]
-async fn successful_machine_config_commands_are_logged_as_successes() {
-    let h = Harness::new();
-    h.put("machine_rename_buildbox_--label_Build box.json", "Renamed.");
-    h.put("machine_disable_buildbox.json", "");
-    h.put("machine_remove_buildbox.exit", "0");
-
-    h.actions
-        .machine_rename("buildbox", "Build box")
-        .await
-        .unwrap();
-    h.actions
-        .machine_set_enabled("buildbox", false)
-        .await
-        .unwrap();
-    h.actions.machine_remove("buildbox").await.unwrap();
-
-    let log = h.cli.log_snapshot();
-    assert_eq!(log.len(), 3);
-    for entry in &log {
-        assert_eq!(entry.error, None, "{:?}", entry.argv);
-        assert_eq!(entry.exit_code, Some(0), "{:?}", entry.argv);
-    }
-}
-
-#[tokio::test]
-async fn machine_command_errors_are_not_swallowed() {
-    let h = Harness::new();
-    h.put(
-        "machine_remove_gone.stderr",
-        r#"{"error":{"code":"machine_not_found","message":"no such machine"}}"#,
-    );
-    h.put("machine_remove_gone.exit", "1");
-
-    let err = h.actions.machine_remove("gone").await.unwrap_err();
-
-    assert!(matches!(
-        err,
-        ActionError::Herdr {
-            error: HerdrError::Server { .. }
-        }
-    ));
-    assert!(h.refreshed().is_empty());
-}
-
-// ---- Row actions on herdr-core ----
 
 const HC_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/hc");
 

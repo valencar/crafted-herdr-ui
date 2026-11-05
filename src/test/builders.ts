@@ -29,6 +29,14 @@ export type MachineSpec = {
   lastOkMs?: number | null;
   /** The `hc` version the machine reports; `null` for none. */
   hcVersion?: string | null;
+  /** The core's word for the machine; derived from `health` when absent (`null` for Local). */
+  state?: string | null;
+  temporary?: boolean;
+  /** Reached through a custom connection command. */
+  via?: boolean;
+  /** Unix ms when the machine entered its state; `null` for none. */
+  stateSinceMs?: number | null;
+  host?: string | null;
 };
 
 export type AgentTermSpec = {
@@ -124,7 +132,29 @@ export function machine(spec: MachineSpec): Required<MachineSpec> {
     session: spec.session ?? "default",
     lastOkMs: spec.lastOkMs === undefined ? 1 : spec.lastOkMs,
     hcVersion: spec.hcVersion ?? null,
+    state:
+      spec.state !== undefined
+        ? spec.state
+        : spec.isLocal
+          ? null
+          : stateOf(spec.health ?? { kind: "online" }),
+    temporary: spec.temporary ?? false,
+    via: spec.via ?? false,
+    stateSinceMs: spec.stateSinceMs ?? null,
+    host: spec.host ?? null,
   };
+}
+
+/** The core's word that matches a health, for a machine whose test doesn't name one. */
+function stateOf(health: Health): string {
+  switch (health.kind) {
+    case "attention":
+      return "unreachable";
+    case "reconnecting":
+      return "connecting";
+    default:
+      return "connected";
+  }
 }
 
 /**
@@ -268,12 +298,14 @@ export function machineView(
     name: m.name,
     target: m.target,
     session: m.session,
-    host: null,
+    host: m.host,
     hc_version: m.hcVersion,
     is_local: m.isLocal,
-    temporary: false,
+    temporary: m.temporary,
+    via: m.via,
+    state: m.state,
     health: m.health,
-    state_since_ms: null,
+    state_since_ms: m.stateSinceMs,
     last_ok_ms: m.lastOkMs,
     terminals: (terms ?? []).map(terminalOf),
     layout: null,

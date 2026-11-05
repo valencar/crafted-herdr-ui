@@ -308,6 +308,38 @@ describe("TerminalView", () => {
     expect(tabState()).toMatchObject({ state: "live", termId: 7 });
   });
 
+  it("a_command_tab_runs_the_wire_target_and_ends_with_close_tab_only", async () => {
+    const args = ["machine", "login", "buildbox"];
+    useTerminalStore.setState({ tabs: [], activeKey: HOME });
+    useTerminalStore.getState().openTab({
+      tabKey: KEY,
+      target: { kind: "command", machineId: "buildbox", args },
+      title: "Log in",
+      machineLabel: "buildbox",
+    });
+    render(<Harness />);
+    await flush();
+    // Rust gets the arguments only; the machine id is the tab's own.
+    expect(open).toHaveBeenCalledWith(
+      { kind: "command", args },
+      100,
+      30,
+      expect.any(Function),
+      false,
+    );
+    expect(tabState()).toMatchObject({ state: "live", termId: 7 });
+
+    emit({ kind: "exit", code: 0, last_line: "Logged in." });
+    expect(tabState()).toMatchObject({ state: "detached", waiting: null });
+    expect(screen.getByRole("button", { name: "Close tab" })).toHaveClass(
+      "btn-primary",
+    );
+    expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "The command finished.",
+    );
+  });
+
   it("an_option_drag_always_makes_a_selection_even_while_herdr_reports_the_mouse", async () => {
     render(<Harness />);
     await flush();

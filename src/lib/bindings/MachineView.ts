@@ -7,7 +7,16 @@ export type MachineView = {
 /**
  * `"local"` for this computer, otherwise the core's permanent machine id.
  */
-id: string, name: string, target: string | null, session: string | null, host: string | null, hc_version: string | null, is_local: boolean, temporary: boolean, health: Health, state_since_ms: number | null, 
+id: string, name: string, target: string | null, session: string | null, host: string | null, hc_version: string | null, is_local: boolean, temporary: boolean, 
+/**
+ * Reached through a custom connection command (`--via`), so it has no ssh target of its own.
+ */
+via: boolean, 
+/**
+ * The core's word for the machine: `connecting`, `connected`, `needs_login`, `needs_update`
+ * or `unreachable`. `None` for this computer, whose health follows the event connection.
+ */
+state: string | null, health: Health, state_since_ms: number | null, 
 /**
  * Unix time in milliseconds when the machine last looked healthy.
  */

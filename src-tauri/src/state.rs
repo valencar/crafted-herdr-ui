@@ -44,6 +44,11 @@ pub struct MachineView {
     pub hc_version: Option<String>,
     pub is_local: bool,
     pub temporary: bool,
+    /// Reached through a custom connection command (`--via`), so it has no ssh target of its own.
+    pub via: bool,
+    /// The core's word for the machine: `connecting`, `connected`, `needs_login`, `needs_update`
+    /// or `unreachable`. `None` for this computer, whose health follows the event connection.
+    pub state: Option<String>,
     pub health: Health,
     #[ts(type = "number | null")]
     pub state_since_ms: Option<u64>,
@@ -130,6 +135,8 @@ pub(crate) mod fixtures {
             hc_version: None,
             is_local,
             temporary: false,
+            via: false,
+            state: (!is_local).then(|| "connected".to_owned()),
             health: Health::Online,
             state_since_ms: None,
             last_ok_ms: None,

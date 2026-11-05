@@ -76,6 +76,33 @@ afterEach(async () => {
 });
 
 describe("useAutoPickColors", () => {
+  it("color_moves_from_name_key_to_id", async () => {
+    const id = "000000000000000000000000c0de0002";
+    useAppStore.setState({
+      state: {
+        machines: [
+          { id: "local", name: "Local" },
+          { id, name: "buildbox" },
+        ],
+      } as unknown as AppState,
+      // v0.8 kept the color under the machine's name.
+      settings: settingsWith({ local: "violet", buildbox: "lime" }),
+    });
+    const { rerender } = render(<Probe />);
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledTimes(1);
+    // Saved under the id; the name entry is left alone.
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: {
+        workbox_colors: { local: "violet", buildbox: "lime", [id]: "lime" },
+      },
+    });
+    // Idempotent: the saved map resolves to itself, so nothing more is written.
+    rerender(<Probe />);
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("does_not_save_before_settings_load", () => {
     useAppStore.setState({ state: stateWith("local", "buildbox") });
     render(<Probe />);

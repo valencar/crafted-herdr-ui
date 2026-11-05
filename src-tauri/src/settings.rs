@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 use ts_rs::TS;
@@ -200,6 +200,28 @@ impl Settings {
         next.normalize();
         next.validate()?;
         Ok(next)
+    }
+
+    /// These settings with one workbox hidden or shown (`hidden_workboxes`). It is an app
+    /// setting and nothing else changes. This computer can't be hidden.
+    pub fn with_hidden(&self, machine_id: &str, hidden: bool) -> Result<Settings, String> {
+        let id = machine_id.trim();
+        if id.is_empty() {
+            return Err("Pick a workbox to hide or show.".to_owned());
+        }
+        if id == "local" {
+            return Err("This computer can’t be hidden.".to_owned());
+        }
+        let mut ids: Vec<&str> = self
+            .hidden_workboxes
+            .iter()
+            .map(String::as_str)
+            .filter(|x| *x != id)
+            .collect();
+        if hidden {
+            ids.push(id);
+        }
+        self.merged(&json!({ "hidden_workboxes": ids }))
     }
 
     fn normalize(&mut self) {
@@ -695,6 +717,32 @@ mod tests {
                 .merged(&json!({"theme": "blue"}))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn hide_writes_setting_only() {
+        let base = Settings::default()
+            .merged(&json!({"hidden_workboxes": ["gpubox"]}))
+            .unwrap();
+        // Hiding adds the id and touches nothing else; showing takes only that id out.
+        let hidden = base.with_hidden("buildbox", true).unwrap();
+        assert_eq!(hidden.hidden_workboxes, ["gpubox", "buildbox"]);
+        assert_eq!(
+            Settings {
+                hidden_workboxes: base.hidden_workboxes.clone(),
+                ..hidden.clone()
+            },
+            base
+        );
+        // Hiding twice is the same as once.
+        assert_eq!(hidden.with_hidden("buildbox", true).unwrap(), hidden);
+        let shown = hidden.with_hidden("buildbox", false).unwrap();
+        assert_eq!(shown.hidden_workboxes, ["gpubox"]);
+        // Showing one that was not hidden changes nothing.
+        assert_eq!(shown.with_hidden("staging", false).unwrap(), shown);
+        // This computer and a blank id are refused.
+        assert!(base.with_hidden("local", true).is_err());
+        assert!(base.with_hidden("  ", true).is_err());
     }
 
     #[test]

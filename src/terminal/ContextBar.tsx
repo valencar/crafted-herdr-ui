@@ -7,6 +7,7 @@ import { shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { openRow } from "../lib/openRow";
 import { terminalName, useTerminals } from "../lib/uiHelpers";
+import { commandWords } from "./commandTabs";
 import { PaneMenu } from "./PaneMenu";
 import { useTerminalStore, type TermTab } from "./terminalStore";
 
@@ -37,6 +38,43 @@ function OpenInTerminal({ row }: { row: Row }) {
  */
 export function ContextBar({ tab, row, onFind }: Props) {
   const closeTab = useTerminalStore((s) => s.closeTab);
+  if (tab.target.kind === "command") {
+    // Log in and Update hc: a command on a workbox, with no agent, status or pane menu.
+    return (
+      <div className="context-bar">
+        <div className="context-id">
+          <span className="context-title">{commandWords(tab).doing}</span>
+          <WorkboxTile
+            size="sm"
+            machineId={tab.target.machineId}
+            label={tab.machineLabel}
+          />
+          <span className="mono muted context-where">{tab.machineLabel}</span>
+        </div>
+        <div className="context-actions">
+          <Tooltip label="Find in terminal" shortcut="find">
+            <button
+              type="button"
+              className="btn btn-small btn-ghost"
+              aria-label={`Find in terminal (${formatShortcut("find")})`}
+              onClick={onFind}
+            >
+              <span aria-hidden="true">⌕</span>
+            </button>
+          </Tooltip>
+          <Tooltip label="Close this tab. A command still running is stopped.">
+            <button
+              type="button"
+              className="btn btn-small btn-ghost"
+              onClick={() => closeTab(tab.tabKey)}
+            >
+              Close tab
+            </button>
+          </Tooltip>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="context-bar">
       <div className="context-id">

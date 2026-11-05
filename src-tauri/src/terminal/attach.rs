@@ -100,7 +100,11 @@ pub fn allowed_core_args(args: &[String]) -> bool {
     match words.as_slice() {
         ["attach", addr] => is_address(addr),
         ["attach", "--observe", addr] => is_address(addr),
-        ["machine", "login" | "update", name] => is_name(name),
+        // The same name check the app makes before it asks for these, so an address-shaped name
+        // (`t7`) is not accepted here either.
+        ["machine", "login" | "update", name] => {
+            is_name(name) && crate::actions::validate_name(name).is_ok()
+        }
         ["machine", "add", rest @ ..] => allowed_machine_add(rest),
         _ => false,
     }
@@ -267,6 +271,8 @@ mod tests {
         assert!(!ok(&["machine", "login", "Build Box"]));
         assert!(!ok(&["machine", "update", "-x"]));
         assert!(!ok(&["machine", "login"]));
+        assert!(!ok(&["machine", "login", "t7"]));
+        assert!(!ok(&["machine", "update", "t12b"]));
 
         // Add.
         assert!(ok(&["machine", "add", "buildbox"]));

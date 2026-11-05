@@ -9,6 +9,7 @@ import {
   type PaneMenuItem,
 } from "./paneMenu";
 import { formatShortcut, type ShortcutId } from "./shortcuts";
+import { shownMachines } from "./workbox";
 
 export type PaletteGroup =
   "Needs you" | "Open tabs" | "Agents" | "Projects" | "Workboxes" | "Commands";
@@ -125,7 +126,7 @@ export function buildItems(ctx: Context): PaletteItem[] {
       run: () => ctx.goToProject(g.key),
     }));
 
-  const workboxes: PaletteItem[] = ctx.machines.map((m) => ({
+  const workboxes: PaletteItem[] = shownMachines(ctx.machines).map((m) => ({
     id: `workbox:${m.id}`,
     group: "Workboxes",
     label: m.name,

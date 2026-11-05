@@ -550,6 +550,8 @@ impl Inner {
             hc_version: info.as_ref().and_then(|i| non_empty(&i.version)),
             is_local: true,
             temporary: false,
+            via: false,
+            state: None,
             health: link_health.clone(),
             state_since_ms: None,
             last_ok_ms: None,
@@ -566,6 +568,8 @@ impl Inner {
                 hc_version: non_empty(&x.version),
                 is_local: false,
                 temporary: x.temporary,
+                via: x.via,
+                state: Some(x.state.clone()),
                 // While the event connection is down the list is stale, and so is its health.
                 health: if m.link == Link::Online {
                     health_of(x, now)

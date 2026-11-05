@@ -132,6 +132,20 @@ beforeEach(() => {
             ...useAppStore.getState().settings,
             ...(args as { patch: object }).patch,
           };
+        case "set_workbox_hidden": {
+          const { machineId, hidden } = args as {
+            machineId: string;
+            hidden: boolean;
+          };
+          const settings = useAppStore.getState().settings!;
+          const others = settings.hidden_workboxes.filter(
+            (x) => x !== machineId,
+          );
+          return {
+            ...settings,
+            hidden_workboxes: hidden ? [...others, machineId] : others,
+          };
+        }
         default:
           return null;
       }
@@ -313,17 +327,23 @@ describe("Settings", () => {
 
     // Show: an app setting, with no core call.
     await user.click(staging);
-    expect(invoke).toHaveBeenCalledWith("set_settings", {
-      patch: { hidden_workboxes: [] },
+    expect(invoke).toHaveBeenCalledWith("set_workbox_hidden", {
+      machineId: "staging",
+      hidden: false,
     });
     await user.click(screen.getByRole("switch", { name: "Hide buildbox" }));
-    expect(invoke).toHaveBeenCalledWith("set_settings", {
-      patch: { hidden_workboxes: ["buildbox"] },
+    expect(invoke).toHaveBeenCalledWith("set_workbox_hidden", {
+      machineId: "buildbox",
+      hidden: true,
     });
-    expect(invoke).not.toHaveBeenCalledWith(
-      "machine_set_enabled",
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
+    for (const name of [
+      "machine_connect",
+      "machine_rename",
+      "machine_remove",
+    ]) {
+      expect(invoke).not.toHaveBeenCalledWith(name, expect.anything());
+    }
   });
 
   it("switches notifications per kind", async () => {

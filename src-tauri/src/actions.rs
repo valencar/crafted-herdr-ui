@@ -1,11 +1,10 @@
 //! What the UI can ask for: the new-session flow on herdr-core's `terminal.run` (pure
 //! `run_params`, `validate_name`, the installed-agents check and `NewSessions`, which makes the
-//! calls), the saved-machine commands that still go through `HerdrCli` until Task 12, and
-//! `RowActions`, what the row menus do to a terminal through herdr-core.
+//! calls), `MachineActions` (the Workbox screen's connect, rename and remove), and `RowActions`,
+//! what the row menus do to a terminal through herdr-core.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
@@ -17,9 +16,7 @@ use crate::activity::ActivityV2;
 use crate::agents::{DisplayStatus, KNOWN_AGENTS, KnownAgent, TaskArg, TerminalView};
 use crate::core::model::TemplateInfo;
 use crate::core::{CoreClient, CoreError};
-use crate::herdr::cli::{HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
-use crate::herdr::model::MachineStatusEntry;
 use crate::{LOCAL, lock};
 
 /// What a new session runs.
@@ -426,120 +423,81 @@ impl<'a> NewSessions<'a> {
     }
 }
 
-fn argv(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|p| (*p).to_owned()).collect()
+/// What follows the core binary in `machine login <name>` or `machine update <name>`, the two
+/// commands that run in an in-app terminal tab. The name is checked with `validate_name`, so a
+/// flag, an address or shell text never becomes part of a command. `verb` is `login` or `update`.
+pub fn machine_command_args(verb: &str, name: &str) -> Result<Vec<String>, String> {
+    validate_name(name)?;
+    Ok(["machine", verb, name].map(str::to_owned).to_vec())
 }
 
-/// Values that herdr would read as a flag, or that are empty, never reach the CLI.
-fn check_arg(what: &str, value: &str) -> Result<(), ActionError> {
-    if value.trim().is_empty() {
-        return Err(ActionError::invalid(format!("{what} can't be empty.")));
+/// What the Workbox screen does to a saved machine, through the one door (`CoreClient`). Each
+/// runs only when the person clicked; the UI confirms `remove` first. A machine's state is not
+/// in the event stream (spec section 4.3), so every action, a failed one included, asks the sync
+/// to read the machine list again. Renames need nothing more: rows, tabs and colors are keyed by
+/// machine id, and the sync copes with the list learning the new name first.
+pub struct MachineActions<'a> {
+    core: &'a CoreClient,
+    sync: &'a crate::sync::CoreSync,
+}
+
+impl<'a> MachineActions<'a> {
+    pub fn new(core: &'a CoreClient, sync: &'a crate::sync::CoreSync) -> Self {
+        Self { core, sync }
     }
-    if value.starts_with('-') {
-        return Err(ActionError::invalid(format!(
-            "{what} can't start with '-'."
-        )));
-    }
-    Ok(())
-}
 
-/// The call timed out: it may or may not have been applied, and is never retried.
-fn timed_out(argv: Vec<String>) -> ActionError {
-    ActionError::MaybeApplied {
-        message: format!(
-            "herdr did not answer in time. `herdr {}` may have been applied; refreshing.",
-            argv.join(" ")
-        ),
-        argv,
-    }
-}
-
-/// Tells the sync to look again. `None` means every machine and the machine list.
-pub type RefreshHook = Arc<dyn Fn(Option<&str>) + Send + Sync>;
-
-/// Per-call time limits. Tests shorten them; the app uses the defaults.
-#[derive(Debug, Clone, Copy)]
-pub struct Timeouts {
-    pub default: Duration,
-}
-
-impl Default for Timeouts {
-    fn default() -> Self {
-        Self { default: T_DEFAULT }
-    }
-}
-
-/// Runs the saved-machine commands through `HerdrCli` (until Task 12 moves them to the core).
-#[derive(Clone)]
-pub struct Actions {
-    cli: HerdrCli,
-    refresh: RefreshHook,
-    timeouts: Timeouts,
-}
-
-impl Actions {
-    pub fn new(cli: HerdrCli, refresh: RefreshHook) -> Self {
-        Self {
-            cli,
-            refresh,
-            timeouts: Timeouts::default(),
+    /// The name the core calls the machine now (the `machine` param). Local is not a saved
+    /// machine, and an id the core doesn't list may have been removed meanwhile.
+    fn name_of(&self, machine_id: &str) -> Result<String, ActionError> {
+        if machine_id == LOCAL {
+            return Err(ActionError::invalid("This computer isn’t a saved workbox."));
         }
+        self.sync
+            .machine_name(machine_id)
+            .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))
     }
 
-    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Self {
-        self.timeouts = timeouts;
-        self
+    async fn run(
+        &self,
+        machine_id: &str,
+        method: &str,
+        params: impl FnOnce(&str) -> Value,
+    ) -> Result<(), ActionError> {
+        let name = self.name_of(machine_id)?;
+        // These calls go to our own core, which names the machine in the params.
+        let result = self.core.call(LOCAL, method, params(&name)).await;
+        self.sync.refresh_machines();
+        result
+            .map(|_| ())
+            .map_err(|e| core_failure(e, method, &name))
     }
 
-    /// Saved-machine changes are local configuration, so they never carry `--machine`. These
-    /// commands print plain text rather than JSON, so they go through `run_text`.
-    async fn machine_config(&self, args: Vec<String>) -> Result<(), ActionError> {
-        let result = self.cli.run_text(None, &args, self.timeouts.default).await;
-        match result {
-            Ok(_) => {
-                (self.refresh)(None);
-                Ok(())
-            }
-            Err(HerdrError::Timeout { argv }) => {
-                (self.refresh)(None);
-                Err(timed_out(argv))
-            }
-            Err(error) => Err(ActionError::Herdr { error }),
-        }
+    /// `machine.connect`: dials the machine now instead of waiting for the next try.
+    pub async fn connect(&self, machine_id: &str) -> Result<(), ActionError> {
+        self.run(
+            machine_id,
+            "machine.connect",
+            |name| json!({ "machine": name }),
+        )
+        .await
     }
 
-    pub async fn machine_rename(&self, id: &str, label: &str) -> Result<(), ActionError> {
-        check_arg("Machine", id)?;
-        check_arg("Name", label)?;
-        self.machine_config(argv(&["machine", "rename", id, "--label", label]))
+    /// `machine.rename`. The new name is checked with `validate_name` first.
+    pub async fn rename(&self, machine_id: &str, new_name: &str) -> Result<(), ActionError> {
+        let new_name = new_name.trim();
+        validate_name(new_name).map_err(ActionError::invalid)?;
+        self.run(
+            machine_id,
+            "machine.rename",
+            |name| json!({ "machine": name, "new_name": new_name }),
+        )
+        .await
+    }
+
+    /// `machine.rm`: forgets the machine here; its terminals keep running there.
+    pub async fn remove(&self, machine_id: &str) -> Result<(), ActionError> {
+        self.run(machine_id, "machine.rm", |name| json!({ "machine": name }))
             .await
-    }
-
-    pub async fn machine_set_enabled(&self, id: &str, enabled: bool) -> Result<(), ActionError> {
-        check_arg("Machine", id)?;
-        let verb = if enabled { "enable" } else { "disable" };
-        self.machine_config(argv(&["machine", verb, id])).await
-    }
-
-    pub async fn machine_remove(&self, id: &str) -> Result<(), ActionError> {
-        check_arg("Machine", id)?;
-        self.machine_config(argv(&["machine", "remove", id])).await
-    }
-
-    /// `machine status <id> --json`: does not prompt for authentication.
-    pub async fn machine_status(&self, id: &str) -> Result<Vec<MachineStatusEntry>, ActionError> {
-        check_arg("Machine", id)?;
-        let args = argv(&["machine", "status", id, "--json"]);
-        let v = self
-            .cli
-            .run(None, &args, self.timeouts.default)
-            .await
-            .map_err(|error| ActionError::Herdr { error })?;
-        serde_json::from_value(v).map_err(|e| ActionError::Herdr {
-            error: HerdrError::Parse {
-                message: format!("machine status: {e}"),
-            },
-        })
     }
 }
 
@@ -1227,5 +1185,33 @@ mod tests {
             "Pressed ctrl+c: it is still working."
         );
         assert_eq!(interrupt_words(&json!({})), "Interrupt sent.");
+    }
+    #[test]
+    fn login_and_update_args_pass_allowlist() {
+        use crate::terminal::allowed_core_args;
+        assert_eq!(
+            machine_command_args("login", "buildbox"),
+            Ok(vec![
+                "machine".to_owned(),
+                "login".into(),
+                "buildbox".into()
+            ])
+        );
+        assert_eq!(
+            machine_command_args("update", "gpubox"),
+            Ok(vec!["machine".to_owned(), "update".into(), "gpubox".into()])
+        );
+        for verb in ["login", "update"] {
+            let args = machine_command_args(verb, "buildbox").unwrap();
+            assert!(allowed_core_args(&args), "{args:?}");
+        }
+        // A name `validate_name` refuses never becomes a command: a flag, an address, shell text.
+        for bad in ["-x", "t7", "a b", "x;y", "$(id)", "Build", ""] {
+            assert!(machine_command_args("login", bad).is_err(), "{bad:?}");
+            assert!(machine_command_args("update", bad).is_err(), "{bad:?}");
+        }
+        // And the allowlist itself no longer takes an address-shaped name either.
+        let shaped: Vec<String> = ["machine", "login", "t7"].map(str::to_owned).to_vec();
+        assert!(!allowed_core_args(&shaped));
     }
 }

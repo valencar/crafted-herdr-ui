@@ -1,6 +1,7 @@
 import { Skeleton } from "./Skeleton";
 import { legendText, StatusBar } from "./StatusBar";
 import { HealthDot } from "./StatusDot";
+import { TemporaryBadge } from "./TemporaryBadge";
 import { WorkboxTile } from "./WorkboxTile";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { statusCounts } from "../lib/dashboard";
@@ -53,6 +54,7 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
           <h3 id={headingId} className="wb-card-name mono">
             {machine.name}
           </h3>
+          {machine.temporary && <TemporaryBadge />}
         </div>
         <span className="health" data-health={kind}>
           <HealthDot health={machine.health} />

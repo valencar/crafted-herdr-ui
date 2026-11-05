@@ -16,6 +16,7 @@
     "allow-list-terminals",
     "allow-preview-launch-template",
     "allow-set-settings",
+    "allow-set-workbox-hidden",
     "allow-shortcut-status",
     "dialog:allow-open"
   ]

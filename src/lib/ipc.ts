@@ -8,7 +8,6 @@ import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CreatedSession } from "./bindings/CreatedSession";
 import type { CoreStatus } from "./bindings/CoreStatus";
 import type { MenuId } from "./bindings/MenuId";
-import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
 import type { RunChoices } from "./bindings/RunChoices";
@@ -37,10 +36,15 @@ export type CommandResults = {
   set_keep: null;
   mark_unread: null;
   set_pinned: null;
+  machine_connect: null;
   machine_rename: null;
-  machine_set_enabled: null;
   machine_remove: null;
-  machine_status: MachineStatusEntry[];
+  /** The settings after the change. */
+  set_workbox_hidden: Settings;
+  /** What follows the core in `machine login <name>`, for a command tab. */
+  machine_login_args: string[];
+  /** What follows the core in `machine update <name>`, for a command tab. */
+  machine_update_args: string[];
   refresh_now: null;
   reconnect_core: null;
   get_command_log: CommandLogEntry[];
@@ -51,7 +55,6 @@ export type CommandResults = {
   list_ssh_hosts: string[];
   machine_add_argv: string[];
   preview_machine_add: string;
-  preview_reconnect: string;
   start_machine_add: null;
   answer_machine_setup: null;
   cancel_machine_setup: null;
@@ -104,10 +107,17 @@ export type CommandArgs = {
   /** Goes back one turn; refused at turn 0. */
   mark_unread: { machineId: string; address: string };
   set_pinned: { machineId: string; address: string; pinned: boolean };
-  machine_rename: { id: string; label: string };
-  machine_set_enabled: { id: string; enabled: boolean };
-  machine_remove: { id: string };
-  machine_status: { id: string };
+  /** `machine.connect`: dial the workbox now. */
+  machine_connect: { machineId: string };
+  /** `machine.rename`; the name is checked in Rust like a terminal's. */
+  machine_rename: { machineId: string; newName: string };
+  /** `machine.rm`; the UI confirms first. */
+  machine_remove: { machineId: string };
+  /** An app setting (`hidden_workboxes`); no core call. */
+  set_workbox_hidden: { machineId: string; hidden: boolean };
+  machine_login_args: { machineId: string };
+  /** The UI confirms first: it copies hc to the machine and restarts its core. */
+  machine_update_args: { machineId: string };
   refresh_now: { machineId?: string | null };
   reconnect_core: undefined;
   get_command_log: undefined;
@@ -121,8 +131,6 @@ export type CommandArgs = {
   machine_add_argv: MachineAddFields;
   /** The `machine add` command line, as text. */
   preview_machine_add: MachineAddFields;
-  /** `herdr machine reconnect <id>` as text, for the cards that suggest it. */
-  preview_reconnect: { id: string };
   /** Runs `machine add` in a hidden terminal; progress arrives as `"machine-setup"` events. */
   start_machine_add: MachineAddFields;
   /** `"yes"` or `"no"` for a confirmation, the session's index (as text) for the picker. */

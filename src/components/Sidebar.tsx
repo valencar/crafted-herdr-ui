@@ -1,5 +1,6 @@
 import { Kbd } from "./Kbd";
 import { HealthDot, StatusDot } from "./StatusDot";
+import { TemporaryBadge } from "./TemporaryBadge";
 import { Tooltip } from "./Tooltip";
 import { useWorkboxColorMenu } from "./WorkboxColorMenu";
 import { WorkboxTile } from "./WorkboxTile";
@@ -9,6 +10,7 @@ import { HEALTH_LABEL, STATUS_LABEL, type RowStatus } from "../lib/format";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { isShell, STATUS_ORDER, type Group } from "../lib/grouping";
 import { toggleSidebar } from "../lib/uiHelpers";
+import { shownMachines } from "../lib/workbox";
 import { useWorkboxColor } from "../lib/workboxColors";
 import { useAppStore } from "../store/appStore";
 import { HomeIcon } from "../terminal/HomeIcon";
@@ -76,12 +78,12 @@ function RailWorkbox({
   onOpen: () => void;
 }) {
   const color = useWorkboxColor(m.id);
-  const label = `${m.name}: ${HEALTH_LABEL[m.health.kind]}`;
+  const label = `${m.name}: ${HEALTH_LABEL[m.health.kind]}${m.temporary ? ", temporary" : ""}`;
   return (
     <Tooltip label={label}>
       <button
         type="button"
-        className={`rail-item${m.health.kind === "hidden" ? " is-dim" : ""}`}
+        className="rail-item"
         aria-label={label}
         aria-current={current ? "page" : undefined}
         data-on={on ? "true" : undefined}
@@ -148,7 +150,9 @@ export function Sidebar({
   onActivity,
 }: Props) {
   const collapsed = useAppStore((s) => s.settings?.sidebar_collapsed ?? false);
-  const localOnly = machines.length === 1 && machines[0].is_local;
+  // A hidden workbox is not shown (spec 7.4); `machines` stays whole for the tabs still open on one.
+  const shown = useMemo(() => shownMachines(machines), [machines]);
+  const localOnly = shown.length === 1 && shown[0].is_local;
   const tabs = useTerminalStore((s) => s.tabs);
   const activeKey = useTerminalStore((s) => s.activeKey);
   const activate = useTerminalStore((s) => s.activate);
@@ -220,7 +224,7 @@ export function Sidebar({
             </span>
           </button>
         </Tooltip>
-        {machines.map((m) => (
+        {shown.map((m) => (
           <RailWorkbox
             key={m.id}
             machine={m}
@@ -308,21 +312,22 @@ export function Sidebar({
           +
         </button>
       </div>
-      {machines.map((m) => (
+      {shown.map((m) => (
         <WorkboxBox key={m.id} machineId={m.id}>
           <Tooltip
-            label={`${m.name}: ${HEALTH_LABEL[m.health.kind]}`}
+            label={`${m.name}: ${HEALTH_LABEL[m.health.kind]}${m.temporary ? ", temporary" : ""}`}
             disabled={colorMenu.openId === m.id}
           >
             <button
               type="button"
-              className={`nav-item${m.health.kind === "hidden" ? " is-dim" : ""}`}
+              className="nav-item"
               aria-current={m.id === activeWorkbox ? "page" : undefined}
               onClick={() => onWorkbox(m.id)}
               onContextMenu={colorMenu.onContextMenu(m.id, m.name)}
             >
               <WorkboxTile machineId={m.id} label={m.name} health={m.health} />
               <span className="nav-label">{m.name}</span>
+              {m.temporary && <TemporaryBadge />}
               <span className="health" data-health={m.health.kind}>
                 {HEALTH_LABEL[m.health.kind]}
               </span>

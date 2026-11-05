@@ -647,19 +647,17 @@ function Appearance({
   );
 }
 
-/** Hide and Show: an app setting (`hidden_workboxes`) with no core call behind it. */
+/**
+ * Hide and Show: an app setting (`hidden_workboxes`) with no core call behind it. A hidden
+ * workbox is not shown in the sidebar, the Dashboard or the lists, and this is where it comes back.
+ */
 function Workboxes({
-  settings,
-  update,
+  hide,
 }: {
-  settings: SettingsData;
-  update: Update;
+  hide: (machineId: string, hidden: boolean) => Promise<void>;
 }) {
   const state = useAppStore((s) => s.state);
-  const toggle = (id: string, hide: boolean) => {
-    const others = settings.hidden_workboxes.filter((x) => x !== id);
-    void update({ hidden_workboxes: hide ? [...others, id] : others });
-  };
+  const toggle = (id: string, hidden: boolean) => void hide(id, hidden);
   if (state === null) return <p className="empty">Connecting to herdr…</p>;
   return (
     <div className="settings-stack">
@@ -877,6 +875,20 @@ export function Settings() {
     [setSettings],
   );
 
+  const hide = useCallback(
+    async (machineId: string, hidden: boolean) => {
+      setError(null);
+      try {
+        setSettings(
+          await invokeTyped("set_workbox_hidden", { machineId, hidden }),
+        );
+      } catch (e) {
+        setError(actionErrorMessage(toActionError(e)));
+      }
+    },
+    [setSettings],
+  );
+
   const { title, blurb } = TITLES[section];
   return (
     <div className="settings">
@@ -912,7 +924,7 @@ export function Settings() {
         ) : section === "appearance" ? (
           <Appearance settings={settings} update={update} />
         ) : section === "workboxes" ? (
-          <Workboxes settings={settings} update={update} />
+          <Workboxes hide={hide} />
         ) : section === "notifications" ? (
           <Notifications settings={settings} update={update} />
         ) : section === "herdr" ? (

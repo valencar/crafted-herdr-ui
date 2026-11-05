@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   HOME,
+  commandTabKey,
   useTerminalStore,
+  wireTarget,
   type CoreKind,
   type RowFacts,
   type TermTab,
@@ -402,5 +404,35 @@ describe("terminalStore", () => {
       });
       expect(tabOf().waiting).toBeNull();
     });
+  });
+
+  it("a_command_tab_is_keyed_by_workbox_and_verb_and_never_waits", () => {
+    const args = ["machine", "login", "buildbox"];
+    const key = commandTabKey("buildbox", args);
+    expect(key).toBe("buildbox::cmd:machine login");
+    expect(commandTabKey("buildbox", ["machine", "update", "buildbox"])).toBe(
+      "buildbox::cmd:machine update",
+    );
+    const command: NewTab = {
+      tabKey: key,
+      target: { kind: "command", machineId: "buildbox", args },
+      title: "Log in",
+      machineLabel: "buildbox",
+    };
+    store().openTab(command);
+    store().openTab(command);
+    expect(keys()).toEqual([key]);
+    expect(store().lastByMachine).toEqual({ buildbox: key });
+    // Even an ending that would make a terminal wait does not: Close tab is the way out.
+    store().sessionEnded(
+      key,
+      { code: 0, lastLine: "[lost the core]" },
+      undefined,
+      "ready",
+    );
+    expect(store().tabs[0]).toMatchObject({ state: "detached", waiting: null });
+    // The wire target has no machine id; Rust takes only the arguments.
+    expect(wireTarget(command.target)).toEqual({ kind: "command", args });
+    expect(wireTarget(tab("t1").target)).toEqual(tab("t1").target);
   });
 });

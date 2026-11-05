@@ -333,3 +333,13 @@ herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, i
 - [ ] In a scratch session, kill a kept terminal's shell with a signal: the tab says "Waiting for a new shell…" and reattaches by itself once, when the new shell starts.
 - [ ] Open a tab on a machine that is unreachable: the bar says "Not available right now." and Reattach works once it is back. Remove a terminal from another window: "This terminal is gone."
 - [ ] Workbox "Open in terminal" (Add workbox) opens `hc machine add <target> …` in the default terminal.
+- [ ] Workbox screen on a machine in state `needs_login`: Connect now, Log in…, Rename…, Remove… and Hide show, with "Needs login · since …". Log in… opens a tab "Logging in to buildbox" that runs `hc machine login buildbox`. Type the password or code in it. When it ends the bar offers Close tab only, and a second click on Log in… starts a fresh tab.
+- [ ] A machine in state `needs_update`, or one running another hc version: Update hc there… asks first ("Copies this hc there and restarts its core. Its terminals keep running."). Confirming opens "Updating hc on buildbox" and runs `hc machine update buildbox`. Its terminals keep running there. Cancel runs nothing.
+- [ ] Connect now on an `unreachable` machine runs `machine.connect`: the state line moves from "Unreachable · …" to Connecting and then Connected without a restart. The Activity drawer shows the call.
+- [ ] Rename… a connected machine (for example to `ci-runner`): its sidebar row, its open tabs and its color stay, and the new name shows everywhere. A name such as `Build Box` or `t7` is refused in the sheet.
+- [ ] Remove… asks first ("Forgets this machine here. Its terminals keep running there."). Confirming forgets it here; its terminals are still running on the machine.
+- [ ] Hide on the Workbox screen goes back to the Dashboard. The workbox is gone from the sidebar (expanded and rail), the Dashboard, the palette and the lists, and raises no notification. Settings → Workboxes shows it with its switch on, and turning it off brings it back.
+- [ ] A temporary workbox (`hc machine add --temp`) shows the word "Temporary" in the sidebar row, the Workbox header and its Dashboard card; the collapsed rail names it "temporary" in its tooltip.
+- [ ] A machine added through a custom connection command (`--via`) shows "custom connection" instead of an ssh target.
+- [ ] Upgrade from v0.8 with workbox colors saved under machine names: each remote workbox keeps its color after the first launch (the colors are then saved under the machine ids).
+- [ ] The Workbox screen groups a machine's terminals by project folder (needs-you groups first, then working, "Loose sessions" last), each box still showing its last line.

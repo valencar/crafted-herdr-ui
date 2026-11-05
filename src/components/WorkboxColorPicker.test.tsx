@@ -61,13 +61,13 @@ describe("WorkboxColorPicker", () => {
         machine={machine("local")}
         counts={{ sessions: 0, agents: 0, needsYou: 0 }}
         nowMs={0}
-        checkedAtMs={null}
-        checkError={null}
-        checking={false}
-        onCheck={noop}
+        coreVersion={null}
+        connecting={false}
+        onConnect={noop}
+        onLogIn={noop}
+        onUpdate={noop}
         onRename={noop}
         onHide={noop}
-        onShow={noop}
         onRemove={noop}
       />,
     );

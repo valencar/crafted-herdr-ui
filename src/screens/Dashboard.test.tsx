@@ -130,14 +130,12 @@ beforeEach(() => {
     settings: { open_target: "external" } as unknown as Settings,
   });
   invoke.mockReset();
-  invoke.mockImplementation(async (name: string, args?: { id?: string }) =>
+  invoke.mockImplementation(async (name: string) =>
     name === "get_terminals"
       ? { installed: ["ghostty"], default: "ghostty" }
       : name === "get_command_log"
         ? log
-        : name === "preview_reconnect"
-          ? `herdr machine reconnect ${args?.id}`
-          : null,
+        : null,
   );
 });
 
@@ -598,6 +596,15 @@ describe("Dashboard", () => {
     ).toBeInTheDocument();
   });
 
+  it("temporary_badge_shown", () => {
+    const temp = machineView({ id: "edgebox", temporary: true }, []);
+    setup(appState(machine("buildbox"), temp));
+    const card = (name: string) =>
+      within(section("Workboxes")).getByRole("article", { name });
+    expect(within(card("edgebox")).getByText("Temporary")).toBeInTheDocument();
+    expect(within(card("buildbox")).queryByText("Temporary")).toBeNull();
+  });
+
   it("workbox_card_actions_follow_health", async () => {
     const user = setup(
       appState(
@@ -635,8 +642,10 @@ describe("Dashboard", () => {
       ["refresh_now", { machineId: "gpubox" }],
     ]);
 
-    expect(within(card("staging")).getByText("Hidden")).toBeInTheDocument();
-    expect(within(card("staging")).queryByRole("button")).toBeNull();
+    // A hidden workbox has no card at all (spec 7.4).
+    expect(
+      within(section("Workboxes")).queryByRole("article", { name: "staging" }),
+    ).toBeNull();
   });
 
   it("workbox_card_shows_its_mix_its_freshness_and_its_tabs", () => {
@@ -857,14 +866,14 @@ describe("Dashboard", () => {
     );
     await settle();
     const cards = within(section("Workboxes")).getAllByRole("article");
-    expect(cards).toHaveLength(4);
+    // The hidden one has no card.
+    expect(cards).toHaveLength(3);
     expect(tile("Agents")).toHaveTextContent("0");
     expect(within(cards[1]).getByText("Not updated yet")).toBeInTheDocument();
     expect(cards[1]).toHaveClass("is-stale");
     expect(
       within(cards[2]).getByRole("button", { name: "Retry now" }),
     ).toBeVisible();
-    expect(within(cards[3]).queryByRole("button")).toBeNull();
   });
 
   it("cmd_n_and_cmd_r_work_here_but_the_list_keys_do_nothing", async () => {
