@@ -20,6 +20,11 @@ const GENERATION: u64 = 1;
 /// The most connections the call pool holds.
 const POOL_SIZE: usize = 4;
 
+/// The most pool slots quiet background reads (`call_quiet`: tails, the preview) hold at once.
+/// The pool is global, so without this cap twelve tail reads of one slow or still-dialing
+/// machine could take all four slots and queue the person's own actions behind them.
+const QUIET_SLOTS: usize = 2;
+
 /// The methods the app calls. A core without one of them is `Incompatible`.
 pub const USES: &[&str] = &[
     "hello",
@@ -191,6 +196,8 @@ pub struct CoreClient {
     pool: Mutex<Pool>,
     /// One permit per pool connection in use, so at most `POOL_SIZE` connections exist.
     slots: Arc<Semaphore>,
+    /// One permit per quiet call in flight (`QUIET_SLOTS`), taken before a pool slot.
+    quiet_slots: Arc<Semaphore>,
     log: Arc<CommandLog>,
 }
 
@@ -221,6 +228,7 @@ impl CoreClient {
                 idle: Vec::new(),
             }),
             slots: Arc::new(Semaphore::new(POOL_SIZE)),
+            quiet_slots: Arc::new(Semaphore::new(QUIET_SLOTS)),
             log,
         }
     }
@@ -319,7 +327,21 @@ impl CoreClient {
         let timeout = timeout_for(method);
 
         let result = match route {
-            Route::Pool => self.pooled(method, params, timeout).await,
+            Route::Pool => {
+                // Held until the call ends; taken before the pool slot, never the other way.
+                let _quiet = if quiet {
+                    Some(
+                        self.quiet_slots
+                            .clone()
+                            .acquire_owned()
+                            .await
+                            .map_err(|_| CoreError::Lost)?,
+                    )
+                } else {
+                    None
+                };
+                self.pooled(method, params, timeout).await
+            }
             Route::OneShot => self.one_shot(method, params, timeout).await,
         };
 
@@ -743,6 +765,72 @@ mod tests {
         assert!(peak <= 4, "{peak} connections at once");
         assert!(peak > 1, "the calls should have run side by side");
         assert!(now.load(Ordering::SeqCst) <= 4);
+    }
+
+    #[tokio::test]
+    async fn quiet_calls_hold_at_most_two_pool_slots_so_an_action_still_answers() {
+        let now = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (n, p) = (now.clone(), peak.clone());
+        let client = Arc::new(CoreClient::new(Arc::new(FnConnector(move || {
+            let live = n.fetch_add(1, Ordering::SeqCst) + 1;
+            p.fetch_max(live, Ordering::SeqCst);
+            let (conn, notes, core) = connect(|req| match req["method"].as_str() {
+                Some("hello") => (0, Reply::Result(hello_result())),
+                // The background reads are slow; an action answers at once.
+                Some("terminal.read") => (400, Reply::Result(json!({"text": ""}))),
+                _ => (0, Reply::Result(json!({"ok": true}))),
+            });
+            let guard = Live { now: n.clone() };
+            Ok((conn.keep_alive(core).keep_alive(guard), notes))
+        }))));
+
+        let quiet_done = Arc::new(AtomicUsize::new(0));
+        let quiet: Vec<_> = (0..6)
+            .map(|i| {
+                let (client, done) = (client.clone(), quiet_done.clone());
+                tokio::spawn(async move {
+                    let r = client
+                        .call_quiet(
+                            "local",
+                            "terminal.read",
+                            json!({"terminal": format!("t{i}")}),
+                        )
+                        .await;
+                    done.fetch_add(1, Ordering::SeqCst);
+                    r
+                })
+            })
+            .collect();
+        // Let the quiet calls take what they can.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            2,
+            "quiet calls must not hold more than two connections"
+        );
+
+        let started = Instant::now();
+        client
+            .call("local", "terminal.kill", json!({"terminal": "t9"}))
+            .await
+            .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "the action waited {:?} behind the quiet calls",
+            started.elapsed()
+        );
+        assert_eq!(
+            quiet_done.load(Ordering::SeqCst),
+            0,
+            "the quiet calls should still be waiting"
+        );
+        assert!(peak.load(Ordering::SeqCst) <= 3);
+
+        for call in quiet {
+            call.await.unwrap().unwrap();
+        }
+        assert!(peak.load(Ordering::SeqCst) <= 3);
     }
 
     #[tokio::test]

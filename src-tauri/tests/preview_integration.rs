@@ -253,18 +253,23 @@ async fn a_reply_without_text_is_a_protocol_error_frame() {
 async fn reads_are_quiet_in_log() {
     let h = Harness::new();
     h.put("terminal.read.json", &screen("hello\n"));
-    h.put("terminal.read@3.json", &error_fixture("not_found.json"));
 
     read_tail(&h.core, "local", "t7").await.unwrap();
     h.preview.start("local", "t7").unwrap();
     h.wait_for("a frame", |f| !f.is_empty()).await;
     h.preview.stop();
-    let _ = read_tail(&h.core, "local", "t7").await;
+    // Once stopped, no preview read is left to take the failure: this one is the tail's own.
+    h.put("terminal.read.json", &error_fixture("not_found.json"));
+    read_tail(&h.core, "local", "t99").await.unwrap_err();
 
     let log = h.core.command_log();
     let reads: Vec<_> = log.iter().filter(|e| e.method == "terminal.read").collect();
     assert!(reads.len() >= 3, "log: {log:#?}");
     assert!(reads.iter().all(|e| e.quiet), "log: {log:#?}");
+    assert!(
+        reads.iter().any(|e| e.error.is_some() && e.quiet),
+        "a failed read is logged quiet too; log: {log:#?}"
+    );
 }
 
 #[tokio::test]
