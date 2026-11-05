@@ -1,6 +1,6 @@
 import type { AppState } from "./bindings/AppState";
 import type { TerminalView } from "./bindings/TerminalView";
-import { STATUS_LABEL, type RowStatus } from "./format";
+import { plural, STATUS_LABEL, type RowStatus } from "./format";
 
 export type Row = {
   /** `${machineId}::${address}`. Addresses repeat across machines. */
@@ -404,4 +404,101 @@ export function groupByStatus(rows: Row[]): Group[] {
     });
   }
   return out;
+}
+
+/** A row with the workers that report to it, in the list's own order. */
+export type NestedRow = Row & { workers: Row[] };
+
+/**
+ * Puts each worker under the agent that started it, when that agent is in `rows`. The order is
+ * the list's own: the top level keeps the order of the rows that stay (pinned first, ended
+ * last, as the caller already sorted them) and so does each parent's workers. A worker whose
+ * parent is not in `rows` (another group, another status, a machine not known) stands alone, in
+ * its place. A worker of a worker goes under the top agent, since a row nests one level; a
+ * loop of parents has no top, so none of its rows is hidden.
+ */
+export function nestWorkers(rows: readonly Row[]): NestedRow[] {
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  /** The top agent above `row`, or `null` when it has none (or the parents loop). */
+  const top = (row: Row): Row | null => {
+    const seen = new Set([row.key]);
+    let at = row;
+    while (at.parent !== null) {
+      const up = byKey.get(at.parent);
+      if (!up) break;
+      if (seen.has(up.key)) return null;
+      seen.add(up.key);
+      at = up;
+    }
+    return at === row ? null : at;
+  };
+  const workers = new Map<string, Row[]>();
+  const tops: Row[] = [];
+  for (const r of rows) {
+    const parent = top(r);
+    if (parent === null) {
+      tops.push(r);
+    } else {
+      const list = workers.get(parent.key);
+      if (list) list.push(r);
+      else workers.set(parent.key, [r]);
+    }
+  }
+  return tops.map((r) => ({ ...r, workers: workers.get(r.key) ?? [] }));
+}
+
+/** How many workers an agent has and how many of them need you (blocked or error). */
+export function workerSummary(workers: readonly Row[]): {
+  count: number;
+  needs: number;
+} {
+  return {
+    count: workers.length,
+    needs: workers.filter((w) => w.status === "blocked" || w.status === "error")
+      .length,
+  };
+}
+
+/** "2 workers, 1 needs you", or "2 workers" when none does. */
+export function workerSummaryText(s: { count: number; needs: number }): string {
+  const count = plural(s.count, "worker", "workers");
+  return s.needs === 0
+    ? count
+    : `${count}, ${s.needs} ${s.needs === 1 ? "needs" : "need"} you`;
+}
+
+/**
+ * The rows as they are drawn: each parent followed by its workers, unless `isCollapsed` says its
+ * workers are folded away. The keyboard walks this list.
+ */
+export function flattenWorkers(
+  nested: readonly NestedRow[],
+  isCollapsed: (key: string) => boolean,
+): Row[] {
+  return nested.flatMap((r) => [r, ...(isCollapsed(r.key) ? [] : r.workers)]);
+}
+
+/**
+ * "worker of {parent name}" for a worker; just "worker" when its parent is not among `byKey`;
+ * `null` for a terminal that reports to nobody.
+ */
+export function workerLabel(
+  row: Row,
+  byKey: ReadonlyMap<string, Row>,
+): string | null {
+  if (!row.isWorker) return null;
+  const parent = row.parent === null ? undefined : byKey.get(row.parent);
+  return parent ? `worker of ${parent.name}` : "worker";
+}
+
+const BLOCKED_KIND: Record<string, string> = {
+  permission: "Permission",
+  question: "Question",
+  auth: "Login",
+};
+
+/** What a blocked agent waits on, in words: `auth` is "Login"; another value is shown as given. */
+export function blockedKindLabel(kind: string | null): string | null {
+  const k = nonEmpty(kind);
+  return k === null ? null : (BLOCKED_KIND[k.toLowerCase()] ?? k);
 }

@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
@@ -67,7 +68,10 @@ beforeEach(() => {
   });
 });
 
-function setup(row = BLOCKED) {
+function setup(
+  row = BLOCKED,
+  extra: Partial<ComponentProps<typeof Inspector>> = {},
+) {
   const user = userEvent.setup();
   const copy = vi.mocked(copyText);
   copy.mockReset().mockResolvedValue(undefined);
@@ -77,6 +81,7 @@ function setup(row = BLOCKED) {
       machine={machine}
       project="api-service"
       terminalName="Ghostty"
+      {...extra}
     />,
   );
   return { user, copy, ...view };
@@ -766,5 +771,76 @@ describe("Inspector live preview", () => {
         address: "w2:p2",
       }),
     );
+  });
+});
+
+describe("Inspector workers and status details", () => {
+  const worker: typeof BLOCKED = {
+    ...DONE,
+    key: "buildbox::w3:p1",
+    address: "w3:p1",
+    name: "linter",
+    status: "blocked",
+    isWorker: true,
+    parent: BLOCKED.key,
+  };
+
+  it("inspector_shows_started_by_and_workers", async () => {
+    // A worker: who started it.
+    const first = setup(worker, { startedBy: BLOCKED });
+    const grid = screen.getByRole("group", { name: "Details" });
+    expect(grid).toHaveTextContent("Started byplanner");
+    expect(screen.queryByText("Workers")).toBeNull();
+    first.unmount();
+
+    // A parent: each worker with its status.
+    const doneWorker = { ...worker, key: "buildbox::w3:p2", name: "fixer" };
+    const workingWorker = {
+      ...worker,
+      key: "buildbox::w3:p3",
+      name: "builder",
+      status: "working" as const,
+    };
+    const second = setup(BLOCKED, {
+      workers: [worker, { ...doneWorker, status: "done" }, workingWorker],
+    });
+    const list = screen.getByRole("list", { name: "Workers" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveTextContent("linter");
+    expect(items[0]).toHaveTextContent("Needs input");
+    expect(items[1]).toHaveTextContent("fixer");
+    expect(items[1]).toHaveTextContent("Done, unseen");
+    expect(items[2]).toHaveTextContent("builder");
+    expect(items[2]).toHaveTextContent("Working");
+    expect(screen.queryByText("Started by")).toBeNull();
+    // A worker's name selects it.
+    await second.user.click(
+      within(list).getByRole("button", { name: "linter" }),
+    );
+    expect(useAppStore.getState().selectedKey).toBe(worker.key);
+  });
+
+  it("a_plain_agent_shows_neither", () => {
+    setup(BLOCKED);
+    expect(screen.queryByText("Started by")).toBeNull();
+    expect(screen.queryByText("Workers")).toBeNull();
+  });
+
+  it("shows_what_a_blocked_agent_waits_on_and_working_progress", () => {
+    const blocked = {
+      ...BLOCKED,
+      statusKind: "permission",
+      statusMsg: "Run cargo test?",
+    };
+    const first = setup(blocked);
+    const head = document.querySelector(".inspector-head") as HTMLElement;
+    expect(head).toHaveTextContent("Permission");
+    expect(head).toHaveTextContent("Run cargo test?");
+    first.unmount();
+    setup({ ...WORKING, progress: 65 });
+    expect(
+      screen.getByRole("progressbar", { name: "Progress 65%" }),
+    ).toBeInTheDocument();
   });
 });

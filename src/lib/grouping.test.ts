@@ -20,10 +20,16 @@ import {
   isNeedsYou,
   isShell,
   needsYou,
+  nestWorkers,
   projectNames,
   projectNamesOf,
   sortPinnedFirst,
   toRows,
+  blockedKindLabel,
+  flattenWorkers,
+  workerLabel,
+  workerSummary,
+  workerSummaryText,
   type Row,
 } from "./grouping";
 
@@ -646,5 +652,154 @@ describe("sortPinnedFirst", () => {
     const order = (g: { rows: Row[] }) => g.rows.map((x) => x.address);
     expect(order(groupByProject(rows)[0])).toEqual(["t3", "t1", "t4", "t2"]);
     expect(order(groupByWorkbox(rows)[0])).toEqual(["t3", "t1", "t4", "t2"]);
+  });
+});
+
+describe("workers under their agent", () => {
+  const at = (address: string, over: Partial<Row> = {}) =>
+    row({ key: `m::${address}`, address, name: address, ...over });
+
+  it("nests_children_under_parent", () => {
+    const rows = [
+      at("t1"),
+      at("t2", { parent: "m::t1", isWorker: true }),
+      at("t3"),
+      at("t4", { parent: "m::t1", isWorker: true }),
+    ];
+    const nested = nestWorkers(rows);
+    // The workers leave the top level; the others keep their order.
+    expect(nested.map((r) => r.key)).toEqual(["m::t1", "m::t3"]);
+    expect(nested[0].workers.map((r) => r.key)).toEqual(["m::t2", "m::t4"]);
+    expect(nested[1].workers).toEqual([]);
+    // The rows themselves are untouched.
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).not.toHaveProperty("workers");
+  });
+
+  it("orphan_worker_stands_alone", () => {
+    const rows = [
+      at("t1"),
+      // Its parent isn't in this list: not on a machine we know, or in another group.
+      at("t2", { parent: "m::t99", isWorker: true }),
+      // A worker the app could not resolve a parent for.
+      at("t3", { parent: null, isWorker: true }),
+    ];
+    const nested = nestWorkers(rows);
+    expect(nested.map((r) => r.key)).toEqual(["m::t1", "m::t2", "m::t3"]);
+    expect(nested.every((r) => r.workers.length === 0)).toBe(true);
+  });
+
+  it("a_worker_of_a_worker_goes_under_the_top_agent_and_a_loop_loses_nobody", () => {
+    const chain = nestWorkers([
+      at("t1"),
+      at("t2", { parent: "m::t1", isWorker: true }),
+      at("t3", { parent: "m::t2", isWorker: true }),
+    ]);
+    expect(chain.map((r) => r.key)).toEqual(["m::t1"]);
+    expect(chain[0].workers.map((r) => r.key)).toEqual(["m::t2", "m::t3"]);
+    const loop = nestWorkers([
+      at("t1", { parent: "m::t2", isWorker: true }),
+      at("t2", { parent: "m::t1", isWorker: true }),
+      at("t3", { parent: "m::t3", isWorker: true }),
+    ]);
+    expect(loop.map((r) => r.key)).toEqual(["m::t1", "m::t2", "m::t3"]);
+  });
+
+  it("keeps_pinned_first_and_ended_last_for_parents_and_workers", () => {
+    const [group] = groupByProject([
+      at("t1", { folder: "/home/dev/api-service" }),
+      at("t2", { folder: "/home/dev/api-service", status: "ended" }),
+      at("t3", { folder: "/home/dev/api-service", pinned: true }),
+      at("t4", {
+        folder: "/home/dev/api-service",
+        parent: "m::t3",
+        isWorker: true,
+        status: "ended",
+      }),
+      at("t5", {
+        folder: "/home/dev/api-service",
+        parent: "m::t3",
+        isWorker: true,
+      }),
+      at("t6", {
+        folder: "/home/dev/api-service",
+        parent: "m::t3",
+        isWorker: true,
+        pinned: true,
+      }),
+    ]);
+    const nested = nestWorkers(group.rows);
+    expect(nested.map((r) => r.address)).toEqual(["t3", "t1", "t2"]);
+    expect(nested[0].workers.map((r) => r.address)).toEqual(["t6", "t5", "t4"]);
+  });
+
+  it("needs_you_lists_blocked_workers_only", () => {
+    const w = (address: string, status: Row["status"]) =>
+      at(address, { status, parent: "m::t1", isWorker: true, sinceMs: 1 });
+    const listed = needsYou([
+      at("t1", { status: "working" }),
+      w("t2", "blocked"),
+      w("t3", "error"),
+      w("t4", "done"),
+      w("t5", "working"),
+      w("t6", "idle"),
+    ]);
+    expect(listed.map((r) => r.address)).toEqual(["t2", "t3"]);
+  });
+
+  it("collapsed_parent_summarizes_worker_needs", () => {
+    const w = (address: string, status: Row["status"]) =>
+      at(address, { status, parent: "m::t1", isWorker: true });
+    const summary = workerSummary([
+      w("t2", "blocked"),
+      w("t3", "error"),
+      w("t4", "done"),
+      w("t5", "working"),
+    ]);
+    // Blocked and error count; a worker's done does not.
+    expect(summary).toEqual({ count: 4, needs: 2 });
+    expect(workerSummaryText(summary)).toBe("4 workers, 2 need you");
+    expect(workerSummaryText({ count: 2, needs: 1 })).toBe(
+      "2 workers, 1 needs you",
+    );
+    expect(workerSummaryText({ count: 1, needs: 0 })).toBe("1 worker");
+    expect(workerSummaryText({ count: 3, needs: 0 })).toBe("3 workers");
+  });
+
+  it("flattens_to_the_order_on_screen_and_drops_a_collapsed_parents_workers", () => {
+    const nested = nestWorkers([
+      at("t1"),
+      at("t2", { parent: "m::t1", isWorker: true }),
+      at("t3"),
+    ]);
+    expect(flattenWorkers(nested, () => false).map((r) => r.address)).toEqual([
+      "t1",
+      "t2",
+      "t3",
+    ]);
+    expect(
+      flattenWorkers(nested, (k) => k === "m::t1").map((r) => r.address),
+    ).toEqual(["t1", "t3"]);
+  });
+
+  it("names_the_parent_of_a_worker", () => {
+    const parent = at("t1", { name: "planner" });
+    const byKey = new Map([[parent.key, parent]]);
+    expect(workerLabel(parent, byKey)).toBeNull();
+    expect(
+      workerLabel(at("t2", { parent: "m::t1", isWorker: true }), byKey),
+    ).toBe("worker of planner");
+    // A worker whose parent isn't listed is still a worker.
+    expect(workerLabel(at("t3", { isWorker: true }), byKey)).toBe("worker");
+  });
+
+  it("maps_the_blocked_kind_to_words", () => {
+    expect(blockedKindLabel("permission")).toBe("Permission");
+    expect(blockedKindLabel("question")).toBe("Question");
+    expect(blockedKindLabel("auth")).toBe("Login");
+    // Anything else is shown as given.
+    expect(blockedKindLabel("rate_limit")).toBe("rate_limit");
+    expect(blockedKindLabel(null)).toBeNull();
+    expect(blockedKindLabel("  ")).toBeNull();
   });
 });

@@ -1023,6 +1023,68 @@ kbd {
   font-size: var(--fs-small);
   color: var(--text-4);
 }
+/* Status details: what a blocked agent waits on (the kind in bold, then its message) and a
+   working agent's progress, a thin bar that never animates. */
+.row-kind {
+  font-weight: 600;
+  color: var(--text-3);
+}
+.progress {
+  display: block;
+  height: 3px;
+  max-width: 240px;
+  margin-top: 4px;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--st-working) 20%, transparent);
+}
+.progress-fill {
+  display: block;
+  height: 100%;
+  width: var(--progress);
+  background: var(--st-working);
+}
+/* Workers under their agent: the row sits in from the left edge on a rail. */
+.agent-row.is-worker {
+  margin-left: 22px;
+  border-left: 2px solid var(--border-strong);
+}
+.worker-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s);
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+.worker-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.worker-count.has-needs {
+  color: var(--st-needs);
+  font-weight: 600;
+}
+.inspector-workers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inspector-workers li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .row-name,
 .row-pane {
   color: var(--muted);
@@ -1649,6 +1711,28 @@ select.field {
 }
 .pane-box[data-status="done"] {
   border-color: color-mix(in srgb, var(--st-done) 35%, transparent);
+}
+/* A family: an agent's box with its fold button under it, then its workers' boxes. */
+.pane-family {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.pane-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.pane-cell .pane-box {
+  flex: none;
+  align-self: stretch;
+}
+.pane-box.is-worker {
+  min-height: 110px;
+  border-left-width: 3px;
 }
 .pane-box-head {
   display: flex;

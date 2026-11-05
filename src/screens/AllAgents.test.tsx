@@ -1240,3 +1240,99 @@ describe("Home states", () => {
     expect(useAppStore.getState().groupBy).toBe("status");
   });
 });
+
+describe("AllAgents workers", () => {
+  const PARENT = "buildbox/w1:p1";
+  const worker = (
+    address: string,
+    name: string,
+    status: "blocked" | "done" | "working" | "error",
+  ) =>
+    agentTerm({
+      address,
+      name,
+      status,
+      parent: PARENT,
+      folder: "/home/dev/projects/api-service",
+      sinceMs: NOW - 60_000,
+    });
+  const withWorkers = () =>
+    appState(
+      machine("buildbox", undefined, {
+        terms: [
+          ...fixtureTerms(),
+          worker("w1:p4", "linter", "blocked"),
+          worker("w1:p5", "fixer", "done"),
+          worker("w1:p6", "builder", "working"),
+        ],
+      }),
+    );
+  const keys = (list: HTMLElement) =>
+    [...list.querySelectorAll<HTMLElement>("[data-row-key]")].map(
+      (el) => el.dataset.rowKey,
+    );
+
+  it("workers_sit_under_their_parent_and_a_collapsed_parent_counts_them", async () => {
+    const user = setup(withWorkers());
+    const parent = rowItem("buildbox::w1:p1");
+    const list = parent.closest("ul") as HTMLElement;
+    // Right after the parent, indented, and in the order the group had.
+    expect(keys(list).slice(0, 4)).toEqual([
+      "buildbox::w1:p1",
+      "buildbox::w1:p4",
+      "buildbox::w1:p5",
+      "buildbox::w1:p6",
+    ]);
+    expect(rowItem("buildbox::w1:p4")).toHaveClass("is-worker");
+    expect(parent).not.toHaveClass("is-worker");
+
+    const toggle = within(parent).getByRole("button", { name: "3 workers" });
+    await user.click(toggle);
+    // Folded: the workers are gone from the list, the count says who needs you.
+    expect(
+      document.querySelector('[data-row-key="buildbox::w1:p4"]'),
+    ).toBeNull();
+    expect(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers, 1 needs you",
+      }),
+    ).toHaveAttribute("aria-expanded", "false");
+    // Arrow keys skip what is folded away.
+    await user.click(selectButton("buildbox::w1:p1"));
+    await user.keyboard("{ArrowDown}");
+    expect(useAppStore.getState().selectedKey).not.toBe("buildbox::w1:p4");
+
+    await user.click(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers, 1 needs you",
+      }),
+    );
+    expect(rowItem("buildbox::w1:p4")).toBeInTheDocument();
+  });
+
+  it("needs_you_lists_blocked_workers_only_and_names_their_parent", () => {
+    setup(withWorkers());
+    const card = (key: string) =>
+      document.querySelector<HTMLElement>(`[data-card-key="${key}"]`);
+    expect(card("buildbox::w1:p4")).toHaveTextContent("worker of planner");
+    // A worker's Done stays under its parent; a plain agent's card has no such line.
+    expect(card("buildbox::w1:p5")).toBeNull();
+    expect(card("buildbox::w1:p6")).toBeNull();
+    expect(card("buildbox::w1:p1")).not.toHaveTextContent("worker of");
+  });
+
+  it("the_inspector_of_a_parent_lists_its_workers_and_a_worker_names_its_parent", async () => {
+    const user = setup(withWorkers());
+    await user.click(selectButton("buildbox::w1:p1"));
+    const inspector = screen.getByRole("complementary", {
+      name: "Selected agent",
+    });
+    const list = within(inspector).getByRole("list", { name: "Workers" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+    await user.click(within(list).getByRole("button", { name: "linter" }));
+    const again = screen.getByRole("complementary", {
+      name: "Selected agent",
+    });
+    expect(again).toHaveTextContent("Started byplanner");
+  });
+});

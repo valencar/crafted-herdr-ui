@@ -18,6 +18,8 @@ type Props = {
   previewLines: readonly string[];
   onSelect: (key: string) => void;
   onMarkSeen: (row: Row) => void;
+  /** "worker of {parent}" for a worker, so a blocker is never anonymous; `null` for the rest. */
+  workerLabel?: string | null;
   /** Whether the status pill loops. Only the Dashboard's short list sets it. */
   live?: boolean;
 };
@@ -33,6 +35,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
   previewLines,
   onSelect,
   onMarkSeen,
+  workerLabel = null,
   live = false,
 }: Props) {
   const age = formatAge(row.sinceMs, nowMs);
@@ -57,6 +60,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
         {row.pinned && <PinGlyph />}
         <span className="chip card-chip">{row.machineLabel}</span>
       </div>
+      {workerLabel && <div className="row-sub card-worker">{workerLabel}</div>}
       {row.folder && (
         <div className="mono card-folder">{shortPath(row.folder)}</div>
       )}

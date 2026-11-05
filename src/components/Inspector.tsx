@@ -15,6 +15,7 @@ import { KindBadge } from "./KindBadge";
 import { OpenButton } from "./OpenButton";
 import { PinGlyph } from "./PinGlyph";
 import { Preview } from "./Preview";
+import { StatusDetail } from "./StatusDetail";
 import { StatusPill } from "./StatusPill";
 
 type Props = {
@@ -23,6 +24,10 @@ type Props = {
   /** The project the row belongs to, when it has one. */
   project?: string | null;
   terminalName?: string;
+  /** The agent that started this terminal, when it is a worker and that agent is listed. */
+  startedBy?: Row | null;
+  /** The workers that report to this terminal. */
+  workers?: readonly Row[];
 };
 
 /** Everything about the selected row: details, live preview, reply, and its actions. */
@@ -31,8 +36,12 @@ export function Inspector({
   machine,
   project = null,
   terminalName = "terminal",
+  startedBy = null,
+  workers = [],
 }: Props) {
   const reportError = useAppStore((s) => s.reportError);
+  const select = useAppStore((s) => s.select);
+  const workersId = useId();
   const { machineId, isAgent } = row;
   const target = { machineId, address: row.address };
   // The ⋯ menu's list: what this row can be offered.
@@ -111,6 +120,7 @@ export function Inspector({
         <span className="inspector-sub">
           {project ? `${project} on ${row.machineLabel}` : row.machineLabel}
         </span>
+        <StatusDetail row={row} />
       </header>
 
       <dl className="inspector-grid" role="group" aria-label="Details">
@@ -134,6 +144,41 @@ export function Inspector({
           <dt>Terminal</dt>
           <dd className="mono">{row.address}</dd>
         </div>
+        {startedBy && (
+          <div className="span-2">
+            <dt>Started by</dt>
+            <dd>
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => select(startedBy.key)}
+              >
+                {startedBy.name}
+              </button>
+            </dd>
+          </div>
+        )}
+        {workers.length > 0 && (
+          <div className="span-2">
+            <dt id={workersId}>Workers</dt>
+            <dd>
+              <ul className="inspector-workers" aria-labelledby={workersId}>
+                {workers.map((w) => (
+                  <li key={w.key}>
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => select(w.key)}
+                    >
+                      {w.name}
+                    </button>
+                    <StatusPill status={w.status} />
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
       </dl>
 
       <Preview row={row} />

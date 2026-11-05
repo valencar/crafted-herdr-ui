@@ -25,6 +25,7 @@ import {
   needsYou,
   projectNamesOf,
   toRows,
+  workerLabel,
   type Row,
 } from "../lib/grouping";
 import { runMenuAction } from "../lib/menuActions";
@@ -150,6 +151,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
     : "All reachable";
 
   const project = (r: Row) => projectOf.get(r.key) ?? null;
+  const rowByKey = useMemo(() => new Map(rows.map((r) => [r.key, r])), [rows]);
   const where = (r: Row) =>
     project(r) ? `${project(r)} · ${r.machineLabel}` : r.machineLabel;
 
@@ -204,6 +206,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
                       nowMs={nowMs}
                       terminalName={terminalName}
                       previewLines={NO_LINES}
+                      workerLabel={workerLabel(r, rowByKey)}
                       onSelect={(key) => {
                         // From the column beside a terminal the list is behind the terminal.
                         showHome();

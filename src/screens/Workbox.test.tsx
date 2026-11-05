@@ -15,6 +15,7 @@ import type { Settings } from "../lib/bindings/Settings";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import {
+  agentTerm,
   appState as buildState,
   buildboxTerms,
   machineView,
@@ -975,5 +976,67 @@ describe("Workbox pane tails", () => {
         ),
       );
     });
+  });
+});
+
+describe("Workbox workers", () => {
+  const workers = () => [
+    ...buildboxTerms(),
+    agentTerm({
+      address: "w1:p4",
+      name: "linter",
+      status: "blocked",
+      parent: "buildbox/w1:p1",
+      folder: "/home/dev/projects/api-service",
+    }),
+    agentTerm({
+      address: "w1:p5",
+      name: "fixer",
+      status: "done",
+      parent: "buildbox/w1:p1",
+      folder: "/home/dev/projects/api-service",
+    }),
+  ];
+
+  it("workers_sit_in_a_family_with_their_parent_and_fold_to_a_count", async () => {
+    const user = setup(appState(machine("buildbox", { terms: workers() })));
+    const group = screen.getByRole("region", { name: "api-service" });
+    const family = group.querySelector(".pane-family") as HTMLElement;
+    expect(family).not.toBeNull();
+    const names = within(family)
+      .getAllByRole("button", { name: /^Open / })
+      .map((b) => b.getAttribute("aria-label"));
+    expect(names).toEqual(["Open planner", "Open linter", "Open fixer"]);
+    expect(
+      within(family).getByRole("button", { name: "Open linter" }),
+    ).toHaveClass("is-worker");
+    // Every other terminal stays a plain box outside any family.
+    expect(document.querySelectorAll(".pane-family")).toHaveLength(1);
+
+    await user.click(within(family).getByRole("button", { name: "2 workers" }));
+    expect(
+      within(family).queryByRole("button", { name: "Open linter" }),
+    ).toBeNull();
+    expect(
+      within(family).getByRole("button", {
+        name: "2 workers, 1 needs you",
+      }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("an_orphan_worker_is_a_plain_box", () => {
+    const terms = [
+      ...buildboxTerms(),
+      agentTerm({
+        address: "w1:p4",
+        name: "linter",
+        status: "idle",
+        parent: "gone/w1:p1",
+        folder: "/home/dev/projects/api-service",
+      }),
+    ];
+    setup(appState(machine("buildbox", { terms })));
+    expect(document.querySelector(".pane-family")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open linter" })).toBeVisible();
   });
 });

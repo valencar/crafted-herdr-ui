@@ -2,18 +2,27 @@ import { Kbd } from "../components/Kbd";
 import { useEffect, useMemo, useState } from "react";
 import { ClearEndedConfirm } from "../components/CloseConfirm";
 import { PaneBox } from "../components/PaneBox";
+import { WorkerToggle } from "../components/WorkerToggle";
 import {
   WorkboxDialogs,
   type WorkboxDialog,
 } from "../components/WorkboxDialogs";
 import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
 import { shortPath } from "../lib/format";
-import { groupByProject, isNeedsYou, isShell, toRows } from "../lib/grouping";
+import {
+  groupByProject,
+  isNeedsYou,
+  isShell,
+  nestWorkers,
+  toRows,
+  workerSummary,
+} from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
 import { tailTargets, useTails } from "../lib/useTails";
 import { isEditable, isInTerminal } from "../lib/uiHelpers";
 import { useNow } from "../lib/useNow";
+import { useWorkerFold } from "../lib/useWorkerFold";
 import { useAppStore } from "../store/appStore";
 import { openMachineCommand } from "../terminal/commandTabs";
 
@@ -43,6 +52,12 @@ export function Workbox({ machineId }: { machineId: string }) {
   );
   // The terminals by project folder, the same rule as everywhere else.
   const groups = useMemo(() => groupByProject(rows), [rows]);
+  // Inside a project each worker sits with the agent that started it.
+  const nestedGroups = useMemo(
+    () => groups.map((g) => ({ group: g, nested: nestWorkers(g.rows) })),
+    [groups],
+  );
+  const { isFolded, toggle: toggleWorkers } = useWorkerFold();
   // A machine that is not answering is not read; its boxes keep their last line.
   const targets = useMemo(
     () => (online ? tailTargets(rows) : []),
@@ -142,7 +157,7 @@ export function Workbox({ machineId }: { machineId: string }) {
                 No terminals yet. Start one with “+ New session”.
               </p>
             )}
-            {groups.map((g) => (
+            {nestedGroups.map(({ group: g, nested }) => (
               <section
                 key={g.key}
                 className="workbox-group"
@@ -157,14 +172,42 @@ export function Workbox({ machineId }: { machineId: string }) {
                   )}
                 </div>
                 <div className="workbox-terminals">
-                  {g.rows.map((row) => (
-                    <PaneBox
-                      key={row.key}
-                      row={row}
-                      tail={tails[row.address] ?? null}
-                      onOpen={openRow}
-                    />
-                  ))}
+                  {nested.map((row) => {
+                    const box = (
+                      <PaneBox
+                        key={row.key}
+                        row={row}
+                        tail={tails[row.address] ?? null}
+                        onOpen={openRow}
+                      />
+                    );
+                    if (row.workers.length === 0) return box;
+                    const { count, needs } = workerSummary(row.workers);
+                    const folded = isFolded(row.key);
+                    return (
+                      <div key={row.key} className="pane-family">
+                        <div className="pane-cell">
+                          {box}
+                          <WorkerToggle
+                            count={count}
+                            needs={needs}
+                            expanded={!folded}
+                            onToggle={() => toggleWorkers(row.key)}
+                          />
+                        </div>
+                        {!folded &&
+                          row.workers.map((w) => (
+                            <PaneBox
+                              key={w.key}
+                              row={w}
+                              tail={tails[w.address] ?? null}
+                              onOpen={openRow}
+                              worker
+                            />
+                          ))}
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
             ))}

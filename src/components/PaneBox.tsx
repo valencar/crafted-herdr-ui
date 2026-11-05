@@ -8,16 +8,18 @@ type Props = {
   /** The last line the pane printed; `null` until it has been read. */
   tail: string | null;
   onOpen: (row: Row) => void;
+  /** The box sits under the agent that started it. */
+  worker?: boolean;
 };
 
 /** One pane drawn as a box: kind, name, status, its last line and its id. Click to open it. */
-export function PaneBox({ row, tail, onOpen }: Props) {
+export function PaneBox({ row, tail, onOpen, worker = false }: Props) {
   const statusId = useId();
   const tailId = useId();
   return (
     <button
       type="button"
-      className="pane-box"
+      className={worker ? "pane-box is-worker" : "pane-box"}
       data-status={row.status}
       aria-label={`Open ${row.name}`}
       aria-describedby={tail ? `${statusId} ${tailId}` : statusId}

@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "../lib/grouping";
 import { rowOf } from "../test/builders";
@@ -151,5 +152,166 @@ describe("AgentRow", () => {
     expect(
       screen.getByRole("button", { name: "Open planner" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("AgentRow status details", () => {
+  it("blocked_row_shows_kind_and_msg", () => {
+    const { container, rerender } = renderRow(
+      row({
+        status: "blocked",
+        statusKind: "permission",
+        statusMsg: "Run cargo test?",
+      }),
+    );
+    const sub = container.querySelector(".row-sub") as HTMLElement;
+    // The mapped word, then the message, on the second line.
+    expect(sub).toHaveTextContent("Permission Run cargo test?");
+    expect(sub.querySelector(".row-kind")).toHaveTextContent("Permission");
+    const again = (over: Partial<Row>) =>
+      rerender(
+        <ul>
+          <AgentRow
+            row={row({ status: "blocked", ...over })}
+            selected={false}
+            dim={false}
+            note={null}
+            showMachine={false}
+            nowMs={1_000}
+            terminalName="Ghostty"
+            onSelect={() => {}}
+          />
+        </ul>,
+      );
+    again({ statusKind: "question", statusMsg: "Which branch?" });
+    expect(screen.getByText("Question")).toBeInTheDocument();
+    again({ statusKind: "auth", statusMsg: null });
+    expect(screen.getByText("Login")).toBeInTheDocument();
+    // Another value is shown as given.
+    again({ statusKind: "rate_limit", statusMsg: "Try again at noon" });
+    expect(screen.getByText("rate_limit")).toBeInTheDocument();
+    expect(screen.getByText("Try again at noon")).toBeInTheDocument();
+    // A message alone still reads.
+    again({ statusKind: null, statusMsg: "Waiting on you" });
+    expect(screen.getByText("Waiting on you")).toBeInTheDocument();
+    // Nothing to say: no second line.
+    again({ statusKind: null, statusMsg: null });
+    expect(container.querySelector(".row-sub")).toBeNull();
+  });
+
+  it("only_a_blocked_row_shows_the_blocker", () => {
+    renderRow(
+      row({
+        status: "working",
+        statusKind: "permission",
+        statusMsg: "Run it?",
+      }),
+    );
+    expect(screen.queryByText("Permission")).toBeNull();
+    expect(screen.queryByText("Run it?")).toBeNull();
+  });
+
+  it("progress_bar_static_with_label", () => {
+    const { container } = renderRow(row({ status: "working", progress: 40 }));
+    const bar = screen.getByRole("progressbar", { name: "Progress 40%" });
+    expect(bar).toHaveAttribute("aria-valuenow", "40");
+    expect(bar).toHaveClass("progress");
+    // Drawn with a custom property the stylesheet reads, not an inline color.
+    expect(bar.querySelector(".progress-fill")).toHaveStyle({
+      "--progress": "40%",
+    });
+    expect(container.querySelector("[style*='color']")).toBeNull();
+  });
+
+  it("progress_is_for_working_rows_with_a_value_and_stays_in_range", () => {
+    const { rerender } = renderRow(row({ status: "working", progress: null }));
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    const again = (over: Partial<Row>) =>
+      rerender(
+        <ul>
+          <AgentRow
+            row={row(over)}
+            selected={false}
+            dim={false}
+            note={null}
+            showMachine={false}
+            nowMs={1_000}
+            terminalName="Ghostty"
+            onSelect={() => {}}
+          />
+        </ul>,
+      );
+    again({ status: "idle", progress: 40 });
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    again({ status: "working", progress: 250 });
+    expect(
+      screen.getByRole("progressbar", { name: "Progress 100%" }),
+    ).toBeInTheDocument();
+    again({ status: "working", progress: 0 });
+    expect(
+      screen.getByRole("progressbar", { name: "Progress 0%" }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("AgentRow workers", () => {
+  function renderParent(expanded: boolean, onToggle = vi.fn()) {
+    render(
+      <ul>
+        <AgentRow
+          row={row({ status: "working" })}
+          selected={false}
+          dim={false}
+          note={null}
+          showMachine={false}
+          nowMs={1_000}
+          terminalName="Ghostty"
+          workerCount={2}
+          workerNeeds={1}
+          expanded={expanded}
+          onToggleWorkers={onToggle}
+          onSelect={() => {}}
+        />
+      </ul>,
+    );
+    return onToggle;
+  }
+
+  it("collapsed_parent_summarizes_worker_needs", async () => {
+    const onToggle = renderParent(false);
+    const toggle = screen.getByRole("button", {
+      name: "2 workers, 1 needs you",
+    });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(toggle);
+    expect(onToggle).toHaveBeenCalledWith("buildbox::t3");
+  });
+
+  it("an_open_parent_names_its_count_only", () => {
+    renderParent(true);
+    const toggle = screen.getByRole("button", { name: "2 workers" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("a_row_with_no_workers_has_no_toggle_and_a_nested_row_is_marked", () => {
+    const { container } = renderRow(row({ status: "idle" }));
+    expect(screen.queryByRole("button", { name: /worker/ })).toBeNull();
+    expect(container.querySelector(".is-worker")).toBeNull();
+    render(
+      <ul>
+        <AgentRow
+          row={row({ key: "buildbox::t4", status: "idle", isWorker: true })}
+          selected={false}
+          dim={false}
+          note={null}
+          showMachine={false}
+          nowMs={1_000}
+          terminalName="Ghostty"
+          nested
+          onSelect={() => {}}
+        />
+      </ul>,
+    );
+    expect(document.querySelector(".agent-row.is-worker")).not.toBeNull();
   });
 });
