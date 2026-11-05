@@ -560,7 +560,11 @@ mod tests {
     #[test]
     fn launches_system_tools_by_absolute_path() {
         // Never through the login PATH the app captured: a directory on it could shadow them.
-        let c = vec!["ssh".to_owned(), "buildbox".to_owned()];
+        let c = vec![
+            "hc".to_owned(),
+            "attach".to_owned(),
+            "buildbox/t7".to_owned(),
+        ];
         assert_eq!(
             Ghostty.spec(&c, OpenMode::Window, "t").program,
             "/usr/bin/open"

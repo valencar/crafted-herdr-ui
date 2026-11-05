@@ -235,25 +235,27 @@ mod tests {
 
     #[test]
     fn iterm_tab_mode_adds_a_tab_to_the_current_window() {
-        let spec = ITerm2.spec(&cmd(&["herdr"]), OpenMode::Tab, "t");
+        let spec = ITerm2.spec(&cmd(&["hc", "attach", "t7"]), OpenMode::Tab, "t");
         let lines = arg_pairs(&spec);
         assert!(lines.iter().any(|l| {
-            l.contains("tell current window to create tab with default profile command \"herdr\"")
+            l.contains(
+                "tell current window to create tab with default profile command \"hc attach t7\"",
+            )
         }));
         // With no window open there is no current window, so it falls back to a new window.
         assert!(
             lines
                 .iter()
-                .any(|l| l.contains("create window with default profile command \"herdr\""))
+                .any(|l| l.contains("create window with default profile command \"hc attach t7\""))
         );
     }
 
     #[test]
     fn terminal_app_uses_do_script() {
-        let spec = TerminalApp.spec(&cmd(&["ssh", "-t", "buildbox"]), OpenMode::Tab, "t");
+        let spec = TerminalApp.spec(&cmd(&["hc", "attach", "buildbox/t7"]), OpenMode::Tab, "t");
         let lines = arg_pairs(&spec);
         assert!(lines.contains(&"tell application \"Terminal\"".to_owned()));
-        assert!(lines.contains(&"do script \"ssh -t buildbox\"".to_owned()));
+        assert!(lines.contains(&"do script \"hc attach buildbox/t7\"".to_owned()));
     }
 
     #[test]
@@ -265,7 +267,8 @@ mod tests {
 
     #[test]
     fn open_based_launchers_pass_the_argv_through() {
-        let c = cmd(&["ssh", "-t", "buildbox", "sh -c 'x'"]);
+        // A core path with a space stays one argument.
+        let c = cmd(&["/Users/dev/my tools/hc", "attach", "buildbox/t7"]);
         let s = Ghostty.spec(&c, OpenMode::Window, "t");
         assert_eq!(s.program, "/usr/bin/open");
         assert_eq!(
@@ -275,10 +278,9 @@ mod tests {
                 "Ghostty.app",
                 "--args",
                 "-e",
-                "ssh",
-                "-t",
-                "buildbox",
-                "sh -c 'x'"
+                "/Users/dev/my tools/hc",
+                "attach",
+                "buildbox/t7"
             ]
         );
         let s = WezTerm.spec(&c, OpenMode::Window, "t");
@@ -290,10 +292,9 @@ mod tests {
                 "--args",
                 "start",
                 "--",
-                "ssh",
-                "-t",
-                "buildbox",
-                "sh -c 'x'"
+                "/Users/dev/my tools/hc",
+                "attach",
+                "buildbox/t7"
             ]
         );
         let s = Kitty.spec(&c, OpenMode::Window, "t");
@@ -303,10 +304,9 @@ mod tests {
                 "-na",
                 "kitty",
                 "--args",
-                "ssh",
-                "-t",
-                "buildbox",
-                "sh -c 'x'"
+                "/Users/dev/my tools/hc",
+                "attach",
+                "buildbox/t7"
             ]
         );
         let s = Alacritty.spec(&c, OpenMode::Window, "t");
@@ -317,17 +317,17 @@ mod tests {
                 "Alacritty",
                 "--args",
                 "-e",
-                "ssh",
-                "-t",
-                "buildbox",
-                "sh -c 'x'"
+                "/Users/dev/my tools/hc",
+                "attach",
+                "buildbox/t7"
             ]
         );
     }
 
     #[test]
     fn custom_template_substitution() {
-        let c = cmd(&["ssh", "-t", "buildbox", "it's"]);
+        // A core path with a quote in it is quoted for the shell.
+        let c = cmd(&["/Users/dev/it's/hc", "attach", "buildbox/t7"]);
         let launcher = Custom {
             template: "myterm --title x -- {attach} # {attach}".into(),
         };
@@ -339,7 +339,7 @@ mod tests {
         assert_eq!(spec.args[0], "-c");
         assert_eq!(
             spec.args[1],
-            "myterm --title x -- ssh -t buildbox 'it'\\''s' # ssh -t buildbox 'it'\\''s'"
+            "myterm --title x -- '/Users/dev/it'\\''s/hc' attach buildbox/t7 # '/Users/dev/it'\\''s/hc' attach buildbox/t7"
         );
     }
 
@@ -352,7 +352,7 @@ mod tests {
         let a = warp.spec(&c, OpenMode::Window, "title");
         let b = warp.spec(&c, OpenMode::Tab, "other title");
         assert_eq!(a, b, "the same command reuses the same file");
-        let other = warp.spec(&cmd(&["herdr"]), OpenMode::Window, "title");
+        let other = warp.spec(&cmd(&["hc", "attach", "t7"]), OpenMode::Window, "title");
         assert_ne!(a.files[0].path, other.files[0].path);
 
         let file = &a.files[0];

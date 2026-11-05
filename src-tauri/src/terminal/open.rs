@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn a_launch_follows_the_saved_terminal_and_open_mode() {
-        let argv = vec!["ssh".to_owned(), "-t".into(), "buildbox".into()];
+        let argv = vec!["hc".to_owned(), "attach".into(), "buildbox/t7".into()];
         let installed = [TerminalId::Warp, TerminalId::TerminalApp];
 
         // Nothing chosen: the default of the installed ones, in a new window.
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn a_custom_terminal_needs_a_template_and_runs_it_detached() {
-        let argv = vec!["ssh".to_owned(), "buildbox".into()];
+        let argv = vec!["hc".to_owned(), "attach".into(), "buildbox/t7".into()];
         let custom = |template: &str| Settings {
             terminal: Some(TerminalId::Custom),
             terminal_custom_template: template.into(),
@@ -129,6 +129,6 @@ mod tests {
 
         let spec = launch_spec(&custom(" myterm -e {attach} "), &[], home(), &argv, "t").unwrap();
         assert!(spec.detached);
-        assert_eq!(spec.args, ["-c", "myterm -e ssh buildbox"]);
+        assert_eq!(spec.args, ["-c", "myterm -e hc attach buildbox/t7"]);
     }
 }

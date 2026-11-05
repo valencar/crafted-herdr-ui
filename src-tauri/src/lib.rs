@@ -167,13 +167,13 @@ async fn locate_and_start(
         handle.state::<SharedSettings>(),
     );
     locator.set_login(login);
-    // The settings can't change the core's path while startup is still resolving it.
+    // The settings can't change the core's path while startup is still resolving it, and the
+    // cell is filled before the guard goes: `set_settings` and `retry_core_with` read it under the
+    // same guard, so neither sees a located core without its sync.
     let update = shared.begin_update().await;
     let status = locator
         .locate(shared.get().core_path.as_deref(), &core)
         .await;
-    drop(update);
-
     let sync = CoreSync::start(
         core.inner().clone(),
         shared.inner().clone(),
@@ -183,6 +183,7 @@ async fn locate_and_start(
     );
     sync.set_core_path(status.path);
     cell.set(sync);
+    drop(update);
     // The UI may have said what it draws before the sync existed.
     notify::apply_looking(&handle, None);
 }
