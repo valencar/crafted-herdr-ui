@@ -781,11 +781,16 @@ describe("TerminalView", () => {
   });
 
   describe("the bar under a session that ended", () => {
-    /** The app state with buildbox listed (remote unless `local`), optionally without this tab's pane. */
-    const listed = (opts: { local?: boolean; gone?: boolean } = {}) => {
-      const terms = buildboxTerms().filter(
-        (t) => !(opts.gone && t.address === "w1:p1"),
-      );
+    /**
+     * The app state with buildbox listed (remote unless `local`), optionally without this tab's
+     * pane, or with it Ended.
+     */
+    const listed = (
+      opts: { local?: boolean; gone?: boolean; ended?: boolean } = {},
+    ) => {
+      const terms = buildboxTerms(
+        opts.ended ? { "w1:p1": { status: "ended" } } : {},
+      ).filter((t) => !(opts.gone && t.address === "w1:p1"));
       const state: AppState = appState([
         [
           machine({
@@ -954,6 +959,26 @@ describe("TerminalView", () => {
       coreIs("ready");
       await flush();
       expect(open).toHaveBeenCalledTimes(2);
+    });
+
+    it("a_server_stop_does_not_reattach_a_terminal_that_came_back_ended", async () => {
+      kept(0);
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0, last_line: "[w1:p1 finished: server_stop]" });
+      coreIs("connecting");
+      await flush();
+      expect(
+        screen.getByText("It reattaches by itself when herdr-core is back."),
+      ).toBeVisible();
+      // The core is back, and its list says the terminal finished: one push carries both.
+      listed({ ended: true });
+      await flush();
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(tabState()).toMatchObject({ state: "detached", waiting: null });
+      expect(screen.queryByText(/reattaches by itself/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toBeVisible();
     });
 
     it("a_plain_detach_waits_for_the_button_whatever_the_row_does", async () => {
@@ -1330,6 +1355,22 @@ describe("TerminalView", () => {
       listed({ gone: true });
       expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
       expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
+    });
+
+    it("Close_tab_takes_focus_when_the_row_ends_after_the_session_ended", async () => {
+      // The attach's exit can reach the UI before the row's change does.
+      const user = userEvent.setup();
+      listed();
+      render(<Harness />);
+      await flush();
+      emit({ kind: "exit", code: 0, last_line: null });
+      expect(screen.getByRole("button", { name: "Reattach" })).toHaveFocus();
+      listed({ ended: true });
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
+      // So Enter closes the tab.
+      await user.keyboard("{Enter}");
+      expect(useTerminalStore.getState().tabs).toEqual([]);
     });
 
     it("a_workbox_without_a_snapshot_does_not_make_the_pane_look_gone", async () => {

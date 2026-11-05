@@ -395,10 +395,12 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
 
   // The bar's default button takes focus, so Enter reattaches or retries. It is disabled while a
   // reattach is opening, so focus comes back each time the session ends again, and when the pane
-  // disappears after the end (the default button becomes Close tab).
+  // disappears or its row ends after the session did (the focused Reattach goes, and the default
+  // button becomes Close tab).
+  const rowEnded = row?.status === "ended";
   useEffect(() => {
     if (active && ended && !modalOpen()) overlayButtonRef.current?.focus();
-  }, [active, ended, gone, tab.attempts]);
+  }, [active, ended, gone, rowEnded, tab.attempts]);
   // Silent on the first open: there is nothing to say until a reattach is under way or it ended.
   const bar =
     tab.state === "detached" ||

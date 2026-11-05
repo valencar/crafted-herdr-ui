@@ -70,7 +70,8 @@ type TerminalStore = {
    * when it is gone); `core` is the core's state now.
    * - The ruled kept-loss line (`[… finished: signaled]`) on a row with `keep` that has not
    *   finished: waits for the row's `restarts` to rise.
-   * - `[lost the core…]` or `[… finished: server_stop]`: waits for the core to come back.
+   * - `[lost the core…]` or `[… finished: server_stop]`: waits for the core to come back, and
+   *   then reattaches only if the row has not ended.
    * Anything else waits for the Reattach button.
    */
   sessionEnded: (
@@ -184,7 +185,9 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
     }
     if (!waiting.sawDown) return false;
     stop();
-    return true;
+    // The core is back with a fresh list: a terminal that finished meanwhile can't be attached
+    // to, so the tab stays on Close tab.
+    return row.status !== "ended";
   },
   closeTab: (tabKey) =>
     set((s) => {

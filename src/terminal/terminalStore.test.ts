@@ -348,6 +348,31 @@ describe("terminalStore", () => {
       expect(store().settle(KEY, live(), "ready")).toBe(true);
     });
 
+    it("a_core_wait_reattaches_a_row_that_came_back_live_but_not_one_that_came_back_ended", () => {
+      // Back up with the terminal still running: once, as before.
+      end(0, "[t12 finished: server_stop]", live(), "connecting");
+      expect(store().settle(KEY, live({ status: "working" }), "ready")).toBe(
+        true,
+      );
+      expect(tabOf().waiting).toBeNull();
+
+      // Back up with the terminal finished: attaching could only fail, so the wait is over.
+      store().closeTab(KEY);
+      end(0, "[t12 finished: server_stop]", live(), "connecting");
+      // While the core is down the row is the old news, so an Ended row does not end the wait.
+      expect(store().settle(KEY, live({ status: "ended" }), "stopped")).toBe(
+        false,
+      );
+      expect(tabOf().waiting).toEqual({ kind: "core", sawDown: true });
+      expect(store().settle(KEY, live({ status: "ended" }), "ready")).toBe(
+        false,
+      );
+      expect(tabOf().waiting).toBeNull();
+      expect(store().settle(KEY, live({ status: "ended" }), "ready")).toBe(
+        false,
+      );
+    });
+
     it("core_loss_does_not_reattach_when_the_row_is_gone", () => {
       end(0, CORE_LOST, live(), "connecting");
       expect(store().settle(KEY, undefined, "ready")).toBe(false);
