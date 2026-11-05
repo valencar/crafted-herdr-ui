@@ -82,6 +82,9 @@ export type CommandResults = {
   term_close: null;
   show_main_open_row: null;
   set_looking: null;
+  /** Whether Herdr's window is open (`herdr-app status` exits 0); reused for 5 s in Rust. */
+  herdr_app_status: boolean;
+  open_in_herdr: null;
 };
 export type CommandName = keyof CommandResults;
 
@@ -160,6 +163,9 @@ export type CommandArgs = {
   show_main_open_row: { machineId: string; address: string };
   /** The rows drawn right now (`${machineId}::${address}`; none while the window is away): Rust skips their notifications and writes `herdr.seen` for them. */
   set_looking: { keys: string[] };
+  herdr_app_status: undefined;
+  /** `herdr-app do terminal.peek`: shows the terminal in Herdr's window; only on the person's click. */
+  open_in_herdr: { machineId: string; address: string };
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([

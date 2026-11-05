@@ -17,6 +17,7 @@ use crate::actions::{
 };
 use crate::activity::ActivityV2;
 use crate::core::{CommandLogEntry, CoreClient};
+use crate::herdr_app::{self, HerdrApp};
 use crate::notify::{self, Looking};
 use crate::preview::{self, PreviewManager};
 use crate::pty::TermSize;
@@ -660,6 +661,47 @@ pub async fn term_close(
     id: TermId,
 ) -> Result<(), ActionError> {
     on_sessions(&sessions, move |s| s.close(id)).await
+}
+
+/// Whether Herdr's window is open now (`herdr-app status` exits 0), so the UI offers Open in
+/// Herdr only then. The answer is reused for 5 s; no `herdr-app`, or a closed window, is `false`.
+#[tauri::command]
+pub async fn herdr_app_status(
+    app: State<'_, HerdrApp>,
+    locator: State<'_, CoreLocator>,
+) -> Result<bool, ActionError> {
+    Ok(app.is_open(&locator.login()).await)
+}
+
+/// Shows a terminal in Herdr's window, over its current tab (`herdr-app do terminal.peek`), and
+/// adds the call to the command log. Only the person's click gets here; nothing calls it by
+/// itself.
+#[tauri::command]
+pub async fn open_in_herdr(
+    app: State<'_, HerdrApp>,
+    core: State<'_, Arc<CoreClient>>,
+    locator: State<'_, CoreLocator>,
+    sync: State<'_, SyncCell>,
+    machine_id: String,
+    address: String,
+) -> Result<(), ActionError> {
+    let full = sync
+        .get()
+        .and_then(|s| s.full_address(&machine_id, &address))
+        .ok_or_else(|| ActionError::invalid("That terminal is no longer listed."))?;
+    let login = locator.login();
+    let bin = app
+        .path(&login)
+        .await
+        .ok_or_else(|| ActionError::invalid("Herdr was not found on this computer."))?;
+    herdr_app::open_in_herdr(
+        &bin,
+        &crate::env::herdr_app_env(&login),
+        &core,
+        &machine_id,
+        &full,
+    )
+    .await
 }
 
 /// Runs one of the few core commands that need a terminal (`machine login` asks for SSH

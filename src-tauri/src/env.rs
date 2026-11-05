@@ -37,6 +37,22 @@ const FORWARDED: [&str; 11] = [
 /// (spec §9.2, onboarding's "You have herdr {version}"). The PTY and terminal-launch envs that
 /// still use it go to the 11-name core list in Task 8.
 const LEGACY_FORWARDED: [&str; 6] = ["PATH", "HOME", "USER", "SSH_AUTH_SOCK", "LANG", "TERM"];
+/// Variables handed to `herdr-app` (the `--version` probe, `status` and `do`): the base six plus
+/// the two that choose which window it talks to. `control.rs::socket()` is
+/// `mods::app_dir().join("herdr-app.sock")`, and the app home is `$HERDR_APP_HOME`, else under
+/// `$XDG_CONFIG_HOME`, else `~/.config/herdr-app` (herdr-app `docs/security.md`), so those two
+/// and `HOME` are the whole socket path. No `HC_*` name goes here: `herdr-app` is not `hc`, and a
+/// `HC_SOCKET`, `HC_TERMINAL_*` or `HC_SCOPE` has no part in finding its window.
+const HERDR_APP_FORWARDED: [&str; 8] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "SSH_AUTH_SOCK",
+    "LANG",
+    "TERM",
+    "HERDR_APP_HOME",
+    "XDG_CONFIG_HOME",
+];
 const DEFAULT_TERM: &str = "xterm-256color";
 
 /// The environment of the user's login shell.
@@ -151,6 +167,11 @@ pub fn forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
 /// or `XDG_*` name. Permanent, for `find_legacy_herdr` only.
 pub fn legacy_forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
     pick_env(login, &LEGACY_FORWARDED)
+}
+
+/// The variables a `herdr-app` spawn gets (see `HERDR_APP_FORWARDED`), with `TERM` defaulted.
+pub fn herdr_app_env(login: &LoginEnv) -> Vec<(String, String)> {
+    pick_env(login, &HERDR_APP_FORWARDED)
 }
 
 fn pick_env(login: &LoginEnv, names: &[&str]) -> Vec<(String, String)> {

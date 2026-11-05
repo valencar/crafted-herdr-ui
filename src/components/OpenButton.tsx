@@ -5,6 +5,7 @@ import type { Row } from "../lib/grouping";
 import { copyText, invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
 import { PANE_MENU_LABEL } from "../lib/paneMenu";
+import { openInHerdr, useHerdrApp } from "../lib/useHerdrApp";
 import { Tooltip } from "./Tooltip";
 import { PINNED, useMenuBehavior } from "../lib/useMenuBehavior";
 import { useAppStore } from "../store/appStore";
@@ -53,6 +54,8 @@ export function OpenButton({
   // Watch is offered beside Open on a Needs-input row, and in the menu on any live row. A
   // finished terminal can't be attached to, observed or not.
   const canWatch = row.status !== "ended";
+  // After the open items, only while Herdr's window is open (and never for an ended row).
+  const herdrApp = useHerdrApp(open) && canWatch;
   const watchBeside = row.status === "blocked";
   const shortcut = hasTab ? tabShortcut(row.key, tabs, machines) : null;
   const label = hasTab ? "Go to tab" : "Open";
@@ -205,6 +208,16 @@ export function OpenButton({
                 onClick={() => choose(watch)}
               >
                 {PANE_MENU_LABEL.watch}
+              </button>
+            )}
+            {herdrApp && (
+              <button
+                type="button"
+                role="menuitem"
+                className="menu-item"
+                onClick={() => choose(() => openInHerdr(row))}
+              >
+                {PANE_MENU_LABEL["open-in-herdr"]}
               </button>
             )}
             <div className="menu-sep" role="separator" />

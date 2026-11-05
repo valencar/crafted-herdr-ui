@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { rowOf } from "../test/builders";
 import type { Row } from "./grouping";
-import { paneMenuItems } from "./paneMenu";
+import { PANE_MENU_LABEL, paneMenuItems } from "./paneMenu";
 
 const row = (status: Row["status"], over: Partial<Row> = {}): Row =>
   rowOf({
@@ -108,5 +108,42 @@ describe("paneMenuItems", () => {
       }
       expect(items.slice(-2)).toEqual(["show-in-all", "close"]);
     }
+  });
+
+  it("menu_item_after_open_items", () => {
+    // Offered only while Herdr's window is open, right after the open-type items.
+    expect(paneMenuItems(row("blocked"), true)).toEqual([
+      "copy-attach",
+      "copy-address",
+      "watch",
+      "open-in-herdr",
+      "pin",
+      "keep",
+      "show-in-all",
+      "close",
+    ]);
+    expect(paneMenuItems(row("done", { pinned: true }), true)).toEqual([
+      "copy-attach",
+      "copy-address",
+      "watch",
+      "open-in-herdr",
+      "mark-seen",
+      "unpin",
+      "keep",
+      "show-in-all",
+      "close",
+    ]);
+    // Closed window, or no argument: not there.
+    expect(paneMenuItems(row("blocked"), false)).not.toContain("open-in-herdr");
+    expect(paneMenuItems(row("blocked"))).not.toContain("open-in-herdr");
+    // Ruling C96: an Ended row never offers it, and C60's list is unchanged.
+    expect(paneMenuItems(row("ended"), true)).toEqual([
+      "copy-address",
+      "pin",
+      "show-in-all",
+      "remove",
+    ]);
+    expect(PANE_MENU_LABEL["open-in-herdr"]).toBe("Open in Herdr");
+    expect(paneMenuItems(null, true)).toEqual([]);
   });
 });

@@ -307,6 +307,24 @@ describe("agentActions", () => {
   };
   const ids = (r: Row, c = ctx) => agentActions(r, c).map((a) => a.id);
 
+  it("agent_actions_offer_open_in_herdr_only_when_its_window_is_open", () => {
+    const open = { ...ctx, herdrApp: true };
+    const list = ids(row({ status: "working" }), open);
+    // After the open items, the Watch one included, and before the row's own changes.
+    expect(list.indexOf("open-in-herdr")).toBe(list.indexOf("watch") + 1);
+    expect(
+      agentActions(row({ status: "working" }), open).find(
+        (a) => a.id === "open-in-herdr",
+      )?.label,
+    ).toBe("Open in Herdr");
+    expect(ids(row({ status: "working" }))).not.toContain("open-in-herdr");
+    expect(
+      ids(row({ status: "working" }), { ...ctx, herdrApp: false }),
+    ).not.toContain("open-in-herdr");
+    // Ended rows (C96) never.
+    expect(ids(row({ status: "ended" }), open)).not.toContain("open-in-herdr");
+  });
+
   it("agent_actions_never_reply_to_blocked", () => {
     expect(ids(row({ status: "blocked" }))).not.toContain("reply");
     expect(ids(row({ status: "unknown" }))).not.toContain("reply");

@@ -5,6 +5,7 @@ pub mod commands;
 pub mod core;
 pub mod env;
 pub mod herdr;
+pub mod herdr_app;
 pub mod menu;
 pub mod notify;
 pub mod preview;
@@ -124,6 +125,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(cell);
     app.manage(activity.clone());
     app.manage(locator);
+    app.manage(herdr_app::HerdrApp::new());
     app.manage(PopoverGuard::default());
     app.manage(notify::Looking::default());
     app.manage(shared.clone());
@@ -307,6 +309,8 @@ pub fn run() {
             commands::term_close,
             commands::show_main_open_row,
             commands::set_looking,
+            commands::herdr_app_status,
+            commands::open_in_herdr,
         ])
         .menu(menu::build)
         .on_menu_event(menu::on_event)

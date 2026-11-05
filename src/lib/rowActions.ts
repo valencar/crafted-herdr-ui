@@ -5,6 +5,7 @@ import { copyText, invokeTyped } from "./ipc";
 import { markSeen, openRow } from "./openRow";
 import type { PaneMenuItem } from "./paneMenu";
 import { showHomeView } from "./uiHelpers";
+import { openInHerdr } from "./useHerdrApp";
 
 /**
  * The row actions that are one click and need no confirmation. Each goes through Rust (the
@@ -81,6 +82,9 @@ export function runRowItem(
       break;
     case "watch":
       void openRow(row, "app", { observe: true });
+      break;
+    case "open-in-herdr":
+      openInHerdr(row);
       break;
     case "mark-seen":
       markSeen(row);

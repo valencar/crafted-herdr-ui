@@ -79,9 +79,7 @@ export const PALETTE_LIMIT = 50;
 export function buildItems(ctx: Context): PaletteItem[] {
   const urgent = sortPinnedFirst(needsYou(ctx.rows));
   const urgentKeys = new Set(urgent.map((r) => r.key));
-  const other = sortPinnedFirst(
-    ctx.rows.filter((r) => !urgentKeys.has(r.key)),
-  );
+  const other = sortPinnedFirst(ctx.rows.filter((r) => !urgentKeys.has(r.key)));
   const tabKeys = new Set(ctx.openTabs.map((t) => t.key));
 
   // The rule of `agentActions` and the Open button: with a tab open, Enter goes to it and ⌘Enter
@@ -229,7 +227,13 @@ export type AgentAction = {
  */
 export function agentActions(
   row: Row,
-  ctx: { hasTab: boolean; openTarget: "app" | "external"; terminal: string },
+  ctx: {
+    hasTab: boolean;
+    openTarget: "app" | "external";
+    terminal: string;
+    /** Herdr's window is open: Open in Herdr is offered, after Watch. */
+    herdrApp?: boolean;
+  },
 ): AgentAction[] {
   const here = "Open in a tab here";
   const external = `Open in ${ctx.terminal}`;
@@ -272,7 +276,7 @@ export function agentActions(
   if (row.status === "idle" || row.status === "done") {
     actions.push({ id: "reply", label: "Reply…" });
   }
-  for (const item of paneMenuItems(row)) {
+  for (const item of paneMenuItems(row, ctx.herdrApp === true)) {
     actions.push({
       id: item,
       label: PANE_MENU_LABEL[item],

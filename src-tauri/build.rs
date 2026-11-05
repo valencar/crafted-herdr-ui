@@ -53,6 +53,8 @@ const COMMANDS: &[&str] = &[
     "term_close",
     "show_main_open_row",
     "set_looking",
+    "herdr_app_status",
+    "open_in_herdr",
 ];
 
 fn main() {

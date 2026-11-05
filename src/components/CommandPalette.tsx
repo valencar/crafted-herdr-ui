@@ -17,6 +17,7 @@ import {
   type PaletteItem,
 } from "../lib/palette";
 import { runRowItem } from "../lib/rowActions";
+import { useHerdrApp } from "../lib/useHerdrApp";
 import { tabShortcutId } from "../lib/shortcuts";
 import {
   focusReplyBox,
@@ -300,6 +301,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const hasTab =
     frameRow !== undefined && tabs.some((t) => t.tabKey === frameRow.key);
 
+  // Open in Herdr is offered in the frame only while Herdr's window is open.
+  const herdrApp = useHerdrApp(inFrame);
+
   const actions = useMemo(() => {
     if (!frameRow) return [];
     const q = query.trim();
@@ -307,8 +311,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       hasTab,
       openTarget,
       terminal: terminalLabel,
+      herdrApp,
     }).filter((a) => q === "" || fuzzyMatch(q, a.label) !== null);
-  }, [frameRow, hasTab, openTarget, terminalLabel, query]);
+  }, [frameRow, hasTab, openTarget, terminalLabel, herdrApp, query]);
 
   // What ⌘↩ does in the frame, whatever the filter hides: the footer names it.
   const frameAltLabel = useMemo(

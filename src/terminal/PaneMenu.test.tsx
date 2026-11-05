@@ -87,6 +87,31 @@ describe("PaneMenu", () => {
     ]);
   });
 
+  it("lists_open_in_herdr_after_watch_only_while_its_window_is_open", async () => {
+    const user = userEvent.setup();
+    invoke.mockImplementation(async (name: string) =>
+      name === "herdr_app_status" ? true : null,
+    );
+    render(<PaneMenu row={{ ...row, status: "blocked" }} />);
+    await user.click(more());
+    await screen.findByRole("menuitem", { name: "Open in Herdr" });
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
+      "Copy attach command",
+      "Copy address",
+      "Watch (read-only)",
+      "Open in Herdr",
+      "Pin",
+      "Keep",
+      "Show in All agents",
+      "Close…",
+    ]);
+    await user.click(screen.getByRole("menuitem", { name: "Open in Herdr" }));
+    expect(invoke).toHaveBeenCalledWith("open_in_herdr", {
+      machineId: "buildbox",
+      address: "w1:p1",
+    });
+  });
+
   it("lists_the_full_set_in_order_for_a_working_pinned_kept_agent", async () => {
     const user = userEvent.setup();
     render(

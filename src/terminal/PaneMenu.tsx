@@ -10,6 +10,7 @@ import {
   type PaneMenuItem,
 } from "../lib/paneMenu";
 import { runRowItem } from "../lib/rowActions";
+import { useHerdrApp } from "../lib/useHerdrApp";
 import { PINNED, useMenuBehavior } from "../lib/useMenuBehavior";
 
 /**
@@ -25,6 +26,7 @@ export function PaneMenu({ row }: { row: Row }) {
   const [closing, setClosing] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const herdrApp = useHerdrApp(open);
 
   useMenuBehavior(open, setOpen, {
     items: menuRef,
@@ -79,7 +81,7 @@ export function PaneMenu({ row }: { row: Row }) {
             aria-label={`Actions for ${row.name}`}
             style={place}
           >
-            {paneMenuItems(row).map((item) => (
+            {paneMenuItems(row, herdrApp).map((item) => (
               <Fragment key={item}>
                 {isDangerItem(item) && (
                   <div className="menu-sep" role="separator" />

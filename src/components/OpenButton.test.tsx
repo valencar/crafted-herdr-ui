@@ -112,6 +112,77 @@ afterEach(() => {
   });
 });
 
+describe("OpenButton Open in Herdr", () => {
+  const app = (open: boolean) =>
+    invoke.mockImplementation(async (name: string) =>
+      name === "herdr_app_status" ? open : ATTACH,
+    );
+
+  it("hidden_when_app_window_closed", async () => {
+    app(false);
+    const { user } = setup();
+    await user.click(chevron());
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("herdr_app_status"),
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Herdr" }),
+    ).toBeNull();
+  });
+
+  it("is_listed_after_watch_when_the_window_is_open_and_opens_the_terminal", async () => {
+    app(true);
+    const { user } = setup();
+    await user.click(chevron());
+    const item = await screen.findByRole("menuitem", {
+      name: "Open in Herdr",
+    });
+    const names = items().map((i) => i.textContent);
+    expect(names).toEqual([
+      "Open here",
+      "Open in Ghostty",
+      "Watch (read-only)",
+      "Open in Herdr",
+      "Copy attach command",
+    ]);
+    await user.click(item);
+    expect(invoke).toHaveBeenCalledWith("open_in_herdr", {
+      machineId: "buildbox",
+      address: "w1:p1",
+    });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("an_ended_row_never_offers_it", async () => {
+    app(true);
+    const { user } = setup({ row: { ...ROW, status: "ended" } });
+    await user.click(chevron());
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+        machineId: "buildbox",
+        address: "w1:p1",
+      }),
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Herdr" }),
+    ).toBeNull();
+  });
+
+  it("a_failure_goes_to_the_toast", async () => {
+    invoke.mockImplementation(async (name: string) => {
+      if (name === "herdr_app_status") return true;
+      if (name === "open_in_herdr") throw new Error("no window");
+      return ATTACH;
+    });
+    const { user } = setup();
+    await user.click(chevron());
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Open in Herdr" }),
+    );
+    await waitFor(() => expect(useAppStore.getState().toast).not.toBeNull());
+  });
+});
+
 describe("OpenButton Watch", () => {
   it("needs_input_row_offers_watch", async () => {
     const { user } = setup();
