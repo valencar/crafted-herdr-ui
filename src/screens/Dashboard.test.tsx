@@ -42,8 +42,8 @@ function entry(over: Partial<CommandLogEntry>): CommandLogEntry {
     durationMs: 10,
     error: null,
     note: null,
-    method: "herdr",
-    display: "herdr api snapshot",
+    method: "machine.list",
+    display: "hc machine ls",
     quiet: true,
     ...over,
   };
@@ -551,7 +551,7 @@ describe("Dashboard", () => {
     ];
     setup();
     await settle();
-    const t = tile("herdr response");
+    const t = tile("Core response");
     expect(t).toHaveTextContent("25 ms");
     expect(
       within(t).getByText("Median, last 5 min · 1 failed call"),
@@ -561,7 +561,7 @@ describe("Dashboard", () => {
   it("response_tile_shows_dash_with_no_calls", async () => {
     setup();
     await settle();
-    const t = tile("herdr response");
+    const t = tile("Core response");
     expect(t).toHaveTextContent("—");
     expect(t).not.toHaveTextContent("ms");
     expect(

@@ -1313,7 +1313,7 @@ impl Inner {
             .map(|all| parse_terminals(all))
             .unwrap_or_default();
         // The call is made on this connection, not through the client, so the note is ours.
-        self.client.log_note(
+        self.client.log_event(
             LOCAL,
             display("events.subscribe", &json!({}), "hc"),
             if resubscribe {

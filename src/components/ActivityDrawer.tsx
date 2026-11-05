@@ -19,10 +19,11 @@ type Props = {
 
 /**
  * The line to copy: `display`, which Rust builds. A command handed to a terminal is the same
- * `hc attach buildbox/t7` for Local and a remote workbox, so every entry has one.
+ * `hc attach buildbox/t7` for Local and a remote workbox. An `"event"` entry (the subscription)
+ * is only a record of what the app did on a connection it holds, so it has no line to run.
  */
 function runnable(entry: CommandLogEntry): string | null {
-  return entry.display;
+  return entry.method === "event" ? null : entry.display;
 }
 
 /** Newest first. The log arrives oldest first, so equal times keep their reverse order. */
@@ -31,7 +32,7 @@ function newestFirst(entries: CommandLogEntry[]): CommandLogEntry[] {
 }
 
 /**
- * Every herdr call the app has made, as the command it ran (spec section 8.2). Refreshes every
+ * Every herdr-core call the app has made, as the command it ran (spec section 8.2). Refreshes every
  * 2 s while it is open and the window is visible. Successful reads (the machine list, the
  * previews' terminal reads) are hidden unless "Show reads" is on, because they would bury everything
  * else.
@@ -137,7 +138,7 @@ export function ActivityDrawer({ machines, onClose }: Props) {
         </button>
       </header>
       <p className="muted activity-sub">
-        Every herdr command the app ran, newest first.
+        Every herdr-core command the app ran, newest first.
         {hidden > 0 &&
           ` ${plural(hidden, "successful read", "successful reads")} hidden.`}
       </p>

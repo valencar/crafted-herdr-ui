@@ -60,8 +60,13 @@ describe("invokeTyped", () => {
 
   it("rethrows a tagged ActionError unchanged", async () => {
     const err = {
-      kind: "herdr",
-      error: { kind: "server", code: "agent_blocked", message: "nope" },
+      kind: "core",
+      error: {
+        kind: "rpc",
+        code: "agent_blocked",
+        message: "nope",
+        hint: null,
+      },
     };
     invoke.mockRejectedValue(err);
     await expect(invokeTyped("get_state")).rejects.toEqual(err);
@@ -92,7 +97,7 @@ describe("invokeTyped types", () => {
 describe("toActionError", () => {
   it("passes every ActionError variant through", () => {
     for (const e of [
-      { kind: "herdr", error: { kind: "notFound" } },
+      { kind: "launch", message: "m" },
       {
         kind: "core",
         error: { kind: "rpc", code: "name_taken", message: "m", hint: null },

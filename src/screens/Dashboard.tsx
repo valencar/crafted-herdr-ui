@@ -282,7 +282,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
                 foot={downFoot}
               />
               <MetricTile
-                label="herdr response"
+                label="Core response"
                 value={
                   response.medianMs === null ? "—" : String(response.medianMs)
                 }

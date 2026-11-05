@@ -4,7 +4,6 @@ pub mod agents;
 pub mod commands;
 pub mod core;
 pub mod env;
-pub mod herdr;
 pub mod herdr_app;
 pub mod menu;
 pub mod notify;
@@ -27,7 +26,6 @@ use tokio::sync::watch;
 
 use crate::core::{CommandLog, CoreClient, ProcessConnector};
 use activity::ActivityV2;
-use herdr::cli::HerdrCli;
 use preview::{PREVIEW_EVENT, PreviewManager};
 use pty::PortablePty;
 use settings::{CoreLocator, SharedSettings, ShortcutState, ShortcutStatus};
@@ -39,7 +37,7 @@ use tray::{MAIN_WINDOW, POPOVER_WINDOW, PopoverGuard};
 
 const FALLBACK_SHELL: &str = "/bin/zsh";
 
-/// Machine id that means "this computer": no `--machine` flag.
+/// Machine id that means "this computer": no machine name in the call.
 pub(crate) const LOCAL: &str = "local";
 
 /// Locks, recovering the data if another thread panicked while holding the lock.
@@ -66,9 +64,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // The login shell and the version check are slow, so they run after the window is up (see
     // the end of this function). Until then the client has no binary, and `get_state` answers
     // `null`, which the UI shows as "Connecting to herdr-core…".
-    // One log for both doors, so the Activity drawer shows `herdr` calls and core calls in order.
     let log = Arc::new(CommandLog::default());
-    let cli = HerdrCli::without_env(PathBuf::new()).with_log(log.clone());
     // Pointed at no binary until the core is located: a call fails `NotFound`.
     let core = Arc::new(CoreClient::with_log(
         Arc::new(ProcessConnector {
@@ -116,7 +112,6 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             let _ = preview_handle.emit(PREVIEW_EVENT, frame);
         }),
     ));
-    app.manage(cli);
     app.manage(core);
     app.manage(InstalledCache::default());
     app.manage(actions::KindsCache::default());

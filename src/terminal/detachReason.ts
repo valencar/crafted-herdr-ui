@@ -12,7 +12,7 @@ export type Ending =
 // Not anchored at the start: on a real pty the ending can follow other text on its line.
 const DETACHED = /\[detached from [^\]]+\]$/;
 const FINISHED = /\[[^\]\s]+ finished: ([a-z_]+)\]$/;
-const CORE_LOST = /\[lost the core/;
+const CORE_LOST = /\[lost the core[^\]]*\]$/;
 
 /**
  * The ending `hc attach` reports with exit 0 (spec section 5). Any other exit code is an error

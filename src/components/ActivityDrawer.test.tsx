@@ -23,13 +23,13 @@ function entry(over: Partial<CommandLogEntry>): CommandLogEntry {
   return {
     atMs: at(9, 0, 0),
     machine: null,
-    argv: ["api", "snapshot"],
+    argv: ["machine.list"],
     exitCode: 0,
     durationMs: 12,
     error: null,
     note: null,
-    method: "herdr",
-    display: "herdr api snapshot",
+    method: "machine.list",
+    display: "hc machine ls",
     quiet: false,
     ...over,
   };
@@ -64,14 +64,14 @@ beforeEach(() => {
     entry({
       atMs: at(9, 5, 7),
       machine: "m-1",
-      argv: ["agent", "prompt", "w1:p1", "hello world"],
-      display: "herdr --machine m-1 agent prompt w1:p1 'hello world'",
+      argv: ["terminal.send"],
+      display: "hc send buildbox/t1 'hello world'",
       durationMs: 412,
     }),
     entry({
       atMs: at(9, 6, 0),
-      argv: ["pane", "close", "w1:p2"],
-      display: "herdr pane close w1:p2",
+      argv: ["terminal.kill"],
+      display: "hc kill t2",
       exitCode: 1,
       durationMs: 1500,
       error: "pane is gone",
@@ -96,9 +96,7 @@ describe("ActivityDrawer", () => {
     // Newest first, with time, machine, command, exit code and duration on each line.
     expect(within(newest).getByText("09:06:00")).toBeInTheDocument();
     expect(within(newest).getByText("Local")).toBeInTheDocument();
-    expect(
-      within(newest).getByText("herdr pane close w1:p2"),
-    ).toBeInTheDocument();
+    expect(within(newest).getByText("hc kill t2")).toBeInTheDocument();
     expect(within(newest).getByText("exit 1")).toBeInTheDocument();
     expect(within(newest).getByText("1.5 s")).toBeInTheDocument();
     expect(within(newest).getByText("pane is gone")).toBeInTheDocument();
@@ -107,9 +105,7 @@ describe("ActivityDrawer", () => {
     expect(within(older).getByText("buildbox")).toBeInTheDocument();
     // The line is the one Rust built, with its shell quoting.
     expect(
-      within(older).getByText(
-        "herdr --machine m-1 agent prompt w1:p1 'hello world'",
-      ),
+      within(older).getByText("hc send buildbox/t1 'hello world'"),
     ).toBeInTheDocument();
     expect(within(older).getByText("exit 0")).toBeInTheDocument();
     expect(within(older).getByText("412 ms")).toBeInTheDocument();
@@ -141,7 +137,7 @@ describe("ActivityDrawer", () => {
     expect(
       within(label).getByText("hc label buildbox/t7 herdr.seen=4"),
     ).toBeInTheDocument();
-    expect(within(label).queryByText(/herdr --machine/)).toBeNull();
+    expect(within(label).queryByText(/terminal\.label/)).toBeNull();
 
     // And that line is what Copy copies.
     await user.click(within(label).getByRole("button", { name: /^Copy/ }));
@@ -156,37 +152,32 @@ describe("ActivityDrawer", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(copy).toHaveBeenCalledWith(
-      "herdr --machine m-1 agent prompt w1:p1 'hello world'",
-    );
+    expect(copy).toHaveBeenCalledWith("hc send buildbox/t1 'hello world'");
     expect(within(older).getByRole("button")).toHaveTextContent("Copied");
 
     const [newest] = rows();
     await user.click(within(newest).getByRole("button", { name: /^Copy/ }));
-    expect(copy).toHaveBeenLastCalledWith("herdr pane close w1:p2");
+    expect(copy).toHaveBeenLastCalledWith("hc kill t2");
   });
 
   it("copies_a_local_entry_without_a_machine_flag", async () => {
     log = [
       entry({
         machine: null,
-        argv: ["pane", "close", "w1:p1"],
-        display: "herdr pane close w1:p1",
+        argv: ["terminal.kill"],
+        display: "hc kill t1",
       }),
       entry({
         atMs: at(9, 0, 1),
         machine: "local",
-        argv: ["pane", "close", "w1:p2"],
-        display: "herdr pane close w1:p2",
+        argv: ["terminal.kill"],
+        display: "hc kill t2",
       }),
     ];
     const user = await open();
     // A null machine reads "Local"; so does the "local" id of an older entry.
     expect(within(rows()[0]).getByText("Local")).toBeInTheDocument();
-    for (const [i, line] of [
-      "herdr pane close w1:p2",
-      "herdr pane close w1:p1",
-    ].entries()) {
+    for (const [i, line] of ["hc kill t2", "hc kill t1"].entries()) {
       await user.click(
         within(rows()[i]).getByRole("button", { name: /^Copy/ }),
       );
@@ -217,6 +208,23 @@ describe("ActivityDrawer", () => {
     expect(copy).toHaveBeenLastCalledWith("hc attach buildbox/t1");
   });
 
+  it("shows_an_event_note_without_a_copy_button", async () => {
+    log = [
+      entry({
+        argv: [],
+        method: "event",
+        display: "hc rpc events.subscribe {}",
+        exitCode: null,
+        note: "subscribed",
+      }),
+    ];
+    await open();
+    const row = rows()[0];
+    expect(within(row).getByText("subscribed")).toBeInTheDocument();
+    expect(within(row).getByText("hc rpc events.subscribe {}")).toBeVisible();
+    expect(within(row).queryByRole("button")).toBeNull();
+  });
+
   it("keeps_copy_on_a_local_terminal_launch", async () => {
     log = [
       entry({
@@ -239,8 +247,8 @@ describe("ActivityDrawer", () => {
       entry({
         exitCode: null,
         error: "timed out",
-        argv: ["pane", "close", "x"],
-        display: "herdr pane close x",
+        argv: ["terminal.kill"],
+        display: "hc kill x",
       }),
     ];
     await open();
@@ -277,8 +285,8 @@ describe("ActivityDrawer", () => {
     log = [
       entry({
         machine: "gone-1",
-        argv: ["machine", "list", "--json"],
-        display: "herdr --machine gone-1 machine list --json",
+        argv: ["machine.list"],
+        display: "hc machine ls",
       }),
     ];
     await open();
@@ -292,8 +300,8 @@ describe("ActivityDrawer", () => {
       ...log,
       entry({
         atMs: at(9, 7, 0),
-        argv: ["pane", "close", "w1:p9"],
-        display: "herdr pane close w1:p9",
+        argv: ["terminal.kill"],
+        display: "hc kill t9",
         durationMs: 3,
       }),
     ];
@@ -305,9 +313,7 @@ describe("ActivityDrawer", () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(
-      within(rows()[0]).getByText("herdr pane close w1:p9"),
-    ).toBeInTheDocument();
+    expect(within(rows()[0]).getByText("hc kill t9")).toBeInTheDocument();
 
     drawer.unmount();
     await act(async () => {
@@ -347,8 +353,8 @@ describe("ActivityDrawer", () => {
       entry({ atMs: at(9, 0, 1), quiet: true }),
       entry({
         atMs: at(9, 0, 2),
-        argv: ["pane", "read", "w1:p1"],
-        display: "herdr pane read w1:p1",
+        argv: ["terminal.read"],
+        display: "hc read t1",
         quiet: true,
       }),
       entry({
@@ -360,13 +366,13 @@ describe("ActivityDrawer", () => {
       }),
       entry({
         atMs: at(9, 0, 4),
-        argv: ["pane", "close", "w1:p1"],
-        display: "herdr pane close w1:p1",
+        argv: ["terminal.kill"],
+        display: "hc kill t1",
       }),
     ];
     const user = await open();
     expect(rows()).toHaveLength(1);
-    expect(screen.getByText("herdr pane close w1:p1")).toBeInTheDocument();
+    expect(screen.getByText("hc kill t1")).toBeInTheDocument();
     expect(screen.getByText(/3 successful reads hidden/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("checkbox", { name: "Show reads" }));
@@ -387,16 +393,16 @@ describe("ActivityDrawer", () => {
       }),
       entry({
         atMs: at(9, 0, 2),
-        argv: ["pane", "read", "w1:p1"],
-        display: "herdr pane read w1:p1",
+        argv: ["terminal.read"],
+        display: "hc read t1",
         quiet: true,
         exitCode: null,
         error: "timed out",
       }),
       entry({
         atMs: at(9, 0, 3),
-        argv: ["pane", "read", "w1:p1"],
-        display: "herdr pane read w1:p1",
+        argv: ["terminal.read"],
+        display: "hc read t1",
         quiet: true,
       }),
     ];

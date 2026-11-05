@@ -169,7 +169,7 @@ export type CommandArgs = {
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([
-  "herdr",
+  "launch",
   "core",
   "maybeApplied",
   "invalid",

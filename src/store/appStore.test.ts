@@ -49,8 +49,8 @@ describe("appStore", () => {
   it("reports an error as a toast that dismisses itself after 8 s", () => {
     const { reportError } = useAppStore.getState();
     reportError({
-      kind: "herdr",
-      error: { kind: "server", code: "x", message: "pane is gone" },
+      kind: "core",
+      error: { kind: "rpc", code: "x", message: "pane is gone", hint: null },
     });
     expect(useAppStore.getState().toast).toBe("pane is gone");
     vi.advanceTimersByTime(7_999);

@@ -324,8 +324,8 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
   const [clicked, setClicked] = useState<"Reattach" | "Retry">("Reattach");
   const closeTab = () => useTerminalStore.getState().closeTab(tab.tabKey);
 
-  // The bar needs the pane's row (to copy or open its attach command) and its workbox (ssh or
-  // not). The pane is "gone" only when its workbox has a list to look in and it is not on it.
+  // The bar needs the pane's row (to copy or open its attach command) and its workbox (Local
+  // or remote). The pane is "gone" only when its workbox has a list to look in and it is not on it.
   const rows = useRowsByKey();
   const row = rows.get(rowKeyOf(tab.tabKey));
   const machine = useAppStore((s) =>

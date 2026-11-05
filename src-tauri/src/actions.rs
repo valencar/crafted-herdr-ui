@@ -16,7 +16,6 @@ use crate::activity::ActivityV2;
 use crate::agents::{DisplayStatus, KNOWN_AGENTS, KnownAgent, TaskArg, TerminalView};
 use crate::core::model::TemplateInfo;
 use crate::core::{CoreClient, CoreError};
-use crate::herdr::errors::HerdrError;
 use crate::terminal::{is_session, is_target, is_via};
 use crate::{LOCAL, lock};
 
@@ -94,13 +93,14 @@ impl RunChoices {
     }
 }
 
-/// Why an action did not (fully) happen. Serialized tagged by `kind`, like `HerdrError`.
+/// Why an action did not (fully) happen. Serialized tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum ActionError {
-    #[error("{error}")]
-    Herdr { error: HerdrError },
+    /// The terminal app could not be started (a launcher that failed to spawn).
+    #[error("{message}")]
+    Launch { message: String },
     /// A herdr-core call failed.
     #[error("{error}")]
     Core { error: CoreError },

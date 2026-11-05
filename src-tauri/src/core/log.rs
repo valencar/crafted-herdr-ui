@@ -8,7 +8,7 @@ use crate::lock;
 
 const LOG_CAPACITY: usize = 200;
 
-/// One call, as shown in the command log: a `herdr` invocation or a herdr-core RPC.
+/// One call, as shown in the command log: a herdr-core RPC, or a note about a command handed on.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
@@ -17,7 +17,7 @@ pub struct CommandLogEntry {
     #[ts(type = "number")]
     pub at_ms: u64,
     pub machine: Option<String>,
-    /// For a `herdr` invocation, the arguments after `--machine <id>`; for an RPC, `[method]`.
+    /// For an RPC, `[method]`; empty for a note.
     pub argv: Vec<String>,
     pub exit_code: Option<i32>,
     #[ts(type = "number")]
@@ -26,7 +26,8 @@ pub struct CommandLogEntry {
     /// For a command handed to the user's terminal, where it went ("opened in Ghostty"). The
     /// app can't see how that command ends, so such an entry has no exit code and no error.
     pub note: Option<String>,
-    /// The RPC method, or `"herdr"` for an invocation of the old CLI.
+    /// The RPC method, or `"launch"` for a command handed to a terminal, or `"event"` for something
+    /// the app did on a connection it holds (the subscription; the drawer offers no copy for it).
     pub method: String,
     /// The command line to show and copy, built in Rust (`hc label buildbox/t7 herdr.seen=4`).
     pub display: String,
@@ -34,8 +35,8 @@ pub struct CommandLogEntry {
     pub quiet: bool,
 }
 
-/// Ring buffer of the most recent calls. One `Arc<CommandLog>` is shared by `HerdrCli` and
-/// `CoreClient`, so the drawer shows both in order.
+/// Ring buffer of the most recent calls, written by `CoreClient` (and its notes about what was
+/// handed to a terminal). The Activity drawer reads it.
 #[derive(Debug, Default)]
 pub struct CommandLog {
     entries: Mutex<VecDeque<CommandLogEntry>>,
@@ -72,7 +73,7 @@ mod tests {
                 duration_ms: 0,
                 error: None,
                 note: None,
-                method: "herdr".into(),
+                method: "terminal.list".into(),
                 display: String::new(),
                 quiet: false,
             });

@@ -398,8 +398,13 @@ describe("Inspector actions", () => {
     invoke.mockImplementation(async (name: string) => {
       if (name === "close_terminal") {
         throw {
-          kind: "herdr",
-          error: { kind: "server", code: "x", message: "pane is gone" },
+          kind: "core",
+          error: {
+            kind: "rpc",
+            code: "x",
+            message: "pane is gone",
+            hint: null,
+          },
         };
       }
       return name === "copy_attach_command" ? ATTACH : null;

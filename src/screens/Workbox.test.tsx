@@ -81,8 +81,8 @@ function appState(...machines: MachineView[]): AppState {
 }
 
 const serverError = (code: string, message: string) => ({
-  kind: "herdr",
-  error: { kind: "server", code, message },
+  kind: "core",
+  error: { kind: "rpc", code, message, hint: null },
 });
 
 /** Answers every command with `null` unless the test overrides it. */

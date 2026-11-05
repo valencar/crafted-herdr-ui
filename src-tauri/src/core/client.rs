@@ -219,7 +219,7 @@ impl CoreClient {
         Self::with_log(connector, Arc::default())
     }
 
-    /// A client writing to a log it shares with `HerdrCli`.
+    /// A client writing to a log the caller holds on to (the app keeps no other handle to it).
     pub fn with_log(connector: Arc<dyn Connector>, log: Arc<CommandLog>) -> Self {
         Self {
             pool: Mutex::new(Pool {
@@ -294,6 +294,17 @@ impl CoreClient {
     /// what a read found (a layout document that isn't understood). The entry has no exit code, no
     /// error and no argv: `display` is the whole command, and `note` says what happened.
     pub fn log_note(&self, machine_id: &str, display: String, note: &str) {
+        self.push_note("launch", machine_id, display, note);
+    }
+
+    /// Adds an entry about something the app itself did on a connection it holds, for example the
+    /// subscription. Like `log_note`, but its method is `"event"`, so the drawer shows it without
+    /// offering the line as a command to run (`hc rpc events.subscribe {}` would hold a stream open).
+    pub fn log_event(&self, machine_id: &str, display: String, note: &str) {
+        self.push_note("event", machine_id, display, note);
+    }
+
+    fn push_note(&self, method: &str, machine_id: &str, display: String, note: &str) {
         self.log.push(CommandLogEntry {
             at_ms: now_ms(),
             machine: remote(machine_id),
@@ -302,7 +313,7 @@ impl CoreClient {
             duration_ms: 0,
             error: None,
             note: Some(note.to_owned()),
-            method: "launch".to_owned(),
+            method: method.to_owned(),
             display,
             quiet: false,
         });
@@ -423,7 +434,7 @@ impl CoreClient {
     }
 }
 
-/// `None` for Local, which is no machine, as in `HerdrCli`.
+/// `None` for Local, which is no machine.
 fn remote(machine_id: &str) -> Option<String> {
     (machine_id != LOCAL).then(|| machine_id.to_owned())
 }
@@ -663,48 +674,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn herdr_and_core_calls_share_one_log() {
-        let log = Arc::new(CommandLog::default());
-        let client = CoreClient::with_log(
-            Arc::new(FnConnector(|| {
-                let (conn, notes, core) = connect(hello_then_ok);
-                Ok((conn.keep_alive(core), notes))
-            })),
-            log.clone(),
-        );
-        let cli =
-            crate::herdr::cli::HerdrCli::new(PathBuf::from("herdr"), vec![]).with_log(log.clone());
-        cli.record(None, vec!["status".into()], now_ms(), Some(0), None, None);
-        client
-            .call("local", "terminal.rm", json!({"terminal": "t1"}))
-            .await
-            .unwrap();
-        cli.record(
-            Some("buildbox"),
-            vec!["pane".into(), "close".into(), "w1:p1".into()],
-            now_ms(),
-            Some(0),
-            None,
-            None,
-        );
-        let entries = client.command_log();
-        assert_eq!(
-            entries
-                .iter()
-                .map(|e| e.method.as_str())
-                .collect::<Vec<_>>(),
-            ["herdr", "terminal.rm", "herdr"]
-        );
-        assert_eq!(entries, cli.log_snapshot());
-        assert_eq!(entries, log.snapshot());
-        assert_eq!(entries[0].display, "herdr status");
-        assert_eq!(
-            entries[2].display,
-            "herdr --machine buildbox pane close w1:p1"
-        );
-    }
-
-    #[tokio::test]
     async fn log_note_records_a_command_handed_to_the_terminal() {
         let client = client();
         client.log_note(
@@ -718,6 +687,17 @@ mod tests {
         assert_eq!(log[0].machine.as_deref(), Some("buildbox"));
         assert_eq!(log[0].exit_code, None);
         assert_eq!(log[0].error, None);
+        assert_eq!(log[0].method, "launch");
+    }
+
+    #[tokio::test]
+    async fn log_event_has_its_own_method() {
+        let client = client();
+        client.log_event("local", "hc rpc events.subscribe {}".into(), "subscribed");
+        let log = client.command_log();
+        assert_eq!(log[0].method, "event");
+        assert_eq!(log[0].note.as_deref(), Some("subscribed"));
+        assert_eq!(log[0].machine, None);
     }
 
     /// Counts the connections that exist: one more when made, one fewer when dropped.

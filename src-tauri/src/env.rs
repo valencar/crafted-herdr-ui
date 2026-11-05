@@ -34,8 +34,7 @@ const FORWARDED: [&str; 11] = [
 ];
 /// Variables handed to the legacy herdr probe (`find_legacy_herdr`): `herdr --version` must
 /// never see `HC_SOCKET` or the other core-only names, so they stay out of this list. Permanent
-/// (spec §9.2, onboarding's "You have herdr {version}"). The PTY and terminal-launch envs that
-/// still use it go to the 11-name core list in Task 8.
+/// (spec §9.2, onboarding's "You have herdr {version}"). Nothing else uses it.
 const LEGACY_FORWARDED: [&str; 6] = ["PATH", "HOME", "USER", "SSH_AUTH_SOCK", "LANG", "TERM"];
 /// Variables handed to `herdr-app` (the `--version` probe, `status` and `do`): the base six plus
 /// the two that choose which window it talks to. `control.rs::socket()` is
@@ -192,26 +191,6 @@ fn pick_env(login: &LoginEnv, names: &[&str]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Finds the herdr binary: the saved path, then the login shell's hit, then
-/// the usual install locations. A candidate that does not exist is skipped.
-pub fn resolve_herdr(
-    saved: Option<&Path>,
-    login_path_hit: Option<PathBuf>,
-    home: &Path,
-    exists: &dyn Fn(&Path) -> bool,
-) -> Option<PathBuf> {
-    saved
-        .map(Path::to_path_buf)
-        .into_iter()
-        .chain(login_path_hit)
-        .chain([
-            home.join(".local/bin/herdr"),
-            PathBuf::from("/opt/homebrew/bin/herdr"),
-            PathBuf::from("/usr/local/bin/herdr"),
-        ])
-        .find(|p| exists(p))
-}
-
 /// Parses the output of `herdr --version` (for example `herdr 0.9.4`).
 /// A pre-release or build suffix is ignored.
 pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
@@ -230,8 +209,8 @@ pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
 }
 
 /// Runs `<bin> <args…>` with exactly `env` and returns its stdout when it exits 0 in time.
-/// For the few herdr calls that print plain text instead of JSON, so they don't go through
-/// `HerdrCli`: `--version`, `status` and `agent start --help`.
+/// For the few calls that print plain text instead of JSON: the `--version` probes of the core, of
+/// the legacy herdr and of `herdr-app`, and `herdr-app status`.
 pub(crate) async fn run_plain_text(
     bin: &Path,
     env: &[(String, String)],
@@ -257,78 +236,11 @@ pub async fn herdr_version(
     Some(format!("{major}.{minor}.{patch}"))
 }
 
-/// Runs `<bin> status` with exactly `env` and returns what it prints. The spec asks for it at
-/// startup; the answer is only logged, nothing depends on it. `None` if it fails or hangs.
-pub async fn herdr_status(bin: &Path, env: &[(String, String)], limit: Duration) -> Option<String> {
-    let text = run_plain_text(bin, env, &["status"], limit).await?;
-    Some(text.trim().to_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::{Path, PathBuf};
     use std::time::Duration;
-
-    fn existing(paths: &[&str]) -> impl Fn(&Path) -> bool {
-        let set: HashSet<PathBuf> = paths.iter().map(PathBuf::from).collect();
-        move |p| set.contains(p)
-    }
-
-    #[test]
-    fn resolution_order() {
-        let home = Path::new("/home/dev");
-        let saved = PathBuf::from("/opt/custom/herdr");
-        let hit = PathBuf::from("/login/bin/herdr");
-        let everything = existing(&[
-            "/opt/custom/herdr",
-            "/login/bin/herdr",
-            "/home/dev/.local/bin/herdr",
-            "/opt/homebrew/bin/herdr",
-            "/usr/local/bin/herdr",
-        ]);
-
-        // Saved path wins even if others exist.
-        assert_eq!(
-            resolve_herdr(Some(&saved), Some(hit.clone()), home, &everything),
-            Some(saved.clone())
-        );
-        // No saved path: the login-shell hit wins.
-        assert_eq!(
-            resolve_herdr(None, Some(hit.clone()), home, &everything),
-            Some(hit.clone())
-        );
-        // Otherwise ~/.local/bin beats Homebrew.
-        assert_eq!(
-            resolve_herdr(None, None, home, &everything),
-            Some(PathBuf::from("/home/dev/.local/bin/herdr"))
-        );
-        let brew_and_usr = existing(&["/opt/homebrew/bin/herdr", "/usr/local/bin/herdr"]);
-        assert_eq!(
-            resolve_herdr(None, None, home, &brew_and_usr),
-            Some(PathBuf::from("/opt/homebrew/bin/herdr"))
-        );
-        let usr_only = existing(&["/usr/local/bin/herdr"]);
-        assert_eq!(
-            resolve_herdr(None, None, home, &usr_only),
-            Some(PathBuf::from("/usr/local/bin/herdr"))
-        );
-        // Nothing found.
-        assert_eq!(resolve_herdr(None, None, home, &existing(&[])), None);
-    }
-
-    #[test]
-    fn stale_saved_path_falls_through() {
-        let home = Path::new("/home/dev");
-        let saved = PathBuf::from("/gone/herdr");
-        let only_brew = existing(&["/opt/homebrew/bin/herdr"]);
-        assert_eq!(
-            resolve_herdr(Some(&saved), None, home, &only_brew),
-            Some(PathBuf::from("/opt/homebrew/bin/herdr"))
-        );
-    }
 
     #[test]
     fn login_env_forwards_ssh_auth_sock() {
@@ -579,25 +491,6 @@ mod tests {
             );
         }
         let missing = herdr_version(Path::new("/nonexistent/herdr"), &[], Duration::from_secs(1));
-        assert_eq!(missing.await, None);
-    }
-
-    #[tokio::test]
-    async fn herdr_status_runs_status_and_returns_its_text() {
-        let dir = tempfile::tempdir().unwrap();
-        let ok = fake_shell(
-            dir.path(),
-            "status-ok",
-            r#"[ "$1" = status ] && printf 'server running\n'"#,
-        );
-        let limit = Duration::from_secs(5);
-        assert_eq!(
-            herdr_status(Path::new(&ok), &[], limit).await.as_deref(),
-            Some("server running")
-        );
-        let fail = fake_shell(dir.path(), "status-fail", "echo 'no server'; exit 1");
-        assert_eq!(herdr_status(Path::new(&fail), &[], limit).await, None);
-        let missing = herdr_status(Path::new("/nonexistent/herdr"), &[], limit);
         assert_eq!(missing.await, None);
     }
 }

@@ -82,7 +82,7 @@ export function ContextBar({ tab, row, onFind }: Props) {
         <span className="mono context-title">{row ? row.name : tab.title}</span>
         {row && <StatusPill status={row.status} live />}
         {row && <KindBadge kind={row.kind} isAgent={row.isAgent} />}
-        {/* Spec 8.4: a Watch tab shows the terminal and sends it nothing, not even a resize. */}
+        {/* Spec 8.4: a Watch tab shows the terminal and sends it no input (it still resizes the local pty; Ruling C94). */}
         {tab.observe && (
           <span className="chip context-watching">Watching (read-only)</span>
         )}

@@ -135,9 +135,8 @@ async fn legacy_among(
     Some((bin.clone(), version))
 }
 
-/// Finds a herdr 0.9 binary (automatic discovery only) and its version. `locate` uses it for good,
-/// to report a retired herdr to onboarding (spec 9.2); only the `lib.rs` call that points
-/// `HerdrCli` and the poller at the result is interim (until v0.9 Task 6c).
+/// Finds a herdr 0.9 binary (automatic discovery only) and its version, to tell onboarding that
+/// herdr was retired (spec 9.2). Permanent: the app never runs it for anything else.
 pub async fn find_legacy_herdr(env: &LoginEnv, system: &[PathBuf]) -> Option<(PathBuf, String)> {
     let hit = match shell_of(env) {
         Some(shell) => crate::env::login_command_v(&shell, "herdr").await,
@@ -160,7 +159,7 @@ pub async fn locate(env: &LoginEnv, saved: Option<&Path>, system: &[PathBuf]) ->
     let hits = login_hits(env).await;
     let core_candidates = candidates(saved, &hits, &home, system);
     let forwarded = crate::env::forwarded_env(env);
-    let mut found = locate_with(&forwarded, saved, &core_candidates, &[], PROBE_TIMEOUT).await;
+    let mut found = locate_with(&forwarded, saved, &core_candidates, PROBE_TIMEOUT).await;
     if found.core.is_none() {
         found.legacy_herdr = find_legacy_herdr(env, system)
             .await
@@ -169,13 +168,12 @@ pub async fn locate(env: &LoginEnv, saved: Option<&Path>, system: &[PathBuf]) ->
     found
 }
 
-/// `locate` over given candidates: the first core wins, and `legacy_candidates` are tried
-/// only when there is none.
+/// `locate` over given candidates: the first core wins. It never looks for a legacy herdr;
+/// `locate` does that when this finds no core.
 pub(crate) async fn locate_with(
     env: &[(String, String)],
     saved: Option<&Path>,
     core_candidates: &[PathBuf],
-    legacy_candidates: &[PathBuf],
     limit: Duration,
 ) -> Located {
     let mut core = None;
@@ -189,15 +187,9 @@ pub(crate) async fn locate_with(
         }
     }
     let saved_missing = saved.is_some_and(|s| core.as_ref().is_none_or(|(p, _)| p != s));
-    let legacy_herdr = match core {
-        Some(_) => None,
-        None => legacy_among(legacy_candidates, env, limit)
-            .await
-            .map(|(_, version)| version),
-    };
     Located {
         core,
-        legacy_herdr,
+        legacy_herdr: None,
         saved_missing,
     }
 }
@@ -333,7 +325,6 @@ mod tests {
             &[],
             Some(&herbstclient.clone()),
             &[herbstclient, legacy, empty, failing, missing, core.clone()],
-            &[],
             LIMIT,
         )
         .await;
@@ -349,14 +340,7 @@ mod tests {
         std::fs::set_permissions(&hang, std::fs::Permissions::from_mode(0o755)).unwrap();
         let core = script(dir.path(), "core", HC, 0);
         let started = std::time::Instant::now();
-        let found = locate_with(
-            &[],
-            None,
-            &[hang, core.clone()],
-            &[],
-            Duration::from_millis(300),
-        )
-        .await;
+        let found = locate_with(&[], None, &[hang, core.clone()], Duration::from_millis(300)).await;
         assert!(started.elapsed() < Duration::from_secs(5));
         assert_eq!(found.core.map(|(p, _)| p), Some(core));
     }
@@ -367,39 +351,60 @@ mod tests {
         let target = script(dir.path(), "versioned-core", HC, 0);
         let link = dir.path().join("herdr-core");
         std::os::unix::fs::symlink(&target, &link).unwrap();
-        let found = locate_with(&[], None, std::slice::from_ref(&link), &[], LIMIT).await;
+        let found = locate_with(&[], None, std::slice::from_ref(&link), LIMIT).await;
         // Not the symlink's target: an update changes the target but not the link.
         assert_eq!(found.core, Some((link, "0.1.18".to_owned())));
+    }
+
+    /// A login environment whose `HOME` is `home` and whose shell is none, so nothing outside
+    /// the test's folder can be found.
+    fn env_at(home: &Path) -> LoginEnv {
+        parse_env_output(&format!("HOME={}\0PATH=/usr/bin:/bin\0", home.display()))
     }
 
     #[tokio::test]
     async fn reports_legacy_herdr_when_no_core() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();
-        let herbstclient = script(d, "hc", HERBSTCLIENT, 0);
-        let herdr = script(d, "herdr", HERDR_LEGACY, 0);
+        std::fs::create_dir_all(d.join(".local/bin")).unwrap();
+        // An `hc` that is not herdr-core, and a herdr 0.9 beside it.
+        script(&d.join(".local/bin"), "hc", HERBSTCLIENT, 0);
+        script(&d.join(".local/bin"), "herdr", HERDR_LEGACY, 0);
 
-        let found = locate_with(
-            &[],
-            None,
-            std::slice::from_ref(&herbstclient),
-            std::slice::from_ref(&herdr),
-            LIMIT,
-        )
-        .await;
+        let found = locate(&env_at(d), None, &[]).await;
         assert_eq!(found.core, None);
         assert_eq!(found.legacy_herdr.as_deref(), Some("0.9.4"));
         assert!(!found.saved_missing);
 
         // With a core found, herdr is not looked for.
-        let core = script(d, "core", HC, 0);
-        let found = locate_with(&[], None, &[core], std::slice::from_ref(&herdr), LIMIT).await;
+        script(&d.join(".local/bin"), "herdr-core", HC, 0);
+        let found = locate(&env_at(d), None, &[]).await;
         assert!(found.core.is_some());
         assert_eq!(found.legacy_herdr, None);
 
         // Neither.
-        let found = locate_with(&[], None, &[], &[], LIMIT).await;
+        let empty = tempfile::tempdir().unwrap();
+        let found = locate(&env_at(empty.path()), None, &[]).await;
         assert_eq!(found, Located::default());
+    }
+
+    #[test]
+    fn legacy_candidates_go_login_hit_then_local_bin_then_system() {
+        let got = legacy_candidates(
+            Some(PathBuf::from("/login/bin/herdr")),
+            Path::new("/home/dev"),
+            &system_dirs(),
+        );
+        assert_eq!(
+            got,
+            [
+                "/login/bin/herdr",
+                "/home/dev/.local/bin/herdr",
+                "/opt/homebrew/bin/herdr",
+                "/usr/local/bin/herdr",
+            ]
+            .map(PathBuf::from)
+        );
     }
 
     #[tokio::test]

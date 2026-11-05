@@ -157,8 +157,7 @@ describe("addAdvice", () => {
   });
 
   it("needs_login_and_unreachable_offer_a_terminal", () => {
-    // needs_login's own hint names a `--via` command, which is wrong for a plain host, so it
-    // is not shown.
+    // needs_login's hint is not shown: the sheet's buttons already run the command it names.
     expect(
       addAdvice(
         rpc("needs_login", "wants a login", "run `hc machine add --via x`"),

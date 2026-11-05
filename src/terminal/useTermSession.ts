@@ -141,7 +141,7 @@ export function useTermSession(
       idRef.current = id;
       // A Watch tab never gets a writer, so no input can be sent to it.
       writer.current = observe ? null : { id, busy: false, pending: "" };
-      // Keystrokes go through from here (an ssh prompt is output, so it is live by then anyway).
+      // Keystrokes go through from here (a login prompt is output, so it is live by then anyway).
       useTerminalStore
         .getState()
         .updateTab(

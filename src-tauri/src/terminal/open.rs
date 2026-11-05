@@ -8,7 +8,6 @@ use std::path::PathBuf;
 
 use crate::actions::ActionError;
 use crate::core::CoreClient;
-use crate::herdr::errors::HerdrError;
 use crate::settings::{Settings, SharedSettings};
 
 use super::{InstalledCache, LaunchSpec, TerminalId, default_terminal, launch, launcher_for};
@@ -68,9 +67,7 @@ pub(crate) async fn launch_in_terminal(
         launch_spec(&settings, &installed, home, argv, title).map_err(ActionError::invalid)?;
     launch(&spec, env)
         .await
-        .map_err(|message| ActionError::Herdr {
-            error: HerdrError::Spawn { message },
-        })?;
+        .map_err(|message| ActionError::Launch { message })?;
     core.log_note(
         log.machine_id,
         log.display,

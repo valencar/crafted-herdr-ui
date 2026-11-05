@@ -116,19 +116,10 @@ describe("actionErrorMessage", () => {
     ).toBe("unsure");
     expect(
       actionErrorMessage({
-        kind: "herdr",
-        error: { kind: "server", code: "agent_blocked", message: "blocked" },
+        kind: "launch",
+        message: "could not start ghostty",
       }),
-    ).toBe("blocked");
-    expect(
-      actionErrorMessage({ kind: "herdr", error: { kind: "notFound" } }),
-    ).toBe("herdr was not found.");
-    expect(
-      actionErrorMessage({
-        kind: "herdr",
-        error: { kind: "timeout", argv: ["agent"] },
-      }),
-    ).toBe("herdr did not answer in time.");
+    ).toBe("could not start ghostty");
   });
 
   it("words a failed core call from what the core said", () => {
@@ -225,7 +216,7 @@ describe("versions", () => {
 describe("shell quoting", () => {
   it("leaves plain words alone and single-quotes the rest", () => {
     expect(shellQuote("api")).toBe("api");
-    expect(shellQuote("--machine")).toBe("--machine");
+    expect(shellQuote("--name")).toBe("--name");
     expect(shellQuote("w1:p1")).toBe("w1:p1");
     expect(shellQuote("two words")).toBe("'two words'");
     expect(shellQuote("")).toBe("''");

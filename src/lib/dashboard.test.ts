@@ -57,8 +57,8 @@ function entry(
     durationMs,
     error: null,
     note: null,
-    method: "herdr",
-    display: "herdr api snapshot",
+    method: "machine.list",
+    display: "hc machine ls",
     quiet: true,
     ...overrides,
   };

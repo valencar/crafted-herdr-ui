@@ -482,8 +482,8 @@ describe("AllAgents", () => {
 
   it("shows_the_message_of_a_failed_open", async () => {
     const err: ActionError = {
-      kind: "herdr",
-      error: { kind: "server", code: "x", message: "pane is gone" },
+      kind: "core",
+      error: { kind: "rpc", code: "x", message: "pane is gone", hint: null },
     };
     invoke.mockImplementation(async (name: string) => {
       if (name === "open_session") throw err;

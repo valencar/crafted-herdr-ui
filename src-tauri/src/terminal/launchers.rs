@@ -348,7 +348,7 @@ mod tests {
         let warp = Warp {
             home: Path::new("/Users/dev").to_path_buf(),
         };
-        let c = cmd(&["/bin/sh", "-c", "herdr terminal attach \"t\" 'x'"]);
+        let c = cmd(&["/bin/sh", "-c", "hc attach \"t\" 'x'"]);
         let a = warp.spec(&c, OpenMode::Window, "title");
         let b = warp.spec(&c, OpenMode::Tab, "other title");
         assert_eq!(a, b, "the same command reuses the same file");
@@ -376,7 +376,7 @@ mod tests {
         );
         assert!(
             file.contents
-                .contains(r#"- exec: "/bin/sh -c 'herdr terminal attach \"t\" '\\''x'\\'''""#)
+                .contains(r#"- exec: "/bin/sh -c 'hc attach \"t\" '\\''x'\\'''""#)
         );
         assert_eq!(file.contents.matches("exec:").count(), 1);
     }

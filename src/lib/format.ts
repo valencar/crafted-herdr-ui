@@ -118,15 +118,7 @@ export function actionErrorMessage(e: ActionError): string {
     return e.message.trim() || MAYBE_APPLIED_FALLBACK;
   }
   if (e.kind === "core") return coreErrorMessage(e.error);
-  if (e.kind !== "herdr") return e.message;
-  switch (e.error.kind) {
-    case "notFound":
-      return "herdr was not found.";
-    case "timeout":
-      return "herdr did not answer in time.";
-    default:
-      return e.error.message;
-  }
+  return e.message;
 }
 
 /** The last `count` non-blank lines of terminal text, trailing spaces trimmed. */
@@ -213,8 +205,7 @@ export function healthShape(
 }
 
 /**
- * A successful timed read, which Rust marks `quiet` (an `api snapshot`, a `pane read`, a core
- * `machine.list`, `terminal.read`, …). They happen every couple of seconds, so the Activity
+ * A successful timed read, which Rust marks `quiet` (a core `machine.list`, a `terminal.read`, …). They happen every couple of seconds, so the Activity
  * drawer hides them unless asked. A read that failed is never quiet.
  */
 export function isQuietRead(entry: CommandLogEntry): boolean {
