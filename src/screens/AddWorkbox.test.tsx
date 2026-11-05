@@ -162,11 +162,13 @@ describe("AddWorkbox", () => {
     ]);
     // Done: the sheet gives way, and the watcher takes over until the machine is listed.
     expect(useAppStore.getState().sheet).toBeNull();
+    // The person waited in the sheet, so the watcher takes them to the new workbox.
     expect(useAppStore.getState().pendingAdd).toEqual({
       id: NEW_ID,
       target: "gpubox:2222",
       knownIds: ["local"],
       tabMachineId: null,
+      awaited: true,
     });
     // Nothing asked for a terminal or an install.
     expect(callsTo("machine_add_args")).toEqual([]);
@@ -331,6 +333,7 @@ describe("AddWorkbox", () => {
     expect(useAppStore.getState().pendingAdd).toMatchObject({
       target: "buildbox",
       tabMachineId: null,
+      awaited: false,
     });
     expect(useAppStore.getState().toast).toMatch(/in Ghostty/);
   });

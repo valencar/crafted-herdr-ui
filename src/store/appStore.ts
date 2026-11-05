@@ -17,13 +17,15 @@ export type PendingOpen = { key: string; machineId: string; address: string };
  * An add the app is waiting to see in the machine list: either it knows the new machine's `id`
  * (the core said so), or it knows the `target` the machine will have (a terminal is adding it)
  * and that it is none of `knownIds`. `tabMachineId` is the pseudo-machine of the in-app tab
- * that does the adding, if there is one.
+ * that does the adding, if there is one. `awaited`: a direct add that finished while its sheet
+ * was still open, so the person is waiting for it wherever the active tab is (Ruling C78).
  */
 export type PendingAdd = {
   id: string | null;
   target: string;
   knownIds: string[];
   tabMachineId: string | null;
+  awaited: boolean;
 };
 export type ToastTone = "info" | "error";
 /** What the Home tab shows: the Dashboard, the All agents list, or one workbox's screen. */

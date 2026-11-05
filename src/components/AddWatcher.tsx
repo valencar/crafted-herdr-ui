@@ -13,8 +13,10 @@ const TIMEOUT_MESSAGE =
  * Waits for the workbox an add is after to show up in the machine list, for up to 10 minutes.
  * It looks at every `"state"` push; the sync reads the machine list on its own every 10 s, and
  * the watcher asks for one more read when the add's terminal tab ends (it never polls). Then it
- * says "Added …" and, when the add's tab or Home is what the person is looking at, opens the new
- * workbox's screen; anywhere else (another tab, typing) it only shows the toast. It leaves the
+ * says "Added …" and opens the new workbox's screen when the person was waiting for it: a direct
+ * add that finished with its sheet open (`awaited`, Ruling C78), or the add's tab or Home is what
+ * they are looking at. An add that finished in the background (in their own terminal, or with
+ * the sheet already closed) only shows the toast while another tab is active. It leaves the
  * add's tab alone, so hc's last output stays readable. Mounted once by `App`: it has to outlive
  * the Add workbox sheet, which closes so that the terminal tab it opened is not hidden behind
  * it. Closing the add's tab ends the wait.
@@ -74,6 +76,7 @@ export function AddWatcher() {
     const { tabs, activeKey } = useTerminalStore.getState();
     const active = tabs.find((t) => t.tabKey === activeKey);
     const here =
+      pending.awaited ||
       activeKey === HOME ||
       (active !== undefined &&
         pending.tabMachineId !== null &&

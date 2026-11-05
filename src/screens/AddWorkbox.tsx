@@ -129,13 +129,21 @@ export function AddWorkbox() {
     setFailure(null);
   }
 
-  /** Hands the wait to `AddWatcher` and gets out of the terminal's way. */
-  function handOver(tabMachineId: string | null, id: string | null) {
+  /**
+   * Hands the wait to `AddWatcher` and gets out of the terminal's way. `direct`: the core added
+   * it itself, so a person still in the sheet is waiting for it (Ruling C78).
+   */
+  function handOver(
+    tabMachineId: string | null,
+    id: string | null,
+    direct = false,
+  ) {
     useAppStore.getState().setPendingAdd({
       id,
       target: addTarget(req),
       knownIds: machines.map((m) => m.id),
       tabMachineId,
+      awaited: direct && mounted.current,
     });
     if (mounted.current) setSheet(null);
   }
@@ -147,7 +155,7 @@ export function AddWorkbox() {
     setAdvice(null);
     try {
       const id = await invokeTyped("add_machine", { req });
-      handOver(null, id);
+      handOver(null, id, true);
     } catch (e) {
       if (!mounted.current) {
         // The sheet was closed during the call: nobody is left to show it, so the toast does.

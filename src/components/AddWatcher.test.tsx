@@ -19,6 +19,7 @@ const PENDING: PendingAdd = {
   target: "dev@buildbox.example",
   knownIds: ["local"],
   tabMachineId: PSEUDO,
+  awaited: false,
 };
 
 const stateWith = (...specs: Parameters<typeof appState>[0]) =>
@@ -148,7 +149,42 @@ describe("AddWatcher", () => {
     expect(useTerminalStore.getState().tabs).toHaveLength(2);
   });
 
-  it("an_add_with_no_tab_takes_a_person_on_home_but_not_elsewhere", async () => {
+  it("a_direct_add_from_the_open_sheet_goes_to_the_workbox_even_from_a_tab", async () => {
+    // Ruling C78: the person was in the sheet waiting for it, whatever tab is behind it.
+    useTerminalStore.getState().openTab({
+      tabKey: "buildbox::t7",
+      target: { kind: "terminal", machineId: "buildbox", address: "t7" },
+      title: "api-agent",
+      machineLabel: "buildbox",
+    });
+    useAppStore.setState({
+      pendingAdd: {
+        ...PENDING,
+        id: "0000c0de",
+        tabMachineId: null,
+        awaited: true,
+      },
+      view: { kind: "all" },
+    });
+    render(<AddWatcher />);
+    act(() =>
+      useAppStore.setState({
+        state: stateWith([
+          { id: "0000c0de", name: "box", target: "dev@buildbox.example" },
+          [],
+        ]),
+      }),
+    );
+    expect(useAppStore.getState().toast).toBe("Added box");
+    expect(useAppStore.getState().view).toEqual({
+      kind: "workbox",
+      machineId: "0000c0de",
+    });
+    expect(useTerminalStore.getState().activeKey).toBe(HOME);
+  });
+
+  it("a_background_add_only_toasts_while_a_terminal_tab_is_active", async () => {
+    // An add in the person's own terminal, or one whose sheet was closed meanwhile.
     useTerminalStore.getState().openTab({
       tabKey: "buildbox::t7",
       target: { kind: "terminal", machineId: "buildbox", address: "t7" },
@@ -170,6 +206,7 @@ describe("AddWatcher", () => {
     );
     expect(useAppStore.getState().toast).toBe("Added box");
     expect(useAppStore.getState().view).toEqual({ kind: "all" });
+    expect(useTerminalStore.getState().activeKey).toBe("buildbox::t7");
   });
 
   it("reads_the_list_once_when_the_add_tab_ends", async () => {
@@ -223,6 +260,7 @@ describe("AddWatcher", () => {
         target: "dev@buildbox.example",
         knownIds: ["local"],
         tabMachineId: null,
+        awaited: true,
       },
     });
     render(<AddWatcher />);
