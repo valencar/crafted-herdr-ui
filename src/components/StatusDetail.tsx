@@ -3,6 +3,20 @@ import { blockedKindLabel, type Row } from "../lib/grouping";
 
 type Detail = Pick<Row, "status" | "statusKind" | "statusMsg" | "progress">;
 
+/** A progress value as the whole percent shown: rounded and kept within 0-100. */
+export function progressPercent(value: number): number {
+  return Math.round(Math.min(100, Math.max(0, Number(value) || 0)));
+}
+
+/** Whether `StatusDetail` has anything to draw for this row. */
+export function hasStatusDetail(row: Detail): boolean {
+  if (row.status === "working") return row.progress !== null;
+  return (
+    row.status === "blocked" &&
+    (blockedKindLabel(row.statusKind) !== null || !!row.statusMsg?.trim())
+  );
+}
+
 /**
  * What a blocked agent waits on, on a line under its name: the kind in words ("Permission",
  * "Question", "Login") and the message. Nothing for another status, or when the core said
@@ -27,7 +41,7 @@ export function BlockedLine({ row }: { row: Detail }) {
  * never animates, so reduced motion changes nothing; the number is its accessible name.
  */
 export function ProgressBar({ value }: { value: number }) {
-  const pct = Math.round(Math.min(100, Math.max(0, Number(value) || 0)));
+  const pct = progressPercent(value);
   return (
     <span
       className="progress"

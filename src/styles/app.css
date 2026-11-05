@@ -1677,9 +1677,13 @@ select.field {
 .workbox-layout.is-dim {
   opacity: 0.6;
 }
+.workbox-terminals,
+.pane-family {
+  --pane-grid: repeat(auto-fill, minmax(220px, 1fr));
+}
 .workbox-terminals {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: var(--pane-grid);
   gap: 8px;
 }
 
@@ -1716,7 +1720,7 @@ select.field {
 .pane-family {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: var(--pane-grid);
   gap: 8px;
 }
 .pane-cell {
@@ -1729,6 +1733,14 @@ select.field {
 .pane-cell .pane-box {
   flex: none;
   align-self: stretch;
+}
+/* The blocker or progress line inside a box; empty for most boxes. */
+.pane-box-detail {
+  display: block;
+  width: 100%;
+}
+.pane-box-detail:empty {
+  display: none;
 }
 .pane-box.is-worker {
   min-height: 110px;

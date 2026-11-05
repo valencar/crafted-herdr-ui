@@ -1,6 +1,7 @@
 import { useId } from "react";
 import type { Row } from "../lib/grouping";
 import { KindBadge } from "./KindBadge";
+import { hasStatusDetail, progressPercent, StatusDetail } from "./StatusDetail";
 import { StatusPill } from "./StatusPill";
 
 type Props = {
@@ -16,13 +17,17 @@ type Props = {
 export function PaneBox({ row, tail, onOpen, worker = false }: Props) {
   const statusId = useId();
   const tailId = useId();
+  const detailId = useId();
+  const detail = hasStatusDetail(row);
   return (
     <button
       type="button"
       className={worker ? "pane-box is-worker" : "pane-box"}
       data-status={row.status}
       aria-label={`Open ${row.name}`}
-      aria-describedby={tail ? `${statusId} ${tailId}` : statusId}
+      aria-describedby={[statusId, detail && detailId, tail && tailId]
+        .filter(Boolean)
+        .join(" ")}
       onClick={() => onOpen(row)}
     >
       <span className="pane-box-head">
@@ -32,6 +37,18 @@ export function PaneBox({ row, tail, onOpen, worker = false }: Props) {
       <span id={statusId}>
         <StatusPill status={row.status} />
       </span>
+      {/* What a blocked agent waits on, or a working agent's progress. */}
+      {detail && (
+        <span id={detailId} className="pane-box-detail">
+          <StatusDetail row={row} />
+          {/* A button's children are presentational, so the bar's own name would be lost. */}
+          {row.status === "working" && row.progress !== null && (
+            <span className="sr-only">
+              Progress {progressPercent(row.progress)}%
+            </span>
+          )}
+        </span>
+      )}
       <span id={tailId} className="mono pane-box-tail">
         {tail}
       </span>

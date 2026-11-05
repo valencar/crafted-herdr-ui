@@ -1,5 +1,12 @@
 import { Kbd } from "../components/Kbd";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { MachineNotices, NoAgentsYet } from "../components/HomeNotices";
@@ -118,7 +125,7 @@ export function AllAgents() {
     [groupBy, visible, rows, projectGroups],
   );
   // Workers sit under their parent inside each group, so the list the keyboard walks follows.
-  const { isFolded, toggle: toggleWorkers } = useWorkerFold();
+  const { isFolded, toggle, unfold } = useWorkerFold();
   const nestedGroups = useMemo(
     () =>
       groups.map((g): { group: Group; nested: NestedRow[] } => ({
@@ -132,6 +139,40 @@ export function AllAgents() {
     [nestedGroups, isFolded],
   );
   const rowByKey = useMemo(() => new Map(rows.map((r) => [r.key, r])), [rows]);
+  // A worker that gets selected (from a Needs-you card, the Inspector or a click elsewhere)
+  // must be on screen, or Enter and Delete would act on a row nobody sees: its parent opens.
+  // Only a change of selection does it, so the person can still fold the parent afterwards.
+  const unfoldedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedKey === unfoldedFor.current) return;
+    unfoldedFor.current = selectedKey;
+    const top = nestedGroups
+      .flatMap((g) => g.nested)
+      .find((n) => n.workers.some((w) => w.key === selectedKey));
+    if (top && isFolded(top.key)) unfold(top.key);
+  }, [selectedKey, nestedGroups, isFolded, unfold]);
+  // Folding the parent of the selected worker moves the selection to the parent, which stays
+  // drawn. Stable, so the memoized rows don't re-render with the screen; it reads the store
+  // when clicked.
+  const toggleWorkers = useCallback(
+    (key: string) => {
+      const { state: now, selectedKey: at } = useAppStore.getState();
+      if (now && at) {
+        const byKey = new Map(toRows(now).map((r) => [r.key, r]));
+        const seen = new Set<string>();
+        for (let r = byKey.get(at); r && !seen.has(r.key);) {
+          seen.add(r.key);
+          if (r.parent === key) {
+            select(key);
+            break;
+          }
+          r = r.parent === null ? undefined : byKey.get(r.parent);
+        }
+      }
+      toggle(key);
+    },
+    [select, toggle],
+  );
 
   const selectedRow = rows.find((r) => r.key === selectedKey) ?? null;
   // Keyboard shortcuts only act on a selection the user can see in the list.

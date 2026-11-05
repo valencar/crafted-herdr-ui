@@ -1300,7 +1300,8 @@ describe("AllAgents workers", () => {
     // Arrow keys skip what is folded away.
     await user.click(selectButton("buildbox::w1:p1"));
     await user.keyboard("{ArrowDown}");
-    expect(useAppStore.getState().selectedKey).not.toBe("buildbox::w1:p4");
+    // The next row drawn, not a folded worker and not the first row of the list.
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p3");
 
     await user.click(
       within(rowItem("buildbox::w1:p1")).getByRole("button", {
@@ -1334,5 +1335,75 @@ describe("AllAgents workers", () => {
       name: "Selected agent",
     });
     expect(again).toHaveTextContent("Started byplanner");
+  });
+
+  it("selecting_a_folded_workers_card_unfolds_its_parent", async () => {
+    const user = setup(withWorkers());
+    const toggleName = "3 workers, 1 needs you";
+    await user.click(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers",
+      }),
+    );
+    expect(
+      document.querySelector('[data-row-key="buildbox::w1:p4"]'),
+    ).toBeNull();
+    // The blocked worker's Needs-you card selects it.
+    const card = document.querySelector<HTMLElement>(
+      '[data-card-key="buildbox::w1:p4"]',
+    )!;
+    await user.click(within(card).getByRole("button", { name: "Details…" }));
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p4");
+    // The selection is on screen again, under an open parent.
+    expect(rowItem("buildbox::w1:p4")).toHaveClass("is-selected");
+    expect(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers",
+      }),
+    ).toHaveAttribute("aria-expanded", "true");
+    // Folding the parent again does not leave a hidden selection behind.
+    await user.click(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers",
+      }),
+    );
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: toggleName,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("a_blocked_card_says_what_the_agent_waits_on", () => {
+    setup(
+      appState(
+        machine("buildbox", undefined, {
+          terms: [
+            ...fixtureTerms(),
+            agentTerm({
+              address: "w1:p4",
+              name: "linter",
+              status: "blocked",
+              statusKind: "permission",
+              statusMsg: "Run cargo test?",
+              parent: PARENT,
+              folder: "/home/dev/projects/api-service",
+              sinceMs: NOW - 60_000,
+            }),
+          ],
+        }),
+      ),
+    );
+    const card = document.querySelector<HTMLElement>(
+      '[data-card-key="buildbox::w1:p4"]',
+    )!;
+    expect(card).toHaveTextContent("worker of planner");
+    expect(card).toHaveTextContent("Permission Run cargo test?");
+    // A card with nothing to say adds no empty line.
+    const plain = document.querySelector<HTMLElement>(
+      '[data-card-key="buildbox::w1:p1"]',
+    )!;
+    expect(plain.querySelector(".row-detail")).toBeNull();
   });
 });

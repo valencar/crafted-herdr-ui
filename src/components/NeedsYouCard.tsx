@@ -3,6 +3,7 @@ import { formatAge, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { OpenButton } from "./OpenButton";
 import { PinGlyph } from "./PinGlyph";
+import { BlockedLine } from "./StatusDetail";
 import { StatusPill } from "./StatusPill";
 
 type Props = {
@@ -61,6 +62,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
         <span className="chip card-chip">{row.machineLabel}</span>
       </div>
       {workerLabel && <div className="row-sub card-worker">{workerLabel}</div>}
+      <BlockedLine row={row} />
       {row.folder && (
         <div className="mono card-folder">{shortPath(row.folder)}</div>
       )}

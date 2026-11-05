@@ -1039,4 +1039,31 @@ describe("Workbox workers", () => {
     expect(document.querySelector(".pane-family")).toBeNull();
     expect(screen.getByRole("button", { name: "Open linter" })).toBeVisible();
   });
+
+  it("boxes_say_what_a_blocked_agent_waits_on_and_show_progress", () => {
+    const terms = buildboxTerms().map((t) => {
+      if (t.kind !== "agent") return t;
+      if (t.address === "w1:p1") {
+        return { ...t, statusKind: "auth", statusMsg: "Sign in to continue" };
+      }
+      if (t.address === "w1:p2") return { ...t, progress: 40 };
+      return t;
+    });
+    setup(appState(machine("buildbox", { terms })));
+    const planner = screen.getByRole("button", { name: "Open planner" });
+    expect(planner).toHaveTextContent("Login Sign in to continue");
+    // The box is a button, so the detail is its description for assistive tech.
+    expect(planner).toHaveAccessibleDescription(
+      expect.stringContaining("Login Sign in to continue"),
+    );
+    const copilot = screen.getByRole("button", {
+      name: "Open copilot: terraform plan",
+    });
+    expect(
+      within(copilot).getByRole("progressbar", { name: "Progress 40%" }),
+    ).toBeInTheDocument();
+    expect(copilot).toHaveAccessibleDescription(
+      expect.stringContaining("Progress 40%"),
+    );
+  });
 });
