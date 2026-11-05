@@ -402,7 +402,7 @@ describe("Settings", () => {
     herdr = { ...HERDR, saved_missing: true };
     await setup({ core_path: "/gone/hc" }, "herdr-core");
     expect(
-      await screen.findByText("The saved path is missing or isn't herdr-core."),
+      await screen.findByText("The saved path is missing or isn’t herdr-core."),
     ).toBeInTheDocument();
     // What is used instead is still shown.
     expect(screen.getByText("/home/dev/.local/bin/hc")).toBeInTheDocument();

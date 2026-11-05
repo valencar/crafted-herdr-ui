@@ -1,4 +1,4 @@
-//! Login-shell environment capture and herdr binary discovery.
+//! Login-shell environment capture and the environments handed to a spawn.
 //!
 //! A Finder-launched macOS app does not inherit the shell `PATH` or
 //! `SSH_AUTH_SOCK`, so we ask the user's login shell for them once.

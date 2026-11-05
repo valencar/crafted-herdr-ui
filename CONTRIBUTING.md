@@ -1,10 +1,10 @@
 # Contributing to Crafted Herdr
 
-Thanks for helping. This is a small macOS app (Tauri 2, Rust core, React UI) that drives the public `herdr` CLI. The design specs are kept locally by the maintainer (`docs/superpowers/`, not in the repo); ask in an issue if you need context on a design decision.
+Thanks for helping. This is a small macOS app (Tauri 2, Rust core, React UI) that talks to the public interfaces of herdr-core (`hc`). The design specs are kept locally by the maintainer (`docs/superpowers/`, not in the repo); ask in an issue if you need context on a design decision.
 
 ## Dev setup
 
-Requirements: macOS 13+, Node 24+, pnpm 10, a stable Rust toolchain, and herdr 0.9+ if you want to run against real state.
+Requirements: macOS 13+, Node 24+, pnpm 10, a stable Rust toolchain, and herdr-core (`curl -fsSL https://releases.herdr.dev/core/install.sh | sh`) if you want to run against real state.
 
 ```bash
 pnpm install
@@ -25,8 +25,8 @@ scripts/check-no-personal-data.sh
 ```
 
 - Write the failing test first, then make it pass. Keep test output clean (no warnings).
-- Tests never run a real `herdr` that mutates state. Use `scripts/fake-herdr`.
-- Live tests are opt-in (`HERDR_UI_LIVE=1`) and may touch only the machine named in `HERDR_UI_TEST_MACHINE`, inside a workspace or session named `herdr-ui-qa`.
+- Tests never run a real `hc` that mutates state. Use `scripts/fake-hc`.
+- The live test (`src-tauri/tests/live.rs`) is opt-in (`HERDR_UI_LIVE=1`) and runs only on a sandbox core you set up yourself (`HC_SESSION=herdr-ui-qa` and its own `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and short `XDG_RUNTIME_DIR`, with `HC_SOCKET`, `HC_TERMINAL_*` and `HC_SCOPE` unset; the test refuses otherwise). It may touch only terminals it creates, labelled `herdr-ui-qa=1`. A remote leg runs only if `HERDR_UI_TEST_MACHINE` is an ssh target `hc machine add` can reach.
 - Rust types shared with the UI are exported with `ts-rs` into `src/lib/bindings/` (generated, committed).
 
 ## No personal data

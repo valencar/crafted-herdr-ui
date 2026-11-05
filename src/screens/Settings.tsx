@@ -795,7 +795,7 @@ function HerdrCore({
       </div>
       {status?.saved_missing && (
         <p className="settings-warn" role="status">
-          The saved path is missing or isn't herdr-core.
+          The saved path is missing or isn’t herdr-core.
         </p>
       )}
       {settings.core_path && (

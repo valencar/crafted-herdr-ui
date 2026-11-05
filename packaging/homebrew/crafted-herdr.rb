@@ -25,7 +25,12 @@ cask "crafted-herdr" do
   ]
 
   caveats <<~EOS
-    Crafted Herdr drives the herdr CLI, which is installed separately: https://herdr.dev
+    Crafted Herdr talks to herdr-core (hc), which is installed separately. There is no
+    Homebrew formula for it; install it with:
+
+      curl -fsSL https://releases.herdr.dev/core/install.sh | sh
+
+    More about herdr: https://herdr.dev
 
     Builds are not notarized. The first time you open the app, macOS will refuse it.
     Open System Settings > Privacy & Security, scroll to the message about Crafted Herdr
