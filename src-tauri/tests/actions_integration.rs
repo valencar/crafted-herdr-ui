@@ -13,9 +13,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crafted_herdr_ui_lib::actions::{
-    ActionError, Actions, NewSessionRequest, Placement, RowActions, Timeouts,
-};
+use crafted_herdr_ui_lib::actions::{ActionError, Actions, RowActions};
 use crafted_herdr_ui_lib::activity::ActivityV2;
 use crafted_herdr_ui_lib::core::{CoreClient, CoreError, ProcessConnector};
 use crafted_herdr_ui_lib::herdr::cli::HerdrCli;
@@ -59,12 +57,7 @@ impl Harness {
         let actions = Actions::new(
             cli.clone(),
             Arc::new(move |m| sink.lock().unwrap().push(m.map(str::to_owned))),
-        )
-        .with_timeouts(Timeouts {
-            create: Duration::from_millis(400),
-            agent_start: Duration::from_millis(400),
-            ..Timeouts::default()
-        });
+        );
         Self {
             dir,
             actions,
@@ -88,117 +81,6 @@ impl Harness {
     fn refreshed(&self) -> Vec<Option<String>> {
         self.refreshed.lock().unwrap().clone()
     }
-}
-
-fn split_agent_request() -> NewSessionRequest {
-    NewSessionRequest {
-        machine_id: "buildbox".into(),
-        cwd: "proj".into(),
-        kind: Some("claude".into()),
-        name: "orders".into(),
-        placement: Placement::SplitBeside {
-            pane_id: "w1:p2".into(),
-        },
-        agent_args: vec![],
-    }
-}
-
-const SPLIT: &str = "pane_split_w1:p2_--direction_right_--cwd_proj_--no-focus";
-const START: &str = "agent_start_orders_--kind_claude_--pane_w1:p5";
-
-#[tokio::test]
-async fn create_session_threads_pane_id() {
-    let h = Harness::new();
-    h.put(&format!("{SPLIT}.json"), &fixture("pane_split.json"));
-    h.put(&format!("{START}.json"), &fixture("agent_start.json"));
-
-    let created = h
-        .actions
-        .create_session(&split_agent_request())
-        .await
-        .unwrap();
-
-    assert_eq!(created.pane_id, "w1:p5");
-    assert_eq!(created.terminal_id.as_deref(), Some("term-9"));
-    assert_eq!(
-        h.calls(),
-        [
-            "--machine buildbox pane split w1:p2 --direction right --cwd proj --no-focus",
-            "--machine buildbox agent start orders --kind claude --pane w1:p5",
-        ]
-    );
-    assert!(h.refreshed().contains(&Some("buildbox".to_string())));
-}
-
-#[tokio::test]
-async fn shell_session_runs_one_step_and_returns_its_terminal() {
-    let h = Harness::new();
-    h.put(&format!("{SPLIT}.json"), &fixture("pane_split.json"));
-    let mut req = split_agent_request();
-    req.kind = None;
-
-    let created = h.actions.create_session(&req).await.unwrap();
-
-    assert_eq!(created.pane_id, "w1:p5");
-    assert_eq!(created.terminal_id.as_deref(), Some("term-8"));
-    assert_eq!(h.calls().len(), 1);
-}
-
-#[tokio::test]
-async fn agent_start_failure_reports_created_pane() {
-    let h = Harness::new();
-    h.put(&format!("{SPLIT}.json"), &fixture("pane_split.json"));
-    h.put(
-        &format!("{START}.stderr"),
-        &fixture("error_agent_blocked.json"),
-    );
-    h.put(&format!("{START}.exit"), "1");
-
-    let err = h
-        .actions
-        .create_session(&split_agent_request())
-        .await
-        .unwrap_err();
-
-    match err {
-        ActionError::MaybeApplied { message, argv } => {
-            assert!(message.contains("w1:p5"), "{message}");
-            assert!(message.contains("left open"), "{message}");
-            assert_eq!(argv.first().map(String::as_str), Some("agent"));
-        }
-        other => panic!("expected MaybeApplied, got {other:?}"),
-    }
-    let calls = h.calls();
-    assert_eq!(calls.len(), 2);
-    assert!(calls.iter().all(|c| !c.contains("pane close")), "{calls:?}");
-    assert!(h.refreshed().contains(&Some("buildbox".to_string())));
-}
-
-#[tokio::test]
-async fn timeout_triggers_refresh_without_retry() {
-    let h = Harness::new();
-    let call = "workspace_create_--cwd_proj_--label_scratch_--no-focus";
-    h.put(&format!("{call}.json"), &fixture("workspace_create.json"));
-    h.put(&format!("{call}.sleep"), "3");
-    let req = NewSessionRequest {
-        machine_id: "local".into(),
-        cwd: "proj".into(),
-        kind: None,
-        name: "scratch".into(),
-        placement: Placement::NewWorkspace,
-        agent_args: vec![],
-    };
-
-    let err = h.actions.create_session(&req).await.unwrap_err();
-
-    assert!(matches!(err, ActionError::MaybeApplied { .. }), "{err:?}");
-    let creates: Vec<_> = h
-        .calls()
-        .into_iter()
-        .filter(|c| c.starts_with("workspace create"))
-        .collect();
-    assert_eq!(creates.len(), 1, "{creates:?}");
-    assert_eq!(h.refreshed(), [Some("local".to_string())]);
 }
 
 #[tokio::test]
@@ -280,137 +162,6 @@ async fn machine_command_errors_are_not_swallowed() {
         }
     ));
     assert!(h.refreshed().is_empty());
-}
-
-#[tokio::test]
-async fn create_without_a_readable_pane_is_maybe_applied_and_never_continues() {
-    let h = Harness::new();
-    // Valid JSON, but no pane in it.
-    h.put(&format!("{SPLIT}.json"), r#"{"result":{}}"#);
-
-    let err = h
-        .actions
-        .create_session(&split_agent_request())
-        .await
-        .unwrap_err();
-
-    assert!(matches!(err, ActionError::MaybeApplied { .. }), "{err:?}");
-    assert_eq!(h.calls().len(), 1, "agent start must not run");
-    assert_eq!(h.refreshed(), [Some("buildbox".to_string())]);
-}
-
-#[tokio::test]
-async fn an_unreadable_create_reply_says_the_agent_was_not_started() {
-    let h = Harness::new();
-    h.put(&format!("{SPLIT}.json"), "not json");
-
-    let err = h
-        .actions
-        .create_session(&split_agent_request())
-        .await
-        .unwrap_err();
-
-    match err {
-        ActionError::MaybeApplied { message, .. } => {
-            assert!(message.contains("could not be read"), "{message}");
-            assert!(
-                message.ends_with(" The agent was not started."),
-                "{message}"
-            );
-        }
-        other => panic!("expected MaybeApplied, got {other:?}"),
-    }
-    assert!(h.calls().iter().all(|c| !c.starts_with("agent start")));
-}
-
-#[tokio::test]
-async fn a_create_reply_without_a_pane_says_the_agent_was_not_started() {
-    let h = Harness::new();
-    h.put(&format!("{SPLIT}.json"), r#"{"result":{}}"#);
-
-    let err = h
-        .actions
-        .create_session(&split_agent_request())
-        .await
-        .unwrap_err();
-
-    match err {
-        ActionError::MaybeApplied { message, .. } => {
-            assert!(
-                message.ends_with(" The agent was not started."),
-                "{message}"
-            );
-        }
-        other => panic!("expected MaybeApplied, got {other:?}"),
-    }
-}
-
-#[tokio::test]
-async fn a_create_timeout_says_the_agent_was_not_started() {
-    let h = Harness::new();
-    h.put(&format!("{SPLIT}.json"), &fixture("pane_split.json"));
-    h.put(&format!("{SPLIT}.sleep"), "3");
-
-    let err = h
-        .actions
-        .create_session(&split_agent_request())
-        .await
-        .unwrap_err();
-
-    match err {
-        ActionError::MaybeApplied { message, .. } => {
-            assert!(message.contains("did not answer in time"), "{message}");
-            assert!(
-                message.ends_with(" The agent was not started."),
-                "{message}"
-            );
-        }
-        other => panic!("expected MaybeApplied, got {other:?}"),
-    }
-    assert!(h.calls().iter().all(|c| !c.starts_with("agent start")));
-}
-
-#[tokio::test]
-async fn an_unreadable_create_reply_without_an_agent_keeps_the_plain_message() {
-    let h = Harness::new();
-    h.put(&format!("{SPLIT}.json"), "not json");
-    let req = NewSessionRequest {
-        kind: None,
-        ..split_agent_request()
-    };
-
-    let err = h.actions.create_session(&req).await.unwrap_err();
-
-    match err {
-        ActionError::MaybeApplied { message, .. } => {
-            assert!(!message.contains("agent"), "{message}");
-        }
-        other => panic!("expected MaybeApplied, got {other:?}"),
-    }
-}
-
-#[tokio::test]
-async fn agent_start_timeout_says_the_agent_may_have_started() {
-    let h = Harness::new();
-    h.put(&format!("{SPLIT}.json"), &fixture("pane_split.json"));
-    h.put(&format!("{START}.json"), &fixture("agent_start.json"));
-    h.put(&format!("{START}.sleep"), "3");
-
-    let err = h
-        .actions
-        .create_session(&split_agent_request())
-        .await
-        .unwrap_err();
-
-    match err {
-        ActionError::MaybeApplied { message, .. } => {
-            assert!(message.contains("w1:p5"), "{message}");
-            assert!(message.contains("may or may not have started"), "{message}");
-            assert!(!message.contains("did not start"), "{message}");
-        }
-        other => panic!("expected MaybeApplied, got {other:?}"),
-    }
-    assert_eq!(h.calls().len(), 2);
 }
 
 // ---- Row actions on herdr-core ----

@@ -14,7 +14,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use ts_rs::TS;
 
 use crate::LOCAL;
-use crate::actions::{ActionError, CreatedSession, RowActions};
+use crate::actions::{
+    ActionError, CreatedSession, KindsCache, NewSessionRequest, NewSessions, RowActions,
+    RunChoices, preview,
+};
 use crate::activity::ActivityV2;
 use crate::core::{CommandLogEntry, CoreClient};
 use crate::herdr::cli::HerdrCli;
@@ -73,24 +76,64 @@ pub fn reconnect_core(sync: State<'_, SyncCell>) {
     }
 }
 
-// ---- Interim stubs (v0.9 Task 6c): replaced by the task named on each ----
+// ---- New session (Task 11) ----
 
-/// Task 11.
-#[tauri::command]
-pub fn create_session() -> Result<CreatedSession, ActionError> {
-    Err(not_yet())
+/// The machine as the core names it for `on`: `None` for Local, and an error for a workbox the
+/// core doesn't list (it may have been removed since the sheet opened).
+fn machine_on(sync: &SyncCell, machine_id: &str) -> Result<Option<String>, ActionError> {
+    if machine_id == LOCAL {
+        return Ok(None);
+    }
+    sync.get()
+        .and_then(|s| s.machine_name(machine_id))
+        .map(Some)
+        .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))
 }
 
-/// Task 11.
+/// Starts a terminal (`terminal.run`). The address answered is local to its machine.
 #[tauri::command]
-pub fn preview_new_session() -> Result<Vec<String>, ActionError> {
-    Err(not_yet())
+pub async fn create_session(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    kinds: State<'_, KindsCache>,
+    req: NewSessionRequest,
+) -> Result<CreatedSession, ActionError> {
+    let on = machine_on(&sync, &req.machine_id)?;
+    let result = NewSessions::new(&core, &kinds)
+        .create(&req, on.as_deref())
+        .await;
+    if matches!(result, Err(ActionError::MaybeApplied { .. }))
+        && let Some(sync) = sync.get()
+    {
+        sync.refresh_machines();
+    }
+    result
 }
 
-/// Task 11.
+/// The `hc run …` line the request would run, built in Rust.
 #[tauri::command]
-pub fn list_agent_kinds() -> Result<Vec<String>, ActionError> {
-    Err(not_yet())
+pub fn preview_new_session(
+    locator: State<'_, CoreLocator>,
+    sync: State<'_, SyncCell>,
+    req: NewSessionRequest,
+) -> Result<String, ActionError> {
+    let on = machine_on(&sync, &req.machine_id)?;
+    let name = resolved_core(&locator).map_or_else(|_| "hc".to_owned(), |p| bin_name(&p));
+    preview(&req, on.as_deref(), &name)
+}
+
+/// The agent kinds (installed ones, when the check worked) and templates for one workbox.
+#[tauri::command]
+pub async fn list_run_choices(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    kinds: State<'_, KindsCache>,
+    machine_id: String,
+) -> Result<RunChoices, ActionError> {
+    let on = machine_on(&sync, &machine_id)?;
+    Ok(NewSessions::new(&core, &kinds)
+        .run_choices(&machine_id, on.as_deref())
+        .await)
 }
 
 // ---- Row actions (Task 10a): the people's clicks on a terminal's row ----
@@ -927,10 +970,21 @@ mod tests {
 
     #[test]
     fn interim_stubs_say_so() {
-        let e = create_session().unwrap_err();
+        let e = machine_rename().unwrap_err();
         assert_eq!(e.to_string(), NOT_YET);
         assert!(matches!(e, ActionError::Invalid { .. }));
         assert!(machine_status().is_err());
+    }
+
+    #[test]
+    fn a_new_session_names_its_machine_only_when_remote() {
+        let cell = SyncCell::default();
+        assert_eq!(machine_on(&cell, LOCAL), Ok(None));
+        // No sync yet, or a workbox the core doesn't list: refused, never sent as `on`.
+        assert!(matches!(
+            machine_on(&cell, "m-1"),
+            Err(ActionError::Invalid { .. })
+        ));
     }
 
     #[test]

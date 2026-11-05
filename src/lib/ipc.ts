@@ -11,6 +11,7 @@ import type { MenuId } from "./bindings/MenuId";
 import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
+import type { RunChoices } from "./bindings/RunChoices";
 import type { SetupEvent } from "./bindings/SetupEvent";
 import type { Settings } from "./bindings/Settings";
 import type { ShortcutStatus } from "./bindings/ShortcutStatus";
@@ -23,7 +24,8 @@ export type CommandResults = {
   /** `null` while startup is still looking for herdr; a "state" event follows. */
   get_state: AppState | null;
   create_session: CreatedSession;
-  preview_new_session: string[];
+  /** The `hc run …` line, built in Rust. */
+  preview_new_session: string;
   reply_to_agent: null;
   mark_seen: null;
   /** The text the core observed after the stop key, for a toast. */
@@ -42,7 +44,8 @@ export type CommandResults = {
   refresh_now: null;
   reconnect_core: null;
   get_command_log: CommandLogEntry[];
-  list_agent_kinds: string[];
+  /** The kinds (installed ones when the check worked) and, on Local, the templates. */
+  list_run_choices: RunChoices;
   open_session: null;
   open_in_terminal: null;
   list_ssh_hosts: string[];
@@ -108,7 +111,7 @@ export type CommandArgs = {
   refresh_now: { machineId?: string | null };
   reconnect_core: undefined;
   get_command_log: undefined;
-  list_agent_kinds: undefined;
+  list_run_choices: { machineId: string };
   /** Opens `hc attach` for the terminal in the user's terminal; `observe` is Watch (never types or resizes). */
   open_session: { machineId: string; address: string; observe: boolean };
   /** What follows the herdr-core binary, which Rust takes from the resolved core; only a few shapes are allowed. */
@@ -160,6 +163,7 @@ export type CommandArgs = {
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([
   "herdr",
+  "core",
   "maybeApplied",
   "invalid",
 ]);

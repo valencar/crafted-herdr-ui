@@ -56,6 +56,10 @@ fn cli_words(method: &str, params: &Value) -> Option<Vec<String>> {
             let mut w = words(&["run", "--bg"]);
             flag(&mut w, "--on", text(params, "on"));
             flag(&mut w, "--cwd", text(params, "cwd"));
+            flag(&mut w, "--name", text(params, "name"));
+            if params.get("keep").and_then(Value::as_bool) == Some(true) {
+                w.push("--keep".to_owned());
+            }
             w.extend(strings(params, "argv"));
             // A line is one argument, as it is quoted.
             w.extend(text(params, "line").map(str::to_owned));
@@ -148,6 +152,19 @@ mod tests {
         assert_eq!(
             d("terminal.run", json!({"line": "npm test && echo done"})),
             "hc run --bg 'npm test && echo done'"
+        );
+        // A name and keep are part of the line; the app's own labels and env are not.
+        assert_eq!(
+            d(
+                "terminal.run",
+                json!({"argv": ["claude", "fix it"], "name": "orders", "keep": true,
+                       "labels": {"herdr.seen": "0"}, "env": {"TERM": "xterm-256color"}})
+            ),
+            "hc run --bg --name orders --keep claude 'fix it'"
+        );
+        assert_eq!(
+            d("terminal.run", json!({"keep": false, "cwd": "/srv/app"})),
+            "hc run --bg --cwd /srv/app"
         );
         assert_eq!(
             d(

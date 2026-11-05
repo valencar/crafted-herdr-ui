@@ -79,7 +79,7 @@ const STATE: AppState = {
 
 let herdr: CoreStatus;
 let shortcut: ShortcutStatus;
-/** What `list_agent_kinds` does: a list, or `"fail"`. */
+/** What `list_run_choices("local")` does: the kinds it lists, or `"fail"`. */
 let kinds: string[] | "fail";
 
 function setup(settings: Partial<SettingsData> = {}, section?: string) {
@@ -118,9 +118,13 @@ beforeEach(() => {
           return herdr;
         case "shortcut_status":
           return shortcut;
-        case "list_agent_kinds":
+        case "list_run_choices":
           if (kinds === "fail") throw { kind: "invalid", message: "No herdr." };
-          return kinds;
+          return {
+            kinds: kinds.map((kind) => ({ kind, takesTask: false })),
+            templates: [],
+            kindsChecked: true,
+          };
         case "preview_launch_template":
           return `${(args as { template: string }).template.replace("{attach}", "hc attach buildbox/t7")}`;
         case "set_settings":
@@ -614,7 +618,7 @@ describe("Settings › New session options", () => {
 
   it("says_loading_while_the_kinds_load", async () => {
     invoke.mockImplementation(async (name: string) =>
-      name === "list_agent_kinds" ? new Promise(() => {}) : null,
+      name === "list_run_choices" ? new Promise(() => {}) : null,
     );
     await setup();
     const g = await group();
@@ -628,7 +632,9 @@ describe("Settings › New session options", () => {
       await setup();
       const g = await group();
       expect(
-        await within(g).findByText("herdr listed no agent kinds."),
+        await within(g).findByText(
+          "No agent programs were found on this computer.",
+        ),
       ).toBeInTheDocument();
       expect(boxes(g)).toEqual(["$_Plain shell"]);
       const shell = within(g).getByRole("checkbox", { name: "Plain shell" });

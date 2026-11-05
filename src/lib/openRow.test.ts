@@ -1,3 +1,4 @@
+import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rowOf } from "../test/builders";
 import { useAppStore } from "../store/appStore";
@@ -10,7 +11,7 @@ vi.mock("./ipc", async (importOriginal) => ({
 import { invokeTyped } from "./ipc";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import type { Settings } from "./bindings/Settings";
-import { markSeen, openRow } from "./openRow";
+import { markSeen, openRow, useOpenWhenListed } from "./openRow";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
@@ -158,5 +159,43 @@ describe("markSeen", () => {
     invoke.mockRejectedValueOnce({ kind: "invalid", message: "gone" });
     markSeen(row("done"));
     await vi.waitFor(() => expect(useAppStore.getState().toast).toBe("gone"));
+  });
+});
+
+describe("useOpenWhenListed", () => {
+  const listed = (machineId: string, address: string): Row =>
+    rowOf({
+      key: `${machineId}::${address}`,
+      machineId,
+      machineLabel: machineId,
+      address,
+      name: "planner",
+      status: "idle",
+    });
+
+  it("waits_for_the_row_of_the_machine_the_session_was_made_on", async () => {
+    // `create_session` answers the address local to its machine (`t7`), and addresses repeat
+    // across machines: another workbox's `t7` is not this session.
+    useAppStore.setState({
+      pendingSelectKey: "gpubox::t7",
+      pendingOpen: { key: "gpubox::t7", machineId: "gpubox", address: "t7" },
+    });
+    const { rerender } = renderHook(({ rows }) => useOpenWhenListed(rows), {
+      initialProps: { rows: [listed("buildbox", "t7")] },
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(useAppStore.getState().pendingOpen).not.toBeNull();
+
+    rerender({ rows: [listed("buildbox", "t7"), listed("gpubox", "t7")] });
+
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_session", {
+        machineId: "gpubox",
+        address: "t7",
+        observe: false,
+      }),
+    );
+    expect(useAppStore.getState().selectedKey).toBe("gpubox::t7");
+    expect(useAppStore.getState().pendingOpen).toBeNull();
   });
 });

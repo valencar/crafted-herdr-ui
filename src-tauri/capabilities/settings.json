@@ -12,7 +12,7 @@
     "allow-get-state",
     "allow-get-terminals",
     "allow-core-status",
-    "allow-list-agent-kinds",
+    "allow-list-run-choices",
     "allow-list-terminals",
     "allow-preview-launch-template",
     "allow-set-settings",

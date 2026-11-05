@@ -85,7 +85,7 @@ describe("invokeTyped types", () => {
     // @ts-expect-error argument keys are camelCase
     void invokeTyped("close_terminal", { machine_id: "a", address: "b" });
     void invokeTyped("refresh_now", {});
-    void invokeTyped("list_agent_kinds");
+    void invokeTyped("list_run_choices", { machineId: "local" });
   });
 });
 
@@ -93,6 +93,10 @@ describe("toActionError", () => {
   it("passes every ActionError variant through", () => {
     for (const e of [
       { kind: "herdr", error: { kind: "notFound" } },
+      {
+        kind: "core",
+        error: { kind: "rpc", code: "name_taken", message: "m", hint: null },
+      },
       { kind: "maybeApplied", argv: ["tab", "create"], message: "m" },
       { kind: "invalid", message: "m" },
     ]) {

@@ -5,8 +5,9 @@ import { KindBadge } from "../components/KindBadge";
 import { Sheet } from "../components/Sheet";
 import { Tooltip } from "../components/Tooltip";
 import type { NewSessionRequest } from "../lib/bindings/NewSessionRequest";
-import type { Placement } from "../lib/bindings/Placement";
-import { actionErrorMessage, agentNameProblem, plural } from "../lib/format";
+import type { RunChoice } from "../lib/bindings/RunChoice";
+import type { RunChoices } from "../lib/bindings/RunChoices";
+import { actionErrorMessage, plural, terminalNameProblem } from "../lib/format";
 import { toRows } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { saveSettings } from "../lib/uiHelpers";
@@ -15,13 +16,39 @@ import { useAppStore } from "../store/appStore";
 const PREVIEW_DEBOUNCE_MS = 150;
 const MAX_RECENT_FOLDERS = 6;
 
-/** Task 11 rebuilds the sheet; until then every session goes in a new terminal in its folder. */
-const PLACEMENT: Placement = { kind: "newWorkspace" };
+/** An option of the Run list: what it would run, its id, and why it can't be chosen. */
+type RunOption = {
+  id: string;
+  label: string;
+  run: RunChoice;
+  /** Shown under the name; the radio is described by it. */
+  description?: string;
+  /** Whether a starting prompt can be typed for it. */
+  takesTask: boolean;
+  /** Set for a template that can't run: the reason. */
+  unavailable?: string;
+  /** The agent kind, for the badge and for remembering the choice. */
+  kind: string | null;
+};
 
-function nameProblem(name: string, isAgent: boolean): string | null {
-  if (name === "") return "";
-  if (isAgent) return agentNameProblem(name);
-  return name.startsWith("-") ? "A name can’t start with “-”." : null;
+const SHELL_ID = "shell";
+const COMMAND_ID = "command";
+
+function nameProblem(name: string): string | null {
+  return name === "" ? null : terminalNameProblem(name);
+}
+
+/** The core said the name is held by a live terminal. */
+function takenMessage(err: { kind: string }): string | null {
+  const e = err as {
+    kind: string;
+    error?: { kind?: string; code?: string; message?: string };
+  };
+  return e.kind === "core" &&
+    e.error?.kind === "rpc" &&
+    e.error.code === "name_taken"
+    ? (e.error.message ?? "That name is already taken.")
+    : null;
 }
 
 function baseName(path: string): string {
@@ -43,7 +70,7 @@ type Props = {
   terminalName: string;
 };
 
-/** The New session sheet: where to start what, and the exact herdr calls it will run. */
+/** The New session sheet: where to start what, and the exact `hc run` line it will use. */
 export function NewSession({ terminalName }: Props) {
   const state = useAppStore((s) => s.state);
   const selectedKey = useAppStore((s) => s.selectedKey);
@@ -60,19 +87,26 @@ export function NewSession({ terminalName }: Props) {
 
   const folderId = useId();
   const nameId = useId();
-  const argsId = useId();
+  const taskId = useId();
+  const commandId = useId();
   const machineGroup = useId();
-  const kindGroup = useId();
+  const runGroup = useId();
 
   const [machineChoice, setMachineChoice] = useState<string | null>(
     prefill?.machineId ?? null,
   );
   const [folder, setFolder] = useState(prefill?.folder ?? "");
-  const [kinds, setKinds] = useState<string[] | null>(null);
+  // What a workbox can run, with the workbox it was asked for.
+  const [loaded, setLoaded] = useState<{
+    machineId: string;
+    choices: RunChoices;
+  } | null>(null);
   // `undefined` = the default (the saved Run choice, else a plain shell).
-  const [kindChoice, setKindChoice] = useState<string | null | undefined>();
+  const [runChoice, setRunChoice] = useState<string | undefined>();
   const [name, setName] = useState("");
-  const [agentArgs, setAgentArgs] = useState("");
+  const [task, setTask] = useState("");
+  const [commandLine, setCommandLine] = useState("");
+  const [keep, setKeep] = useState(false);
   const [openAfter, setOpenAfter] = useState(
     () => useAppStore.getState().settings?.open_after_create ?? true,
   );
@@ -84,6 +118,10 @@ export function NewSession({ terminalName }: Props) {
     sticky: boolean;
     forRequest: string;
   } | null>(null);
+  // The name the core said is taken, with its words.
+  const [taken, setTaken] = useState<{ name: string; message: string } | null>(
+    null,
+  );
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -92,9 +130,9 @@ export function NewSession({ terminalName }: Props) {
     };
   }, []);
   const [preview, setPreview] = useState<{
-    lines: string[];
+    line: string;
     error: string | null;
-  }>({ lines: [], error: null });
+  }>({ line: "", error: null });
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const machines = useMemo(
@@ -113,42 +151,81 @@ export function NewSession({ terminalName }: Props) {
     null;
   const machineId = machine?.id ?? null;
 
+  // `null` while the chosen workbox is being asked (an answer for another one doesn't count).
+  const choices = loaded?.machineId === machineId ? loaded.choices : null;
   useEffect(() => {
+    if (machineId === null) return;
     let cancelled = false;
     (async () => {
       try {
-        const list = await invokeTyped("list_agent_kinds");
-        if (!cancelled) setKinds(list);
+        const list = await invokeTyped("list_run_choices", { machineId });
+        if (!cancelled) setLoaded({ machineId, choices: list });
       } catch (e) {
         if (cancelled) return;
         reportError(e);
-        setKinds([]);
+        setLoaded({
+          machineId,
+          choices: { kinds: [], templates: [], kindsChecked: false },
+        });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [reportError]);
+  }, [machineId, reportError]);
 
-  // The Run options: the listed kinds minus the hidden ones, then Plain shell (`null`) unless
-  // hidden. Never empty: with nothing left, Plain shell is offered anyway.
-  const runOptions = useMemo<(string | null)[]>(() => {
-    const shown: (string | null)[] = (kinds ?? []).filter(
-      (k) => !hiddenKinds?.includes(k),
-    );
-    if (!hideShell) shown.push(null);
-    return shown.length > 0 ? shown : [null];
-  }, [kinds, hiddenKinds, hideShell]);
-  // A click wins while its option is still offered. Otherwise: the saved choice if it is offered,
-  // else Plain shell, else the first option.
-  const kind: string | null =
-    kindChoice !== undefined && runOptions.includes(kindChoice)
-      ? kindChoice
-      : runOptions.includes(savedKind)
-        ? savedKind
-        : runOptions.includes(null)
-          ? null
-          : runOptions[0];
+  // The Run options: the agents minus the hidden ones, the templates, then Plain shell unless
+  // hidden, then Custom command. Never without a way to run something: with no agent or
+  // template left, Plain shell is offered anyway.
+  const runOptions = useMemo<RunOption[]>(() => {
+    const agents: RunOption[] = (choices?.kinds ?? [])
+      .filter((k) => !hiddenKinds?.includes(k.kind))
+      .map((k) => ({
+        id: `agent:${k.kind}`,
+        label: k.kind,
+        run: { type: "agent", kind: k.kind },
+        takesTask: k.takesTask,
+        kind: k.kind,
+      }));
+    const templates: RunOption[] = (choices?.templates ?? []).map((tpl) => ({
+      id: `template:${tpl.name}`,
+      label: tpl.name,
+      run: { type: "template", name: tpl.name },
+      description: tpl.description ?? undefined,
+      takesTask: true,
+      unavailable: tpl.error
+        ? tpl.error
+        : tpl.command
+          ? undefined
+          : "It has no command.",
+      kind: null,
+    }));
+    const shell: RunOption = {
+      id: SHELL_ID,
+      label: "Plain shell",
+      run: { type: "shell" },
+      takesTask: false,
+      kind: null,
+    };
+    const command: RunOption = {
+      id: COMMAND_ID,
+      label: "Custom command",
+      run: { type: "command", line: "" },
+      takesTask: false,
+      kind: null,
+    };
+    const withShell =
+      !hideShell || (agents.length === 0 && templates.length === 0);
+    return [...agents, ...templates, ...(withShell ? [shell] : []), command];
+  }, [choices, hiddenKinds, hideShell]);
+  const offered = runOptions.filter((o) => o.unavailable === undefined);
+  // A click wins while its option is still offered. Otherwise: the saved choice if it is
+  // offered, else Plain shell, else the first option.
+  const option: RunOption | undefined =
+    offered.find((o) => o.id === runChoice) ??
+    offered.find((o) => o.kind !== null && o.kind === savedKind) ??
+    offered.find((o) => o.id === SHELL_ID) ??
+    offered[0];
 
   const recentFolders = useMemo(() => {
     const seen = new Set<string>();
@@ -160,30 +237,42 @@ export function NewSession({ terminalName }: Props) {
 
   const cwd = folder.trim();
   const trimmedName = name.trim();
-  const isAgent = kind !== null;
-  const nameHint = nameProblem(trimmedName, isAgent);
+  const trimmedTask = task.trim();
+  const isCommand = option?.id === COMMAND_ID;
+  const nameHint = nameProblem(trimmedName);
+  const nameTaken = taken !== null && taken.name === trimmedName;
   const canCreate =
     machineId !== null &&
-    kinds !== null &&
+    option !== undefined &&
     cwd !== "" &&
     !cwd.startsWith("-") &&
+    (!isCommand || commandLine.trim() !== "") &&
     nameHint === null &&
     !busy;
 
+  const run: RunChoice | null = !option
+    ? null
+    : option.run.type === "command"
+      ? { type: "command", line: commandLine.trim() }
+      : option.run;
   const request: NewSessionRequest | null =
-    machineId === null
+    machineId === null || run === null
       ? null
       : {
           machineId,
           cwd,
-          kind,
-          name: trimmedName,
-          placement: PLACEMENT,
-          agentArgs: isAgent ? agentArgs.split(/\s+/).filter(Boolean) : [],
+          run,
+          name: trimmedName === "" ? null : trimmedName,
+          task: option?.takesTask && trimmedTask !== "" ? trimmedTask : null,
+          keep,
         };
   const requestJson = request ? JSON.stringify(request) : null;
-  // Only ask Rust for the commands once there is a folder to run them in.
-  const previewJson = cwd !== "" && kinds !== null ? requestJson : null;
+  // Only ask Rust for the command once there is a folder to run it in (and, for a custom
+  // command, the command).
+  const previewJson =
+    cwd !== "" && choices !== null && (!isCommand || commandLine.trim() !== "")
+      ? requestJson
+      : null;
   const debouncedPreview = useDebounced(previewJson, PREVIEW_DEBOUNCE_MS);
 
   useEffect(() => {
@@ -191,14 +280,14 @@ export function NewSession({ terminalName }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const lines = await invokeTyped("preview_new_session", {
+        const line = await invokeTyped("preview_new_session", {
           req: JSON.parse(debouncedPreview) as NewSessionRequest,
         });
-        if (!cancelled) setPreview({ lines, error: null });
+        if (!cancelled) setPreview({ line, error: null });
       } catch (e) {
         if (!cancelled) {
           setPreview({
-            lines: [],
+            line: "",
             error: actionErrorMessage(toActionError(e)),
           });
         }
@@ -215,25 +304,28 @@ export function NewSession({ terminalName }: Props) {
     if (!request || !canCreate) return;
     setBusy(true);
     setFailure(null);
+    setTaken(null);
     const sent: NewSessionRequest = request;
     try {
       const created = await invokeTyped("create_session", { req: sent });
-      const key = `${sent.machineId}::${created.paneId}`;
+      // The address is local to its machine, like every row key.
+      const key = `${sent.machineId}::${created.address}`;
       setPendingSelectKey(key);
       if (openAfter) {
-        // `open_session` needs the pane in the state, which the next poll brings; Home opens
-        // it then. There is nothing to mark seen for a new session.
+        // `open_session` needs the terminal in the state, which the event stream brings; Home
+        // opens it then. There is nothing to mark seen for a new session.
         setPendingOpen({
           key,
           machineId: sent.machineId,
-          address: created.paneId,
+          address: created.address,
         });
       }
-      // Remember the Run choice only now that it made a session.
-      const rememberedKind =
-        useAppStore.getState().settings?.new_session_kind ?? null;
-      if (sent.kind !== rememberedKind) {
-        saveSettings({ new_session_kind: sent.kind });
+      // Remember the Run choice only now that it made a session. A template or a custom
+      // command leaves the saved choice (an agent or a plain shell) alone.
+      const remembered = rememberedKind(sent.run);
+      const current = useAppStore.getState().settings?.new_session_kind ?? null;
+      if (remembered !== undefined && remembered !== current) {
+        saveSettings({ new_session_kind: remembered });
       }
       // Closing a sheet the user already left could close the next one they opened.
       if (mounted.current) close();
@@ -241,6 +333,11 @@ export function NewSession({ terminalName }: Props) {
       const err = toActionError(e);
       if (!mounted.current) {
         reportError(err);
+        return;
+      }
+      const takenWords = takenMessage(err);
+      if (takenWords !== null) {
+        setTaken({ name: sent.name ?? "", message: takenWords });
         return;
       }
       setFailure({
@@ -270,6 +367,7 @@ export function NewSession({ terminalName }: Props) {
     failure && (failure.sticky || failure.forRequest === requestJson)
       ? failure
       : null;
+  const nameError = nameHint ?? (nameTaken ? taken.message : null);
 
   return (
     <Sheet
@@ -382,31 +480,76 @@ export function NewSession({ terminalName }: Props) {
 
       <fieldset className="sheet-field">
         <legend className="sheet-label">Run</legend>
-        {kinds === null ? (
-          <p className="muted">Loading agent kinds…</p>
+        {choices === null ? (
+          <p className="muted">Looking for agents on this workbox…</p>
         ) : (
-          <div className="opt-grid opt-grid-3">
-            {runOptions.map((k) => (
-              <label
-                key={k ?? "shell"}
-                className="opt opt-row"
-                data-on={k === kind}
-              >
-                <input
-                  type="radio"
-                  name={kindGroup}
-                  checked={k === kind}
-                  onChange={() => setKindChoice(k)}
-                />
-                <span aria-hidden="true">
-                  <KindBadge kind={k} named />
-                </span>
-                <span className="opt-name">{k ?? "Plain shell"}</span>
-              </label>
-            ))}
-          </div>
+          <>
+            <div className="opt-grid opt-grid-3">
+              {runOptions.map((o) => {
+                const describedBy = `${runGroup}-${o.id}`;
+                const note = o.unavailable
+                  ? `Unavailable: ${o.unavailable}`
+                  : o.description;
+                return (
+                  <label
+                    key={o.id}
+                    className="opt opt-row"
+                    data-on={o.id === option?.id}
+                    data-unavailable={o.unavailable !== undefined || undefined}
+                  >
+                    <input
+                      type="radio"
+                      name={runGroup}
+                      checked={o.id === option?.id}
+                      aria-label={o.label}
+                      disabled={o.unavailable !== undefined}
+                      aria-describedby={note ? describedBy : undefined}
+                      onChange={() => setRunChoice(o.id)}
+                    />
+                    <span aria-hidden="true">
+                      <KindBadge kind={o.kind} named />
+                    </span>
+                    <span className="opt-text">
+                      <span className="opt-name">{o.label}</span>
+                      {note && (
+                        <span id={describedBy} className="muted opt-meta">
+                          {note}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            {!choices.kindsChecked && (
+              <p className="muted sheet-note">
+                Couldn’t check which agents are installed here, so every known
+                agent is listed.
+              </p>
+            )}
+          </>
         )}
       </fieldset>
+
+      {isCommand && (
+        <div className="sheet-field">
+          <label htmlFor={commandId} className="sheet-label">
+            Command
+          </label>
+          <input
+            id={commandId}
+            className="field mono"
+            type="text"
+            value={commandLine}
+            placeholder="npm run dev"
+            spellCheck={false}
+            onChange={(e) => setCommandLine(e.target.value)}
+          />
+          <p className="muted sheet-note">
+            Run by the workbox’s shell, in the folder above.
+          </p>
+        </div>
+      )}
 
       <div className="sheet-pair">
         <div className="sheet-field">
@@ -418,51 +561,53 @@ export function NewSession({ terminalName }: Props) {
             className="field mono"
             type="text"
             value={name}
-            placeholder={isAgent ? "orders-index" : "optional"}
+            placeholder="optional"
             spellCheck={false}
-            aria-invalid={nameHint ? true : undefined}
+            aria-invalid={nameError ? true : undefined}
             onChange={(e) => setName(e.target.value)}
           />
-          {nameHint && <p className="field-error">{nameHint}</p>}
+          {nameError && <p className="field-error">{nameError}</p>}
         </div>
+        {option?.takesTask && (
+          <div className="sheet-field">
+            <label htmlFor={taskId} className="sheet-label">
+              Task
+            </label>
+            <input
+              id={taskId}
+              className="field"
+              type="text"
+              value={task}
+              placeholder="optional"
+              onChange={(e) => setTask(e.target.value)}
+            />
+          </div>
+        )}
       </div>
 
-      <details className="sheet-advanced">
-        <summary>Advanced</summary>
-        <div className="sheet-field">
-          <label htmlFor={argsId} className="sheet-label">
-            Agent arguments
-          </label>
-          <input
-            id={argsId}
-            className="field mono"
-            type="text"
-            value={agentArgs}
-            disabled={!isAgent}
-            placeholder="--model sonnet"
-            spellCheck={false}
-            onChange={(e) => setAgentArgs(e.target.value)}
-          />
-          <p className="muted sheet-note">
-            Passed to the agent after <code>--</code>, split on spaces.
-          </p>
-        </div>
-      </details>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={keep}
+          onChange={(e) => setKeep(e.target.checked)}
+        />
+        Keep this terminal if its program is lost
+      </label>
 
       <div className="cmdbox" aria-live="polite">
-        <div className="cmdbox-caption">
-          # Herdr will run, using your herdr CLI
-        </div>
+        <div className="cmdbox-caption"># herdr-core will run</div>
         {previewJson === null ? (
-          <div className="cmdbox-caption">Pick a folder to see the calls.</div>
+          <div className="cmdbox-caption">
+            Pick a folder to see the command.
+          </div>
         ) : (
-          preview.lines.map((line, i) => (
-            <div key={i}>
+          preview.line !== "" && (
+            <div>
               <code className="cmdbox-line">
-                <span className="cmdbox-prompt">$</span> {line}
+                <span className="cmdbox-prompt">$</span> {preview.line}
               </code>
             </div>
-          ))
+          )
         )}
       </div>
       {previewJson !== null && preview.error && (
@@ -487,4 +632,19 @@ export function NewSession({ terminalName }: Props) {
       )}
     </Sheet>
   );
+}
+
+/**
+ * The Run choice to remember after a session was made: the agent kind, `null` for a plain
+ * shell, `undefined` for a template or a custom command (the saved choice stays).
+ */
+function rememberedKind(run: RunChoice): string | null | undefined {
+  switch (run.type) {
+    case "agent":
+      return run.kind;
+    case "shell":
+      return null;
+    default:
+      return undefined;
+  }
 }

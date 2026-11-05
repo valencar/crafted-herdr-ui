@@ -19,7 +19,7 @@
     "allow-get-state",
     "allow-get-terminals",
     "allow-interrupt-terminal",
-    "allow-list-agent-kinds",
+    "allow-list-run-choices",
     "allow-list-ssh-hosts",
     "allow-machine-add-argv",
     "allow-machine-remove",

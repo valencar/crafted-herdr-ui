@@ -190,13 +190,19 @@ function NewSessionOptions({
 }) {
   const labelId = useId();
   const stayId = useId();
-  // `null` while loading; a failed or empty list means herdr offers no agent kinds.
+  // `null` while loading; a failed or empty list means no agent kinds to choose from.
   const [kinds, setKinds] = useState<string[] | null>(null);
   useEffect(() => {
     let cancelled = false;
-    invokeTyped("list_agent_kinds")
-      .then((list) => {
-        if (!cancelled) setKinds(Array.isArray(list) ? list : []);
+    invokeTyped("list_run_choices", { machineId: "local" })
+      .then((choices) => {
+        if (!cancelled) {
+          setKinds(
+            Array.isArray(choices?.kinds)
+              ? choices.kinds.map((k) => k.kind)
+              : [],
+          );
+        }
       })
       .catch(() => {
         if (!cancelled) setKinds([]);
@@ -286,7 +292,9 @@ function NewSessionOptions({
             ))}
           </div>
           {noKinds && (
-            <p className="muted settings-hint">herdr listed no agent kinds.</p>
+            <p className="muted settings-hint">
+              No agent programs were found on this computer.
+            </p>
           )}
           {lastOne && (
             <p id={stayId} className="muted settings-hint">

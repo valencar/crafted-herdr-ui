@@ -231,11 +231,17 @@ export function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
-const AGENT_NAME_HELP =
-  "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.";
+const TERMINAL_NAME = /^[a-z0-9][a-z0-9_.-]{0,31}$/;
+/** What an address looks like: `t7`, or a worker's `t1b`. */
+const ADDRESS_SHAPE = /^t[0-9]+[a-z]*$/;
+const TERMINAL_NAME_HELP =
+  "Use 1 to 32 of a-z 0-9 - _ . starting with a letter or digit.";
 
-/** Why an agent name is refused, or `null` when it is fine. Mirrors Rust `validate_name`. */
-export function agentNameProblem(name: string): string | null {
-  return AGENT_NAME.test(name) ? null : AGENT_NAME_HELP;
+/** Why a terminal name is refused, or `null` when it is fine. Mirrors Rust `validate_name`. */
+export function terminalNameProblem(name: string): string | null {
+  if (!TERMINAL_NAME.test(name)) return TERMINAL_NAME_HELP;
+  if (ADDRESS_SHAPE.test(name)) {
+    return `“${name}” looks like a terminal address (t7). Pick a name that doesn’t.`;
+  }
+  return null;
 }

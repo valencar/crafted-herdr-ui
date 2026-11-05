@@ -23,7 +23,7 @@ const COMMANDS: &[&str] = &[
     "refresh_now",
     "reconnect_core",
     "get_command_log",
-    "list_agent_kinds",
+    "list_run_choices",
     "open_session",
     "open_in_terminal",
     "list_ssh_hosts",

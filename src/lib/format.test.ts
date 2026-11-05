@@ -6,7 +6,6 @@ import {
   agoText,
   TERMINAL_LABEL,
   actionErrorMessage,
-  agentNameProblem,
   formatAge,
   formatChecked,
   lastLines,
@@ -18,6 +17,7 @@ import {
   formatStaleness,
   isSupportedVersion,
   plural,
+  terminalNameProblem,
   parseVersion,
   shellJoin,
   shellQuote,
@@ -321,18 +321,31 @@ describe("plural", () => {
   });
 });
 
-describe("agentNameProblem", () => {
-  it("accepts_a_lowercase_name_of_up_to_32_characters", () => {
-    for (const ok of ["a", "planner", "web-app_2", "a".repeat(32)]) {
-      expect(agentNameProblem(ok)).toBeNull();
+describe("terminalNameProblem", () => {
+  it("accepts_names_the_core_accepts", () => {
+    for (const ok of [
+      "a",
+      "planner",
+      "0day",
+      "web-app_2",
+      "web.app",
+      "tool",
+      "a".repeat(32),
+    ]) {
+      expect(terminalNameProblem(ok)).toBeNull();
     }
   });
 
-  it("explains_every_other_name_with_the_sentence_rust_gives", () => {
-    const rust =
-      "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.";
-    for (const bad of ["", "Bad Name", "1abc", "has.dot", "a".repeat(33)]) {
-      expect(agentNameProblem(bad)).toBe(rust);
+  it("explains_every_other_name_with_the_sentences_rust_gives", () => {
+    const help =
+      "Use 1 to 32 of a-z 0-9 - _ . starting with a letter or digit.";
+    for (const bad of ["", "Bad Name", "-x", "_x", ".x", "é", "a".repeat(33)]) {
+      expect(terminalNameProblem(bad)).toBe(help);
+    }
+    for (const shaped of ["t7", "t1b", "t12"]) {
+      expect(terminalNameProblem(shaped)).toBe(
+        `“${shaped}” looks like a terminal address (t7). Pick a name that doesn’t.`,
+      );
     }
   });
 });

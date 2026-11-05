@@ -146,8 +146,12 @@ beforeEach(() => {
   invoke.mockImplementation(async (name: string, args?: { id?: string }) =>
     name === "get_terminals"
       ? { installed: ["ghostty"], default: "ghostty" }
-      : name === "list_agent_kinds"
-        ? ["claude"]
+      : name === "list_run_choices"
+        ? {
+            kinds: [{ kind: "claude", takesTask: true }],
+            templates: [],
+            kindsChecked: true,
+          }
         : // The text Rust builds from the profile id.
           name === "preview_reconnect"
           ? `herdr machine reconnect ${args?.id}`

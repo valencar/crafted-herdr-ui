@@ -12,6 +12,7 @@ import type { AppState } from "../lib/bindings/AppState";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { NewSessionRequest } from "../lib/bindings/NewSessionRequest";
+import type { RunChoices } from "../lib/bindings/RunChoices";
 import type { Settings } from "../lib/bindings/Settings";
 import { useAppStore } from "../store/appStore";
 import {
@@ -55,17 +56,25 @@ function appState(...machines: MachineView[]): AppState {
   return { ...buildState([], { generatedAtMs: NOW }), machines };
 }
 
-/** The backend's plan, faked: the agent start line exists only for an agent kind. */
-function fakePreview(req: NewSessionRequest): string[] {
-  const lines = [
-    `herdr --machine ${req.machineId} tab create --cwd ${req.cwd} --label ${req.name}`,
-  ];
-  if (req.kind) {
-    lines.push(
-      `herdr agent start ${req.name} --kind ${req.kind} --pane {PANE}`,
-    );
+/** The backend's preview line, faked: the `hc run` shape without the bookkeeping. */
+function fakePreview(req: NewSessionRequest): string {
+  const words = ["hc run --bg"];
+  if (req.cwd) words.push(`--cwd ${req.cwd}`);
+  if (req.name) words.push(`--name ${req.name}`);
+  if (req.keep) words.push("--keep");
+  switch (req.run.type) {
+    case "agent":
+      words.push(req.run.kind);
+      break;
+    case "template":
+      words.push(req.run.name);
+      break;
+    case "command":
+      words.push(`'${req.run.line}'`);
+      break;
   }
-  return lines;
+  if (req.task) words.push(`'${req.task}'`);
+  return words.join(" ");
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -100,10 +109,38 @@ function savedKind(kind: string | null, over: Partial<Settings> = {}) {
   };
 }
 
-const KINDS = ["claude", "codex"];
+/** What `list_run_choices` answers: claude and codex take a task, gemini is not asked. */
+const REMOTE_CHOICES: RunChoices = {
+  kinds: [
+    { kind: "claude", takesTask: true },
+    { kind: "codex", takesTask: true },
+    { kind: "opencode", takesTask: false },
+  ],
+  templates: [],
+  kindsChecked: true,
+};
+/** Local also lists templates, one of them broken. */
+const LOCAL_CHOICES: RunChoices = {
+  ...REMOTE_CHOICES,
+  templates: [
+    {
+      name: "reviewer",
+      description: "Read-only code review. Give it file paths and scope.",
+      command: "claude",
+      error: null,
+    },
+    {
+      name: "broken",
+      description: "",
+      command: "",
+      error: "templates/broken.md: no command",
+    },
+  ],
+};
+let choicesFor: (machineId: string) => RunChoices;
 /** Errors the next `create_session` calls fail with, oldest first. */
 let createErrors: unknown[] = [];
-const CREATED = { paneId: "w3:p1", terminalId: "term-9" };
+const CREATED = { address: "t7" };
 
 function callsTo(name: string): unknown[][] {
   return invoke.mock.calls.filter((c) => c[0] === name);
@@ -133,25 +170,34 @@ function setup(
   return user;
 }
 
-async function fillFolder(user: ReturnType<typeof userEvent.setup>, v: string) {
+type User = ReturnType<typeof userEvent.setup>;
+async function fillFolder(user: User, v: string) {
   await user.type(screen.getByLabelText("Project folder"), v);
 }
-async function fillName(user: ReturnType<typeof userEvent.setup>, v: string) {
+async function fillName(user: User, v: string) {
   await user.type(screen.getByLabelText("Name"), v);
 }
 const createButton = () =>
   screen.getByRole("button", { name: /^Create session/ });
+const radio = (name: string) => screen.findByRole("radio", { name });
+/** Local first, with its templates; the remote one has none. */
+const withLocal = () =>
+  appState(machine("local", { isLocal: true }), machine("buildbox"));
 
 beforeEach(() => {
   createErrors = [];
+  choicesFor = (id) => (id === "local" ? LOCAL_CHOICES : REMOTE_CHOICES);
   invoke.mockReset();
   invoke.mockImplementation(
-    async (name: string, args?: { req: NewSessionRequest }) => {
+    async (
+      name: string,
+      args?: { req?: NewSessionRequest; machineId?: string },
+    ) => {
       switch (name) {
-        case "list_agent_kinds":
-          return KINDS;
+        case "list_run_choices":
+          return choicesFor(args!.machineId!);
         case "preview_new_session":
-          return fakePreview(args!.req);
+          return fakePreview(args!.req!);
         case "create_session":
           if (createErrors.length > 0) throw createErrors.shift();
           return CREATED;
@@ -173,37 +219,67 @@ afterEach(() => {
   useAppStore.setState({ settings: null });
 });
 
+const runRadios = () =>
+  within(screen.getByRole("group", { name: "Run" }))
+    .getAllByRole("radio")
+    .map((r) => r.closest("label")!.querySelector(".opt-name")!.textContent);
+
 describe("NewSession", () => {
-  it("preview_matches_backend_plan", async () => {
+  it("sheet_has_no_placement_or_worktree", async () => {
+    const user = setup(appState(machine("buildbox", { terms: [] })), {
+      selectedKey: "buildbox::w2:p1",
+    });
+    await radio("claude");
+    expect(screen.queryByLabelText("Place it")).toBeNull();
+    expect(screen.queryByText(/worktree/i)).toBeNull();
+    expect(screen.queryByText(/trust/i)).toBeNull();
+    expect(screen.queryByText("Advanced")).toBeNull();
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await user.click(createButton());
+    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
+    // The request carries what to run and nothing about where it goes.
+    expect(Object.keys(lastRequest("create_session")).sort()).toEqual([
+      "cwd",
+      "keep",
+      "machineId",
+      "name",
+      "run",
+      "task",
+    ]);
+  });
+
+  it("preview_is_the_line_rust_builds", async () => {
     const user = setup(undefined, savedKind("claude"));
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     const expected = fakePreview({
       machineId: "buildbox",
       cwd: "/home/dev/projects/api-service",
-      kind: "claude",
+      run: { type: "agent", kind: "claude" },
       name: "planner",
-      placement: { kind: "newWorkspace" },
-      agentArgs: [],
+      task: null,
+      keep: false,
     });
-    expect(expected).toHaveLength(2);
-    for (const line of expected) {
-      expect(await screen.findByText(line)).toBeInTheDocument();
-    }
-    expect(
-      screen.getByText("# Herdr will run, using your herdr CLI"),
-    ).toBeVisible();
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.getByText("# herdr-core will run")).toBeVisible();
   });
 
   it("create_disabled_until_valid", async () => {
     const user = setup(undefined, savedKind("claude"));
-    await screen.findByRole("radio", { name: "claude" });
+    await radio("claude");
     expect(createButton()).toBeDisabled();
     await fillFolder(user, "/home/dev/projects/api-service");
-    expect(createButton()).toBeDisabled();
+    // The name is optional.
+    expect(createButton()).toBeEnabled();
     await fillName(user, "Bad Name");
     expect(createButton()).toBeDisabled();
-    expect(screen.getByText(/Use 1 to 32 characters/)).toBeInTheDocument();
+    expect(screen.getByText(/Use 1 to 32 of a-z/)).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("Name"));
+    await fillName(user, "t7");
+    expect(createButton()).toBeDisabled();
+    expect(
+      screen.getByText(/looks like a terminal address/),
+    ).toBeInTheDocument();
     await user.clear(screen.getByLabelText("Name"));
     await fillName(user, "planner");
     expect(createButton()).toBeEnabled();
@@ -211,22 +287,189 @@ describe("NewSession", () => {
     expect(createButton()).toBeDisabled();
   });
 
-  it("shell_kind_omits_agent_start_line", async () => {
+  it("name_is_optional_for_every_run_choice", async () => {
+    const user = setup(withLocal(), savedKind(null));
+    await radio("Plain shell");
+    expect(screen.getByLabelText("Name")).toHaveAttribute(
+      "placeholder",
+      "optional",
+    );
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await user.click(createButton());
+    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
+    expect(lastRequest("create_session").name).toBeNull();
+  });
+
+  it("name_taken_shows_inline", async () => {
     const user = setup(undefined, savedKind("claude"));
+    await radio("claude");
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
+    createErrors.push({
+      kind: "core",
+      error: {
+        kind: "rpc",
+        code: "name_taken",
+        message: 'a live terminal is already named "planner"',
+        hint: "pick another name, or kill the one holding it",
+      },
+    });
+    await user.click(createButton());
+    const message = await screen.findByText(
+      'a live terminal is already named "planner"',
+    );
+    // Under the Name field, not in the failure strip at the foot of the sheet.
+    expect(message.closest(".sheet-failure")).toBeNull();
+    expect(screen.getByLabelText("Name")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(useAppStore.getState().sheet).toBe("new-session");
+    // Another name clears it.
+    await user.type(screen.getByLabelText("Name"), "2");
     expect(
-      await screen.findByText(/agent start planner --kind claude/),
-    ).toBeInTheDocument();
+      screen.queryByText('a live terminal is already named "planner"'),
+    ).toBeNull();
+  });
+
+  it("task_field_only_when_supported", async () => {
+    const user = setup(withLocal(), savedKind("claude"));
+    await radio("claude");
+    // claude takes a task.
+    expect(screen.getByLabelText("Task")).toBeInTheDocument();
+    // opencode has no rule: the field is hidden, not offered and then refused.
+    await user.click(screen.getByRole("radio", { name: "opencode" }));
+    expect(screen.queryByLabelText("Task")).toBeNull();
+    // A plain shell and a command take none.
     await user.click(screen.getByRole("radio", { name: "Plain shell" }));
-    await vi.waitFor(() =>
-      expect(lastRequest("preview_new_session").kind).toBeNull(),
+    expect(screen.queryByLabelText("Task")).toBeNull();
+    await user.click(screen.getByRole("radio", { name: "Custom command" }));
+    expect(screen.queryByLabelText("Task")).toBeNull();
+    // A template always does.
+    await user.click(screen.getByRole("radio", { name: "reviewer" }));
+    expect(screen.getByLabelText("Task")).toBeInTheDocument();
+  });
+
+  it("sends_the_task_only_with_a_run_that_takes_one", async () => {
+    const user = setup(withLocal(), savedKind("claude"));
+    await radio("claude");
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await user.type(screen.getByLabelText("Task"), "  fix the flaky test ");
+    await user.click(screen.getByRole("radio", { name: "opencode" }));
+    await user.click(createButton());
+    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
+    // The typed task belongs to claude; opencode gets none.
+    expect(lastRequest("create_session").task).toBeNull();
+    expect(lastRequest("create_session").run).toEqual({
+      type: "agent",
+      kind: "opencode",
+    });
+  });
+
+  it("templates_listed_with_description_on_local_only", async () => {
+    setup(withLocal(), savedKind(null));
+    const reviewer = await radio("reviewer");
+    expect(runRadios()).toEqual([
+      "claude",
+      "codex",
+      "opencode",
+      "reviewer",
+      "broken",
+      "Plain shell",
+      "Custom command",
+    ]);
+    expect(reviewer).toHaveAccessibleDescription(
+      "Read-only code review. Give it file paths and scope.",
     );
-    await vi.waitFor(() =>
-      expect(screen.queryByText(/agent start/)).not.toBeInTheDocument(),
+    // A broken template is shown, unavailable, with the reason; it can't be picked.
+    const broken = screen.getByRole("radio", { name: "broken" });
+    expect(broken).toBeDisabled();
+    expect(broken).toHaveAccessibleDescription(
+      "Unavailable: templates/broken.md: no command",
     );
-    expect(screen.getByText(/ create /)).toBeInTheDocument();
-    expect(lastRequest("preview_new_session").agentArgs).toEqual([]);
+    // A remote workbox resolves template names itself, so the sheet lists none.
+    await userEvent.click(screen.getByRole("radio", { name: /buildbox/ }));
+    await radio("claude");
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("radio", { name: "reviewer" })).toBeNull(),
+    );
+    expect(runRadios()).toEqual([
+      "claude",
+      "codex",
+      "opencode",
+      "Plain shell",
+      "Custom command",
+    ]);
+  });
+
+  it("a_template_run_sends_its_name_and_task", async () => {
+    const user = setup(withLocal(), savedKind(null));
+    await user.click(await radio("reviewer"));
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await user.type(screen.getByLabelText("Task"), "src/lib.rs");
+    await user.click(createButton());
+    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
+    expect(lastRequest("create_session")).toEqual({
+      machineId: "local",
+      cwd: "/home/dev/projects/api-service",
+      run: { type: "template", name: "reviewer" },
+      name: null,
+      task: "src/lib.rs",
+      keep: false,
+    });
+  });
+
+  it("a_custom_command_needs_its_line", async () => {
+    const user = setup(undefined, savedKind(null));
+    await user.click(await radio("Custom command"));
+    await fillFolder(user, "/home/dev/projects/api-service");
+    expect(createButton()).toBeDisabled();
+    await user.type(screen.getByLabelText("Command"), "npm test && echo done");
+    expect(createButton()).toBeEnabled();
+    await user.click(createButton());
+    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
+    expect(lastRequest("create_session").run).toEqual({
+      type: "command",
+      line: "npm test && echo done",
+    });
+  });
+
+  it("keep_is_off_by_default_and_sent_when_checked", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await radio("claude");
+    const keep = screen.getByLabelText(
+      "Keep this terminal if its program is lost",
+    );
+    expect(keep).not.toBeChecked();
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await user.click(keep);
+    await user.click(createButton());
+    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
+    expect(lastRequest("create_session").keep).toBe(true);
+  });
+
+  it("says_so_when_the_installed_check_could_not_run", async () => {
+    choicesFor = () => ({ ...REMOTE_CHOICES, kindsChecked: false });
+    setup();
+    await radio("claude");
+    expect(
+      screen.getByText(/couldn.t check which agents are installed/i),
+    ).toBeInTheDocument();
+  });
+
+  it("asks_for_the_choices_of_the_chosen_workbox", async () => {
+    const user = setup(withLocal());
+    await radio("claude");
+    expect(callsTo("list_run_choices").map((c) => c[1])).toEqual([
+      { machineId: "local" },
+    ]);
+    await user.click(screen.getByRole("radio", { name: /buildbox/ }));
+    await vi.waitFor(() =>
+      expect(callsTo("list_run_choices").map((c) => c[1])).toEqual([
+        { machineId: "local" },
+        { machineId: "buildbox" },
+      ]),
+    );
   });
 
   it("cmd_enter_submits", async () => {
@@ -238,24 +481,23 @@ describe("NewSession", () => {
     expect(lastRequest("create_session")).toEqual({
       machineId: "buildbox",
       cwd: "/home/dev/projects/api-service",
-      kind: "claude",
+      run: { type: "agent", kind: "claude" },
       name: "planner",
-      placement: { kind: "newWorkspace" },
-      agentArgs: [],
+      task: null,
+      keep: false,
     });
   });
 
   it("cmd_enter_does_nothing_while_the_form_is_invalid", async () => {
     const user = setup();
-    await fillFolder(user, "/home/dev/projects/api-service");
+    await radio("claude");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
     expect(callsTo("create_session")).toHaveLength(0);
   });
 });
 
 describe("NewSession remembers the Run choice", () => {
-  const radio = (name: string) => screen.findByRole("radio", { name });
-  async function createValid(user: ReturnType<typeof userEvent.setup>) {
+  async function createValid(user: User) {
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(createButton());
@@ -269,7 +511,9 @@ describe("NewSession remembers the Run choice", () => {
       expect(screen.getByRole("radio", { name: "claude" })).not.toBeChecked();
       await fillFolder(user, "/home/dev/projects/api-service");
       await vi.waitFor(() =>
-        expect(lastRequest("preview_new_session").kind).toBeNull(),
+        expect(lastRequest("preview_new_session").run).toEqual({
+          type: "shell",
+        }),
       );
       cleanup();
       invoke.mockClear();
@@ -277,21 +521,26 @@ describe("NewSession remembers the Run choice", () => {
     }
   });
 
-  const runRadios = () =>
-    within(screen.getByRole("group", { name: "Run" }))
-      .getAllByRole("radio")
-      .map((r) => r.closest("label")!.querySelector(".opt-name")!.textContent);
-
   it("a_hidden_kind_is_not_offered", async () => {
     setup(undefined, savedKind(null, { new_session_hidden_kinds: ["codex"] }));
     await radio("claude");
-    expect(runRadios()).toEqual(["claude", "Plain shell"]);
+    expect(runRadios()).toEqual([
+      "claude",
+      "opencode",
+      "Plain shell",
+      "Custom command",
+    ]);
   });
 
   it("a_hidden_plain_shell_is_not_offered", async () => {
     setup(undefined, savedKind("codex", { new_session_hide_shell: true }));
     await radio("claude");
-    expect(runRadios()).toEqual(["claude", "codex"]);
+    expect(runRadios()).toEqual([
+      "claude",
+      "codex",
+      "opencode",
+      "Custom command",
+    ]);
     expect(screen.getByRole("radio", { name: "codex" })).toBeChecked();
   });
 
@@ -301,7 +550,6 @@ describe("NewSession remembers the Run choice", () => {
       savedKind("claude", { new_session_hidden_kinds: ["claude"] }),
     );
     await radio("codex");
-    expect(runRadios()).toEqual(["codex", "Plain shell"]);
     expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
   });
 
@@ -314,7 +562,7 @@ describe("NewSession remembers the Run choice", () => {
       }),
     );
     await radio("codex");
-    expect(runRadios()).toEqual(["codex"]);
+    expect(runRadios()).toEqual(["codex", "opencode", "Custom command"]);
     expect(screen.getByRole("radio", { name: "codex" })).toBeChecked();
   });
 
@@ -322,25 +570,13 @@ describe("NewSession remembers the Run choice", () => {
     setup(
       undefined,
       savedKind(null, {
-        new_session_hidden_kinds: ["claude", "codex"],
+        new_session_hidden_kinds: ["claude", "codex", "opencode"],
         new_session_hide_shell: true,
       }),
     );
     await radio("Plain shell");
-    expect(runRadios()).toEqual(["Plain shell"]);
     expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
-  });
-
-  it("the_only_shown_kind_being_uninstalled_still_offers_plain_shell", async () => {
-    setup(
-      undefined,
-      savedKind("gemini", {
-        new_session_hidden_kinds: ["claude", "codex"],
-        new_session_hide_shell: true,
-      }),
-    );
-    await radio("Plain shell");
-    expect(runRadios()).toEqual(["Plain shell"]);
+    expect(runRadios()).toEqual(["Plain shell", "Custom command"]);
   });
 
   it("a_clicked_kind_that_gets_hidden_meanwhile_is_not_sent", async () => {
@@ -354,13 +590,11 @@ describe("NewSession remembers the Run choice", () => {
         },
       });
     });
-    expect(runRadios()).toEqual(["claude", "Plain shell"]);
     expect(screen.getByRole("radio", { name: "Plain shell" })).toBeChecked();
     await fillFolder(user, "/home/dev/projects/api-service");
-    await fillName(user, "planner");
     await user.click(createButton());
     await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
-    expect(lastRequest("create_session").kind).toBeNull();
+    expect(lastRequest("create_session").run).toEqual({ type: "shell" });
   });
 
   it("defaults_to_the_saved_kind", async () => {
@@ -404,6 +638,16 @@ describe("NewSession remembers the Run choice", () => {
     expect(callsTo("set_settings")[0][1]).toEqual({
       patch: { new_session_kind: null },
     });
+  });
+
+  it("a_template_or_command_run_leaves_the_saved_choice_alone", async () => {
+    const user = setup(withLocal(), savedKind("claude"));
+    await user.click(await radio("reviewer"));
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await user.click(createButton());
+    await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
+    expect(callsTo("create_session")).toHaveLength(1);
+    expect(callsTo("set_settings")).toHaveLength(0);
   });
 
   it("create_with_the_saved_kind_does_not_save_again", async () => {
@@ -489,62 +733,48 @@ describe("NewSession preview requests", () => {
 
   it("asks for no preview until there is a folder", async () => {
     setup();
-    await screen.findByRole("radio", { name: "claude" });
+    await radio("claude");
     expect(
-      screen.getByText("Pick a folder to see the calls."),
+      screen.getByText("Pick a folder to see the command."),
     ).toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 250));
     expect(callsTo("preview_new_session")).toHaveLength(0);
   });
 
   it("shows a preview error under the box using its message", async () => {
-    invoke.mockImplementation(async (name: string) => {
-      if (name === "list_agent_kinds") return KINDS;
+    invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "list_run_choices") return REMOTE_CHOICES;
       if (name === "preview_new_session") {
-        throw { kind: "invalid", message: "Folder can't start with '-'." };
+        throw { kind: "invalid", message: "Folder can’t start with “-”." };
       }
-      return null;
+      return args ? null : null;
     });
     const user = setup();
     await fillFolder(user, "x");
     expect(
-      await screen.findByText("Folder can't start with '-'."),
+      await screen.findByText("Folder can’t start with “-”."),
     ).toBeInTheDocument();
   });
 });
 
 describe("NewSession form", () => {
-  it("lists the agent kinds and a final Plain shell option", async () => {
+  it("lists the agent kinds, then Plain shell and Custom command", async () => {
     setup();
     const group = within(screen.getByRole("group", { name: "Run" }));
     await group.findByRole("radio", { name: "claude" });
-    expect(
-      group.getAllByRole("radio").map((r) => r.closest("label")!.textContent),
-    ).toEqual(["claude", "CXcodex", "$_Plain shell"]);
+    expect(runRadios()).toEqual([
+      "claude",
+      "codex",
+      "opencode",
+      "Plain shell",
+      "Custom command",
+    ]);
     expect(group.getByRole("radio", { name: "Plain shell" })).toBeChecked();
   });
 
   it("starts on the selected row's machine", () => {
     setup(undefined, { selectedKey: "gpubox::w1:p1" });
     expect(screen.getByRole("radio", { name: /gpubox/ })).toBeChecked();
-  });
-
-  it("every_new_session_goes_in_a_new_terminal_in_its_folder", async () => {
-    // Placement is not a choice any more (the sheet is rebuilt in Task 11): no "Place it", no
-    // worktree, and the same request whatever the machine has or the selection is.
-    const empty = machine("buildbox", { terms: [] });
-    const user = setup(appState(empty), { selectedKey: "buildbox::w2:p1" });
-    expect(screen.queryByLabelText("Place it")).toBeNull();
-    expect(
-      screen.queryByRole("checkbox", { name: "Work in a new git worktree" }),
-    ).toBeNull();
-    await fillFolder(user, "/home/dev/projects/api-service");
-    await fillName(user, "planner");
-    await user.click(createButton());
-    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
-    expect(lastRequest("create_session").placement).toEqual({
-      kind: "newWorkspace",
-    });
   });
 
   it("offers exactly six distinct recent folders of the chosen machine", async () => {
@@ -573,26 +803,6 @@ describe("NewSession form", () => {
     // The other machine's folders are its own.
     await user.click(screen.getByRole("radio", { name: /gpubox/ }));
     expect(recentButtons()).toHaveLength(0);
-  });
-
-  it("splits Advanced agent arguments on whitespace, and only for an agent", async () => {
-    const user = setup(undefined, savedKind("claude"));
-    await fillFolder(user, "/home/dev/projects/api-service");
-    await fillName(user, "planner");
-    await user.click(screen.getByText("Advanced"));
-    await user.type(
-      screen.getByLabelText("Agent arguments"),
-      "--model   sonnet  --fast",
-    );
-    await user.click(createButton());
-    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
-    expect(lastRequest("create_session").agentArgs).toEqual([
-      "--model",
-      "sonnet",
-      "--fast",
-    ]);
-    await user.click(screen.getByRole("radio", { name: "Plain shell" }));
-    expect(screen.getByLabelText("Agent arguments")).toBeDisabled();
   });
 
   it("shows Browse only for the local machine and fills the folder from the dialog", async () => {
@@ -634,6 +844,19 @@ describe("NewSession form", () => {
       screen.queryByRole("radio", { name: /gpubox/ }),
     ).not.toBeInTheDocument();
   });
+
+  it("falls_back_to_a_shell_when_the_choices_cannot_be_read", async () => {
+    invoke.mockImplementation(async (name: string) => {
+      if (name === "list_run_choices") {
+        throw { kind: "invalid", message: "Unknown workbox buildbox." };
+      }
+      return null;
+    });
+    setup();
+    await radio("Plain shell");
+    expect(runRadios()).toEqual(["Plain shell", "Custom command"]);
+    expect(useAppStore.getState().toast).toBe("Unknown workbox buildbox.");
+  });
 });
 
 describe("NewSession prefill and ids", () => {
@@ -671,26 +894,26 @@ describe("NewSession prefill and ids", () => {
 });
 
 describe("NewSession after create", () => {
-  async function createValid(user: ReturnType<typeof userEvent.setup>) {
+  async function createValid(user: User) {
     await fillFolder(user, "/home/dev/projects/api-service");
     await fillName(user, "planner");
     await user.click(createButton());
   }
 
-  it("queues the open and the selection for when the row appears, and closes the sheet", async () => {
+  it("queues the open and the selection by the machine-local address, and closes the sheet", async () => {
     const user = setup();
     expect(screen.getByLabelText("Open here when ready")).toBeChecked();
     await createValid(user);
     await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
-    // The pane is not in the state yet, so open_session must wait for Home.
+    // The terminal is not in the state yet, so open_session must wait for Home.
     expect(callsTo("open_session")).toHaveLength(0);
     expect(callsTo("mark_seen")).toHaveLength(0);
     expect(useAppStore.getState().pendingOpen).toEqual({
-      key: "buildbox::w3:p1",
+      key: "buildbox::t7",
       machineId: "buildbox",
-      address: "w3:p1",
+      address: "t7",
     });
-    expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p1");
+    expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::t7");
   });
 
   it("names the terminal in the option when open_target is external", () => {
@@ -718,7 +941,7 @@ describe("NewSession after create", () => {
     await createValid(user);
     await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
     expect(useAppStore.getState().pendingOpen).toBeNull();
-    expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p1");
+    expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::t7");
   });
 
   it("reports a failure to the toast when the sheet was closed while creating", async () => {
@@ -733,7 +956,7 @@ describe("NewSession after create", () => {
             fail = reject;
           });
         }
-        if (name === "list_agent_kinds") return KINDS;
+        if (name === "list_run_choices") return REMOTE_CHOICES;
         return args ? fakePreview(args.req) : null;
       },
     );
@@ -753,14 +976,16 @@ describe("NewSession after create", () => {
     createErrors.push({
       kind: "maybeApplied",
       argv: [],
-      message: "The pane w3:p1 was created; the agent may not have started.",
+      message: "herdr-core did not answer in time. It may have been applied.",
     });
     await user.click(createButton());
-    expect(await screen.findByText(/may not have started/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/may have been applied/),
+    ).toBeInTheDocument();
     await fillName(user, "x");
-    expect(screen.getByText(/may not have started/)).toBeInTheDocument();
+    expect(screen.getByText(/may have been applied/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText(/may not have started/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/may have been applied/)).not.toBeInTheDocument();
   });
 
   it("drops an ordinary error as soon as the form changes", async () => {
@@ -781,10 +1006,10 @@ describe("NewSession after create", () => {
     createErrors.push({
       kind: "maybeApplied",
       argv: [],
-      message: "The pane w3:p1 was created, but the agent did not start.",
+      message: "herdr-core did not answer in time.",
     });
     await user.click(createButton());
-    expect(await screen.findByText(/did not start/)).toBeInTheDocument();
+    expect(await screen.findByText(/did not answer/)).toBeInTheDocument();
     expect(useAppStore.getState().sheet).toBe("new-session");
     expect(useAppStore.getState().pendingSelectKey).toBeNull();
     expect(callsTo("open_session")).toHaveLength(0);
@@ -801,19 +1026,15 @@ describe("NewSession as a sheet", () => {
   });
 
   it.each([
-    [
-      "Escape",
-      async (u: ReturnType<typeof userEvent.setup>) => u.keyboard("{Escape}"),
-    ],
+    ["Escape", async (u: User) => u.keyboard("{Escape}")],
     [
       "Cancel",
-      async (u: ReturnType<typeof userEvent.setup>) =>
+      async (u: User) =>
         u.click(screen.getByRole("button", { name: "Cancel" })),
     ],
     [
       "the close button",
-      async (u: ReturnType<typeof userEvent.setup>) =>
-        u.click(screen.getByRole("button", { name: "Close" })),
+      async (u: User) => u.click(screen.getByRole("button", { name: "Close" })),
     ],
   ])("clears the sheet on %s", async (_label, act) => {
     const user = setup();

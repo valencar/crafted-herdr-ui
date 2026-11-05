@@ -120,6 +120,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(cli);
     app.manage(core);
     app.manage(InstalledCache::default());
+    app.manage(actions::KindsCache::default());
     app.manage(MachineSetup::new(Arc::new(PortablePty)));
     // An `Arc`, so the blocking `term_*` work can move a handle into `spawn_blocking`.
     app.manage(Arc::new(TermSessions::new(Arc::new(PortablePty))));
@@ -267,7 +268,7 @@ pub fn run() {
             commands::refresh_now,
             commands::reconnect_core,
             commands::get_command_log,
-            commands::list_agent_kinds,
+            commands::list_run_choices,
             commands::open_session,
             commands::open_in_terminal,
             commands::list_ssh_hosts,

@@ -236,41 +236,6 @@ pub async fn herdr_status(bin: &Path, env: &[(String, String)], limit: Duration)
     Some(text.trim().to_owned())
 }
 
-/// Agent kinds offered when `herdr agent start --help` cannot be read.
-pub const FALLBACK_AGENT_KINDS: [&str; 5] = ["claude", "codex", "copilot", "opencode", "cursor"];
-
-/// The values listed for `--kind` in `herdr agent start --help` (`[possible values: a, b, c]`).
-/// The list may wrap over several lines. Empty when there is no such list.
-pub fn parse_agent_kinds(help: &str) -> Vec<String> {
-    let after_kind = help.find("--kind").map_or(help, |i| &help[i..]);
-    let Some(start) = after_kind.find("[possible values:") else {
-        return Vec::new();
-    };
-    let list = &after_kind[start + "[possible values:".len()..];
-    let list = list.split(']').next().unwrap_or_default();
-    list.split(',')
-        .map(str::trim)
-        .filter(|k| {
-            k.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-                && k.chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
-        })
-        .map(str::to_owned)
-        .collect()
-}
-
-/// Runs `<bin> agent start --help` with exactly `env` and returns the agent kinds it lists.
-/// `None` if the binary fails, hangs past `limit`, or lists no kinds.
-pub async fn herdr_agent_kinds(
-    bin: &Path,
-    env: &[(String, String)],
-    limit: Duration,
-) -> Option<Vec<String>> {
-    let text = run_plain_text(bin, env, &["agent", "start", "--help"], limit).await?;
-    let kinds = parse_agent_kinds(&text);
-    (!kinds.is_empty()).then_some(kinds)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,17 +554,6 @@ mod tests {
         assert_eq!(missing.await, None);
     }
 
-    #[test]
-    fn agent_kinds_come_from_the_kind_option() {
-        let help = "Options:\n      --kind <KIND>\n          Supported agent kind\n          \n          [possible values: pi, claude, codex,\n          open-code, kilo_2]\n\n      --pane <ID>\n          [possible values: nope]\n";
-        assert_eq!(
-            parse_agent_kinds(help),
-            ["pi", "claude", "codex", "open-code", "kilo_2"]
-        );
-        assert!(parse_agent_kinds("no list here").is_empty());
-        assert!(parse_agent_kinds("--kind <KIND>\n[possible values: ]").is_empty());
-    }
-
     #[tokio::test]
     async fn herdr_status_runs_status_and_returns_its_text() {
         let dir = tempfile::tempdir().unwrap();
@@ -616,33 +570,6 @@ mod tests {
         let fail = fake_shell(dir.path(), "status-fail", "echo 'no server'; exit 1");
         assert_eq!(herdr_status(Path::new(&fail), &[], limit).await, None);
         let missing = herdr_status(Path::new("/nonexistent/herdr"), &[], limit);
-        assert_eq!(missing.await, None);
-    }
-
-    #[tokio::test]
-    async fn herdr_agent_kinds_runs_agent_start_help() {
-        let dir = tempfile::tempdir().unwrap();
-        let ok = fake_shell(
-            dir.path(),
-            "kinds-ok",
-            r#"[ "$1 $2 $3" = "agent start --help" ] && printf -- '--kind <KIND>\n[possible values: claude, codex]\n'"#,
-        );
-        let kinds = herdr_agent_kinds(Path::new(&ok), &[], Duration::from_secs(5)).await;
-        assert_eq!(kinds, Some(vec!["claude".to_string(), "codex".to_string()]));
-
-        let none = fake_shell(dir.path(), "kinds-none", "echo 'no values'");
-        let fail = fake_shell(
-            dir.path(),
-            "kinds-fail",
-            "echo '[possible values: a]'; exit 1",
-        );
-        let hang = fake_shell(dir.path(), "kinds-hang", "exec sleep 30");
-        for bin in [none, fail, hang] {
-            let limit = Duration::from_millis(300);
-            assert_eq!(herdr_agent_kinds(Path::new(&bin), &[], limit).await, None);
-        }
-        let missing =
-            herdr_agent_kinds(Path::new("/nonexistent/herdr"), &[], Duration::from_secs(1));
         assert_eq!(missing.await, None);
     }
 }

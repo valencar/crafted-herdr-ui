@@ -398,9 +398,11 @@ it("opens the tab but leaves the sheet alone when focus-row or open-row arrives 
     settings: { open_target: "app" } as unknown as Settings,
   });
   listBuildbox();
-  // The sheet lists agent kinds; the default mock answers every command with an object.
+  // The sheet lists the run choices; the default mock answers every command with an object.
   ipc.invokeTyped.mockImplementation(async (name: string) =>
-    name === "list_agent_kinds" ? [] : { installed: [], default: "ghostty" },
+    name === "list_run_choices"
+      ? { kinds: [], templates: [], kindsChecked: true }
+      : { installed: [], default: "ghostty" },
   );
   render(<App />);
   await waitFor(() => expect(ipc.onOpenRow).toHaveBeenCalled());
@@ -1237,8 +1239,12 @@ describe("the window chrome", () => {
     ipc.invokeTyped.mockImplementation(async (name: string) =>
       name === "get_terminals"
         ? { installed: ["ghostty"], default: "ghostty" }
-        : name === "list_agent_kinds"
-          ? ["claude"]
+        : name === "list_run_choices"
+          ? {
+              kinds: [{ kind: "claude", takesTask: true }],
+              templates: [],
+              kindsChecked: true,
+            }
           : name === "get_command_log"
             ? []
             : null,

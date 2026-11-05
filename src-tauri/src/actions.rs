@@ -1,43 +1,43 @@
-//! What the UI can ask herdr to do: pure argv builders for the new-session flow (also shown to
-//! the user as the command preview) and the `Actions` runner that executes them, plus
+//! What the UI can ask for: the new-session flow on herdr-core's `terminal.run` (pure
+//! `run_params`, `validate_name`, the installed-agents check and `NewSessions`, which makes the
+//! calls), the saved-machine commands that still go through `HerdrCli` until Task 12, and
 //! `RowActions`, what the row menus do to a terminal through herdr-core.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use ts_rs::TS;
 
 use crate::activity::ActivityV2;
-use crate::agents::{DisplayStatus, TerminalView};
+use crate::agents::{DisplayStatus, KNOWN_AGENTS, KnownAgent, TaskArg, TerminalView};
+use crate::core::model::TemplateInfo;
 use crate::core::{CoreClient, CoreError};
-use crate::herdr::cli::{HerdrCli, T_AGENT_START, T_CREATE, T_DEFAULT};
+use crate::herdr::cli::{HerdrCli, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
-use crate::herdr::model::{MachineStatusEntry, parse_created_pane};
-use crate::terminal::shell_quote;
+use crate::herdr::model::MachineStatusEntry;
+use crate::{LOCAL, lock};
 
-/// Where a new session goes.
+/// What a new session runs.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
 #[serde(
-    tag = "kind",
+    tag = "type",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 #[ts(export, export_to = "../../src/lib/bindings/")]
-pub enum Placement {
-    NewTab {
-        workspace_id: String,
-    },
-    SplitBeside {
-        pane_id: String,
-    },
-    NewWorkspace,
-    /// `trust` is passed to herdr as `--trust-repository`; only an explicit click may set it.
-    Worktree {
-        branch: String,
-        trust: bool,
-    },
+pub enum RunChoice {
+    /// A known agent, by the kind the UI shows (`KNOWN_AGENTS`).
+    Agent { kind: String },
+    /// A template by name (Local workbox only).
+    Template { name: String },
+    /// The machine's own shell.
+    Shell,
+    /// A shell line, run by the machine's shell.
+    Command { line: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
@@ -46,19 +46,42 @@ pub enum Placement {
 pub struct NewSessionRequest {
     pub machine_id: String,
     pub cwd: String,
-    /// The agent kind, or `None` for a plain shell.
-    pub kind: Option<String>,
-    pub name: String,
-    pub placement: Placement,
-    pub agent_args: Vec<String>,
+    pub run: RunChoice,
+    /// The terminal's name; the core makes one up when it is absent or blank.
+    pub name: Option<String>,
+    /// The first message, for a template or an agent that takes one as an argument.
+    pub task: Option<String>,
+    pub keep: bool,
 }
 
+/// A started terminal. `address` is local to its machine (`t7`), as the UI keys rows.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct CreatedSession {
-    pub pane_id: String,
-    pub terminal_id: Option<String>,
+    pub address: String,
+}
+
+/// An agent kind the machine can run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct KindChoice {
+    pub kind: String,
+    /// Whether the agent takes a starting prompt as an argument.
+    pub takes_task: bool,
+}
+
+/// What the New session sheet offers on one machine.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct RunChoices {
+    pub kinds: Vec<KindChoice>,
+    /// Local only: a remote machine resolves template names itself.
+    pub templates: Vec<TemplateInfo>,
+    /// False when the installed-agents check failed and every known kind is listed.
+    pub kinds_checked: bool,
 }
 
 /// Why an action did not (fully) happen. Serialized tagged by `kind`, like `HerdrError`.
@@ -88,116 +111,269 @@ impl ActionError {
     }
 }
 
-/// Stands in for the new pane's id in the `agent start` step until the first step has run.
-pub const PANE_PLACEHOLDER: &str = "{PANE}";
-
 const NAME_MAX_LEN: usize = 32;
 
-/// Agent names: `[a-z][a-z0-9_-]{0,31}`.
-pub fn validate_name(name: &str) -> Result<(), String> {
-    let mut chars = name.chars();
-    let starts_ok = chars.next().is_some_and(|c| c.is_ascii_lowercase());
+const NAME_HELP: &str = "Use 1 to 32 of a-z 0-9 - _ . starting with a letter or digit.";
+
+/// Terminal names: 1 to 32 of `a-z 0-9 - _ .`, starting with a letter or digit, and not shaped
+/// like an address (`t7`, `t1b`). Spec section 3.
+pub fn validate_name(s: &str) -> Result<(), String> {
+    let mut chars = s.chars();
+    let starts_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
     let rest_ok =
-        chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
-    if starts_ok && rest_ok && name.len() <= NAME_MAX_LEN {
-        Ok(())
-    } else {
-        Err(format!(
-            "Use 1 to {NAME_MAX_LEN} characters: a lowercase letter first, then lowercase letters, digits, - or _."
-        ))
+        chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'));
+    if !(starts_ok && rest_ok && s.len() <= NAME_MAX_LEN) {
+        return Err(NAME_HELP.to_owned());
+    }
+    // `t`, digits, then letters: what an address (or a worker's) looks like.
+    let tail = s.strip_prefix('t').unwrap_or_default();
+    let digits = tail.chars().take_while(char::is_ascii_digit).count();
+    if digits > 0 && tail[digits..].chars().all(|c| c.is_ascii_lowercase()) {
+        return Err(format!(
+            "“{s}” looks like a terminal address (t7). Pick a name that doesn’t."
+        ));
+    }
+    Ok(())
+}
+
+fn known_agent(kind: &str) -> Option<&'static KnownAgent> {
+    KNOWN_AGENTS.iter().find(|a| a.kind == kind)
+}
+
+/// The `terminal.run` params for a request. `machine_name` is the remote machine as the core
+/// names it, or `None` for Local (no `on`). Only the names the core's schema has are used.
+pub fn run_params(req: &NewSessionRequest, machine_name: Option<&str>) -> Result<Value, String> {
+    let cwd = req.cwd.trim();
+    if cwd.is_empty() {
+        return Err("Folder can’t be empty.".to_owned());
+    }
+    if cwd.starts_with('-') {
+        return Err("Folder can’t start with “-”.".to_owned());
+    }
+    let task = req.task.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    let mut p = Map::new();
+    match &req.run {
+        RunChoice::Agent { kind } => {
+            let agent = known_agent(kind).ok_or_else(|| format!("Unknown agent “{kind}”."))?;
+            let mut argv: Vec<String> = agent.start.iter().map(|a| (*a).to_owned()).collect();
+            if let Some(task) = task {
+                if agent.task != TaskArg::Positional {
+                    return Err(format!("{kind} doesn’t take a task here."));
+                }
+                argv.push(task.to_owned());
+            }
+            p.insert("argv".into(), json!(argv));
+        }
+        RunChoice::Template { name } => {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err("Template can’t be empty.".to_owned());
+            }
+            let mut argv = vec![name.to_owned()];
+            argv.extend(task.map(str::to_owned));
+            p.insert("argv".into(), json!(argv));
+        }
+        RunChoice::Shell | RunChoice::Command { .. } if task.is_some() => {
+            return Err("Only an agent or a template takes a task.".to_owned());
+        }
+        RunChoice::Shell => {}
+        RunChoice::Command { line } => {
+            if line.trim().is_empty() {
+                return Err("Command can’t be empty.".to_owned());
+            }
+            p.insert("line".into(), json!(line));
+        }
+    }
+    p.insert("cwd".into(), json!(cwd));
+    if let Some(name) = req.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        validate_name(name)?;
+        p.insert("name".into(), json!(name));
+    }
+    if let Some(on) = machine_name {
+        p.insert("on".into(), json!(on));
+    }
+    p.insert("keep".into(), json!(req.keep));
+    // The core's own rule for a client-started terminal (labels.md): nothing seen yet.
+    p.insert("labels".into(), json!({"herdr.seen": "0"}));
+    p.insert(
+        "env".into(),
+        json!({"TERM": "xterm-256color", "COLORTERM": "truecolor"}),
+    );
+    Ok(Value::Object(p))
+}
+
+/// The command line for the preview: `display("terminal.run", …)` of the very params that run.
+pub fn preview(
+    req: &NewSessionRequest,
+    machine_name: Option<&str>,
+    bin_name: &str,
+) -> Result<String, ActionError> {
+    let params = run_params(req, machine_name).map_err(ActionError::invalid)?;
+    Ok(crate::core::display::display(
+        "terminal.run",
+        &params,
+        bin_name,
+    ))
+}
+
+/// The installed programs found on each machine (by machine id), kept for the session.
+#[derive(Default)]
+pub struct KindsCache(Mutex<HashMap<String, HashSet<String>>>);
+
+/// The New session calls, through the one door.
+pub struct NewSessions<'a> {
+    core: &'a CoreClient,
+    cache: &'a KindsCache,
+}
+
+/// The shell line that prints `has:<program>` for each known agent found on the machine. The
+/// program names come only from `KNOWN_AGENTS`, never from the UI. It always exits 0.
+fn installed_check_script() -> String {
+    let programs: Vec<&str> = KNOWN_AGENTS.iter().map(|a| a.program).collect();
+    format!(
+        "for p in {}; do command -v \"$p\" >/dev/null 2>&1 && echo \"has:$p\"; done; true",
+        programs.join(" ")
+    )
+}
+
+/// The programs a finished `machine.exec` found, or `None` when the check itself failed (it
+/// ran out of time, or the reply can't be read). A nonzero exit code is still an answer.
+fn installed_programs(result: &Value) -> Option<HashSet<String>> {
+    if result.get("timed_out").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let stdout = result.get("stdout").and_then(Value::as_str)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(stdout)
+        .ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    Some(
+        text.lines()
+            .filter_map(|l| l.trim().strip_prefix("has:"))
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
+fn kind_choice(a: &KnownAgent) -> KindChoice {
+    KindChoice {
+        kind: a.kind.to_owned(),
+        takes_task: a.task == TaskArg::Positional,
+    }
+}
+
+/// The address as its own machine knows it. A remote run may answer `buildbox/t7`.
+fn machine_local_address(address: &str, machine_name: Option<&str>) -> String {
+    machine_name
+        .and_then(|name| address.strip_prefix(name)?.strip_prefix('/'))
+        .unwrap_or(address)
+        .to_owned()
+}
+
+impl<'a> NewSessions<'a> {
+    pub fn new(core: &'a CoreClient, cache: &'a KindsCache) -> Self {
+        Self { core, cache }
+    }
+
+    /// The programs on the machine, from the cache or one quiet `machine.exec`. `None` when the
+    /// check failed; a failure is not remembered.
+    async fn installed(
+        &self,
+        machine_id: &str,
+        machine_name: Option<&str>,
+    ) -> Option<HashSet<String>> {
+        if let Some(found) = lock(&self.cache.0).get(machine_id) {
+            return Some(found.clone());
+        }
+        let mut params = json!({
+            "argv": ["sh", "-lc", installed_check_script()],
+            "timeout": 15,
+        });
+        if let Some(on) = machine_name {
+            params["on"] = json!(on);
+        }
+        let result = self
+            .core
+            .call_quiet(machine_id, "machine.exec", params)
+            .await
+            .ok()?;
+        let found = installed_programs(&result)?;
+        lock(&self.cache.0).insert(machine_id.to_owned(), found.clone());
+        Some(found)
+    }
+
+    /// What the sheet offers on this machine. `machine_name` is `None` for Local.
+    pub async fn run_choices(&self, machine_id: &str, machine_name: Option<&str>) -> RunChoices {
+        let installed = self.installed(machine_id, machine_name).await;
+        let kinds = KNOWN_AGENTS
+            .iter()
+            .filter(|a| installed.as_ref().is_none_or(|set| set.contains(a.program)))
+            .map(kind_choice)
+            .collect();
+        // The template list is Local's; a remote resolves template names itself. A list that
+        // can't be read is an empty one (the call is in the Activity log either way).
+        let templates = if machine_id == LOCAL {
+            match self
+                .core
+                .call_quiet(LOCAL, "templates.list", json!({}))
+                .await
+            {
+                Ok(v) => v
+                    .get("templates")
+                    .and_then(|t| serde_json::from_value(t.clone()).ok())
+                    .unwrap_or_default(),
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        RunChoices {
+            kinds,
+            templates,
+            kinds_checked: installed.is_some(),
+        }
+    }
+
+    /// Starts the terminal. A template run can take a while (the core waits for the agent), so
+    /// it gets a connection of its own. A timeout may have been applied and is never retried.
+    pub async fn create(
+        &self,
+        req: &NewSessionRequest,
+        machine_name: Option<&str>,
+    ) -> Result<CreatedSession, ActionError> {
+        let params = run_params(req, machine_name).map_err(ActionError::invalid)?;
+        let long = matches!(req.run, RunChoice::Template { .. });
+        let result = if long {
+            self.core
+                .call_long(&req.machine_id, "terminal.run", params)
+                .await
+        } else {
+            self.core
+                .call(&req.machine_id, "terminal.run", params)
+                .await
+        };
+        let on = machine_name.unwrap_or("Local");
+        let reply = result.map_err(|e| core_failure(e, "terminal.run", on))?;
+        let address = reply
+            .get("address")
+            .and_then(Value::as_str)
+            .filter(|a| !a.is_empty())
+            .ok_or_else(|| ActionError::MaybeApplied {
+                message: format!(
+                    "herdr-core started a terminal on {on}, but its reply could not be read; refreshing."
+                ),
+                argv: vec!["terminal.run".to_owned()],
+            })?;
+        Ok(CreatedSession {
+            address: machine_local_address(address, machine_name),
+        })
     }
 }
 
 fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|p| (*p).to_owned()).collect()
-}
-
-/// The herdr calls for a new session, in order. The last step is `agent start` when `kind` is
-/// set, with `{PANE}` where the first step's pane id goes. This is also what the UI previews.
-pub fn plan_new_session(req: &NewSessionRequest) -> Vec<Vec<String>> {
-    let mut first = match &req.placement {
-        Placement::NewTab { workspace_id } => argv(&[
-            "tab",
-            "create",
-            "--workspace",
-            workspace_id,
-            "--cwd",
-            &req.cwd,
-            "--label",
-            &req.name,
-        ]),
-        Placement::SplitBeside { pane_id } => argv(&[
-            "pane",
-            "split",
-            pane_id,
-            "--direction",
-            "right",
-            "--cwd",
-            &req.cwd,
-        ]),
-        Placement::NewWorkspace => argv(&[
-            "workspace",
-            "create",
-            "--cwd",
-            &req.cwd,
-            "--label",
-            &req.name,
-        ]),
-        Placement::Worktree { branch, .. } => argv(&[
-            "worktree", "create", "--cwd", &req.cwd, "--branch", branch, "--label", &req.name,
-        ]),
-    };
-    first.push("--no-focus".into());
-    if matches!(req.placement, Placement::Worktree { trust: true, .. }) {
-        first.push("--trust-repository".into());
-    }
-    let mut steps = vec![first];
-    if let Some(kind) = &req.kind {
-        let mut start = argv(&[
-            "agent",
-            "start",
-            &req.name,
-            "--kind",
-            kind,
-            "--pane",
-            PANE_PLACEHOLDER,
-        ]);
-        if !req.agent_args.is_empty() {
-            start.push("--".into());
-            start.extend(req.agent_args.iter().cloned());
-        }
-        steps.push(start);
-    }
-    steps
-}
-
-/// One argument of a displayed command line. The pane placeholder stays readable.
-fn display_arg(arg: &str) -> String {
-    if arg == PANE_PLACEHOLDER {
-        arg.to_owned()
-    } else {
-        shell_quote(arg)
-    }
-}
-
-/// A command line for people to read and copy: `herdr [--machine <label>] <args…>`.
-fn display_command(machine_label: Option<&str>, argv: &[String]) -> String {
-    let mut parts = vec!["herdr".to_owned()];
-    if let Some(label) = machine_label {
-        parts.push("--machine".into());
-        parts.push(shell_quote(label));
-    }
-    parts.extend(argv.iter().map(|a| display_arg(a)));
-    parts.join(" ")
-}
-
-/// The command lines `create_session` will run, for the preview. `machine_label` is the
-/// remote machine's label, or `None` for Local.
-pub fn preview_new_session(req: &NewSessionRequest, machine_label: Option<&str>) -> Vec<String> {
-    plan_new_session(req)
-        .iter()
-        .map(|step| display_command(machine_label, step))
-        .collect()
 }
 
 /// Values that herdr would read as a flag, or that are empty, never reach the CLI.
@@ -213,39 +389,11 @@ fn check_arg(what: &str, value: &str) -> Result<(), ActionError> {
     Ok(())
 }
 
-fn validate_request(req: &NewSessionRequest) -> Result<(), ActionError> {
-    check_arg("Folder", &req.cwd)?;
-    match &req.placement {
-        Placement::NewTab { workspace_id } => check_arg("Workspace", workspace_id)?,
-        Placement::SplitBeside { pane_id } => check_arg("Pane", pane_id)?,
-        Placement::NewWorkspace => {}
-        Placement::Worktree { branch, .. } => check_arg("Branch", branch)?,
-    }
-    if let Some(kind) = &req.kind {
-        check_arg("Agent kind", kind)?;
-        validate_name(&req.name).map_err(ActionError::invalid)?;
-    } else if !matches!(req.placement, Placement::SplitBeside { .. }) {
-        check_arg("Name", &req.name)?;
-    }
-    Ok(())
-}
-
 /// The call timed out: it may or may not have been applied, and is never retried.
 fn timed_out(argv: Vec<String>) -> ActionError {
     ActionError::MaybeApplied {
         message: format!(
             "herdr did not answer in time. `herdr {}` may have been applied; refreshing.",
-            argv.join(" ")
-        ),
-        argv,
-    }
-}
-
-/// herdr exited 0 but its reply could not be read, so the action was applied.
-fn unreadable_reply(argv: Vec<String>) -> ActionError {
-    ActionError::MaybeApplied {
-        message: format!(
-            "herdr applied `herdr {}` but its reply could not be read; refreshing.",
             argv.join(" ")
         ),
         argv,
@@ -259,56 +407,20 @@ pub type RefreshHook = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 #[derive(Debug, Clone, Copy)]
 pub struct Timeouts {
     pub default: Duration,
-    pub create: Duration,
-    pub agent_start: Duration,
 }
 
 impl Default for Timeouts {
     fn default() -> Self {
-        Self {
-            default: T_DEFAULT,
-            create: T_CREATE,
-            agent_start: T_AGENT_START,
-        }
+        Self { default: T_DEFAULT }
     }
 }
 
-/// Runs the UI's actions through `HerdrCli`. Mutations are never retried: a timeout becomes
-/// `ActionError::MaybeApplied` and the machine list is asked to refresh.
+/// Runs the saved-machine commands through `HerdrCli` (until Task 12 moves them to the core).
 #[derive(Clone)]
 pub struct Actions {
     cli: HerdrCli,
     refresh: RefreshHook,
     timeouts: Timeouts,
-}
-
-fn created_terminal_id(v: &Value) -> Option<String> {
-    [
-        "/result/agent/terminal_id",
-        "/result/root_pane/terminal_id",
-        "/result/pane/terminal_id",
-    ]
-    .iter()
-    .find_map(|p| v.pointer(p).and_then(Value::as_str))
-    .map(str::to_owned)
-}
-
-/// A create step whose outcome is unknown: the agent step never runs after it, and the message
-/// says so.
-fn agent_not_started(error: ActionError) -> ActionError {
-    match error {
-        ActionError::MaybeApplied { message, argv } => ActionError::MaybeApplied {
-            message: format!("{message} The agent was not started."),
-            argv,
-        },
-        other => other,
-    }
-}
-
-/// The new pane's id from a create reply. `mutate` already refreshed; if the reply has no pane
-/// the action was still applied, so say so rather than report a failure.
-fn created_pane(reply: &Value, argv: Vec<String>) -> Result<String, ActionError> {
-    parse_created_pane(reply).map_err(|_| unreadable_reply(argv))
 }
 
 impl Actions {
@@ -323,95 +435,6 @@ impl Actions {
     pub fn with_timeouts(mut self, timeouts: Timeouts) -> Self {
         self.timeouts = timeouts;
         self
-    }
-
-    /// One mutating call. Refreshes the machine afterwards unless herdr refused it. A reply that
-    /// can't be read (exit 0) counts as applied.
-    async fn mutate(
-        &self,
-        machine: &str,
-        args: Vec<String>,
-        limit: Duration,
-    ) -> Result<Value, ActionError> {
-        match self.cli.run(Some(machine), &args, limit).await {
-            Ok(v) => {
-                (self.refresh)(Some(machine));
-                Ok(v)
-            }
-            Err(HerdrError::Timeout { argv }) => {
-                (self.refresh)(Some(machine));
-                Err(timed_out(argv))
-            }
-            // Parse only happens after exit 0, so the mutation went through.
-            Err(HerdrError::Parse { .. }) => {
-                (self.refresh)(Some(machine));
-                Err(unreadable_reply(args))
-            }
-            Err(error) => Err(ActionError::Herdr { error }),
-        }
-    }
-
-    /// Creates the pane and, for an agent, starts it there. If the agent fails to start, the
-    /// new pane stays open and the error says so.
-    pub async fn create_session(
-        &self,
-        req: &NewSessionRequest,
-    ) -> Result<CreatedSession, ActionError> {
-        validate_request(req)?;
-        let mut steps = plan_new_session(req).into_iter();
-        let Some(first) = steps.next() else {
-            return Err(ActionError::invalid("Nothing to create."));
-        };
-        // An agent's later step never runs after an unknown create, and the error says so.
-        let not_started = |e: ActionError| {
-            if req.kind.is_some() {
-                agent_not_started(e)
-            } else {
-                e
-            }
-        };
-        let created = self
-            .mutate(&req.machine_id, first.clone(), self.timeouts.create)
-            .await
-            .map_err(not_started)?;
-        let pane_id = created_pane(&created, first).map_err(not_started)?;
-        let session = CreatedSession {
-            terminal_id: created_terminal_id(&created),
-            pane_id,
-        };
-        let Some(mut start) = steps.next() else {
-            return Ok(session);
-        };
-        for a in &mut start {
-            if a == PANE_PLACEHOLDER {
-                a.clone_from(&session.pane_id);
-            }
-        }
-        let step = start.clone();
-        match self
-            .mutate(&req.machine_id, start, self.timeouts.agent_start)
-            .await
-        {
-            Ok(started) => Ok(CreatedSession {
-                terminal_id: created_terminal_id(&started).or(session.terminal_id),
-                pane_id: session.pane_id,
-            }),
-            // Timed out or unreadable reply: the agent may be running.
-            Err(ActionError::MaybeApplied { argv, .. }) => Err(ActionError::MaybeApplied {
-                message: format!(
-                    "The pane {} was created; the agent may or may not have started; refreshing.",
-                    session.pane_id
-                ),
-                argv,
-            }),
-            Err(e) => Err(ActionError::MaybeApplied {
-                message: format!(
-                    "The pane {} was created, but the agent did not start ({e}). The pane was left open.",
-                    session.pane_id
-                ),
-                argv: step,
-            }),
-        }
     }
 
     /// Saved-machine changes are local configuration, so they never carry `--machine`. These
@@ -811,203 +834,214 @@ impl<'a> RowActions<'a> {
 mod tests {
     use super::*;
 
-    fn s(v: &[&str]) -> Vec<String> {
-        v.iter().map(|x| x.to_string()).collect()
-    }
-
-    fn req(kind: Option<&str>, placement: Placement, agent_args: &[&str]) -> NewSessionRequest {
+    fn req(run: RunChoice) -> NewSessionRequest {
         NewSessionRequest {
-            machine_id: "buildbox".into(),
+            machine_id: "local".into(),
             cwd: "/home/dev/api-service".into(),
-            kind: kind.map(str::to_owned),
-            name: "orders".into(),
-            placement,
-            agent_args: s(agent_args),
+            run,
+            name: None,
+            task: None,
+            keep: false,
         }
     }
 
-    #[test]
-    fn plan_new_tab_agent() {
-        let plan = plan_new_session(&req(
-            Some("claude"),
-            Placement::NewTab {
-                workspace_id: "w1".into(),
-            },
-            &[],
-        ));
-        assert_eq!(
-            plan,
-            vec![
-                s(&[
-                    "tab",
-                    "create",
-                    "--workspace",
-                    "w1",
-                    "--cwd",
-                    "/home/dev/api-service",
-                    "--label",
-                    "orders",
-                    "--no-focus"
-                ]),
-                s(&[
-                    "agent", "start", "orders", "--kind", "claude", "--pane", "{PANE}"
-                ]),
-            ]
-        );
+    fn agent(kind: &str) -> RunChoice {
+        RunChoice::Agent { kind: kind.into() }
     }
 
     #[test]
-    fn plan_split_shell() {
-        let plan = plan_new_session(&req(
+    fn run_params_agent_with_task_positional() {
+        let mut r = req(agent("claude"));
+        r.task = Some("fix the flaky test".into());
+        r.name = Some("orders".into());
+        r.keep = true;
+        let p = run_params(&r, None).unwrap();
+        assert_eq!(
+            p,
+            json!({
+                "argv": ["claude", "fix the flaky test"],
+                "cwd": "/home/dev/api-service",
+                "name": "orders",
+                "keep": true,
+                "labels": {"herdr.seen": "0"},
+                "env": {"TERM": "xterm-256color", "COLORTERM": "truecolor"},
+            })
+        );
+        // Codex starts with `--no-daemon`, then its task.
+        let mut c = req(agent("codex"));
+        c.task = Some("review".into());
+        assert_eq!(
+            run_params(&c, None).unwrap()["argv"],
+            json!(["codex", "--no-daemon", "review"])
+        );
+        // No task: just the start argv. A blank task is no task.
+        let mut bare = req(agent("claude"));
+        bare.task = Some("  ".into());
+        assert_eq!(run_params(&bare, None).unwrap()["argv"], json!(["claude"]));
+        assert!(run_params(&bare, None).unwrap().get("name").is_none());
+    }
+
+    #[test]
+    fn run_params_task_refused_without_rule() {
+        let mut r = req(agent("opencode"));
+        r.task = Some("do it".into());
+        let e = run_params(&r, None).unwrap_err();
+        assert!(e.contains("opencode") && e.contains("task"), "{e}");
+        // Not for a shell or a command either, and an unknown kind is refused.
+        let mut shell = req(RunChoice::Shell);
+        shell.task = Some("x".into());
+        assert!(run_params(&shell, None).is_err());
+        assert!(run_params(&req(agent("nope")), None).is_err());
+    }
+
+    #[test]
+    fn run_params_template() {
+        let mut r = req(RunChoice::Template {
+            name: "reviewer".into(),
+        });
+        assert_eq!(run_params(&r, None).unwrap()["argv"], json!(["reviewer"]));
+        r.task = Some("src/lib.rs".into());
+        assert_eq!(
+            run_params(&r, None).unwrap()["argv"],
+            json!(["reviewer", "src/lib.rs"])
+        );
+        let blank = req(RunChoice::Template { name: " ".into() });
+        assert!(run_params(&blank, None).is_err());
+    }
+
+    #[test]
+    fn run_params_shell_has_no_argv() {
+        let p = run_params(&req(RunChoice::Shell), None).unwrap();
+        assert!(p.get("argv").is_none() && p.get("line").is_none(), "{p}");
+        assert_eq!(p["cwd"], "/home/dev/api-service");
+        assert_eq!(p["keep"], false);
+    }
+
+    #[test]
+    fn run_params_command_uses_line() {
+        let p = run_params(
+            &req(RunChoice::Command {
+                line: "npm test && echo done".into(),
+            }),
             None,
-            Placement::SplitBeside {
-                pane_id: "w1:p2".into(),
-            },
-            &[],
-        ));
-        assert_eq!(
-            plan,
-            vec![s(&[
-                "pane",
-                "split",
-                "w1:p2",
-                "--direction",
-                "right",
-                "--cwd",
-                "/home/dev/api-service",
-                "--no-focus"
-            ])]
-        );
+        )
+        .unwrap();
+        assert_eq!(p["line"], "npm test && echo done");
+        assert!(p.get("argv").is_none());
+        let empty = req(RunChoice::Command { line: "  ".into() });
+        assert!(run_params(&empty, None).is_err());
     }
 
     #[test]
-    fn plan_new_workspace_shell() {
-        let plan = plan_new_session(&req(None, Placement::NewWorkspace, &[]));
-        assert_eq!(
-            plan,
-            vec![s(&[
-                "workspace",
-                "create",
-                "--cwd",
-                "/home/dev/api-service",
-                "--label",
-                "orders",
-                "--no-focus"
-            ])]
+    fn run_params_remote_sets_on() {
+        let p = run_params(&req(RunChoice::Shell), Some("buildbox")).unwrap();
+        assert_eq!(p["on"], "buildbox");
+        assert!(
+            run_params(&req(RunChoice::Shell), None)
+                .unwrap()
+                .get("on")
+                .is_none()
         );
+        // A folder is required, and one that looks like a flag is refused.
+        let mut no_folder = req(RunChoice::Shell);
+        no_folder.cwd = " ".into();
+        assert!(run_params(&no_folder, None).is_err());
+        no_folder.cwd = "--help".into();
+        assert!(run_params(&no_folder, None).is_err());
     }
 
     #[test]
-    fn plan_worktree_trust_flag_only_when_true() {
-        let placement = |trust| Placement::Worktree {
-            branch: "feat/x".into(),
-            trust,
-        };
-        let without = plan_new_session(&req(None, placement(false), &[]));
-        let with = plan_new_session(&req(None, placement(true), &[]));
+    fn starts_with_seen_zero_string_label() {
+        let p = run_params(&req(RunChoice::Shell), None).unwrap();
+        assert_eq!(p["labels"], json!({"herdr.seen": "0"}));
+        assert!(p["labels"]["herdr.seen"].is_string());
         assert_eq!(
-            without[0],
-            s(&[
-                "worktree",
-                "create",
-                "--cwd",
-                "/home/dev/api-service",
-                "--branch",
-                "feat/x",
-                "--label",
-                "orders",
-                "--no-focus"
-            ])
+            p["env"],
+            json!({"TERM": "xterm-256color", "COLORTERM": "truecolor"})
         );
-        assert!(!without[0].contains(&"--trust-repository".to_string()));
-        let mut expected = without[0].clone();
-        expected.push("--trust-repository".into());
-        assert_eq!(with[0], expected);
+        // The name is checked here too.
+        let mut bad = req(RunChoice::Shell);
+        bad.name = Some("t7".into());
+        assert!(run_params(&bad, None).is_err());
     }
 
     #[test]
-    fn agent_args_after_double_dash() {
-        let plan = plan_new_session(&req(
-            Some("codex"),
-            Placement::NewWorkspace,
-            &["--model", "o3"],
-        ));
-        assert_eq!(
-            plan[1],
-            s(&[
-                "agent", "start", "orders", "--kind", "codex", "--pane", "{PANE}", "--", "--model",
-                "o3"
-            ])
-        );
-    }
-
-    #[test]
-    fn validate_name_cases() {
-        assert!(validate_name("orders-index").is_ok());
-        assert!(validate_name("a").is_ok());
-        assert!(validate_name("a_b-9").is_ok());
-        assert!(validate_name(&format!("a{}", "b".repeat(31))).is_ok());
-        for bad in ["Orders", "1abc", "", "-a", "a b", "a.b", "é"] {
+    fn validate_name_rules() {
+        for ok in [
+            "orders",
+            "a",
+            "0day",
+            "api-agent",
+            "web_app.2",
+            &"a".repeat(32),
+            "tool",
+            "t",
+        ] {
+            assert_eq!(validate_name(ok), Ok(()), "{ok:?}");
+        }
+        for bad in [
+            "t7",
+            "t1b",
+            "t12",
+            "-x",
+            "_x",
+            ".x",
+            "Orders",
+            "",
+            "a b",
+            "a/b",
+            "é",
+            &"a".repeat(33),
+        ] {
             assert!(validate_name(bad).is_err(), "{bad:?}");
         }
-        assert!(validate_name(&format!("a{}", "b".repeat(32))).is_err());
+        // Two different sentences: the shape rule says what an address looks like.
+        let shaped = validate_name("t7").unwrap_err();
+        assert!(shaped.contains("t7"), "{shaped}");
+        assert_ne!(shaped, validate_name("Orders").unwrap_err());
     }
 
     #[test]
-    fn preview_shows_the_machine_label_and_quotes_unsafe_arguments() {
-        let mut r = req(
-            Some("claude"),
-            Placement::NewWorkspace,
-            &["--note", "it's $HOME"],
-        );
-        r.cwd = "/home/dev/my project".into();
-        let lines = preview_new_session(&r, Some("Build box"));
-        assert_eq!(
-            lines[0],
-            "herdr --machine 'Build box' workspace create --cwd '/home/dev/my project' --label orders --no-focus"
-        );
-        assert_eq!(
-            lines[1],
-            "herdr --machine 'Build box' agent start orders --kind claude --pane {PANE} -- --note 'it'\\''s $HOME'"
-        );
-        let local = preview_new_session(&req(None, Placement::NewWorkspace, &[]), None);
-        assert!(local[0].starts_with("herdr workspace create "));
-        assert_eq!(display_arg(""), "''");
-        assert_eq!(display_arg(PANE_PLACEHOLDER), PANE_PLACEHOLDER);
-    }
-
-    #[test]
-    fn requests_that_herdr_would_misread_are_refused() {
-        let ok = req(Some("claude"), Placement::NewWorkspace, &[]);
-        assert!(validate_request(&ok).is_ok());
-        let mut bad_name = ok.clone();
-        bad_name.name = "Orders".into();
-        let mut bad_cwd = ok.clone();
-        bad_cwd.cwd = "--help".into();
-        let bad_branch = req(
-            None,
-            Placement::Worktree {
-                branch: "-x".into(),
-                trust: false,
-            },
-            &[],
-        );
-        for r in [bad_name, bad_cwd, bad_branch] {
-            assert!(matches!(
-                validate_request(&r),
-                Err(ActionError::Invalid { .. })
-            ));
+    fn known_agents_programs_are_safe_in_the_check_script() {
+        for a in KNOWN_AGENTS {
+            assert_eq!(a.start[0], a.program, "{}", a.kind);
+            assert!(
+                a.program
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                "{}",
+                a.program
+            );
         }
-        // A split shell does not use the name at all.
-        let mut split = req(
-            None,
-            Placement::SplitBeside {
-                pane_id: "w1:p1".into(),
-            },
-            &[],
+    }
+
+    #[test]
+    fn preview_matches_display() {
+        let mut r = req(agent("claude"));
+        r.task = Some("fix it".into());
+        r.name = Some("orders".into());
+        r.keep = true;
+        let line = preview(&r, Some("buildbox"), "hc").unwrap();
+        let params = run_params(&r, Some("buildbox")).unwrap();
+        assert_eq!(
+            line,
+            crate::core::display::display("terminal.run", &params, "hc")
         );
-        split.name = String::new();
-        assert!(validate_request(&split).is_ok());
+        assert_eq!(
+            line,
+            "hc run --bg --on buildbox --cwd /home/dev/api-service --name orders --keep claude 'fix it'"
+        );
+        // Bookkeeping stays out of the line.
+        assert!(!line.contains("herdr.seen") && !line.contains("TERM"));
+        let local = preview(&req(RunChoice::Shell), None, "hc").unwrap();
+        assert_eq!(local, "hc run --bg --cwd /home/dev/api-service");
+        // A refused request has no preview.
+        let mut bad = req(RunChoice::Shell);
+        bad.name = Some("T7".into());
+        assert!(matches!(
+            preview(&bad, None, "hc"),
+            Err(ActionError::Invalid { .. })
+        ));
     }
 
     #[test]
