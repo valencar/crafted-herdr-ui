@@ -1,18 +1,21 @@
 import type { ActionError } from "./bindings/ActionError";
-import type { AgentStatus } from "./bindings/AgentStatus";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
+import type { CoreError } from "./bindings/CoreError";
+import type { DisplayStatus } from "./bindings/DisplayStatus";
 import type { Health } from "./bindings/Health";
 import type { TerminalId } from "./bindings/TerminalId";
 
-/** A row's status: a herdr agent status, or `shell` for a pane with no agent. */
-export type RowStatus = AgentStatus | "shell";
+/** A row's status: what the core reports for an agent, or `shell` for a terminal with none. */
+export type RowStatus = DisplayStatus;
 
 /** Every status shows this text next to its color (never color alone). */
 export const STATUS_LABEL: Record<RowStatus, string> = {
   blocked: "Needs input",
+  error: "Error",
   done: "Done, unseen",
   working: "Working",
   idle: "Idle",
+  ended: "Ended",
   unknown: "Unknown",
   shell: "Shell",
 };
@@ -42,8 +45,8 @@ export function agoText(age: string): string {
 
 /**
  * "last updated 40s ago". Only for a machine that is not online: its `last_ok_ms` is the
- * last success. An online machine's only moves when its snapshot changes, so it says nothing
- * about freshness there.
+ * last success. An online machine's moves only when it last looked healthy, so it says
+ * nothing about freshness there.
  */
 export function formatStaleness(
   lastOkMs: number | null,
@@ -88,6 +91,24 @@ export const TERMINAL_LABEL: Record<TerminalId, string> = {
 
 const MAYBE_APPLIED_FALLBACK = "May have been applied; refreshing…";
 
+/** The sentence for a failed herdr-core call; the words the core gave, where it gave any. */
+function coreErrorMessage(e: CoreError): string {
+  switch (e.kind) {
+    case "notFound":
+      return "herdr-core was not found.";
+    case "timeout":
+      return "herdr-core did not answer in time.";
+    case "lost":
+      return "The connection to herdr-core was lost.";
+    case "rpc":
+    case "spawn":
+    case "protocol":
+      return e.message;
+    case "incompatible":
+      return e.reason;
+  }
+}
+
 /**
  * The sentence shown for a failed action. It reads the `message` fields the app produced,
  * never a Rust Display string.
@@ -96,15 +117,8 @@ export function actionErrorMessage(e: ActionError): string {
   if (e.kind === "maybeApplied") {
     return e.message.trim() || MAYBE_APPLIED_FALLBACK;
   }
-  if (e.kind !== "herdr") return e.message;
-  switch (e.error.kind) {
-    case "notFound":
-      return "herdr was not found.";
-    case "timeout":
-      return "herdr did not answer in time.";
-    default:
-      return e.error.message;
-  }
+  if (e.kind === "core") return coreErrorMessage(e.error);
+  return e.message;
 }
 
 /** The last `count` non-blank lines of terminal text, trailing spaces trimmed. */
@@ -117,11 +131,11 @@ export function lastLines(text: string | null, count: number): string[] {
     .slice(-count);
 }
 
-/** The first herdr version the app is built against. The only place the floor lives. */
-const MIN_VERSION: [number, number, number] = [0, 9, 0];
+/** The first herdr-core version the app is built against (advisory). The only place the floor lives. */
+export const MIN_VERSION: [number, number, number] = [0, 1, 17];
 
 /**
- * `[major, minor, patch]` from `herdr --version` text (`0.9.4`, `herdr v1.2.3+build5`). A
+ * `[major, minor, patch]` from `--version` text (`0.9.4`, `herdr v1.2.3+build5`). A
  * pre-release or build suffix is ignored; anything else is `null`. Mirrors Rust `parse_version`.
  */
 export function parseVersion(text: string): [number, number, number] | null {
@@ -135,14 +149,34 @@ export function parseVersion(text: string): [number, number, number] | null {
   return parts.map(Number) as [number, number, number];
 }
 
-/** True when the version parses and is 0.9.0 or newer. */
+/** Negative, zero or positive as `a` is below, equal to or above `b`, part by part. */
+function compareParsed(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+/**
+ * True when the version parses and is at least `MIN_VERSION`. Only the numeric X.Y.Z part is
+ * compared: a pre-release or build suffix (`0.2.0-beta.1`) is ignored, as `parseVersion` does.
+ */
 export function isSupportedVersion(version: string | null): boolean {
   const parsed = version === null ? null : parseVersion(version);
-  if (!parsed) return false;
-  for (let i = 0; i < 3; i++) {
-    if (parsed[i] !== MIN_VERSION[i]) return parsed[i] > MIN_VERSION[i];
-  }
-  return true;
+  return parsed !== null && compareParsed(parsed, MIN_VERSION) >= 0;
+}
+
+/**
+ * True when both versions parse and `a` is numerically lower than `b`, comparing the X.Y.Z part
+ * only (Ruling C21: `0.1.18-beta.1` equals `0.1.18`). Unknown on either side is `false`.
+ */
+export function isOlderVersion(a: string | null, b: string | null): boolean {
+  const pa = a === null ? null : parseVersion(a);
+  const pb = b === null ? null : parseVersion(b);
+  return pa !== null && pb !== null && compareParsed(pa, pb) < 0;
 }
 
 /** Quotes one word for a POSIX shell: plain words stay as they are (Rust `shell_quote`). */
@@ -182,20 +216,17 @@ export function isPending(health: Health): boolean {
  */
 export function healthShape(
   health: Health,
-): "online" | "pending" | "reconnecting" | "attention" | "disabled" {
+): "online" | "pending" | "reconnecting" | "attention" | "hidden" {
   if (isPending(health)) return "pending";
   return health.kind;
 }
 
 /**
- * A successful read-only call: `api snapshot`, or `<noun> read …` (`pane read`, `agent read`).
- * The poller and the previews make these every couple of seconds, so the Activity drawer hides
- * them unless asked. A read that failed is never quiet.
+ * A successful timed read, which Rust marks `quiet` (a core `machine.list`, a `terminal.read`, …). They happen every couple of seconds, so the Activity
+ * drawer hides them unless asked. A read that failed is never quiet.
  */
 export function isQuietRead(entry: CommandLogEntry): boolean {
-  if (entry.exitCode !== 0 || entry.error !== null) return false;
-  const [first, second] = entry.argv;
-  return (first === "api" && second === "snapshot") || second === "read";
+  return entry.quiet && entry.exitCode === 0 && entry.error === null;
 }
 
 /** The workbox health words shown next to a machine's dot (never color alone). */
@@ -203,7 +234,7 @@ export const HEALTH_LABEL: Record<Health["kind"], string> = {
   online: "Online",
   reconnecting: "Reconnecting",
   attention: "Attention",
-  disabled: "Disabled",
+  hidden: "Hidden",
 };
 
 /** "1 agent", "2 agents". */
@@ -211,11 +242,17 @@ export function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
-const AGENT_NAME_HELP =
-  "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.";
+const TERMINAL_NAME = /^[a-z0-9][a-z0-9_.-]{0,31}$/;
+/** What an address looks like: `t7`, or a worker's `t1b`. */
+const ADDRESS_SHAPE = /^t[0-9]+[a-z]*$/;
+const TERMINAL_NAME_HELP =
+  "Use 1 to 32 of a-z 0-9 - _ . starting with a letter or digit.";
 
-/** Why an agent name is refused, or `null` when it is fine. Mirrors Rust `validate_name`. */
-export function agentNameProblem(name: string): string | null {
-  return AGENT_NAME.test(name) ? null : AGENT_NAME_HELP;
+/** Why a terminal name is refused, or `null` when it is fine. Mirrors Rust `validate_name`. */
+export function terminalNameProblem(name: string): string | null {
+  if (!TERMINAL_NAME.test(name)) return TERMINAL_NAME_HELP;
+  if (ADDRESS_SHAPE.test(name)) {
+    return `“${name}” looks like a terminal address (t7). Pick a name that doesn’t.`;
+  }
+  return null;
 }

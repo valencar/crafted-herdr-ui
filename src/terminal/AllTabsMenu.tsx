@@ -5,7 +5,7 @@ import { useMenuBehavior } from "../lib/useMenuBehavior";
 import { HomeIcon } from "./HomeIcon";
 import { tabDotStatus, tabName, tabStatus } from "./tabInfo";
 import type { TabGroup } from "./tabOrder";
-import { HOME } from "./terminalStore";
+import { HOME, rowKeyOf } from "./terminalStore";
 
 type Props = {
   homeLabel: string;
@@ -88,7 +88,7 @@ export function AllTabsMenu({
                 {g.label}
               </div>
               {g.tabs.map((tab) => {
-                const row = rows.get(tab.tabKey);
+                const row = rows.get(rowKeyOf(tab.tabKey));
                 const words = tabStatus(tab, row);
                 return (
                   <button

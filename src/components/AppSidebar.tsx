@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { groupByProject, needsYou, toRows } from "../lib/grouping";
+import { groupByProject, isShell, needsYou, toRows } from "../lib/grouping";
 import { openSettings, scrollToId, showHomeView } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
@@ -23,11 +23,11 @@ export function AppSidebar() {
   return (
     <Sidebar
       needsCount={needsYou(rows).length}
-      agentCount={rows.filter((r) => r.status !== "shell").length}
+      agentCount={rows.filter((r) => !isShell(r)).length}
       projects={projects}
       machines={state?.machines ?? []}
-      herdrPath={state?.herdr_path ?? null}
-      herdrVersion={state?.herdr_version ?? null}
+      corePath={state?.core_path ?? null}
+      coreVersion={state?.core_version ?? null}
       onJump={(id) => {
         showHomeView({ kind: "all" });
         scrollToId(id);

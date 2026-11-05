@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "in a terminal, `hc machine add --via 'dev@labbox.example' --name <name>` offers to copy this hc there",
+      "kind": "hc_missing"
+    },
+    "message": "hc is not installed on dev@labbox.example"
+  }
+}

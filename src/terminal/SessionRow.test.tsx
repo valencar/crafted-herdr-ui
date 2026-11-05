@@ -2,52 +2,37 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useMemo } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
-import type { MachineView } from "../lib/bindings/MachineView";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
+import {
+  agentTerm,
+  buildboxTerms,
+  appState as buildState,
+  machine,
+} from "../test/builders";
 import { useRowsByKey } from "./tabInfo";
 import { groupTabs } from "./tabOrder";
 import { HOME, useTerminalStore } from "./terminalStore";
 
 import { SessionRow } from "./SessionRow";
 
-const fixture = raw.result.snapshot as unknown as Snapshot;
-
-function machine(id: string, withSnapshot: boolean): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: withSnapshot ? structuredClone(fixture) : null,
-    last_ok_ms: 1,
-    ages: {},
-  };
+function appState(patch: Parameters<typeof buildboxTerms>[0] = {}): AppState {
+  return buildState([
+    [machine({ id: "buildbox" }), buildboxTerms(patch)],
+    [machine({ id: "gpubox" }), null],
+  ]);
 }
 
-function appState(): AppState {
-  return {
-    machines: [machine("buildbox", true), machine("gpubox", false)],
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: 1,
-  };
-}
-
-function open(machineId: string, paneId: string, title: string) {
+function open(machineId: string, address: string, title: string) {
   useTerminalStore.getState().openTab({
-    tabKey: `${machineId}::${paneId}`,
-    target: { kind: "pane", machineId, paneId },
+    tabKey: `${machineId}::${address}`,
+    target: { kind: "terminal", machineId, address: address },
     title,
     machineLabel: machineId,
   });
   useTerminalStore
     .getState()
-    .updateTab(`${machineId}::${paneId}`, { state: "live", termId: 1 });
+    .updateTab(`${machineId}::${address}`, { state: "live", termId: 1 });
 }
 
 const reset = () => {
@@ -119,7 +104,7 @@ describe("SessionRow", () => {
     expect(planner).toHaveAttribute("data-tone", "needs");
     expect(sub(/^infra/)).toHaveTextContent("Opening…");
     expect(sub(/^web/)).toHaveTextContent("Detached");
-    expect(sub(/^tester/)).toHaveTextContent("Error");
+    expect(sub(/^tester/)).toHaveTextContent("Failed");
   });
 
   it("a_done_tab_has_the_done_tone_and_a_quiet_one_no_tone", () => {
@@ -138,6 +123,34 @@ describe("SessionRow", () => {
     ).not.toHaveAttribute("data-tone");
   });
 
+  it("a_workers_done_tab_reads_done_with_no_tone", () => {
+    // Spec 4.5: a worker's done is Idle-ranked "Done", not the person's to see.
+    useAppStore.setState({
+      state: buildState([
+        [
+          machine({ id: "buildbox" }),
+          [
+            ...buildboxTerms(),
+            agentTerm({
+              address: "w9:p1",
+              status: "done",
+              name: "fixer",
+              parent: "buildbox/w1:p1",
+            }),
+          ],
+        ],
+      ]),
+    });
+    open("buildbox", "w9:p1", "fixer");
+    render(<Harness machineId="buildbox" />);
+    const tab = screen.getByRole("button", { name: /^fixer/ });
+    const sub = tab.querySelector(".session-tab-sub");
+    expect(sub).toHaveTextContent("Done");
+    expect(sub).not.toHaveTextContent("Done, unseen");
+    expect(sub).not.toHaveAttribute("data-tone");
+    expect(tab.querySelector(".sdot")).toHaveAttribute("data-status", "idle");
+  });
+
   it("only_a_blocked_tab_is_marked_as_needing_you", () => {
     open("buildbox", "w1:p1", "planner"); // blocked
     open("buildbox", "w1:p2", "infra"); // working
@@ -150,22 +163,25 @@ describe("SessionRow", () => {
     expect(tab(/^infra/)).not.toHaveAttribute("data-needs");
   });
 
-  it("a_full_ui_tab_reads_herdr_over_full_herdr_ui", () => {
-    useTerminalStore.getState().openTab({
-      tabKey: "full::buildbox",
-      target: { kind: "full", machineId: "buildbox" },
-      title: "herdr",
-      machineLabel: "buildbox",
+  it("an_errored_tab_is_marked_and_toned_like_a_blocked_one", () => {
+    useAppStore.setState({
+      state: appState({ "w1:p1": { status: "error" } }),
     });
-    useTerminalStore
-      .getState()
-      .updateTab("full::buildbox", { state: "live", termId: 2 });
+    open("buildbox", "w1:p1", "planner"); // error
+    open("buildbox", "w1:p2", "infra"); // working
     render(<Harness machineId="buildbox" />);
-    const tab = screen.getByRole("button", { name: "herdr on buildbox" });
-    expect(tab.querySelector(".session-tab-title")).toHaveTextContent("herdr");
-    expect(tab.querySelector(".session-tab-sub")).toHaveTextContent(
-      "Full herdr UI",
+    const planner = screen.getByRole("button", { name: /^planner/ });
+    expect(planner.closest(".session-tab")).toHaveAttribute(
+      "data-needs",
+      "true",
     );
+    expect(planner.querySelector(".session-tab-sub")).toHaveAttribute(
+      "data-tone",
+      "needs",
+    );
+    expect(
+      screen.getByRole("button", { name: /^infra/ }).closest(".session-tab"),
+    ).not.toHaveAttribute("data-needs");
   });
 
   it("tab_tooltip_has_status_and_shortcut", () => {
@@ -268,7 +284,7 @@ describe("SessionRow", () => {
     open("staging", "w1:p1", "tester"); // not in the machine list
     open("gpubox", "w1:p1", "planner");
     const state = appState();
-    state.machines[1].health = { kind: "disabled" };
+    state.machines[1].health = { kind: "hidden" };
     act(() => useAppStore.setState({ state }));
     const { rerender } = render(<Harness machineId="staging" />);
     expect(screen.getByRole("button", { name: /^tester/ })).toBeInTheDocument();

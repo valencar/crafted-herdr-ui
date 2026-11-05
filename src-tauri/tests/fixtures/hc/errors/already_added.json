@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "rename it: hc machine rename devbox <name>",
+      "kind": "already_added"
+    },
+    "message": "that core is already added as devbox"
+  }
+}

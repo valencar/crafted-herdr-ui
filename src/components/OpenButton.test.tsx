@@ -1,3 +1,4 @@
+import { rowOf } from "../test/builders";
 import {
   act,
   cleanup,
@@ -8,9 +9,9 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MachineView } from "../lib/bindings/MachineView";
 import type { Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
+import { appState } from "../test/builders";
 import {
   HOME,
   useTerminalStore,
@@ -28,9 +29,8 @@ import { copyText, invokeTyped } from "../lib/ipc";
 
 vi.mock("../lib/openRow", () => ({
   openRow: vi.fn(),
-  openFull: vi.fn(),
 }));
-import { openFull, openRow } from "../lib/openRow";
+import { openRow } from "../lib/openRow";
 
 // xterm is tested on its own; the palette only reaches the panel through menu actions.
 vi.mock("../terminal/Workspace", () => ({
@@ -42,46 +42,33 @@ vi.mock("../terminal/Workspace", () => ({
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const copy = vi.mocked(copyText);
-const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
+const ATTACH = "hc attach buildbox/t1";
 
-const ROW: Row = {
+const ROW: Row = rowOf({
   key: "buildbox::w1:p1",
   machineId: "buildbox",
   machineLabel: "buildbox",
-  paneId: "w1:p1",
-  terminalId: "term-1",
+  address: "w1:p1",
   kind: "claude",
   name: "api-service",
   title: "",
   status: "blocked",
   folder: null,
   sinceMs: null,
-};
+});
 
-function machine(id: string): MachineView {
+function tab(address: string): TermTab {
   return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: null,
-    ages: {},
-  };
-}
-
-function tab(paneId: string): TermTab {
-  return {
-    tabKey: `buildbox::${paneId}`,
-    target: { kind: "pane", machineId: "buildbox", paneId },
-    title: paneId,
+    tabKey: `buildbox::${address}`,
+    target: { kind: "terminal", machineId: "buildbox", address: address },
+    title: address,
     machineLabel: "buildbox",
     state: "live",
     error: null,
     termId: null,
     exitCode: null,
+    lastLine: null,
+    waiting: null,
     attempts: 0,
   };
 }
@@ -106,14 +93,10 @@ beforeEach(() => {
   invoke.mockResolvedValue(ATTACH);
   copy.mockReset().mockResolvedValue(undefined);
   vi.mocked(openRow).mockReset();
-  vi.mocked(openFull).mockReset();
   useAppStore.setState({
-    state: {
-      machines: [machine("buildbox")],
-      herdr_version: "0.9.4",
-      herdr_path: null,
-      generated_at_ms: 1,
-    },
+    state: appState([[{ id: "buildbox", lastOkMs: null }, null]], {
+      path: null,
+    }),
   });
 });
 
@@ -126,6 +109,176 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
+  });
+});
+
+describe("OpenButton Open in Herdr", () => {
+  const app = (open: boolean) =>
+    invoke.mockImplementation(async (name: string) =>
+      name === "herdr_app_status" ? open : ATTACH,
+    );
+
+  it("hidden_when_app_window_closed", async () => {
+    app(false);
+    const { user } = setup();
+    await user.click(chevron());
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("herdr_app_status"),
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Herdr" }),
+    ).toBeNull();
+  });
+
+  it("is_listed_after_watch_when_the_window_is_open_and_opens_the_terminal", async () => {
+    app(true);
+    const { user } = setup();
+    await user.click(chevron());
+    const item = await screen.findByRole("menuitem", {
+      name: "Open in Herdr",
+    });
+    const names = items().map((i) => i.textContent);
+    expect(names).toEqual([
+      "Open here",
+      "Open in Ghostty",
+      "Watch (read-only)",
+      "Open in Herdr",
+      "Copy attach command",
+    ]);
+    await user.click(item);
+    expect(invoke).toHaveBeenCalledWith("open_in_herdr", {
+      machineId: "buildbox",
+      address: "w1:p1",
+    });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("a_reopened_menu_never_shows_a_stale_answer", async () => {
+    let status: boolean | Promise<boolean> = true;
+    invoke.mockImplementation(async (name: string) =>
+      name === "herdr_app_status" ? status : ATTACH,
+    );
+    const { user } = setup();
+    await user.click(chevron());
+    await screen.findByRole("menuitem", { name: "Open in Herdr" });
+    await user.click(chevron());
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // Herdr's window closes; the next answer is slow.
+    let answer: (open: boolean) => void = () => {};
+    status = new Promise<boolean>((resolve) => (answer = resolve));
+    await user.click(chevron());
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Herdr" }),
+    ).toBeNull();
+    await act(async () => answer(false));
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Herdr" }),
+    ).toBeNull();
+  });
+
+  it("an_ended_row_never_asks_whether_herdr_is_open", async () => {
+    app(true);
+    const { user } = setup({ row: { ...ROW, status: "ended" } });
+    await user.click(chevron());
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+        machineId: "buildbox",
+        address: "w1:p1",
+        observe: false,
+      }),
+    );
+    expect(invoke).not.toHaveBeenCalledWith("herdr_app_status");
+  });
+
+  it("an_ended_row_never_offers_it", async () => {
+    app(true);
+    const { user } = setup({ row: { ...ROW, status: "ended" } });
+    await user.click(chevron());
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+        machineId: "buildbox",
+        address: "w1:p1",
+        observe: false,
+      }),
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Herdr" }),
+    ).toBeNull();
+  });
+
+  it("a_failure_goes_to_the_toast", async () => {
+    invoke.mockImplementation(async (name: string) => {
+      if (name === "herdr_app_status") return true;
+      if (name === "open_in_herdr") throw new Error("no window");
+      return ATTACH;
+    });
+    const { user } = setup();
+    await user.click(chevron());
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Open in Herdr" }),
+    );
+    await waitFor(() => expect(useAppStore.getState().toast).not.toBeNull());
+  });
+});
+
+describe("OpenButton Watch", () => {
+  it("needs_input_row_offers_watch", async () => {
+    const { user } = setup();
+    // Beside Open, for a blocked agent.
+    const watch = screen.getByRole("button", {
+      name: "Watch api-service (read-only)",
+    });
+    expect(watch).toHaveTextContent("Watch");
+    await user.click(watch);
+    expect(openRow).toHaveBeenLastCalledWith(ROW, "app", { observe: true });
+  });
+
+  it("the_chevron_menu_lists_watch_for_any_live_row", async () => {
+    const { user } = setup({ row: { ...ROW, status: "working" } });
+    // Not beside Open: only a Needs-input row gets the button.
+    expect(
+      screen.queryByRole("button", { name: "Watch api-service (read-only)" }),
+    ).toBeNull();
+    await user.click(chevron());
+    await user.click(
+      screen.getByRole("menuitem", { name: "Watch (read-only)" }),
+    );
+    expect(openRow).toHaveBeenLastCalledWith(
+      { ...ROW, status: "working" },
+      "app",
+      { observe: true },
+    );
+  });
+
+  it("an_open_tab_does_not_stand_in_for_watch", () => {
+    useTerminalStore.setState({ tabs: [tab("w1:p1")], activeKey: HOME });
+    setup();
+    expect(
+      screen.getByRole("button", { name: /^Go to tab api-service/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Watch api-service (read-only)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a_watch_tab_does_not_make_open_read_go_to_tab", () => {
+    useTerminalStore.setState({
+      tabs: [{ ...tab("w1:p1"), tabKey: `${ROW.key}::watch`, observe: true }],
+      activeKey: HOME,
+    });
+    setup();
+    expect(
+      screen.getByRole("button", { name: "Open api-service" }),
+    ).toBeInTheDocument();
+  });
+
+  it("an_ended_row_offers_no_watch", async () => {
+    const { user } = setup({ row: { ...ROW, status: "ended" } });
+    expect(screen.queryByRole("button", { name: /^Watch/ })).toBeNull();
+    await user.click(chevron());
+    expect(screen.queryByRole("menuitem", { name: /Watch/ })).toBeNull();
   });
 });
 
@@ -188,7 +341,7 @@ describe("OpenButton", () => {
     expect(items().map((i) => i.textContent)).toEqual([
       "Open here",
       "Open in Ghostty",
-      "Open full herdr UI",
+      "Watch (read-only)",
       "Copy attach command",
     ]);
     expect(screen.getByRole("separator")).toBeInTheDocument();
@@ -209,9 +362,10 @@ describe("OpenButton", () => {
     expect(openRow).toHaveBeenLastCalledWith(ROW, "app");
     await choose("Open in Ghostty");
     expect(openRow).toHaveBeenLastCalledWith(ROW, "external");
-    await choose("Open full herdr UI");
-    expect(openFull).toHaveBeenCalledWith("buildbox", "buildbox");
     expect(openRow).toHaveBeenCalledTimes(2);
+    // There is no herdr TUI to open any more.
+    await user.click(chevron());
+    expect(screen.queryByRole("menuitem", { name: /full/i })).toBeNull();
   });
 
   it("copy_attach_command_copies_and_toasts_copied", async () => {
@@ -223,7 +377,8 @@ describe("OpenButton", () => {
     await waitFor(() => expect(copy).toHaveBeenCalledWith(ATTACH));
     expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
     await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
     expect(useAppStore.getState().toastTone).toBe("info");
@@ -236,7 +391,10 @@ describe("OpenButton", () => {
     expect(fetches()).toHaveLength(0);
     await user.click(chevron());
     expect(fetches()).toEqual([
-      ["copy_attach_command", { machineId: "buildbox", paneId: "w1:p1" }],
+      [
+        "copy_attach_command",
+        { machineId: "buildbox", address: "w1:p1", observe: false },
+      ],
     ]);
     await user.keyboard("{Escape}");
     await user.click(chevron());
@@ -310,8 +468,8 @@ describe("OpenButton", () => {
     expect(all[3]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(all[0]).toHaveFocus();
-    await user.keyboard("{ArrowDown}{ArrowDown}");
-    expect(all[2]).toHaveFocus();
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
+    expect(all[3]).toHaveFocus();
     await user.keyboard("{Home}");
     expect(all[0]).toHaveFocus();
     await user.keyboard("{End}");

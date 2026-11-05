@@ -2,6 +2,7 @@ import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useAppStore } from "../store/appStore";
 import type { AppState } from "./bindings/AppState";
+import type { MachineView } from "./bindings/MachineView";
 import type { Settings } from "./bindings/Settings";
 import type { WorkboxColor } from "./bindings/WorkboxColor";
 import {
@@ -58,6 +59,66 @@ describe("assignColors", () => {
     expect(result.staging).toBe("violet");
     // Still kept: a workbox that comes back gets its old color.
     expect(result).toMatchObject(saved);
+  });
+
+  it("color_moves_from_name_key_to_id", () => {
+    const id = "000000000000000000000000c0de0002";
+    const names = { [id]: "buildbox" };
+    // v0.8 saved the color under the name; the id has none yet.
+    const saved = { local: "violet" as const, buildbox: "lime" as const };
+    const moved = assignColors(["local", id], saved, names);
+    expect(moved[id]).toBe("lime");
+    // The migrated color counts as used: the next new workbox doesn't get it.
+    const next = assignColors(["local", id, "other"], saved, {
+      ...names,
+      other: "gpubox",
+    });
+    expect(next.other).toBe("pink");
+    // Idempotent: run on its own result, nothing changes.
+    expect(assignColors(["local", id], moved, names)).toEqual(moved);
+    // An id that already has a color keeps it, whatever its name's entry says.
+    expect(
+      assignColors(["local", id], { ...saved, [id]: "cyan" }, names)[id],
+    ).toBe("cyan");
+    // A workbox renamed after the move keeps its id color, not the new name's.
+    expect(
+      assignColors(
+        ["local", id],
+        { ...moved, gpubox: "yellow" },
+        {
+          [id]: "gpubox",
+        },
+      )[id],
+    ).toBe("lime");
+    // No name entry: it is picked as before. Local is never read by name.
+    expect(assignColors(["local", id], {}, names)[id]).toBe("pink");
+    expect(
+      assignColors(["local"], { Local: "cyan" }, { local: "Local" }).local,
+    ).toBe("violet");
+  });
+
+  it("a_migrating_id_is_not_beaten_to_its_color_by_a_new_one_listed_before_it", () => {
+    // v0.8 colors by name; `staging-id` is new and listed before `buildbox-id`.
+    const names = { "staging-id": "staging", "buildbox-id": "buildbox" };
+    const result = assignColors(
+      ["local", "staging-id", "buildbox-id"],
+      { local: "violet", buildbox: "pink" },
+      names,
+    );
+    expect(result["buildbox-id"]).toBe("pink");
+    // The new one takes the first color nobody has, not the migrating one's.
+    expect(result["staging-id"]).toBe("lime");
+    expect(new Set(Object.values(result)).size).toBe(3);
+  });
+
+  it("resolves_a_saved_name_key_for_a_listed_machine", () => {
+    const id = "000000000000000000000000c0de0002";
+    const machines = [
+      { id: "local", name: "Local" },
+      { id, name: "buildbox" },
+    ] as MachineView[];
+    const resolved = resolveColors({ buildbox: "lime" }, machines);
+    expect(resolved[id]).toBe("lime");
   });
 
   it("treats_object_prototype_names_as_plain_ids", () => {

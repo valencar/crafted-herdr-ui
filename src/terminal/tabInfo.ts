@@ -1,9 +1,10 @@
 import { useMemo } from "react";
-import { shortPath, STATUS_LABEL } from "../lib/format";
-import { isNeedsYou, toRows, type Row } from "../lib/grouping";
+import type { AppState } from "../lib/bindings/AppState";
+import { shortPath } from "../lib/format";
+import { isNeedsYou, shownStatus, toRows, type Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import type { DotStatus } from "../components/StatusDot";
-import type { TermTab } from "./terminalStore";
+import { rowKeyOf, type TermTab } from "./terminalStore";
 
 /** The agent rows by key, for matching a tab to the pane it shows. */
 export function useRowsByKey(): Map<string, Row> {
@@ -15,19 +16,30 @@ export function useRowsByKey(): Map<string, Row> {
   }, [state]);
 }
 
+/** The row a tab shows in `state`, if the state has it (a Watch tab shows its row too). */
+export function rowFor(
+  state: AppState | null,
+  tabKey: string,
+): Row | undefined {
+  return state
+    ? toRows(state).find((r) => r.key === rowKeyOf(tabKey))
+    : undefined;
+}
+
 const STATE_WORDS: Record<Exclude<TermTab["state"], "live">, string> = {
   opening: "Opening…",
   detached: "Detached",
-  error: "Error",
+  // Not "Error": that is an agent's status, and a screen reader should tell them apart.
+  error: "Failed",
 };
 
 /**
  * The words a tab shows for its session: the state while there is no live session, else the
  * row's status. A tab that needs you always says so in words, whatever its state. `null` when
- * there is nothing to say (the full herdr UI, or a pane whose row is gone).
+ * there is nothing to say (a terminal whose row is gone).
  */
 export function tabStatus(tab: TermTab, row: Row | undefined): string | null {
-  const rowLabel = row ? STATUS_LABEL[row.status] : null;
+  const rowLabel = row ? shownStatus(row).label : null;
   if (tab.state === "live") return rowLabel;
   const state = STATE_WORDS[tab.state];
   return row && isNeedsYou(row) ? `${state} · ${rowLabel}` : state;
@@ -41,12 +53,13 @@ export function tabName(tab: TermTab, row: Row | undefined): string {
     : `${tab.title} on ${tab.machineLabel}`;
 }
 
-/** What the dot's colour stands for: the agent's status while live, else the session state. */
+/** What the dot's colour stands for: the agent's status while live, else the session state (a failed one is `failed`, never an agent's `error`). */
 export function tabDotStatus(
   tab: TermTab,
   row: Row | undefined,
 ): DotStatus | undefined {
-  return tab.state === "live" ? row?.status : tab.state;
+  if (tab.state === "live") return row && shownStatus(row).status;
+  return tab.state === "error" ? "failed" : tab.state;
 }
 
 /**
@@ -59,19 +72,23 @@ export function tabTreeName(tab: TermTab, row: Row | undefined): string {
 
 /**
  * The second line of a tab: "{project or short folder} · {status words}", else whichever of the
- * two exists, else "" (an empty line isn't rendered). The full herdr UI says what it is.
+ * two exists, else "" (an empty line isn't rendered).
  */
 export function tabSubline(
   tab: TermTab,
   row: Row | undefined,
   project: string | null,
 ): string {
-  if (tab.target.kind === "full") return "Full herdr UI";
   const place = project ?? (row?.folder ? shortPath(row.folder) : null);
   return [place, tabStatus(tab, row)].filter(Boolean).join(" · ");
 }
 
-/** How many of the tabs show a blocked agent. */
+/** How many of the tabs show a blocked or errored agent (a done one is not counted). */
 export function countNeeds(tabs: TermTab[], rows: Map<string, Row>): number {
-  return tabs.filter((t) => rows.get(t.tabKey)?.status === "blocked").length;
+  // A row counts once, even with both an Open and a Watch tab.
+  const keys = new Set(tabs.map((t) => rowKeyOf(t.tabKey)));
+  return [...keys].filter((key) => {
+    const status = rows.get(key)?.status;
+    return status === "blocked" || status === "error";
+  }).length;
 }

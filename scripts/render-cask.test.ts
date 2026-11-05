@@ -30,6 +30,9 @@ describe("render-cask.sh", () => {
     const caveats = out.slice(out.indexOf("caveats"));
     expect(caveats).toContain("Open Anyway");
     expect(caveats).toContain("herdr.dev");
+    expect(caveats).toContain("curl -fsSL https://releases.herdr.dev/core/install.sh | sh");
+    expect(caveats).toContain("herdr-core");
+    expect(caveats).not.toContain("herdr CLI");
     const zap = out.slice(out.indexOf("zap trash:"));
     expect(zap).toContain("~/Library/Application Support/dev.crafted.herdr-ui");
     expect(out).not.toContain("{{");

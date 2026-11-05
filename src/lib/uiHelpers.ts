@@ -164,6 +164,16 @@ export function isKeyForMenu(
  */
 export const INSTALL_URL = "https://herdr.dev";
 
+/**
+ * The line that installs herdr-core. Onboarding shows it with a Copy button; the app never
+ * runs it (spec 2 rule 5). No Homebrew formula exists for herdr-core, so this is the one path.
+ */
+export const CORE_INSTALL_LINE =
+  "curl -fsSL https://releases.herdr.dev/core/install.sh | sh";
+
+/** Updates herdr-core. Copied for the person to run; the app never runs it. */
+export const CORE_UPDATE_COMMAND = "hc update";
+
 export function openInstallPage(): Promise<void> {
   return openUrl(INSTALL_URL);
 }

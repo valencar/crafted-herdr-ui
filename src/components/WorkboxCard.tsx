@@ -1,6 +1,7 @@
 import { Skeleton } from "./Skeleton";
 import { legendText, StatusBar } from "./StatusBar";
 import { HealthDot } from "./StatusDot";
+import { TemporaryBadge } from "./TemporaryBadge";
 import { WorkboxTile } from "./WorkboxTile";
 import type { MachineView } from "../lib/bindings/MachineView";
 import { statusCounts } from "../lib/dashboard";
@@ -14,7 +15,6 @@ import {
 } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
-import { openFull } from "../lib/openRow";
 import { useAppStore } from "../store/appStore";
 import { useId } from "react";
 
@@ -35,8 +35,8 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
   const pending = isPending(machine.health);
   const stale = kind !== "online";
   const counts = statusCounts(rows);
-  // An online workbox answers every poll, but `last_ok_ms` only moves when the snapshot
-  // changes, so its age would grow while everything is fine: say "Up to date" instead. A
+  // An online workbox is live on the event stream, but `last_ok_ms` is when it last looked
+  // healthy, so its age says nothing about freshness: say "Up to date" instead. A
   // workbox that is not online keeps its last success, which is what its age claims.
   const updated = stale
     ? formatStaleness(machine.last_ok_ms, nowMs)
@@ -50,10 +50,11 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
     >
       <div className="wb-card-head">
         <div className="wb-card-id">
-          <WorkboxTile size="sm" machineId={machine.id} label={machine.label} />
+          <WorkboxTile size="sm" machineId={machine.id} label={machine.name} />
           <h3 id={headingId} className="wb-card-name mono">
-            {machine.label}
+            {machine.name}
           </h3>
+          {machine.temporary && <TemporaryBadge />}
         </div>
         <span className="health" data-health={kind}>
           <HealthDot health={machine.health} />
@@ -81,21 +82,17 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
           </div>
         </>
       )}
-      {kind === "online" && (
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() => void openFull(machine.id, machine.label)}
-        >
-          Open herdr
-        </button>
-      )}
       {(kind === "reconnecting" || kind === "attention") && (
         <button
           type="button"
           className="btn btn-small"
           onClick={() =>
-            invokeTyped("refresh_now", { machineId: machine.id }).catch(report)
+            // A remote workbox is dialed again (`machine.connect`); Local has no such call, so
+            // it re-reads (Task 14 owns its card).
+            (machine.is_local
+              ? invokeTyped("refresh_now", { machineId: machine.id })
+              : invokeTyped("machine_connect", { machineId: machine.id })
+            ).catch(report)
           }
         >
           Retry now

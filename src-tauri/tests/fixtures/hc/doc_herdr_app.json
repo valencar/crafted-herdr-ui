@@ -1,0 +1,127 @@
+{
+  "value": {
+    "spaces": [
+      {
+        "folder": "/home/dev/api-service",
+        "id": "s1",
+        "name": "api-service",
+        "tabs": [
+          {
+            "id": "tab1",
+            "name": "main",
+            "root": {
+              "children": [
+                {
+                  "content": {
+                    "terminal": "t1"
+                  },
+                  "id": "b1",
+                  "size": {
+                    "weight": 2
+                  },
+                  "type": "block"
+                },
+                {
+                  "children": [
+                    {
+                      "content": {
+                        "terminal": "t5"
+                      },
+                      "id": "b2",
+                      "type": "block"
+                    },
+                    {
+                      "children": [
+                        {
+                          "content": {
+                            "terminal": "t7"
+                          },
+                          "id": "b3",
+                          "type": "block"
+                        },
+                        {
+                          "content": {
+                            "mod": "agents",
+                            "props": {
+                              "pane": "b4",
+                              "terminal": "t4"
+                            }
+                          },
+                          "id": "b4",
+                          "type": "block"
+                        }
+                      ],
+                      "id": "row2",
+                      "type": "row"
+                    }
+                  ],
+                  "id": "col1",
+                  "size": {
+                    "weight": 1
+                  },
+                  "type": "column"
+                }
+              ],
+              "floating": [
+                {
+                  "align": "end",
+                  "content": {
+                    "terminal": "t2"
+                  },
+                  "edge": "right",
+                  "id": "float1"
+                }
+              ],
+              "id": "root1",
+              "type": "row"
+            }
+          },
+          {
+            "id": "tab2",
+            "name": "tests",
+            "root": {
+              "content": {
+                "terminal": "t8"
+              },
+              "id": "root2",
+              "type": "block"
+            }
+          }
+        ]
+      },
+      {
+        "folder": "/home/dev/infra",
+        "id": "s2",
+        "name": "",
+        "tabs": [
+          {
+            "id": "tab3",
+            "name": "",
+            "root": {
+              "active": "b5",
+              "children": [
+                {
+                  "content": {
+                    "terminal": "t3"
+                  },
+                  "id": "b5",
+                  "type": "block"
+                },
+                {
+                  "content": {
+                    "terminal": "t6"
+                  },
+                  "id": "b6",
+                  "type": "block"
+                }
+              ],
+              "id": "root3",
+              "type": "stack"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "version": 1
+}

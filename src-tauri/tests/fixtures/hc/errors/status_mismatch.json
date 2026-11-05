@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "nothing was typed",
+      "kind": "status_mismatch"
+    },
+    "message": "t1 is done, not idle"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "check that `dev@devbox.example echo ok` prints ok without asking anything",
+      "kind": "unreachable"
+    },
+    "message": "cannot reach dev@devbox.example: ssh: Could not resolve hostname devbox.example: Name or service not known"
+  }
+}

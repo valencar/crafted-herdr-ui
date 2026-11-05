@@ -1,0 +1,268 @@
+#!/usr/bin/env node
+// Test double for herdr-core's `hc` CLI. Reads $FAKE_HC_DIR. No dependencies.
+//
+// Subcommands:
+//   --version                    prints version.txt, else "hc 0.1.17".
+//   connect [--session S]        a JSON-RPC 2.0 line server on stdin/stdout (see below).
+//   attach [--observe] <address> prints attach_screen.txt to stdout (the pty) and attach_last_line.txt
+//                                to stderr (ending in exactly one newline), then exits with
+//                                attach_exit.txt (default 0).
+//   machine login|update|add ... prints "ok", exits 0.
+//   anything else                exits 2.
+//
+// connect: one process finishes a call (including its sleep) before it reads the next line, like
+// the real core. Concurrency in tests comes from separate processes.
+//   hello            -> hello.json
+//   <method>         -> <method>@<n>.json (n: that method's 1-based call number, counted across
+//                       processes in .counts.json), else <method>.json, else error -32601 not_found.
+// A <method>.json holds the JSON-RPC result only. `{"error":{...}}` is sent as the error, and
+// `{"sleep_ms":N,"result":...}` / `{"sleep_ms":N,"error":...}` waits N ms first. `{"exit":true}` makes
+// the process log the request, then exit 0 without replying (the core dying mid-call).
+//   events.subscribe -> answers like any method, then plays events@<n>.jsonl (n: the n-th subscribe),
+//                       else events.jsonl, writing each line verbatim. Only two lines are control:
+//                       {"sleep_ms":N} pauses and {"drop":true} exits 0 at once. After the file ends
+//                       the process stays alive, reading stdin and answering nothing, until it closes.
+//
+// Logging: every process appends `argv <JSON array>` to calls.log, and every request line is
+// appended exactly as received.
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import process from "node:process";
+
+const dir = process.env.FAKE_HC_DIR;
+if (!dir) {
+  process.stderr.write("FAKE_HC_DIR is not set\n");
+  process.exit(2);
+}
+const at = (name) => join(dir, name);
+const readText = (name) =>
+  existsSync(at(name)) ? readFileSync(at(name), "utf8") : null;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleepSync = (ms) =>
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+const argv = process.argv.slice(2);
+appendFileSync(at("calls.log"), `argv ${JSON.stringify(argv)}\n`);
+
+/** Atomically bumps and returns the call counter for `key`, safe across concurrent processes. */
+function nextCount(key) {
+  const lock = at(".counts.lock");
+  for (let tries = 0; ; tries++) {
+    try {
+      closeSync(openSync(lock, "wx"));
+      break;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > 5000) unlinkSync(lock); // stale lock
+      } catch {
+        // Someone else released it; retry.
+      }
+      if (tries > 5000)
+        throw new Error("could not take .counts.lock", { cause: e });
+      sleepSync(2);
+    }
+  }
+  try {
+    let counts = {};
+    try {
+      counts = JSON.parse(readFileSync(at(".counts.json"), "utf8"));
+    } catch {
+      // First call, or unreadable: start over.
+    }
+    counts[key] = (counts[key] ?? 0) + 1;
+    const tmp = at(`.counts.${process.pid}.tmp`);
+    writeFileSync(tmp, JSON.stringify(counts));
+    renameSync(tmp, at(".counts.json"));
+    return counts[key];
+  } finally {
+    unlinkSync(lock);
+  }
+}
+
+const send = (obj) => process.stdout.write(JSON.stringify(obj) + "\n");
+
+/** Loads the fixture for the n-th call of `method`, else the plain one. */
+function loadFixture(method, n) {
+  const text = readText(`${method}@${n}.json`) ?? readText(`${method}.json`);
+  return text === null ? null : JSON.parse(text);
+}
+
+/** Splits a fixture into { sleepMs, error } or { sleepMs, result }. */
+function interpret(fixture) {
+  const isObj =
+    fixture !== null && typeof fixture === "object" && !Array.isArray(fixture);
+  if (
+    isObj &&
+    "sleep_ms" in fixture &&
+    ("result" in fixture || "error" in fixture)
+  ) {
+    return "error" in fixture
+      ? { sleepMs: fixture.sleep_ms, error: fixture.error }
+      : { sleepMs: fixture.sleep_ms, result: fixture.result };
+  }
+  if (isObj && Object.keys(fixture).length === 1 && "error" in fixture) {
+    return { sleepMs: 0, error: fixture.error };
+  }
+  return { sleepMs: 0, result: fixture };
+}
+
+/** Answers one request and returns the method's call number (0 for hello, which is not counted). */
+async function reply(id, method) {
+  let step;
+  let n = 0;
+  if (method === "hello") {
+    const text = readText("hello.json");
+    step = text === null ? null : interpret(JSON.parse(text));
+  } else {
+    n = nextCount(method);
+    const fixture = loadFixture(method, n);
+    if (
+      fixture !== null &&
+      typeof fixture === "object" &&
+      Object.keys(fixture).length === 1 &&
+      fixture.exit === true
+    ) {
+      process.exit(0);
+    }
+    step = fixture === null ? null : interpret(fixture);
+  }
+  if (step === null) {
+    send({
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: -32601,
+        message: "no fixture",
+        data: { kind: "not_found" },
+      },
+    });
+    return n;
+  }
+  if (step.sleepMs) await sleep(step.sleepMs);
+  send(
+    "error" in step
+      ? { jsonrpc: "2.0", id, error: step.error }
+      : { jsonrpc: "2.0", id, result: step.result },
+  );
+  return n;
+}
+
+async function playEvents(n) {
+  const text = readText(`events@${n}.jsonl`) ?? readText("events.jsonl") ?? "";
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    let control = null;
+    try {
+      const parsed = JSON.parse(line);
+      const keys =
+        parsed !== null && typeof parsed === "object"
+          ? Object.keys(parsed)
+          : [];
+      if (keys.length === 1 && (keys[0] === "sleep_ms" || keys[0] === "drop"))
+        control = parsed;
+    } catch {
+      // Not JSON: write it verbatim like any other line.
+    }
+    if (control?.drop) process.exit(0);
+    if (control) await sleep(control.sleep_ms);
+    else process.stdout.write(line + "\n");
+  }
+}
+
+async function connect() {
+  let subscribed = false;
+  const queue = [];
+  let ended = false;
+  let wake = null;
+  // Own line splitter and queue: a readline async iterator can drop lines that arrive while a
+  // slow request is being answered.
+  let buffered = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    buffered += chunk;
+    const parts = buffered.split("\n");
+    buffered = parts.pop();
+    queue.push(...parts);
+    wake?.();
+  });
+  process.stdin.on("end", () => {
+    if (buffered !== "") queue.push(buffered);
+    buffered = "";
+    ended = true;
+    if (subscribed) process.exit(0);
+    wake?.();
+  });
+  while (true) {
+    if (queue.length === 0) {
+      if (ended) return;
+      await new Promise((resolve) => (wake = resolve));
+      wake = null;
+      continue;
+    }
+    const line = queue.shift();
+    if (line.trim() === "") continue;
+    appendFileSync(at("calls.log"), line + "\n");
+    if (subscribed) continue;
+    let request;
+    try {
+      request = JSON.parse(line);
+    } catch {
+      send({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32700, message: "parse error" },
+      });
+      continue;
+    }
+    if (request.id === undefined) continue; // a notification gets no reply
+    const n = await reply(request.id, request.method);
+    if (request.method === "events.subscribe") {
+      subscribed = true;
+      await playEvents(n);
+    }
+  }
+}
+
+function attach() {
+  process.stdout.write(readText("attach_screen.txt") ?? "");
+  process.stderr.write(
+    (readText("attach_last_line.txt") ?? "").replace(/\n?$/, "\n"),
+  );
+  const code = Number.parseInt((readText("attach_exit.txt") ?? "0").trim(), 10);
+  process.exitCode = Number.isNaN(code) ? 0 : code; // let both streams flush
+}
+
+switch (argv[0]) {
+  case "--version":
+    process.stdout.write(
+      (readText("version.txt") ?? "hc 0.1.17\n").replace(/\n?$/, "\n"),
+    );
+    break;
+  case "connect":
+    await connect();
+    break;
+  case "attach":
+    attach();
+    break;
+  case "machine":
+    if (["login", "update", "add"].includes(argv[1])) {
+      process.stdout.write("ok\n");
+      break;
+    }
+    process.exit(2);
+    break;
+  default:
+    process.stderr.write(`fake-hc: unknown command: ${argv.join(" ")}\n`);
+    process.exit(2);
+}

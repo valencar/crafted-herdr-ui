@@ -3,11 +3,11 @@ import type { MachineView } from "./bindings/MachineView";
 
 /**
  * Whether the New session sheet can take this workbox: it must be known (still in the machine
- * list) and not disabled, because the sheet lists only those and would silently pick another.
+ * list) and not hidden, because the sheet lists only those and would silently pick another.
  * "New on {workbox}" in the session row and ⌘T share it.
  */
 export function canOpenNewSession(machine: MachineView | null | undefined) {
-  return machine != null && machine.health.kind !== "disabled";
+  return machine != null && machine.health.kind !== "hidden";
 }
 
 /**

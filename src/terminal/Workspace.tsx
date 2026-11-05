@@ -16,7 +16,7 @@ import { useRowsByKey } from "./tabInfo";
 import { TabStrip } from "./TabStrip";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
 import { DEFAULT_TERMINAL_FONT } from "./terminalFonts";
-import { HOME, useTerminalStore } from "./terminalStore";
+import { HOME, rowKeyOf, useTerminalStore } from "./terminalStore";
 
 export const DEFAULT_FONT_SIZE = 13;
 export const MIN_FONT_SIZE = 9;
@@ -228,7 +228,7 @@ export function Workspace({ children }: { children: ReactNode }) {
           {activeTab && (
             <ContextBar
               tab={activeTab}
-              row={rows.get(activeTab.tabKey) ?? null}
+              row={rows.get(rowKeyOf(activeTab.tabKey)) ?? null}
               onFind={openFind}
             />
           )}

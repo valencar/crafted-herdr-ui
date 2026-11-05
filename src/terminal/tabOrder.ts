@@ -21,7 +21,7 @@ export function groupTabs(
   const known = new Map<string, TabGroup>(
     machines.map((m) => [
       m.id,
-      { machineId: m.id, label: m.label, machine: m, tabs: [] },
+      { machineId: m.id, label: m.name, machine: m, tabs: [] },
     ]),
   );
   const strays = new Map<string, TabGroup>();

@@ -1,13 +1,13 @@
 import { Kbd } from "./Kbd";
+import { PinGlyph } from "./PinGlyph";
 import { StatusDot } from "./StatusDot";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { copyAttach } from "../lib/copyAttach";
 import { fuzzyMatch } from "../lib/fuzzy";
-import { STATUS_LABEL, shortPath } from "../lib/format";
+import { shortPath } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
-import { toRows, type Row } from "../lib/grouping";
+import { shownStatus, toRows, type Row } from "../lib/grouping";
 import { runMenuAction } from "../lib/menuActions";
-import { markSeen, openRow } from "../lib/openRow";
+import { openRow } from "../lib/openRow";
 import {
   agentActions,
   buildItems,
@@ -16,6 +16,8 @@ import {
   type AgentAction,
   type PaletteItem,
 } from "../lib/palette";
+import { runRowItem } from "../lib/rowActions";
+import { useHerdrApp } from "../lib/useHerdrApp";
 import { tabShortcutId } from "../lib/shortcuts";
 import {
   focusReplyBox,
@@ -29,7 +31,7 @@ import {
 import { useAppStore, useModalOpen } from "../store/appStore";
 import { tabStatus, useRowsByKey } from "../terminal/tabInfo";
 import { stripOrder, tabShortcut } from "../terminal/tabOrder";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { rowKeyOf, useTerminalStore } from "../terminal/terminalStore";
 
 /** The first of these that focus can go back to: on the page, visible, and not the body. */
 function firstRestorable(els: (HTMLElement | null)[]): HTMLElement | undefined {
@@ -102,7 +104,7 @@ type Frame =
  * The ⌘K command palette: type to jump to an agent, an open tab, a project, a workbox or a
  * command. ↑ and ↓ move, Enter runs the active item, ⌘Enter runs it the other way (an agent
  * opens in the other terminal), ⇥ on an agent lists what can be done with it (Reply…, Copy
- * attach command, Close pane…), Esc closes. It counts as an open modal, so the menu's shortcuts
+ * attach command, Close…), Esc closes. It counts as an open modal, so the menu's shortcuts
  * and Home's stand down while it is up, and it sits on the scrim, above the terminal panel.
  *
  * Focus stays in the input throughout (a combobox): the options are never focused, and nothing
@@ -167,8 +169,23 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const machines = state?.machines;
   const items = useMemo(() => {
     const store = useAppStore.getState();
+    const rows = state ? toRows(state) : [];
+    // One command per workbox that lists ended terminals (spec 7.3); it asks first.
+    const clearEndedCommands = (machines ?? [])
+      .filter((m) =>
+        rows.some((r) => r.machineId === m.id && r.status === "ended"),
+      )
+      .map((m) => ({
+        id: `clear-ended-${m.id}`,
+        label: `Clear ended on ${m.name}`,
+        run: () =>
+          store.setClearEnded(
+            m.id,
+            firstRestorable([previousFocus, menuTrigger]) ?? null,
+          ),
+      }));
     return buildItems({
-      rows: state ? toRows(state) : [],
+      rows,
       machines: machines ?? [],
       commands: [
         {
@@ -232,6 +249,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             window.setTimeout(() => runMenuAction("shortcuts"), 0);
           },
         },
+        ...clearEndedCommands,
         {
           id: "refresh",
           label: "Refresh",
@@ -242,10 +260,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         },
       ],
       openTabs: stripOrder(tabs, machines ?? []).map((tab) => {
-        const row = rowsByKey.get(tab.tabKey) ?? null;
-        const words =
-          tabStatus(tab, row ?? undefined) ??
-          (tab.target.kind === "full" ? "Full herdr UI" : null);
+        const row = rowsByKey.get(rowKeyOf(tab.tabKey)) ?? null;
+        const words = tabStatus(tab, row ?? undefined);
         const n = tabShortcut(tab.tabKey, tabs, machines ?? []);
         return {
           key: tab.tabKey,
@@ -268,7 +284,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       goToWorkbox: (machineId) => showHomeView({ kind: "workbox", machineId }),
       openTarget,
     });
-  }, [state, machines, openTarget, tabs, rowsByKey]);
+  }, [
+    state,
+    machines,
+    openTarget,
+    tabs,
+    rowsByKey,
+    previousFocus,
+    menuTrigger,
+  ]);
 
   // The agent whose actions are showing, as the state has it now (its status may have moved on).
   const frameRow =
@@ -277,6 +301,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const hasTab =
     frameRow !== undefined && tabs.some((t) => t.tabKey === frameRow.key);
 
+  // Open in Herdr is offered in the frame only while Herdr's window is open.
+  const herdrApp = useHerdrApp(inFrame && frameRow?.status !== "ended");
+
   const actions = useMemo(() => {
     if (!frameRow) return [];
     const q = query.trim();
@@ -284,8 +311,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       hasTab,
       openTarget,
       terminal: terminalLabel,
+      herdrApp,
     }).filter((a) => q === "" || fuzzyMatch(q, a.label) !== null);
-  }, [frameRow, hasTab, openTarget, terminalLabel, query]);
+  }, [frameRow, hasTab, openTarget, terminalLabel, herdrApp, query]);
 
   // What ⌘↩ does in the frame, whatever the filter hides: the footer names it.
   const frameAltLabel = useMemo(
@@ -300,9 +328,30 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     [frameRow, hasTab, openTarget, terminalLabel],
   );
 
+  // The frame's list can change under the person (Herdr's answer inserts or removes Open in
+  // Herdr): the highlight stays on the same action, by id, so Enter runs what they picked. A new
+  // query is the person's own change and starts at the top as before.
+  const [seenActions, setSeenActions] = useState<{
+    list: AgentAction[];
+    query: string;
+  }>({ list: actions, query });
+  if (seenActions.list !== actions) {
+    const before =
+      seenActions.list[Math.min(active, seenActions.list.length - 1)];
+    setSeenActions({ list: actions, query });
+    if (inFrame && before && seenActions.query === query) {
+      const next = actions.findIndex((a) => a.id === before.id);
+      if (next >= 0 && next !== active) setActive(next);
+    }
+  }
+
   const results = useMemo(() => rankItems(items, query), [items, query]);
   const count = inFrame ? actions.length : results.length;
   const at = Math.min(active, Math.max(0, count - 1));
+  // The active item is an ended agent: Enter shows its actions, and there is no second way to open.
+  // Only an agent has a second way to open; a tab, a command, a project or a workbox has none.
+  const hasAlt = !inFrame && results[at]?.alt !== undefined;
+  const framedHere = !inFrame && results[at]?.framed === true;
   const optionId = (index: number) => `${listId}-${index}`;
 
   // The agent went away while its actions were showing: back to the list (React re-renders
@@ -346,17 +395,14 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       showHomeView({ kind: "all" });
       store.select(row.key);
       focusReplyBoxSoon();
-    } else if (id === "copy-attach") void copyAttach(row);
-    else if (id === "mark-seen") markSeen(row);
-    else if (id === "show-in-all") {
-      store.setQuery("");
-      store.select(row.key);
-      showHomeView({ kind: "all" });
-    } else if (id === "close-pane") {
-      // The confirmation outlives the palette, and focus goes back to where ⌘K was pressed.
-      store.setCloseRow(
-        row,
-        firstRestorable([previousFocus, menuTrigger]) ?? null,
+    } else {
+      // The rest is the ⋯ menu's list. Close… and Remove… hand the row to the store: the
+      // confirmation outlives the palette, and focus goes back to where ⌘K was pressed.
+      runRowItem(id, row, () =>
+        store.setCloseRow(
+          row,
+          firstRestorable([previousFocus, menuTrigger]) ?? null,
+        ),
       );
     }
     onClose();
@@ -371,6 +417,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 
   const run = (item: PaletteItem | undefined, how: "default" | "alt") => {
     if (!item) return;
+    if (item.framed) {
+      // Nothing to open: Enter shows what can be done with it, ⌘Enter does nothing.
+      if (how === "default") enterFrame(item);
+      return;
+    }
     item.run(how);
     onClose();
   };
@@ -389,7 +440,12 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (inFrame && frameRow) {
-        const id = e.metaKey ? "open-alt" : actions[at]?.id;
+        // ⌘↩ is the second way to open; an ended terminal has none.
+        const id = e.metaKey
+          ? frameAltLabel === undefined
+            ? undefined
+            : "open-alt"
+          : actions[at]?.id;
         if (id) runAction(frameRow, id);
       } else run(results[at], e.metaKey ? "alt" : "default");
     } else if (e.key === "Tab") {
@@ -465,13 +521,13 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
               <span className="palette-crumb-back" aria-hidden="true">
                 ‹
               </span>
-              <StatusDot status={frameRow.status} live />
+              <StatusDot status={shownStatus(frameRow).status} live />
               <span className="palette-crumb-name">{frameRow.name}</span>
               <span className="palette-detail mono">
                 {[
                   frameRow.machineLabel,
                   frameRow.folder === null ? null : shortPath(frameRow.folder),
-                  STATUS_LABEL[frameRow.status],
+                  shownStatus(frameRow).label,
                 ]
                   .filter((part) => part !== null)
                   .join(" · ")}
@@ -526,18 +582,21 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     onMouseMove={() => setActive(index)}
                     onClick={(e) => run(item, e.metaKey ? "alt" : "default")}
                   >
-                    {item.row && <StatusDot status={item.row.status} live />}
+                    {item.row && (
+                      <StatusDot status={shownStatus(item.row).status} live />
+                    )}
                     <span className="palette-label">
                       <Highlighted
                         text={item.label}
                         positions={labelPositions(item, query)}
                       />
+                      {item.row?.pinned && <PinGlyph />}
                     </span>
                     <span className="palette-detail mono">{item.detail}</span>
                     {index === at && (
                       <span className="palette-keys">
-                        <Kbd keys="↵" /> Open
-                        {item.row && (
+                        <Kbd keys="↵" /> {item.framed ? "Actions" : "Open"}
+                        {item.row && !item.framed && (
                           <>
                             {" "}
                             <Kbd keys="⇥" /> Actions
@@ -572,14 +631,18 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         </div>
         <p className="palette-hint">
           <Kbd keys="↑" /> <Kbd keys="↓" /> Move · <Kbd keys="↵" />{" "}
-          {inFrame ? "Run" : "Open"} · <Kbd id="palette-open-alt" />{" "}
-          {inFrame
-            ? (frameAltLabel ?? "")
-            : (results[at]?.alt ??
-                  (openTarget === "app" ? "external" : "app")) === "external"
-              ? `Open in ${terminalLabel}`
-              : "Open here"}{" "}
-          ·{" "}
+          {inFrame ? "Run" : framedHere ? "Actions" : "Open"} ·{" "}
+          {(inFrame ? frameAltLabel !== undefined : hasAlt) && (
+            <>
+              <Kbd id="palette-open-alt" />{" "}
+              {inFrame
+                ? frameAltLabel
+                : results[at]?.alt === "external"
+                  ? `Open in ${terminalLabel}`
+                  : "Open here"}{" "}
+              ·{" "}
+            </>
+          )}
           {inFrame ? (
             <>
               <Kbd keys="⌫" /> Back

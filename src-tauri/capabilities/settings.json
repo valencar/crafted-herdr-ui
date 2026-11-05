@@ -11,12 +11,12 @@
     "allow-get-settings",
     "allow-get-state",
     "allow-get-terminals",
-    "allow-herdr-status",
-    "allow-list-agent-kinds",
+    "allow-core-status",
+    "allow-list-run-choices",
     "allow-list-terminals",
-    "allow-machine-set-enabled",
     "allow-preview-launch-template",
     "allow-set-settings",
+    "allow-set-workbox-hidden",
     "allow-shortcut-status",
     "dialog:allow-open"
   ]

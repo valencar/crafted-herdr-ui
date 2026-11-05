@@ -1,774 +1,551 @@
-//! The commands the user's terminal runs: attach to one pane, or the full herdr UI.
+//! The commands the user's terminal runs: `hc attach <full address>`, and the few other core
+//! commands that need a terminal (`machine login`, `machine add`, `machine update`).
+//!
+//! Every command is the resolved core binary followed by arguments. The UI hands over arguments
+//! only, and `checked_core_argv` is the one place that prepends the binary, after
+//! `allowed_core_args` has accepted them.
 
-use crate::state::MachineView;
+use std::path::Path;
 
-use super::quote::{is_plain, shell_quote};
+use super::quote::join_quoted;
+use crate::actions::{ActionError, AddMachineRequest, Reach, check_add};
 
-/// Refuses machines the app can't safely build a command for.
-///
-/// The command line is parsed by POSIX `sh` and also by the user's login shell (Terminal.app,
-/// Warp and the remote side of ssh), which may be fish, where `\\` and `\'` mean something inside
-/// single quotes. So the strings herdr hands us (SSH target, session name) must be made only of
-/// characters that are safe unquoted everywhere.
-pub fn check_openable(machine: &MachineView) -> Result<(), String> {
-    // A leading '-' would make `--session <s>` read the name as another flag.
-    if machine.session != DEFAULT_SESSION
-        && (!is_plain(&machine.session) || machine.session.starts_with('-'))
-    {
-        return Err(format!(
-            "The session name of {} has characters the app won't pass to a shell. \
-             Open it from a terminal instead.",
-            machine.label
-        ));
-    }
-    if machine.is_local {
-        return Ok(());
-    }
-    match machine.target.as_deref() {
-        None | Some("") => Err(format!(
-            "{} has no SSH target to connect to.",
-            machine.label
-        )),
-        // ssh would read this as an option, e.g. `-oProxyCommand=…`.
-        Some(t) if t.starts_with('-') => Err(format!(
-            "The SSH target of {} starts with '-', which ssh would read as an option.",
-            machine.label
-        )),
-        Some(t) if !is_plain(t) => Err(format!(
-            "The SSH target of {} has characters the app won't pass to a shell.",
-            machine.label
-        )),
-        Some(_) => Ok(()),
-    }
-}
-
-/// Refuses a terminal id that isn't safe to put in a command line (same reason as
-/// `check_openable`).
-pub fn check_terminal_id(terminal_id: &str) -> Result<(), String> {
-    if is_plain(terminal_id) {
-        Ok(())
-    } else {
-        Err(format!(
-            "The terminal id {terminal_id:?} has characters the app won't pass to a shell."
-        ))
-    }
-}
-
-/// Refuses a herdr path that can't be quoted for every shell. Spaces are fine; backslashes,
-/// quotes, `$`, backticks and control characters are not.
+/// Refuses a core path that can't be quoted for every shell. The command line is parsed by POSIX
+/// `sh` and also by the user's login shell (Terminal.app, Warp), which may be fish, where `\\`
+/// and `\'` mean something inside single quotes. Spaces are fine; backslashes, quotes, `$`,
+/// backticks and control characters are not.
 pub fn check_bin(bin: &str) -> Result<(), String> {
     if bin.chars().any(|c| c.is_control() || "\\'\"$`".contains(c)) {
-        Err("The herdr path has characters the app won't pass to a shell.".to_owned())
+        Err("The herdr-core path has characters the app won't pass to a shell.".to_owned())
     } else {
         Ok(())
     }
 }
 
-const DEFAULT_SESSION: &str = "default";
-const REMOTE_BIN: &str = "herdr";
-
-/// The remote machine's SSH target. Callers check `check_openable` first; an id is the
-/// fallback so a bad call fails visibly in the terminal instead of panicking.
-fn remote_target(machine: &MachineView) -> &str {
-    machine.target.as_deref().unwrap_or(&machine.id)
-}
-
-/// The local herdr path as it appears inside the attach script: bare when plain, otherwise in
-/// double quotes (`check_bin` has refused every character that would still be special there).
-/// Single quotes would turn into `'\\''` once the whole script is quoted again.
-fn bin_in_script(bin: &str) -> String {
-    if is_plain(bin) {
-        bin.to_owned()
-    } else {
-        format!("\"{bin}\"")
+/// `[<core>, "attach", ["--observe",] <full address>]`: the same for Local and a remote
+/// workbox, run directly with no shell around it.
+pub fn attach_argv(core: &Path, full_address: &str, observe: bool) -> Vec<String> {
+    let mut argv = vec![core.to_string_lossy().into_owned(), "attach".to_owned()];
+    if observe {
+        argv.push("--observe".to_owned());
     }
-}
-
-/// `[export HERDR_SESSION=<s>; ]` for a non-default session.
-fn session_prefix(machine: &MachineView) -> String {
-    if machine.session == DEFAULT_SESSION {
-        String::new()
-    } else {
-        format!("export HERDR_SESSION={}; ", shell_quote(&machine.session))
-    }
-}
-
-/// `herdr terminal attach <terminal_id>`, with the takeover fallback, as argv for a terminal
-/// to run. `local_bin` is the resolved herdr path, used for Local only; a remote machine uses
-/// plain `herdr` from its own PATH.
-pub fn attach_argv(machine: &MachineView, terminal_id: &str, local_bin: &str) -> Vec<String> {
-    let herdr = if machine.is_local {
-        bin_in_script(local_bin)
-    } else {
-        REMOTE_BIN.to_owned()
-    };
-    let id = shell_quote(terminal_id);
-    // The attach runs where the app can't watch it. If another client owns the terminal it
-    // fails, and only an explicit "y" reruns it with `--takeover`. Exit 127 means the shell
-    // couldn't find herdr (over ssh, often a PATH that a non-interactive session doesn't set),
-    // and taking over would not help, so it says so instead. The constant text uses double
-    // quotes only, so quoting the whole script never produces `\\'` sequences.
-    let not_found = if machine.is_local {
-        "herdr not found on this computer".to_owned()
-    } else {
-        let target = remote_target(machine);
-        // The target is checked by `check_openable`; a name that isn't plain is never put in.
-        let target = if is_plain(target) {
-            target
-        } else {
-            "the remote machine"
-        };
-        format!("herdr not found on {target} (check PATH for non-interactive ssh)")
-    };
-    let script = format!(
-        "{prefix}{herdr} terminal attach {id} || {{ s=$?; [ $s -eq 127 ] && {{ \
-         printf \"\\n%s\\nPress Enter to close. \" \"{not_found}\"; read a; exit 127; }}; \
-         printf \"\\nAnother client owns this session. Take over? [y/N] \"; read a; \
-         [ \"$a\" = y ] && exec {herdr} terminal attach {id} --takeover; }}",
-        prefix = session_prefix(machine),
-    );
-    if machine.is_local {
-        vec!["/bin/sh".into(), "-c".into(), script]
-    } else {
-        vec![
-            "ssh".into(),
-            "-t".into(),
-            remote_target(machine).to_owned(),
-            format!("sh -c {}", shell_quote(&script)),
-        ]
-    }
-}
-
-/// The full herdr UI: `herdr`, or `herdr --remote <target>` for a remote machine. Both run
-/// the local client, so both use the local binary.
-pub fn full_ui_argv(machine: &MachineView, local_bin: &str) -> Vec<String> {
-    let mut argv = vec![local_bin.to_owned()];
-    if !machine.is_local {
-        argv.push("--remote".into());
-        argv.push(remote_target(machine).to_owned());
-    }
-    if machine.session != DEFAULT_SESSION {
-        argv.push("--session".into());
-        argv.push(machine.session.clone());
-    }
+    argv.push(full_address.to_owned());
     argv
 }
 
-/// A value that goes into an allowlisted command: plain characters only, and never something
-/// herdr or ssh would read as an option.
-fn allowed_value(what: &str, value: &str) -> Result<(), String> {
-    if is_plain(value) && !value.starts_with('-') {
-        Ok(())
-    } else {
-        Err(format!(
-            "{what} {value:?} has characters the app won't pass to a shell."
-        ))
+/// The attach command as the user would type it (`hc attach buildbox/t7`), for the command log
+/// and "Copy attach command". `bin_name` is the resolved binary's file name.
+pub fn attach_display(bin_name: &str, full_address: &str, observe: bool) -> String {
+    let mut words = vec![bin_name.to_owned(), "attach".to_owned()];
+    if observe {
+        words.push("--observe".to_owned());
+    }
+    words.push(full_address.to_owned());
+    join_quoted(&words)
+}
+
+/// A name (a machine's, a terminal's): 1 to 32 of `a-z 0-9 - _ .`, starting with a letter or
+/// digit (spec §3).
+fn is_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && s.len() <= 32
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c))
+}
+
+/// `^([a-z0-9][a-z0-9._-]{0,31}/)?[a-z0-9][a-z0-9._-]{0,31}$`: an address as the local core
+/// takes it, `t7` or `buildbox/t7`.
+fn is_address(s: &str) -> bool {
+    match s.split_once('/') {
+        Some((machine, terminal)) => is_name(machine) && is_name(terminal),
+        None => is_name(s),
     }
 }
 
-/// A machine label: words of plain characters separated by single spaces, so it reads as one
-/// name. Splitting on `' '` makes an empty word (a leading, trailing or doubled space) fail
-/// `is_plain`, and the leading-`-` check keeps it from reading as an option.
-fn allowed_label(value: &str) -> Result<(), String> {
-    if value.split(' ').all(is_plain) && !value.starts_with('-') {
-        Ok(())
-    } else {
-        Err(format!(
-            "The label {value:?} has characters the app won't pass to a shell."
-        ))
-    }
+/// An SSH target for `machine add`: `^[A-Za-z0-9._@:-]+$`, never starting with `-`, so ssh can't
+/// read it as an option.
+pub fn is_target(s: &str) -> bool {
+    !s.is_empty()
+        && !s.starts_with('-')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._@:-".contains(c))
 }
 
-/// The options `machine add <target>` may carry, each at most once, in any order.
-fn check_machine_add_options(options: &[String]) -> Result<(), String> {
-    let mut seen: Vec<&str> = Vec::new();
-    for pair in options.chunks(2) {
-        let [flag, value] = pair else {
-            return Err(format!("{} needs a value.", pair[0]));
-        };
-        if seen.contains(&flag.as_str()) {
-            return Err(format!("{flag} was given twice."));
-        }
-        match flag.as_str() {
-            "--label" => allowed_label(value)?,
-            "--remote-session" => allowed_value("The remote session", value)?,
-            other => return Err(format!("{other} is not an option the app will run.")),
-        }
-        seen.push(flag);
-    }
-    Ok(())
+/// A session name for `machine add --session`.
+pub fn is_session(s: &str) -> bool {
+    s.len() <= 64
+        && s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
 }
 
-/// The command for `open_in_terminal`: `herdr_bin` followed by `args`, but only when `args` is
-/// one of the three listed shapes. Anything else is refused, so the UI can't have the app run an
-/// arbitrary herdr command (or anything else) in the user's terminal.
+/// The `--via` command: anything without a control character (NUL and newlines among them) or a
+/// backslash, and not shaped like an option. The command line is read by POSIX `sh` and by the
+/// user's login shell, which may be fish, where `\\` and `\'` mean something inside single
+/// quotes; refusing the backslash keeps what the person reads the same as what runs.
+pub fn is_via(s: &str) -> bool {
+    !s.is_empty() && !s.starts_with('-') && !s.chars().any(|c| c.is_control() || c == '\\')
+}
+
+/// Whether `args` (no binary) are a command the UI may hand to a terminal. Exactly:
 ///
-/// - `machine reconnect <id>`
-/// - `machine add <target> [--label <L>] [--remote-session <S>]`
-/// - `--remote <target> [--session <S>]`
-pub fn allowed_herdr_argv(herdr_bin: &str, args: &[String]) -> Result<Vec<String>, String> {
-    check_bin(herdr_bin)?;
-    if herdr_bin.is_empty() {
-        return Err("herdr was not found on this computer.".to_owned());
-    }
+/// - `attach <addr>` and `attach --observe <addr>`
+/// - `machine login <name>` and `machine update <name>`
+/// - `machine add`, then exactly one of `<target>` or `--via <cmd>` (`--via` needs `--name`),
+///   and any of `--name <name>`, `--session <name>`, `--temp` and `--install`, each at most once
+///   and in any order
+///
+/// Nothing else: not `server stop`, `machine rm`, `kill`, `rm`, `update` or a bare call.
+pub fn allowed_core_args(args: &[String]) -> bool {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
-        ["machine", "reconnect", id] => allowed_value("The machine id", id)?,
-        ["machine", "add", target, ..] => {
-            allowed_value("The SSH target", target)?;
-            check_machine_add_options(&args[3..])?;
+        ["attach", addr] => is_address(addr),
+        ["attach", "--observe", addr] => is_address(addr),
+        // The same name check the app makes before it asks for these, so an address-shaped name
+        // (`t7`) is not accepted here either.
+        ["machine", "login" | "update", name] => {
+            is_name(name) && crate::actions::validate_name(name).is_ok()
         }
-        ["--remote", target] => allowed_value("The SSH target", target)?,
-        ["--remote", target, "--session", session] => {
-            allowed_value("The SSH target", target)?;
-            allowed_value("The session", session)?;
-        }
-        _ => return Err("The app won't run that command in a terminal.".to_owned()),
+        ["machine", "add", rest @ ..] => allowed_machine_add(rest),
+        _ => false,
     }
-    let mut argv = vec![herdr_bin.to_owned()];
+}
+
+fn allowed_machine_add(words: &[&str]) -> bool {
+    let (mut target, mut via, mut name, mut session) = (false, false, false, false);
+    let (mut temp, mut install) = (false, false);
+    let mut i = 0;
+    // Sets a flag that may appear once; false when it already had.
+    fn once(seen: &mut bool) -> bool {
+        !std::mem::replace(seen, true)
+    }
+    while i < words.len() {
+        let ok = match words[i] {
+            "--temp" => once(&mut temp),
+            "--install" => once(&mut install),
+            flag @ ("--via" | "--name" | "--session") => {
+                i += 1;
+                let Some(value) = words.get(i) else {
+                    return false;
+                };
+                match flag {
+                    "--via" => is_via(value) && once(&mut via),
+                    "--name" => crate::actions::validate_name(value).is_ok() && once(&mut name),
+                    _ => is_session(value) && once(&mut session),
+                }
+            }
+            positional => is_target(positional) && once(&mut target),
+        };
+        if !ok {
+            return false;
+        }
+        i += 1;
+    }
+    // Exactly one of a target and `--via`; `--via` has no name of its own to go by.
+    (target ^ via) && (!via || name)
+}
+
+/// `core` followed by `args`, but only when `args` pass `allowed_core_args`. The UI never sends a
+/// binary: this is where the resolved one goes in front.
+pub fn checked_core_argv(core: &Path, args: &[String]) -> Result<Vec<String>, String> {
+    let core = core.to_string_lossy();
+    if core.is_empty() {
+        return Err("herdr-core was not found on this computer.".to_owned());
+    }
+    check_bin(&core)?;
+    if !allowed_core_args(args) {
+        return Err("The app won't run that command in a terminal.".to_owned());
+    }
+    let mut argv = vec![core.into_owned()];
     argv.extend_from_slice(args);
     Ok(argv)
 }
 
-/// The command that adds a machine: `herdr machine add <target> [--label L] [--remote-session S]`.
-/// The UI's preview and the call to `open_in_terminal` both come from here, so what the user
-/// reads is what runs. Empty options are left out.
-pub fn machine_add_argv(target: &str, label: Option<&str>, session: Option<&str>) -> Vec<String> {
-    let mut argv: Vec<String> = ["herdr", "machine", "add", target]
-        .map(str::to_owned)
-        .into();
-    for (flag, value) in [("--label", label), ("--remote-session", session)] {
-        if let Some(value) = value.filter(|v| !v.is_empty()) {
-            argv.push(flag.to_owned());
-            argv.push(value.to_owned());
-        }
-    }
-    argv
+/// The command as shown in the log and previews: the binary's name, then the arguments.
+pub fn args_display(bin_name: &str, args: &[String]) -> String {
+    let mut words = vec![bin_name.to_owned()];
+    words.extend_from_slice(args);
+    join_quoted(&words)
 }
 
-/// `machine_add_argv` for the form's raw fields (trimmed; empty means not given), checked
-/// against the same allowlist `open_in_terminal` applies.
-pub fn checked_machine_add_argv(
-    target: &str,
-    label: Option<&str>,
-    session: Option<&str>,
-) -> Result<Vec<String>, String> {
-    fn given(v: Option<&str>) -> Option<&str> {
-        v.map(str::trim).filter(|v| !v.is_empty())
+/// The binary's file name (`hc`, `herdr-core`), which is what the command text shows.
+pub fn bin_name(core: &Path) -> String {
+    core.file_name()
+        .map_or_else(|| "hc".to_owned(), |n| n.to_string_lossy().into_owned())
+}
+
+/// What follows the binary in `machine add`, for the sheet's fields: a target (with its port) or
+/// `--via <cmd> --name N`, then `--name`, `--session`, `--temp` and, only when `install` is true,
+/// `--install`. The request is checked first (`check_add`), and the result against
+/// `allowed_core_args`, so what the person reads is what runs. `install` is true only after the
+/// person confirmed Install hc there….
+pub fn machine_add_args(
+    req: &AddMachineRequest,
+    install: bool,
+) -> Result<Vec<String>, ActionError> {
+    let add = check_add(req).map_err(ActionError::invalid)?;
+    let mut args: Vec<String> = ["machine", "add"].map(str::to_owned).into();
+    match add.reach {
+        Reach::Target(target) => args.push(target),
+        Reach::Via(via) => args.extend(["--via".to_owned(), via]),
     }
-    let argv = machine_add_argv(target.trim(), given(label), given(session));
-    allowed_herdr_argv("herdr", &argv[1..])?;
-    Ok(argv)
+    for (flag, value) in [("--name", add.name), ("--session", add.session)] {
+        if let Some(value) = value {
+            args.extend([flag.to_owned(), value]);
+        }
+    }
+    if add.temporary {
+        args.push("--temp".to_owned());
+    }
+    if install {
+        args.push("--install".to_owned());
+    }
+    if allowed_core_args(&args) {
+        Ok(args)
+    } else {
+        Err(ActionError::invalid(
+            "The app won't run that command in a terminal.",
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Health;
-    use std::collections::HashMap;
-
-    fn machine(id: &str, target: Option<&str>, session: &str) -> MachineView {
-        MachineView {
-            id: id.into(),
-            label: id.into(),
-            target: target.map(str::to_owned),
-            session: session.into(),
-            is_local: target.is_none(),
-            health: Health::Online,
-            snapshot: None,
-            last_ok_ms: None,
-            ages: HashMap::new(),
-        }
-    }
 
     fn strs(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| (*s).to_owned()).collect()
     }
 
+    fn ok(args: &[&str]) -> bool {
+        allowed_core_args(&strs(args))
+    }
+
     #[test]
-    fn open_in_terminal_accepts_each_listed_shape() {
-        let ok = |args: &[&str]| allowed_herdr_argv("/opt/herdr/bin/herdr", &strs(args));
+    fn attach_argv_local_and_remote_same_shape() {
+        let core = Path::new("/opt/herdr-core/bin/hc");
         assert_eq!(
-            ok(&["machine", "reconnect", "buildbox"]).unwrap(),
-            strs(&["/opt/herdr/bin/herdr", "machine", "reconnect", "buildbox"])
+            attach_argv(core, "t7", false),
+            strs(&["/opt/herdr-core/bin/hc", "attach", "t7"])
         );
         assert_eq!(
-            ok(&["machine", "add", "buildbox"]).unwrap().len(),
-            4,
-            "machine add <target>"
+            attach_argv(core, "buildbox/t7", false),
+            strs(&["/opt/herdr-core/bin/hc", "attach", "buildbox/t7"])
         );
+        // No shell, no ssh, no takeover prompt: argv is exactly three words.
+        assert_eq!(attach_argv(core, "buildbox/t7", false).len(), 3);
+    }
+
+    #[test]
+    fn observe_adds_flag() {
+        let core = Path::new("/opt/herdr-core/bin/hc");
         assert_eq!(
-            ok(&[
-                "machine",
-                "add",
-                "dev@build.example",
-                "--label",
-                "Build box",
-                "--remote-session",
-                "work"
-            ])
-            .unwrap(),
+            attach_argv(core, "buildbox/t7", true),
             strs(&[
-                "/opt/herdr/bin/herdr",
-                "machine",
-                "add",
-                "dev@build.example",
-                "--label",
-                "Build box",
-                "--remote-session",
-                "work"
+                "/opt/herdr-core/bin/hc",
+                "attach",
+                "--observe",
+                "buildbox/t7"
             ])
         );
-        // Either order, and either option alone.
-        assert!(
-            ok(&[
-                "machine",
-                "add",
-                "t",
-                "--remote-session",
-                "s",
-                "--label",
-                "L"
-            ])
-            .is_ok()
-        );
-        assert!(ok(&["machine", "add", "t", "--label", "L"]).is_ok());
-        assert!(ok(&["machine", "add", "t", "--label", "build box 2"]).is_ok());
-        assert!(ok(&["machine", "add", "t", "--remote-session", "s"]).is_ok());
         assert_eq!(
-            ok(&["--remote", "buildbox"]).unwrap(),
-            strs(&["/opt/herdr/bin/herdr", "--remote", "buildbox"])
+            attach_display("hc", "buildbox/t7", false),
+            "hc attach buildbox/t7"
         );
         assert_eq!(
-            ok(&["--remote", "buildbox", "--session", "work"])
-                .unwrap()
-                .len(),
-            5
+            attach_display("herdr-core", "t7", true),
+            "herdr-core attach --observe t7"
         );
     }
 
     #[test]
-    fn open_in_terminal_rejects_unlisted_argv() {
-        let bad = |args: &[&str]| allowed_herdr_argv("herdr", &strs(args)).is_err();
-        // Not a listed shape at all.
-        assert!(bad(&[]));
-        assert!(bad(&["server", "stop"]));
-        assert!(bad(&["machine", "remove", "buildbox"]));
-        assert!(bad(&["machine", "reconnect"]));
-        assert!(bad(&["machine", "reconnect", "a", "b"]));
-        assert!(bad(&["machine", "add"]));
-        assert!(bad(&["terminal", "attach", "term-1"]));
-        assert!(bad(&["--remote"]));
-        assert!(bad(&["--remote", "buildbox", "--takeover"]));
-        assert!(bad(&["--remote", "buildbox", "--session"]));
-        assert!(bad(&["--session", "work", "--remote", "buildbox"]));
-        // Unlisted or repeated options after `machine add <target>`.
-        assert!(bad(&["machine", "add", "t", "--trust-repository"]));
-        assert!(bad(&["machine", "add", "t", "--label"]));
-        assert!(bad(&[
-            "machine", "add", "t", "--label", "A", "--label", "B"
-        ]));
-        assert!(bad(&["machine", "add", "t", "--label", "A", "extra"]));
-        // Values a shell or ssh could misread.
-        assert!(bad(&["machine", "reconnect", "a b"]));
-        assert!(bad(&["machine", "reconnect", "a;b"]));
-        assert!(bad(&["machine", "reconnect", "$(x)"]));
-        assert!(bad(&["machine", "reconnect", ""]));
-        assert!(bad(&["machine", "reconnect", "-oProxyCommand=x"]));
-        assert!(bad(&["--remote", "-oProxyCommand=x"]));
-        assert!(bad(&["--remote", "host'x"]));
-        assert!(bad(&["machine", "add", "t", "--label", "it's"]));
-        assert!(bad(&["machine", "add", "t", "--label", "a`b`"]));
-        assert!(bad(&["machine", "add", "t", "--label", "-x"]));
-        assert!(bad(&["machine", "add", "t", "--label", "  "]));
-        assert!(bad(&["machine", "add", "t", "--label", "a  b"]));
-        assert!(bad(&["machine", "add", "t", "--label", " a"]));
-        assert!(bad(&["machine", "add", "t", "--label", "a "]));
-        assert!(bad(&["machine", "add", "t", "--label", ""]));
-        assert!(bad(&["machine", "add", "t", "--label", "a\nb"]));
-        assert!(bad(&[
+    fn allowlist_grammar() {
+        // Attach, with and without Watch.
+        assert!(ok(&["attach", "t7"]));
+        assert!(ok(&["attach", "buildbox/t7"]));
+        assert!(ok(&["attach", "--observe", "buildbox/t7"]));
+        assert!(!ok(&["attach"]));
+        assert!(!ok(&["attach", "--observe"]));
+        assert!(!ok(&["attach", "T7"]), "uppercase");
+        assert!(!ok(&["attach", "-t7"]));
+        assert!(!ok(&["attach", "a/b/c"]));
+        assert!(!ok(&["attach", "/t7"]));
+        assert!(!ok(&["attach", &"a".repeat(33)]));
+        assert!(ok(&["attach", &"a".repeat(32)]));
+        assert!(!ok(&["attach", "t7;rm"]));
+        assert!(!ok(&["attach", "--takeover", "t7"]));
+        assert!(!ok(&["attach", "t7", "t8"]));
+
+        // Login and update.
+        assert!(ok(&["machine", "login", "buildbox"]));
+        assert!(ok(&["machine", "update", "buildbox"]));
+        assert!(!ok(&["machine", "login", "Build Box"]));
+        assert!(!ok(&["machine", "update", "-x"]));
+        assert!(!ok(&["machine", "login"]));
+        assert!(!ok(&["machine", "login", "t7"]));
+        assert!(!ok(&["machine", "update", "t12b"]));
+
+        // Add.
+        assert!(ok(&["machine", "add", "buildbox"]));
+        assert!(ok(&["machine", "add", "dev@build.example:2222", "--temp"]));
+        assert!(ok(&[
             "machine",
             "add",
-            "t",
-            "--remote-session",
-            "two words"
+            "buildbox",
+            "--install",
+            "--temp",
+            "--session",
+            "work",
+            "--name",
+            "box"
+        ]));
+        assert!(ok(&[
+            "machine",
+            "add",
+            "--name",
+            "box",
+            "--via",
+            "ssh -p 2222 dev@host",
+            "--temp"
+        ]));
+        assert!(ok(&[
+            "machine",
+            "add",
+            "--via",
+            "ssh dev@host",
+            "--name",
+            "box"
+        ]));
+
+        // Refused.
+        for bad in [
+            &["server", "stop"][..],
+            &["machine", "rm", "x"],
+            &["kill", "t1"],
+            &["rm", "t1"],
+            &["update"],
+            &[],
+            &["machine", "add"],
+            &[
+                "machine", "add", "buildbox", "--via", "ssh h", "--name", "b",
+            ],
+            &["machine", "add", "--via", "ssh h"],
+            &[
+                "machine", "add", "--name", "box", "--via", "ssh h", "--via", "ssh i",
+            ],
+            &["machine", "add", "buildbox", "--temp", "--temp"],
+            &["machine", "add", "buildbox", "--install", "--install"],
+            &["machine", "add", "buildbox", "--name", "a", "--name", "b"],
+            &[
+                "machine",
+                "add",
+                "buildbox",
+                "--session",
+                "a",
+                "--session",
+                "b",
+            ],
+            &["machine", "add", "-oProxyCommand=x"],
+            &["machine", "add", "buildbox", "other"],
+            &["machine", "add", "buildbox", "--name"],
+            &["machine", "add", "buildbox", "--name", "Build box"],
+            &["machine", "add", "buildbox", "--rm"],
+            &[
+                "machine",
+                "add",
+                "--name",
+                "box",
+                "--via",
+                "ssh h\nrm -rf /",
+            ],
+            &[
+                "machine",
+                "add",
+                "--name",
+                "box",
+                "--via",
+                "-oProxyCommand=x",
+            ],
+            &["machine", "add", "--name", "box", "--via", "a\0b"],
+            &["machine", "add", "--name", "box", "--via", ""],
+            &["machine", "add", "bad target"],
+            &["machine", "add", "buildbox;ls"],
+        ] {
+            assert!(!allowed_core_args(&strs(bad)), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn checked_argv_always_starts_with_the_core() {
+        let core = Path::new("/opt/herdr-core/bin/hc");
+        let argv = checked_core_argv(core, &strs(&["machine", "login", "buildbox"])).unwrap();
+        assert_eq!(
+            argv,
+            strs(&["/opt/herdr-core/bin/hc", "machine", "login", "buildbox"])
+        );
+        // A binary in the arguments is not an allowed command.
+        assert!(checked_core_argv(core, &strs(&["/bin/sh", "-c", "id"])).is_err());
+        // No core, or one a login shell could misread.
+        assert!(checked_core_argv(Path::new(""), &strs(&["attach", "t7"])).is_err());
+        assert!(checked_core_argv(Path::new("/opt/it's/hc"), &strs(&["attach", "t7"])).is_err());
+        assert!(check_bin("/Users/dev/My Tools/hc").is_ok());
+    }
+
+    fn req(target: &str) -> AddMachineRequest {
+        AddMachineRequest {
+            target: Some(target.into()),
+            ..AddMachineRequest::default()
+        }
+    }
+
+    #[test]
+    fn machine_add_args_are_arguments_only_and_pass_the_allowlist() {
+        let mut full = req(" buildbox ");
+        full.port = Some(2222);
+        full.name = Some(" box ".into());
+        full.session = Some("work".into());
+        full.temporary = true;
+        let args = machine_add_args(&full, false).unwrap();
+        assert_eq!(
+            args,
+            strs(&[
+                "machine",
+                "add",
+                "buildbox:2222",
+                "--name",
+                "box",
+                "--session",
+                "work",
+                "--temp"
+            ])
+        );
+        assert!(allowed_core_args(&args));
+        // Never the binary.
+        assert_eq!(args[0], "machine");
+
+        assert_eq!(
+            machine_add_args(&req("buildbox"), false).unwrap(),
+            strs(&["machine", "add", "buildbox"])
+        );
+        let via = AddMachineRequest {
+            via: Some("ssh -p 2222 dev@host".into()),
+            name: Some("gpubox".into()),
+            ..AddMachineRequest::default()
+        };
+        let args = machine_add_args(&via, false).unwrap();
+        assert_eq!(
+            args,
+            strs(&[
+                "machine",
+                "add",
+                "--via",
+                "ssh -p 2222 dev@host",
+                "--name",
+                "gpubox"
+            ])
+        );
+        assert!(allowed_core_args(&args));
+    }
+
+    #[test]
+    fn install_flag_only_after_click() {
+        let mut full = req("buildbox");
+        full.name = Some("box".into());
+        // The flag is asked for with `install`, which the UI sets only after a confirm.
+        let plain = machine_add_args(&full, false).unwrap();
+        assert!(!plain.iter().any(|a| a == "--install"), "{plain:?}");
+        let installing = machine_add_args(&full, true).unwrap();
+        assert_eq!(installing.last().map(String::as_str), Some("--install"));
+        assert_eq!(installing.iter().filter(|a| *a == "--install").count(), 1);
+        assert!(allowed_core_args(&installing));
+    }
+
+    #[test]
+    fn via_requires_name() {
+        let via = AddMachineRequest {
+            via: Some("ssh dev@host".into()),
+            ..AddMachineRequest::default()
+        };
+        assert!(machine_add_args(&via, false).is_err());
+        // A target and a custom connection together are no command either.
+        let mut both = via.clone();
+        both.target = Some("buildbox".into());
+        both.name = Some("box".into());
+        assert!(machine_add_args(&both, false).is_err());
+    }
+
+    #[test]
+    fn hostile_values_never_become_arguments() {
+        for bad in ["-oProxyCommand=x", "", "buildbox;ls", "a b", "$(id)"] {
+            assert!(machine_add_args(&req(bad), false).is_err(), "{bad:?}");
+        }
+        let mut named = req("buildbox");
+        named.name = Some("Build box".into());
+        assert!(machine_add_args(&named, false).is_err());
+        named.name = Some("t7".into());
+        assert!(machine_add_args(&named, false).is_err());
+        let mut session = req("buildbox");
+        session.session = Some("-x".into());
+        assert!(machine_add_args(&session, false).is_err());
+    }
+
+    #[test]
+    fn via_refuses_a_backslash() {
+        // The login shell may be fish, where `\\` and `\'` mean something inside single quotes,
+        // so what the person reads would differ from what runs.
+        for bad in ["ssh a\\b", "ssh a\\'b", "ssh\\ host"] {
+            assert!(
+                !ok(&["machine", "add", "--name", "box", "--via", bad]),
+                "{bad:?}"
+            );
+            let via = AddMachineRequest {
+                via: Some(bad.into()),
+                name: Some("box".into()),
+                ..AddMachineRequest::default()
+            };
+            assert!(machine_add_args(&via, false).is_err(), "{bad:?}");
+        }
+        // Ordinary quoting is fine.
+        assert!(ok(&[
+            "machine",
+            "add",
+            "--name",
+            "box",
+            "--via",
+            "fly ssh console -a app --pty=false -C"
         ]));
     }
 
     #[test]
-    fn argv_with_label_and_session() {
-        assert_eq!(
-            machine_add_argv("buildbox", Some("Build box"), Some("work")),
-            strs(&[
-                "herdr",
-                "machine",
-                "add",
-                "buildbox",
-                "--label",
-                "Build box",
-                "--remote-session",
-                "work"
-            ])
-        );
-        assert_eq!(
-            machine_add_argv("buildbox", None, None),
-            strs(&["herdr", "machine", "add", "buildbox"])
-        );
-        assert_eq!(
-            machine_add_argv("buildbox", Some(""), Some("work")),
-            strs(&[
-                "herdr",
-                "machine",
-                "add",
-                "buildbox",
-                "--remote-session",
-                "work"
-            ])
-        );
-    }
-
-    #[test]
-    fn built_machine_add_commands_pass_the_allowlist() {
-        let full = checked_machine_add_argv(" buildbox ", Some(" Build box "), Some("  ")).unwrap();
-        assert_eq!(
-            full,
-            strs(&[
-                "herdr",
-                "machine",
-                "add",
-                "buildbox",
-                "--label",
-                "Build box"
-            ])
-        );
-        assert!(allowed_herdr_argv("herdr", &full[1..]).is_ok());
-        assert!(checked_machine_add_argv("-oProxyCommand=x", None, None).is_err());
-        assert!(checked_machine_add_argv("", None, None).is_err());
-        assert!(checked_machine_add_argv("buildbox", Some("it's"), None).is_err());
-        assert!(checked_machine_add_argv("buildbox", None, Some("two words")).is_err());
-    }
-
-    #[test]
-    fn open_in_terminal_needs_a_shell_safe_binary() {
-        let args = strs(&["machine", "reconnect", "buildbox"]);
-        assert!(allowed_herdr_argv("", &args).is_err());
-        assert!(allowed_herdr_argv("/opt/it's/herdr", &args).is_err());
-        assert!(allowed_herdr_argv("/opt/my tools/herdr", &args).is_ok());
-    }
-
-    #[test]
-    fn remote_attach_shape() {
-        let m = machine("buildbox", Some("buildbox"), "default");
-        let argv = attach_argv(&m, "term_1", "/unused");
-        assert_eq!(argv.len(), 4);
-        assert_eq!(argv[..3], ["ssh", "-t", "buildbox"]);
-        assert!(argv[3].starts_with("sh -c '"));
-        assert!(argv[3].contains("herdr terminal attach term_1 ||"));
-        assert!(argv[3].contains("exec herdr terminal attach term_1 --takeover"));
-        assert!(!argv[3].contains("HERDR_SESSION"));
-    }
-
-    #[test]
-    fn local_attach_uses_the_absolute_path_and_the_same_wrapper() {
-        let m = machine("local", None, "default");
-        let argv = attach_argv(&m, "term_1", "/opt/herdr/bin/herdr");
-        assert_eq!(argv[..2], ["/bin/sh", "-c"]);
-        assert_eq!(argv.len(), 3);
-        assert!(argv[2].starts_with("/opt/herdr/bin/herdr terminal attach term_1 || {"));
-        assert!(argv[2].contains("Another client owns this session. Take over? [y/N] "));
-        assert!(argv[2].contains("exec /opt/herdr/bin/herdr terminal attach term_1 --takeover"));
-        assert!(!argv[2].contains("HERDR_SESSION"));
-    }
-
-    #[test]
-    fn non_default_session_exports_env() {
-        let local = machine("local", None, "work");
-        let script = &attach_argv(&local, "term_1", "/bin/herdr")[2];
-        assert!(script.starts_with("export HERDR_SESSION=work; "));
-
-        let remote = machine("buildbox", Some("buildbox"), "it's");
-        let argv = attach_argv(&remote, "term_1", "/unused");
-        assert!(argv[3].contains("export HERDR_SESSION="));
-        assert!(argv[3].contains("it"));
-        // The session name never reaches the remote shell unquoted.
-        assert!(!argv[3].contains("HERDR_SESSION=it's"));
-    }
-
-    #[test]
-    fn takeover_only_follows_an_explicit_answer() {
-        let m = machine("local", None, "default");
-        let script = &attach_argv(&m, "t", "herdr")[2];
-        assert!(
-            script.contains("read a; [ \"$a\" = y ] && exec herdr terminal attach t --takeover")
-        );
-    }
-
-    #[test]
-    fn hostile_terminal_ids_stay_one_argument() {
-        let m = machine("local", None, "default");
-        let id = "x'; echo pwned; '";
-        let script = &attach_argv(&m, id, "herdr")[2];
-        assert!(script.contains(&shell_quote(id)));
-    }
-
-    #[test]
-    fn full_ui_argv_per_machine() {
-        let local = machine("local", None, "default");
-        assert_eq!(full_ui_argv(&local, "/bin/herdr"), ["/bin/herdr"]);
-        let local_s = machine("local", None, "work");
-        assert_eq!(
-            full_ui_argv(&local_s, "/bin/herdr"),
-            ["/bin/herdr", "--session", "work"]
-        );
-        let remote = machine("buildbox", Some("buildbox"), "default");
-        assert_eq!(
-            full_ui_argv(&remote, "/opt/herdr/bin/herdr"),
-            ["/opt/herdr/bin/herdr", "--remote", "buildbox"]
-        );
-        let remote_s = machine("buildbox", Some("buildbox"), "work");
-        assert_eq!(
-            full_ui_argv(&remote_s, "/opt/herdr/bin/herdr"),
-            [
-                "/opt/herdr/bin/herdr",
-                "--remote",
-                "buildbox",
-                "--session",
-                "work"
-            ]
-        );
-    }
-
-    #[test]
-    fn unsafe_or_missing_targets_are_refused() {
-        assert!(check_openable(&machine("local", None, "default")).is_ok());
-        assert!(check_openable(&machine("b", Some("buildbox"), "default")).is_ok());
-        assert!(check_openable(&machine("b", Some("-oProxyCommand=x"), "default")).is_err());
-        assert!(check_openable(&machine("b", Some(""), "default")).is_err());
-        let mut no_target = machine("b", Some("x"), "default");
-        no_target.target = None;
-        assert!(check_openable(&no_target).is_err());
-    }
-
-    #[test]
-    fn a_session_that_herdr_would_read_as_a_flag_is_refused() {
-        // `--session -x` would be taken as an option, so it is refused like an unsafe name.
-        for target in [None, Some("buildbox")] {
-            let err = check_openable(&machine("b", target, "-x")).unwrap_err();
-            assert!(err.contains("session name"), "{err}");
-        }
-        assert!(check_openable(&machine("b", Some("buildbox"), "work-2")).is_ok());
-    }
-
-    /// Runs the local attach command with the real `/bin/sh` against a fake herdr that refuses
-    /// to attach unless given `--takeover`, and returns (exit ok, the calls it logged).
-    fn run_local_attach(session: &str, terminal_id: &str, answer: &str) -> (bool, Vec<String>) {
-        use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
-        use std::process::{Command, Stdio};
-
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("calls.log");
-        let bin = dir.path().join("fake herdr");
-        std::fs::write(
-            &bin,
-            format!(
-                "#!/bin/sh\nprintf 'session=%s' \"$HERDR_SESSION\" >> '{log}'\n\
-                 for a in \"$@\"; do printf '|%s' \"$a\" >> '{log}'; done\necho >> '{log}'\n\
-                 case \" $* \" in *' --takeover '*) exit 0;; esac\nexit 1\n",
-                log = log.display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let m = machine("local", None, session);
-        let argv = attach_argv(&m, terminal_id, bin.to_str().unwrap());
-        let mut child = Command::new(&argv[0])
-            .args(&argv[1..])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(answer.as_bytes())
-            .unwrap();
-        let ok = child.wait().unwrap().success();
-        let calls = std::fs::read_to_string(log)
-            .unwrap()
-            .lines()
-            .map(str::to_owned)
-            .collect();
-        (ok, calls)
-    }
-
-    #[test]
-    fn the_command_takes_over_only_after_a_y() {
-        let id = "x'; echo pwned; '$HOME";
-        let (ok, calls) = run_local_attach("work's", id, "y\n");
-        assert!(ok);
-        assert_eq!(
-            calls,
-            [
-                format!("session=work's|terminal|attach|{id}"),
-                format!("session=work's|terminal|attach|{id}|--takeover"),
-            ]
-        );
-
-        for answer in ["n\n", "\n", "yes\n", ""] {
-            let (ok, calls) = run_local_attach("default", "term_1", answer);
-            assert!(!ok, "answer {answer:?}");
-            assert_eq!(calls, ["session=|terminal|attach|term_1"], "{answer:?}");
-        }
-    }
-
-    /// Runs the attach command for `m` under `/bin/sh` against a fake `herdr` that exits with
-    /// `herdr_exit`, answering `answer` to any prompt. The remote command is run through the
-    /// same `sh -c '…'` it would get over ssh, with the fake first on PATH. Returns the exit
-    /// code and what the terminal showed.
-    fn run_attach_exit(m: &MachineView, herdr_exit: i32, answer: &str) -> (Option<i32>, String) {
-        use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
-        use std::process::{Command, Stdio};
-
-        let dir = tempfile::tempdir().unwrap();
-        let bin = dir.path().join("herdr");
-        std::fs::write(&bin, format!("#!/bin/sh\nexit {herdr_exit}\n")).unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let argv = attach_argv(m, "term_1", bin.to_str().unwrap());
-        let (program, args): (&str, Vec<&str>) = if m.is_local {
-            ("/bin/sh", vec!["-c", &argv[2]])
-        } else {
-            // What ssh would hand the remote login shell.
-            ("/bin/sh", vec!["-c", &argv[3]])
-        };
-        let path = format!("{}:/usr/bin:/bin", dir.path().display());
-        let mut child = Command::new(program)
-            .args(args)
-            .env("PATH", path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(answer.as_bytes())
-            .unwrap();
-        let out = child.wait_with_output().unwrap();
-        (
-            out.status.code(),
-            String::from_utf8_lossy(&out.stdout).into_owned(),
-        )
-    }
-
-    #[test]
-    fn exit_127_says_herdr_is_missing_and_never_offers_takeover() {
-        let remote = machine("buildbox", Some("buildbox"), "default");
-        let (code, shown) = run_attach_exit(&remote, 127, "y\n");
-        assert_eq!(code, Some(127));
-        assert!(
-            shown.contains("herdr not found on buildbox (check PATH for non-interactive ssh)"),
-            "{shown}"
-        );
-        assert!(!shown.contains("Take over"), "{shown}");
-
-        let local = machine("local", None, "default");
-        let (code, shown) = run_attach_exit(&local, 127, "y\n");
-        assert_eq!(code, Some(127));
-        assert!(
-            shown.contains("herdr not found on this computer"),
-            "{shown}"
-        );
-        assert!(!shown.contains("Take over"), "{shown}");
-    }
-
-    #[test]
-    fn other_non_zero_exits_still_offer_takeover_and_success_is_quiet() {
-        for m in [
-            machine("local", None, "default"),
-            machine("buildbox", Some("buildbox"), "default"),
-        ] {
-            for exit in [1, 2, 255] {
-                let (code, shown) = run_attach_exit(&m, exit, "n\n");
-                assert!(shown.contains("Take over? [y/N]"), "exit {exit}: {shown}");
-                assert!(!shown.contains("not found"), "exit {exit}: {shown}");
-                assert_ne!(code, Some(0));
-            }
-            let (code, shown) = run_attach_exit(&m, 0, "");
-            assert_eq!(code, Some(0));
-            assert_eq!(shown, "");
-        }
-    }
-
-    #[test]
-    fn strings_a_login_shell_could_misread_are_refused() {
-        for target in ["bu ildbox", "b;x", "b'x", "b\\x", "b$x", "ünï", "a|b"] {
+    fn the_name_flag_follows_validate_name() {
+        for bad in ["t7", "t1b", "Box", "a b", "-x", ""] {
             assert!(
-                check_openable(&machine("b", Some(target), "default")).is_err(),
-                "target {target:?}"
+                !ok(&["machine", "add", "buildbox", "--name", bad]),
+                "{bad:?}"
             );
         }
-        for session in ["a b", "it's", "a\\b", "x;y", "ünï", "$x"] {
+        assert!(ok(&["machine", "add", "buildbox", "--name", "web_app.2"]));
+        for bad in ["-x", "a b", "a/b", "_x", "é", &"a".repeat(65)] {
             assert!(
-                check_openable(&machine("local", None, session)).is_err(),
-                "session {session:?}"
+                !ok(&["machine", "add", "buildbox", "--session", bad]),
+                "{bad:?}"
             );
-            assert!(check_openable(&machine("b", Some("buildbox"), session)).is_err());
         }
-        assert!(check_openable(&machine("b", Some("dev@host.example:22"), "my-work_1")).is_ok());
-
-        assert!(check_terminal_id("term_1").is_ok());
-        for id in ["", "a b", "x'y", "x\\y", "x;y", "x\"y", "$HOME", "ünï"] {
-            assert!(check_terminal_id(id).is_err(), "terminal id {id:?}");
-        }
-
-        assert!(check_bin("/opt/herdr/bin/herdr").is_ok());
-        assert!(check_bin("/Users/dev/My Apps/herdr").is_ok());
-        for bin in [
-            "/a'b/herdr",
-            "/a\\b/herdr",
-            "/a\"b",
-            "/a$b",
-            "/a`b",
-            "/a\nb",
-        ] {
-            assert!(check_bin(bin).is_err(), "bin {bin:?}");
-        }
+        assert!(ok(&["machine", "add", "buildbox", "--session", "Work.2"]));
     }
 
     #[test]
-    fn the_script_has_no_single_quotes_or_backslashes_but_the_newline() {
-        // A bin path with a space is double-quoted in the script, so even after the script and
-        // the whole command line are single-quoted there is no `\'` or `\\` for fish to misread.
-        let bin = "/Users/dev/My Apps/herdr";
-        for m in [
-            machine("local", None, "default"),
-            machine("local", None, "my-work"),
-        ] {
-            let script = &attach_argv(&m, "term_1", bin)[2];
-            assert!(script.contains("\"/Users/dev/My Apps/herdr\" terminal attach term_1"));
-            assert!(
-                !script.replace("\\n", "").contains(['\\', '\'']),
-                "{script}"
-            );
-            let line = crate::terminal::join_quoted(&attach_argv(&m, "term_1", bin));
-            // Only the quotes around the script itself remain.
-            assert_eq!(line.matches('\'').count(), 2, "{line}");
-        }
-        let remote = machine("buildbox", Some("buildbox"), "my-work");
-        let argv = attach_argv(&remote, "term_1", bin);
-        let line = crate::terminal::join_quoted(&argv);
-        assert!(!argv[3].replace("\\n", "").contains('\\'), "{}", argv[3]);
-        // The remote string is quoted a second time, so its two outer quotes become `'\\''`,
-        // a backslash outside any quotes, which every shell reads the same way.
-        assert!(
-            !line.replace("'\\''", "").replace("\\n", "").contains('\\'),
-            "{line}"
+    fn the_display_names_the_binary_and_quotes_the_rest() {
+        assert_eq!(
+            args_display("hc", &strs(&["machine", "add", "buildbox"])),
+            "hc machine add buildbox"
+        );
+        assert_eq!(
+            bin_name(Path::new("/home/dev/.local/bin/herdr-core")),
+            "herdr-core"
         );
     }
 }

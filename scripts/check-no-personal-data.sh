@@ -23,6 +23,23 @@ while IFS= read -r f; do
   [ -f "$f" ] && files+=("$f")
 done <<< "$list"
 
+# The herdr-core fixtures (src-tauri/tests/fixtures/hc/) are scanned on their own account, so
+# a .gitignore rule can never take them out of the check. They are captured from a real core
+# and rewritten by hand, which is exactly where a real name could slip through.
+fixtures_dir="src-tauri/tests/fixtures/hc"
+if [ ! -d "$fixtures_dir" ]; then
+  echo "check-no-personal-data: $fixtures_dir is missing (fails closed)" >&2
+  exit 2
+fi
+listed=" ${files[*]} "
+while IFS= read -r f; do
+  case "$listed" in *" $f "*) ;; *) files+=("$f") ;; esac
+done < <(find "$fixtures_dir" -type f | sort)
+if ! printf '%s\n' "${files[@]}" | grep -q "^$fixtures_dir/"; then
+  echo "check-no-personal-data: no fixture files found under $fixtures_dir (fails closed)" >&2
+  exit 2
+fi
+
 if [ "${#files[@]}" -eq 0 ]; then
   echo "check-no-personal-data: no files to check"
   exit 0

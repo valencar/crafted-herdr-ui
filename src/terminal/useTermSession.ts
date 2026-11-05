@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { Terminal } from "@xterm/xterm";
-import type { TermTarget } from "../lib/bindings/TermTarget";
 import { actionErrorMessage } from "../lib/format";
 import { invokeTyped, openTerm, toActionError } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
-import { useTerminalStore, type TermTab } from "./terminalStore";
+import { rowFor } from "./tabInfo";
+import {
+  useTerminalStore,
+  wireTarget,
+  type TabTarget,
+  type TermTab,
+} from "./terminalStore";
 
 type Size = { cols: number; rows: number };
 
@@ -18,14 +23,25 @@ type Writer = { id: number; busy: boolean; pending: string };
 /**
  * One tab's session with the Rust side: opens it into `termRef`'s terminal on mount, streams
  * its output, forwards keystrokes, and closes it on unmount. `reattach` opens a fresh session
- * into the same terminal (after a detach or an error). Declare this hook after the effect that
- * creates the terminal, so the terminal exists when the session opens.
+ * into the same terminal after a click (a detach or an error); `resume` does the same when the
+ * tab decided to by itself (see `settle` in the store), so it does not count as an attempt.
+ * Declare this hook after the effect that creates the terminal, so the terminal exists when the
+ * session opens.
+ *
+ * A Watch tab (`observe`) opens the observe attach and sends no input to it, ever: no keystroke,
+ * no paste and no reply xterm makes to a terminal query (all of them arrive as `onData`). Its size
+ * is not input: `term_resize` only sizes the local pty that `hc attach --observe` draws into, and
+ * observe never resizes the remote terminal, so a Watch tab fits its view like any other.
  */
 export function useTermSession(
-  tab: Pick<TermTab, "tabKey" | "target">,
+  tab: Pick<TermTab, "tabKey" | "target" | "run" | "observe">,
   termRef: RefObject<Terminal | null>,
 ) {
   const { tabKey } = tab;
+  const observe = tab.observe === true;
+  const run = tab.run ?? 0;
+  // The run whose output the terminal shows; a new run clears it (a Reattach keeps it).
+  const shownRun = useRef(run);
   // Compared by value: the store builds new tab objects, but the session must outlive them.
   const targetJson = JSON.stringify(tab.target);
   const idRef = useRef<number | null>(null);
@@ -50,7 +66,11 @@ export function useTermSession(
   const open = useCallback(async () => {
     const term = termRef.current;
     if (!term) return;
-    const target = JSON.parse(targetJson) as TermTarget;
+    const target = wireTarget(JSON.parse(targetJson) as TabTarget);
+    if (shownRun.current !== run) {
+      shownRun.current = run;
+      term.reset();
+    }
     const mine = ++generation.current;
     const { updateTab } = useTerminalStore.getState();
     const again = asked.current;
@@ -62,40 +82,56 @@ export function useTermSession(
       state: "opening",
       error: null,
       exitCode: null,
+      lastLine: null,
+      waiting: null,
+      restartsAtOpen:
+        rowFor(useAppStore.getState().state, tabKey)?.restarts ?? null,
       attempts: again ? attempts + 1 : attempts,
     });
     sentSize.current = { cols: term.cols, rows: term.rows };
     let exited = false;
-    // A session is live once it has printed: ssh can sit connecting to a box that is down for a
-    // minute or more, and until then the tab stays "opening" (a reattach keeps its bar).
+    // A session is live once it has printed: `hc attach` to a workbox that is dialing can sit
+    // for a while, and until then the tab stays "opening" (a reattach keeps its bar).
     let printed = false;
     try {
-      const id = await openTerm(target, term.cols, term.rows, (e) => {
-        if (mine !== generation.current) return;
-        if (e.kind === "data") {
-          term.write(e.data);
-          if (!printed) {
-            printed = true;
-            // Before the open returns there is no id yet; the open goes live itself then.
-            if (idRef.current !== null)
-              useTerminalStore.getState().updateTab(tabKey, { state: "live" });
+      const id = await openTerm(
+        target,
+        term.cols,
+        term.rows,
+        (e) => {
+          if (mine !== generation.current) return;
+          if (e.kind === "data") {
+            term.write(e.data);
+            if (!printed) {
+              printed = true;
+              // Before the open returns there is no id yet; the open goes live itself then.
+              if (idRef.current !== null)
+                useTerminalStore
+                  .getState()
+                  .updateTab(tabKey, { state: "live" });
+            }
+            return;
           }
-          return;
-        }
-        exited = true;
-        idRef.current = null;
-        writer.current = null;
-        // Only a normal end (exit 0) clears the count. A session is "live" from the moment its
-        // pty runs, and the attach script's own failures (herdr missing, a declined takeover, a
-        // slow ssh timeout) wait on a human or the network, so how long it lived says nothing.
-        const worked = !e.code;
-        useTerminalStore.getState().updateTab(tabKey, {
-          state: "detached",
-          termId: null,
-          exitCode: e.code,
-          ...(worked && { attempts: 0 }),
-        });
-      });
+          exited = true;
+          idRef.current = null;
+          writer.current = null;
+          // Only a normal end (exit 0) clears the count: a session is "live" from the moment its
+          // pty runs, and an attach that fails (exit 3, 5…) says so within a moment, so how long
+          // it lived says nothing.
+          const { state } = useAppStore.getState();
+          useTerminalStore
+            .getState()
+            .sessionEnded(
+              tabKey,
+              { code: e.code, lastLine: e.last_line },
+              rowFor(state, tabKey),
+              state?.core_state.kind ?? "connecting",
+            );
+          if (!e.code)
+            useTerminalStore.getState().updateTab(tabKey, { attempts: 0 });
+        },
+        observe,
+      );
       if (mine !== generation.current) {
         // Unmounted, or replaced by a newer open, while this one was starting.
         invokeTyped("term_close", { id }).catch(() => {});
@@ -103,8 +139,9 @@ export function useTermSession(
       }
       if (exited) return;
       idRef.current = id;
-      writer.current = { id, busy: false, pending: "" };
-      // Keystrokes go through from here (an ssh prompt is output, so it is live by then anyway).
+      // A Watch tab never gets a writer, so no input can be sent to it.
+      writer.current = observe ? null : { id, busy: false, pending: "" };
+      // Keystrokes go through from here (a login prompt is output, so it is live by then anyway).
       useTerminalStore
         .getState()
         .updateTab(
@@ -120,7 +157,7 @@ export function useTermSession(
         error: actionErrorMessage(toActionError(e)),
       });
     }
-  }, [tabKey, targetJson, termRef, resize]);
+  }, [tabKey, targetJson, run, observe, termRef, resize]);
 
   useEffect(() => {
     void open();
@@ -160,16 +197,16 @@ export function useTermSession(
     };
     const sub = term.onData((data) => {
       const w = writer.current;
-      if (!w) return;
+      if (!w || observe) return;
       if (w.busy) w.pending += data;
       else send(w, data);
     });
     return () => sub.dispose();
-  }, [termRef]);
+  }, [termRef, observe]);
 
   const reattach = useCallback(() => {
     asked.current = true;
     return open();
   }, [open]);
-  return { reattach, resize };
+  return { reattach, resume: open, resize };
 }

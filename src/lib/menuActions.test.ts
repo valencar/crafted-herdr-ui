@@ -1,14 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MachineView } from "./bindings/MachineView";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import { appState, machine } from "../test/builders";
 import { runMenuAction } from "./menuActions";
 
 // xterm is tested on its own; `runMenuAction` only drags the workspace in with it.
 vi.mock("../terminal/TerminalView", () => ({ TerminalView: () => null }));
-
-const machine = (id: string, kind: "online" | "disabled") =>
-  ({ id, label: id, health: { kind } }) as unknown as MachineView;
 
 describe("new-in-workbox", () => {
   const openNewSession = vi.fn();
@@ -18,15 +15,10 @@ describe("new-in-workbox", () => {
       openNewSession,
       view: { kind: "dashboard" },
       selectedKey: null,
-      state: {
-        machines: [
-          machine("buildbox", "online"),
-          machine("gpubox", "disabled"),
-        ],
-        herdr_version: "0.9.4",
-        herdr_path: "/home/dev/.local/bin/herdr",
-        generated_at_ms: 1,
-      },
+      state: appState([
+        [machine({ id: "buildbox", health: { kind: "online" } }), null],
+        [machine({ id: "gpubox", health: { kind: "hidden" } }), null],
+      ]),
     });
     useTerminalStore.setState({ tabs: [], activeKey: HOME });
   });
@@ -35,7 +27,7 @@ describe("new-in-workbox", () => {
   const openTab = (machineId: string) => {
     useTerminalStore.getState().openTab({
       tabKey: `${machineId}::w1:p1`,
-      target: { kind: "pane", machineId, paneId: "w1:p1" },
+      target: { kind: "terminal", machineId, address: "w1:p1" },
       title: "agent",
       machineLabel: machineId,
     });

@@ -1,34 +1,42 @@
+import { useState } from "react";
 import { formatShortcut } from "../lib/shortcuts";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { formatStaleness, isPending, isSupportedVersion } from "../lib/format";
+import {
+  MIN_VERSION,
+  formatStaleness,
+  isPending,
+  isSupportedVersion,
+} from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
 import { ReconnectBox } from "./ReconnectBox";
 
-/** The banner for a herdr older than the app supports, until the user dismisses it. */
+/** The banner for a herdr-core older than the app supports, until the user dismisses it. */
 export function VersionBanner() {
-  // `undefined` before the first state; `null` when herdr didn't report a version.
-  const version = useAppStore((s) => s.state?.herdr_version);
+  // `undefined` before the first state; `null` until the core has said hello, when there is
+  // no version to judge yet.
+  const version = useAppStore((s) => s.state?.core_version);
   const dismissed = useAppStore((s) => s.dismissedVersion);
   const dismiss = useAppStore((s) => s.dismissVersionBanner);
   if (
     version === undefined ||
+    version === null ||
     isSupportedVersion(version) ||
-    dismissed === (version ?? "")
+    dismissed === version
   ) {
     return null;
   }
   return (
     <div className="banner" role="status">
       <span>
-        herdr {version ?? "(unknown version)"} is older than this app supports
-        (0.9.0+). Some actions may fail.
+        herdr-core {version} is older than this app supports (
+        {MIN_VERSION.join(".")}+). Some actions may fail.
       </span>
       <button
         type="button"
         className="btn btn-small btn-ghost"
-        onClick={() => dismiss(version ?? "")}
+        onClick={() => dismiss(version)}
       >
         Dismiss
       </button>
@@ -36,22 +44,34 @@ export function VersionBanner() {
   );
 }
 
-/** Local never gets the reconnect card, so this says herdr isn't answering, and what to do. */
-export function LocalDownCard({ error }: { error: string }) {
+/**
+ * Local never gets the reconnect card, so this says herdr-core isn't answering, with the last
+ * error (`cause`, the real reason once the core is stopped, below the generic line) and a
+ * Reconnect button, disabled while its call is out. Connecting starts the core, so it doesn't
+ * send anyone to a terminal.
+ */
+export function LocalDownCard({
+  error,
+  cause,
+}: {
+  error: string;
+  cause?: string;
+}) {
   const report = useAppStore((s) => s.reportError);
+  const [busy, setBusy] = useState(false);
+  const reconnect = () => {
+    setBusy(true);
+    invokeTyped("reconnect_core")
+      .catch(report)
+      .finally(() => setBusy(false));
+  };
   return (
     <EmptyState
       title="Local isn’t answering"
-      action={{
-        label: "Retry now",
-        onClick: () =>
-          invokeTyped("refresh_now", { machineId: "local" }).catch(report),
-      }}
+      action={{ label: "Reconnect", onClick: reconnect, disabled: busy }}
     >
-      <p>{error || "herdr isn’t answering yet"}</p>
-      <p>
-        Start herdr with <code>herdr</code> in a terminal, then retry.
-      </p>
+      <p>{error || "herdr-core isn’t answering yet"}</p>
+      {cause && cause !== error && <p className="muted">{cause}</p>}
     </EmptyState>
   );
 }
@@ -68,34 +88,46 @@ export function MachineNotices({
   machines: MachineView[];
   nowMs: number;
 }) {
-  // Local never gets the reconnect card below, so a herdr that isn't answering would be
-  // invisible. Say so, with the one thing to do.
-  const localDown = machines.find(
-    (m) =>
-      m.is_local &&
-      m.health.kind !== "online" &&
-      m.snapshot === null &&
-      !isPending(m.health),
-  );
+  // Local never gets the reconnect card below, so a core that isn't answering would be
+  // invisible. Say so, with the one thing to do. The event connection is down when the core is
+  // `stopped` (after the 2-minute window, or at once after `hc server stop`, whose cause line
+  // reads "herdr-core was stopped."), or `connecting` after having been up (the rows are
+  // kept, and Local's health then carries the last error; the first connect has none).
+  const core = useAppStore((s) => s.state?.core_state);
+  const local = machines.find((m) => m.is_local);
   const localError =
-    localDown &&
-    (localDown.health.kind === "attention" ||
-      localDown.health.kind === "reconnecting")
-      ? localDown.health.error.trim()
+    local &&
+    (local.health.kind === "attention" || local.health.kind === "reconnecting")
+      ? local.health.error.trim()
       : "";
+  const retrying =
+    core?.kind === "connecting" &&
+    local?.health.kind === "reconnecting" &&
+    localError !== "";
+  const stopped = core?.kind === "stopped";
+  const unanswered =
+    local !== undefined &&
+    local.health.kind !== "online" &&
+    local.terminals.length === 0 &&
+    !isPending(local.health);
+  const showLocalDown = stopped || retrying || unanswered;
+  // Once the core is stopped Local's own error is the generic sentence; the real cause is the
+  // core state's, so both are shown.
+  const downError = stopped ? "herdr-core isn’t running." : localError;
+  const cause = stopped ? core.error.trim() : "";
   const attention = machines.filter(
     (m) => !m.is_local && m.health.kind === "attention",
   );
   return (
     <>
-      {localDown && <LocalDownCard error={localError} />}
+      {showLocalDown && <LocalDownCard error={downError} cause={cause} />}
       {attention.map((m) => (
-        <EmptyState key={m.id} title={`${m.label} needs attention`}>
+        <EmptyState key={m.id} title={`${m.name} needs attention`}>
           <p>
             {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
             {formatStaleness(m.last_ok_ms, nowMs)}
           </p>
-          <ReconnectBox machineId={m.id} />
+          <ReconnectBox machine={m} />
         </EmptyState>
       ))}
     </>

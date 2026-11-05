@@ -1,53 +1,43 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppState } from "../lib/bindings/AppState";
-import type { MachineView } from "../lib/bindings/MachineView";
-import type { SetupEvent } from "../lib/bindings/SetupEvent";
+import type { ActionError } from "../lib/bindings/ActionError";
+import type { AddMachineRequest } from "../lib/bindings/AddMachineRequest";
+import { AddWatcher } from "../components/AddWatcher";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import { appState } from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
-  onMachineSetup: vi.fn(),
 }));
-import { invokeTyped, onMachineSetup } from "../lib/ipc";
+import { invokeTyped } from "../lib/ipc";
 import { AddWorkbox } from "./AddWorkbox";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
-const listen = vi.mocked(onMachineSetup);
-/** Sends an event the way the `"machine-setup"` listener would. */
-let emitSetup: (event: SetupEvent) => void;
 
-function machine(id: string, label = id, target: string | null = id) {
-  return {
-    id,
-    label,
-    target,
-    session: "default",
-    is_local: target === null,
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: 1,
-    ages: {},
-  } as MachineView;
-}
+const LOCAL = { id: "local", name: "This Mac", isLocal: true };
+const NEW_ID = "000000000000000000000000c0de0009";
 
-function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: 1,
-  };
-}
+const rpc = (code: string, message: string, hint: string | null = null) =>
+  ({
+    kind: "core",
+    error: { kind: "rpc", code, message, hint },
+  }) as ActionError;
 
-const LOCAL = machine("local", "This Mac", null);
-let argvError: unknown;
+/** What `add_machine` does next; set by each test. */
+let addResult: () => Promise<string>;
 
 function callsTo(name: string): unknown[][] {
   return invoke.mock.calls.filter((c) => c[0] === name);
+}
+
+/** The requests `add_machine` has been given. */
+function added(): AddMachineRequest[] {
+  return callsTo("add_machine").map(
+    (c) => (c[1] as { req: AddMachineRequest }).req,
+  );
 }
 
 function setup() {
@@ -55,18 +45,21 @@ function setup() {
   return userEvent.setup({ delay: null });
 }
 
-/** Mounts the sheet the way App does: only while the store says it is open. */
+/** Mounts the sheet the way App does, with the watcher that outlives it. */
 function Host() {
   const sheet = useAppStore((s) => s.sheet);
-  return sheet === "add-workbox" ? <AddWorkbox /> : null;
+  return (
+    <>
+      {sheet === "add-workbox" && <AddWorkbox />}
+      <AddWatcher />
+    </>
+  );
 }
 
 /** Renders the sheet and lets its first reads (terminals, ssh hosts) land. */
 async function open() {
   render(<Host />);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
+  await advance(0);
 }
 
 async function advance(ms: number) {
@@ -82,45 +75,35 @@ beforeEach(() => {
   vi.stubGlobal("jest", {
     advanceTimersByTime: vi.advanceTimersByTime.bind(vi),
   });
-  argvError = undefined;
-  emitSetup = () => {
-    throw new Error("the sheet is not listening");
-  };
-  listen.mockReset().mockImplementation(async (cb) => {
-    emitSetup = (event) => act(() => cb(event));
-    return () => {};
-  });
+  addResult = async () => NEW_ID;
   useAppStore.setState({
-    state: appState(LOCAL),
+    state: appState([[LOCAL, []]]),
     sheet: "add-workbox",
     view: { kind: "all" },
     toast: null,
     toastTone: "error",
     dialogOpen: 0,
+    pendingAdd: null,
   });
   invoke
     .mockReset()
     .mockImplementation(async (name: string, args?: unknown) => {
-      const a = (args ?? {}) as {
-        target?: string;
-        label?: string | null;
-        session?: string | null;
-      };
+      const a = (args ?? {}) as { req?: AddMachineRequest; install?: boolean };
       switch (name) {
         case "get_terminals":
           return { installed: ["ghostty"], default: "ghostty" };
         case "list_ssh_hosts":
           return ["buildbox", "gpubox", "staging"];
-        case "preview_machine_add":
-          return `herdr machine add ${a.target}${a.label ? ` --label '${a.label}'` : ""}`;
-        case "machine_add_argv":
-          if (argvError) throw argvError;
+        case "preview_add_machine":
+          return `hc machine add ${a.req?.target}${a.req?.port ? `:${a.req.port}` : ""}`;
+        case "add_machine":
+          return addResult();
+        case "machine_add_args":
           return [
             "machine",
             "add",
-            a.target,
-            ...(a.label ? ["--label", a.label] : []),
-            ...(a.session ? ["--remote-session", a.session] : []),
+            a.req?.target ?? "",
+            ...(a.install ? ["--install"] : []),
           ];
         default:
           return null;
@@ -134,14 +117,15 @@ afterEach(() => {
     tabs: [],
     activeKey: HOME,
     lastTermKey: null,
+    lastByMachine: {},
   });
   useAppStore.getState().clearToast();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
-/** Types a host and clicks "Add workbox"; the run is now under way. */
-async function startNative(user: ReturnType<typeof setup>, host = "buildbox") {
+/** Picks a host from the ssh config chips and clicks "Add workbox". */
+async function addHost(user: ReturnType<typeof setup>, host = "buildbox") {
   await open();
   await user.click(screen.getByRole("button", { name: host }));
   await user.click(screen.getByRole("button", { name: "Add workbox" }));
@@ -149,659 +133,498 @@ async function startNative(user: ReturnType<typeof setup>, host = "buildbox") {
 }
 
 describe("AddWorkbox", () => {
-  it("continue_in_terminal_then_detects_new_profile", async () => {
+  it("add_joins_port_and_calls_api", async () => {
     const user = setup();
     await open();
 
     await user.click(screen.getByRole("button", { name: "gpubox" }));
-    await user.type(screen.getByLabelText("Label"), "Gpu box");
+    await user.type(screen.getByLabelText("Port"), "2222");
+    await user.type(screen.getByLabelText("Name"), "gpu-box");
     await user.type(screen.getByLabelText("Remote session"), "work");
+    await user.click(screen.getByRole("checkbox", { name: /Temporary/ }));
     await advance(0);
-    expect(screen.getByText(/herdr machine add gpubox/)).toBeVisible();
+    // The command line comes from Rust.
+    expect(screen.getByText(/hc machine add gpubox:2222/)).toBeVisible();
 
-    await user.click(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    );
-    await advance(0);
-    expect(callsTo("machine_add_argv")).toEqual([
-      [
-        "machine_add_argv",
-        { target: "gpubox", label: "Gpu box", session: "work" },
-      ],
-    ]);
-    expect(callsTo("open_in_terminal")).toEqual([
-      [
-        "open_in_terminal",
-        {
-          argv: [
-            "machine",
-            "add",
-            "gpubox",
-            "--label",
-            "Gpu box",
-            "--remote-session",
-            "work",
-          ],
-        },
-      ],
-    ]);
-    expect(screen.getByText("Waiting for setup in Ghostty…")).toBeVisible();
-
-    // Polls the machine list every 2 s; nothing new yet.
-    expect(callsTo("refresh_now")).toHaveLength(0);
-    await advance(2000);
-    await advance(2000);
-    expect(callsTo("refresh_now")).toEqual([
-      ["refresh_now", {}],
-      ["refresh_now", {}],
-    ]);
-    expect(useAppStore.getState().sheet).toBe("add-workbox");
-
-    // A terminal tab is in front, as when the sheet is opened from the sidebar over one.
-    act(() =>
-      useTerminalStore.getState().openTab({
-        tabKey: "buildbox::w1:p1",
-        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
-        title: "planner",
-        machineLabel: "buildbox",
-      }),
-    );
-    // A different machine appears first: not the one we are waiting for.
-    act(() =>
-      useAppStore
-        .getState()
-        .setState(appState(LOCAL, machine("other", "Other", "other"))),
-    );
-    expect(useAppStore.getState().sheet).toBe("add-workbox");
-
-    act(() =>
-      useAppStore
-        .getState()
-        .setState(
-          appState(
-            LOCAL,
-            machine("other", "Other", "other"),
-            machine("gpubox-1", "Gpu box", "gpubox"),
-          ),
-        ),
-    );
-    const s = useAppStore.getState();
-    expect(s.sheet).toBeNull();
-    expect(s.toast).toBe("Added Gpu box");
-    expect(s.toastTone).toBe("info");
-    expect(s.view).toEqual({ kind: "workbox", machineId: "gpubox-1" });
-    // The new workbox's screen is on the Home tab, which has to be the one showing.
-    expect(useTerminalStore.getState().activeKey).toBe(HOME);
-
-    // The poll stops with the sheet.
-    const polled = callsTo("refresh_now").length;
-    await advance(10_000);
-    expect(callsTo("refresh_now")).toHaveLength(polled);
-  });
-
-  it("names the target in the success toast when there is no label", async () => {
-    const user = setup();
-    await open();
-    await user.type(screen.getByLabelText("SSH host"), "staging");
-    await user.click(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    );
-    await advance(0);
-    act(() =>
-      useAppStore
-        .getState()
-        .setState(appState(LOCAL, machine("staging", "staging", "staging"))),
-    );
-    expect(useAppStore.getState().toast).toBe("Added staging");
-  });
-
-  it("gives up after 10 minutes with a message, and can try again", async () => {
-    const user = setup();
-    await open();
-    await user.type(screen.getByLabelText("SSH host"), "staging");
-    await user.click(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    );
-    await advance(0);
-    await advance(10 * 60_000 - 1);
-    expect(screen.getByText("Waiting for setup in Ghostty…")).toBeVisible();
-    await advance(1);
-    expect(
-      screen.getByText(
-        "Didn't see the new workbox yet. Finish setup in the terminal, then check the sidebar.",
-      ),
-    ).toBeVisible();
-    expect(screen.queryByText("Waiting for setup in Ghostty…")).toBeNull();
-    const polled = callsTo("refresh_now").length;
-    // About one poll every 2 s for 10 minutes; the exact count depends on timer ordering.
-    expect(polled).toBeGreaterThanOrEqual(299);
-    await advance(10_000);
-    expect(callsTo("refresh_now")).toHaveLength(polled);
-    expect(useAppStore.getState().sheet).toBe("add-workbox");
-    expect(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    ).toBeEnabled();
-  });
-
-  it("cancel stops the polling", async () => {
-    const user = setup();
-    await open();
-    await user.type(screen.getByLabelText("SSH host"), "staging");
-    await user.click(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    );
-    await advance(0);
-    await advance(2000);
-    expect(callsTo("refresh_now")).toHaveLength(1);
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(useAppStore.getState().sheet).toBeNull();
-    await advance(60_000);
-    expect(callsTo("refresh_now")).toHaveLength(1);
-  });
-
-  it("notes a duplicate profile and blocks the button", async () => {
-    useAppStore.setState({
-      state: appState(LOCAL, machine("buildbox", "Build box", "buildbox")),
-    });
-    const user = setup();
-    await open();
-    await user.click(screen.getByRole("button", { name: "buildbox" }));
-    expect(screen.getByText("Already added as Build box")).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    ).toBeDisabled();
-    await user.clear(screen.getByLabelText("SSH host"));
-    await user.type(screen.getByLabelText("SSH host"), "gpubox");
-    expect(screen.queryByText(/Already added/)).toBeNull();
-    expect(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    ).toBeEnabled();
-  });
-
-  it("allows the same host in a different session, and blocks the same session", async () => {
-    useAppStore.setState({
-      state: appState(LOCAL, machine("buildbox", "Build box", "buildbox")),
-    });
-    const user = setup();
-    await open();
-    const go = () =>
-      screen.getByRole("button", { name: "Continue in Ghostty" });
-    await user.type(screen.getByLabelText("SSH host"), "buildbox");
-    // The empty session field means `default`, which is the profile that exists.
-    expect(screen.getByText("Already added as Build box")).toBeVisible();
-    expect(go()).toBeDisabled();
-
-    await user.type(screen.getByLabelText("Remote session"), "work");
-    expect(screen.queryByText(/Already added/)).toBeNull();
-    expect(go()).toBeEnabled();
-
-    await user.clear(screen.getByLabelText("Remote session"));
-    await user.type(screen.getByLabelText("Remote session"), "default");
-    expect(screen.getByText("Already added as Build box")).toBeVisible();
-    expect(go()).toBeDisabled();
-  });
-
-  it("blocks a host whose profile is in the session being asked for", async () => {
-    const work = {
-      ...machine("buildbox-work", "Build box (work)", "buildbox"),
-      session: "work",
-    };
-    useAppStore.setState({
-      state: appState(
-        LOCAL,
-        machine("buildbox", "Build box", "buildbox"),
-        work,
-      ),
-    });
-    const user = setup();
-    await open();
-    await user.type(screen.getByLabelText("SSH host"), "buildbox");
-    await user.type(screen.getByLabelText("Remote session"), "work");
-    expect(screen.getByText("Already added as Build box (work)")).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    ).toBeDisabled();
-  });
-
-  it.each([
-    ["-oProxyCommand=x", "SSH host"],
-    ["two words", "SSH host"],
-    ["it's", "SSH host"],
-  ])("refuses the host %j before asking Rust", async (value, label) => {
-    const user = setup();
-    await open();
-    // Pasted whole, so no valid prefix of it is ever previewed.
-    await user.click(screen.getByLabelText(label));
-    await user.paste(value);
-    expect(screen.getByRole("alert")).toHaveTextContent(/SSH host/);
-    expect(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    ).toBeDisabled();
-    expect(callsTo("preview_machine_add")).toHaveLength(0);
-  });
-
-  it("validates the session and the label", async () => {
-    const user = setup();
-    await open();
-    await user.type(screen.getByLabelText("SSH host"), "staging");
-    const go = screen.getByRole("button", { name: "Continue in Ghostty" });
-    expect(go).toBeEnabled();
-
-    await user.type(screen.getByLabelText("Remote session"), "a b");
-    expect(go).toBeDisabled();
-    await user.clear(screen.getByLabelText("Remote session"));
-    expect(go).toBeEnabled();
-
-    // Single spaces are fine in a label; double spaces and a leading dash are not.
-    await user.type(screen.getByLabelText("Label"), "Build box");
-    expect(go).toBeEnabled();
-    await user.clear(screen.getByLabelText("Label"));
-    await user.type(screen.getByLabelText("Label"), "Build  box");
-    expect(go).toBeDisabled();
-    await user.clear(screen.getByLabelText("Label"));
-    await user.type(screen.getByLabelText("Label"), "-x");
-    expect(go).toBeDisabled();
-    await user.clear(screen.getByLabelText("Label"));
-    await user.type(screen.getByLabelText("Label"), "it's");
-    expect(go).toBeDisabled();
-  });
-
-  it("shows why the terminal could not be opened and keeps the form", async () => {
-    argvError = { kind: "invalid", message: "Nope." };
-    const user = setup();
-    await open();
-    await user.type(screen.getByLabelText("SSH host"), "staging");
-    await user.click(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    );
-    await advance(0);
-    expect(screen.getByRole("alert")).toHaveTextContent("Nope.");
-    expect(callsTo("open_in_terminal")).toHaveLength(0);
-    expect(screen.queryByText(/Waiting for setup/)).toBeNull();
-    await advance(10_000);
-    expect(callsTo("refresh_now")).toHaveLength(0);
-  });
-
-  it("offers the ssh config aliases as chips, and an empty list as no chips", async () => {
-    await open();
-    expect(screen.getByText("From ~/.ssh/config:")).toBeVisible();
-    expect(
-      screen.getAllByRole("button", { name: /^(buildbox|gpubox|staging)$/ }),
-    ).toHaveLength(3);
-    cleanup();
-    invoke.mockImplementation(async (name: string) =>
-      name === "list_ssh_hosts" ? [] : { installed: [], default: "ghostty" },
-    );
-    await open();
-    expect(screen.queryByText("From ~/.ssh/config:")).toBeNull();
-  });
-
-  it("states that keys stay with OpenSSH", async () => {
-    await open();
-    expect(
-      screen.getByText(
-        "Keys stay with OpenSSH. Crafted Herdr never stores passwords.",
-      ),
-    ).toBeVisible();
-  });
-
-  it("add_workbox_runs_natively_and_answers_each_prompt", async () => {
-    const user = setup();
-    await startNative(user);
-    expect(callsTo("start_machine_add")).toEqual([
-      ["start_machine_add", { target: "buildbox", label: null, session: null }],
-    ]);
-    // The terminal is the way out, not the way in.
-    expect(callsTo("open_in_terminal")).toHaveLength(0);
-    expect(screen.getByRole("button", { name: "Add workbox" })).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    ).toBeEnabled();
-
-    await emitSetup({
-      kind: "step",
-      data: { step: "ssh", state: "active", meta: null },
-    });
-    await emitSetup({
-      kind: "output",
-      data: "Running sessions on buildbox:\n",
-    });
-    expect(screen.getByText("SSH connection")).toBeVisible();
-    expect(screen.getByText("In progress")).toBeVisible();
-    expect(screen.getAllByText("Waiting")).toHaveLength(3);
-    await user.click(screen.getByText("Show herdr output"));
-    expect(screen.getByLabelText("herdr output")).toHaveTextContent(
-      "Running sessions on buildbox:",
-    );
-
-    // Session picker: the second session.
-    await emitSetup({
-      kind: "prompt",
-      data: { kind: "pickSession", options: ["default", "agents"] },
-    });
-    const picker = screen.getByRole("dialog", {
-      name: "Which session on buildbox?",
-    });
-    expect(picker).toBeVisible();
-    await user.click(screen.getByRole("radio", { name: "agents" }));
-    await user.click(screen.getByRole("button", { name: "Use this session" }));
-    expect(callsTo("answer_machine_setup")).toEqual([
-      ["answer_machine_setup", { choice: "1" }],
-    ]);
-    expect(screen.queryByRole("dialog", { name: /Which session/ })).toBeNull();
-
-    // Install consent: nothing is installed until the click.
-    await emitSetup({
-      kind: "prompt",
-      data: {
-        kind: "confirmInstall",
-        version: "0.9.4",
-        path: "/home/dev/.local/bin/herdr",
-        detail:
-          "matching herdr 0.9.4 is not installed on buildbox (session default) for linux-x86_64.",
-      },
-    });
-    const install = screen.getByRole("dialog", {
-      name: "Install herdr on buildbox?",
-    });
-    expect(install).toHaveAccessibleDescription(
-      /herdr 0\.9\.4 needs to be installed on buildbox, at \/home\/dev\/\.local\/bin\/herdr/,
-    );
-    expect(
-      screen.getByText(/is not installed on buildbox \(session/),
-    ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Install herdr" }));
-    expect(callsTo("answer_machine_setup")[1]).toEqual([
-      "answer_machine_setup",
-      { choice: "yes" },
-    ]);
-
-    // Finished ok: the machine list decides.
-    await emitSetup({ kind: "finished", data: { ok: true } });
-    expect(screen.getByText("Waiting for buildbox to show up…")).toBeVisible();
-    await advance(2000);
-    expect(callsTo("refresh_now")).toHaveLength(1);
-    expect(useAppStore.getState().sheet).toBe("add-workbox");
-    act(() =>
-      useAppStore
-        .getState()
-        .setState(
-          appState(LOCAL, machine("buildbox", "Build box", "buildbox")),
-        ),
-    );
-    const s = useAppStore.getState();
-    expect(s.sheet).toBeNull();
-    expect(s.toast).toBe("Added buildbox");
-    expect(s.view).toEqual({ kind: "workbox", machineId: "buildbox" });
-  });
-
-  it("replace_prompt_states_the_consequence_and_defaults_to_no", async () => {
-    const user = setup();
-    await startNative(user);
-    await emitSetup({
-      kind: "prompt",
-      data: {
-        kind: "confirmReplace",
-        message:
-          "remote herdr server on buildbox is currently running:\n  server: v0.8.2",
-      },
-    });
-    const dialog = screen.getByRole("dialog", {
-      name: "Stop the herdr server on buildbox?",
-    });
-    expect(dialog).toHaveAccessibleDescription(
-      "This stops the running herdr server on buildbox and the agents in its panes.",
-    );
-    expect(screen.getByText(/server: v0\.8\.2/)).toBeVisible();
-    // Focus starts on the safe choice, and Enter or Escape there never stops anything.
-    expect(
-      within(dialog).getByRole("button", { name: "Cancel" }),
-    ).toHaveFocus();
-    await user.keyboard("{Escape}");
-    expect(callsTo("answer_machine_setup")).toEqual([
-      ["answer_machine_setup", { choice: "no" }],
-    ]);
-    expect(screen.queryByRole("dialog")).toBeTruthy();
-  });
-
-  it("replace_prompt_yes_only_on_the_explicit_button", async () => {
-    const user = setup();
-    await startNative(user);
-    await emitSetup({
-      kind: "prompt",
-      data: {
-        kind: "confirmReplace",
-        message: "restart the remote server now?",
-      },
-    });
-    await user.click(
-      screen.getByRole("button", { name: "Stop server and continue" }),
-    );
-    expect(callsTo("answer_machine_setup")).toEqual([
-      ["answer_machine_setup", { choice: "yes" }],
-    ]);
-  });
-
-  it("a_quiet_run_offers_the_terminal_and_hands_over_after_cancelling_the_pty", async () => {
-    const user = setup();
-    await startNative(user);
-    await emitSetup({ kind: "stalled" });
-    expect(screen.getByRole("status")).toHaveTextContent(
-      /Continue in Ghostty to answer it there/,
-    );
-    invoke.mockClear();
-    await user.click(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    );
-    await advance(0);
-    const order = invoke.mock.calls.map((c) => c[0]);
-    expect(order.slice(0, 3)).toEqual([
-      "cancel_machine_setup",
-      "machine_add_argv",
-      "open_in_terminal",
-    ]);
-    expect(screen.getByText("Waiting for setup in Ghostty…")).toBeVisible();
-    // Events from the run that was cancelled mean nothing now.
-    await emitSetup({ kind: "finished", data: { ok: false } });
-    expect(screen.queryByText(/herdr stopped before/)).toBeNull();
-  });
-
-  it("a_failed_run_shows_why_and_keeps_the_terminal_option", async () => {
-    const user = setup();
-    await startNative(user);
-    await emitSetup({
-      kind: "step",
-      data: {
-        step: "ssh",
-        state: "failed",
-        meta: "error: Permission denied (publickey).; machine was not saved",
-      },
-    });
-    await emitSetup({
-      kind: "output",
-      data: "hint: verify SSH access first with `ssh buildbox`.\n",
-    });
-    await emitSetup({ kind: "finished", data: { ok: false } });
-    expect(screen.getByRole("alert")).toHaveTextContent(/herdr stopped before/);
-    expect(screen.getByText("Failed")).toBeVisible();
-    expect(screen.getByText(/machine was not saved/)).toBeVisible();
-    // The output is open, since that is where the reason is.
-    expect(screen.getByLabelText("herdr output")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Add workbox" })).toBeEnabled();
-    expect(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
-    ).toBeEnabled();
-    // No polling: nothing was added.
-    await advance(10_000);
-    expect(callsTo("refresh_now")).toHaveLength(0);
-  });
-
-  it("leaving_the_sheet_stops_the_hidden_run", async () => {
-    const user = setup();
-    await startNative(user);
-    invoke.mockClear();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(useAppStore.getState().sheet).toBeNull();
-    expect(callsTo("cancel_machine_setup")).toHaveLength(1);
-  });
-
-  it("shows_why_the_run_could_not_start", async () => {
-    argvError = undefined;
-    const user = setup();
-    await open();
-    const base = invoke.getMockImplementation() as
-      ((name: string, args?: unknown) => unknown) | undefined;
-    invoke.mockImplementation(async (name: string, args?: unknown) => {
-      if (name === "start_machine_add") {
-        throw {
-          kind: "invalid",
-          message: "A workbox setup is already running.",
-        };
-      }
-      return base?.(name, args);
-    });
-    await user.click(screen.getByRole("button", { name: "buildbox" }));
     await user.click(screen.getByRole("button", { name: "Add workbox" }));
     await advance(0);
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "A workbox setup is already running.",
-    );
-    expect(screen.getByRole("button", { name: "Add workbox" })).toBeEnabled();
-  });
 
-  it("a_refused_answer_brings_the_question_back", async () => {
-    const user = setup();
-    await startNative(user);
-    await emitSetup({
-      kind: "prompt",
-      data: { kind: "confirmInstall", version: null, path: null, detail: null },
-    });
-    const base = invoke.getMockImplementation() as
-      ((name: string, args?: unknown) => unknown) | undefined;
-    invoke.mockImplementation(async (name: string, args?: unknown) => {
-      if (name === "answer_machine_setup") {
-        throw { kind: "invalid", message: "Nothing is waiting for an answer." };
-      }
-      return base?.(name, args);
-    });
-    await user.click(screen.getByRole("button", { name: "Install herdr" }));
-    await advance(0);
-    // herdr never got the answer, so the dialog is still there and the reason is shown.
-    expect(
-      screen.getByRole("dialog", { name: "Install herdr on buildbox?" }),
-    ).toBeVisible();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Nothing is waiting for an answer.",
-    );
-  });
-
-  it("a_refused_answer_after_the_run_ended_does_not_reopen_the_dialog", async () => {
-    const user = setup();
-    await startNative(user);
-    await emitSetup({
-      kind: "prompt",
-      data: {
-        kind: "confirmReplace",
-        message: "restart the remote server now?",
+    // Rust joins the port; the sheet sends it as its own field.
+    expect(added()).toEqual([
+      {
+        target: "gpubox",
+        port: 2222,
+        via: null,
+        name: "gpu-box",
+        session: "work",
+        temporary: true,
       },
+    ]);
+    // Done: the sheet gives way, and the watcher takes over until the machine is listed.
+    expect(useAppStore.getState().sheet).toBeNull();
+    // The person waited in the sheet, so the watcher takes them to the new workbox.
+    expect(useAppStore.getState().pendingAdd).toEqual({
+      id: NEW_ID,
+      target: "gpubox:2222",
+      knownIds: ["local"],
+      tabMachineId: null,
+      awaited: true,
     });
-    const base = invoke.getMockImplementation() as
-      ((name: string, args?: unknown) => unknown) | undefined;
-    let refuse: (e: unknown) => void = () => {};
-    invoke.mockImplementation((name: string, args?: unknown) =>
-      name === "answer_machine_setup"
-        ? new Promise((_, reject) => (refuse = reject))
-        : base?.(name, args),
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Stop server and continue" }),
-    );
-    await emitSetup({ kind: "finished", data: { ok: false } });
-    await act(async () => refuse({ kind: "invalid", message: "Too late." }));
-    expect(
-      screen.queryByRole("dialog", { name: /Stop the herdr server/ }),
-    ).toBeNull();
+    // Nothing asked for a terminal or an install.
+    expect(callsTo("machine_add_args")).toEqual([]);
   });
 
-  describe("field errors", () => {
-    it("are_alerts_linked_to_their_inputs", async () => {
-      const user = setup();
-      await open();
-      const host = screen.getByLabelText("SSH host");
-      const label = screen.getByLabelText("Label");
-      const session = screen.getByLabelText("Remote session");
-      await user.type(host, "bad host");
-      await user.type(label, "bad;label");
-      await user.type(session, "-x");
-
-      for (const [input, text] of [
-        [host, /The SSH host may only use letters/],
-        [label, /The label may only use letters/],
-        [session, /The remote session can’t start with “-”/],
-      ] as const) {
-        expect(input).toHaveAttribute("aria-invalid", "true");
-        const id = input.getAttribute("aria-describedby");
-        expect(id).toBeTruthy();
-        const error = document.getElementById(id!)!;
-        expect(error).toHaveAttribute("role", "alert");
-        expect(error).toHaveTextContent(text);
-      }
-    });
-
-    it("tell_the_label_it_may_have_single_spaces_between_words", async () => {
-      const user = setup();
-      await open();
-      await user.type(screen.getByLabelText("Label"), "two  spaces");
-      expect(screen.getByLabelText("Label")).toHaveAccessibleDescription(
-        /single spaces between words/,
-      );
-      await user.clear(screen.getByLabelText("Label"));
-      await user.type(screen.getByLabelText("Label"), "one space");
-      expect(screen.getByLabelText("Label")).not.toHaveAttribute(
-        "aria-describedby",
-      );
-    });
-
-    it("leave_no_description_on_a_valid_field", async () => {
-      const user = setup();
-      await open();
-      await user.type(screen.getByLabelText("SSH host"), "buildbox");
-      expect(screen.getByLabelText("SSH host")).not.toHaveAttribute(
-        "aria-describedby",
-      );
-    });
-  });
-
-  it("the_checklist_title_names_the_host_of_the_last_submit_not_the_live_field", async () => {
+  it("hc_missing_offers_install_with_confirm", async () => {
     const user = setup();
-    await startNative(user, "buildbox");
-    await emitSetup({
-      kind: "step",
-      data: { step: "ssh", state: "failed", meta: "refused" },
-    });
-    await emitSetup({ kind: "finished", data: { ok: false } });
-    expect(screen.getByText("Setting up buildbox")).toBeVisible();
+    for (const code of ["hc_missing", "incompatible"]) {
+      cleanup();
+      invoke.mockClear();
+      useAppStore.setState({ sheet: "add-workbox", pendingAdd: null });
+      addResult = async () => {
+        throw rpc(code, "hc is not installed on dev@buildbox.example");
+      };
+      await addHost(user);
 
-    // The fields are open again; editing one must not rename what was tried.
-    await user.clear(screen.getByLabelText("SSH host"));
-    await user.type(screen.getByLabelText("SSH host"), "gpubox");
-    expect(screen.getByText("Setting up buildbox")).toBeVisible();
-    expect(screen.queryByText("Setting up gpubox")).toBeNull();
+      expect(
+        screen.getByText("hc isn’t installed on buildbox, or it’s too old."),
+      ).toBeVisible();
+      expect(
+        screen.getByText("hc is not installed on dev@buildbox.example"),
+      ).toBeVisible();
+      // Nothing is installed by the failure itself.
+      expect(callsTo("machine_add_args")).toEqual([]);
+      expect(useAppStore.getState().sheet).toBe("add-workbox");
+
+      // A click only asks.
+      await user.click(
+        screen.getByRole("button", { name: "Install hc there…" }),
+      );
+      const confirm = screen.getByRole("dialog", {
+        name: "Install hc on buildbox?",
+      });
+      expect(callsTo("machine_add_args")).toEqual([]);
+      await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog", { name: /Install hc/ })).toBeNull();
+      expect(callsTo("machine_add_args")).toEqual([]);
+      expect(useTerminalStore.getState().tabs).toEqual([]);
+
+      // Confirming runs the install in an in-app tab.
+      await user.click(
+        screen.getByRole("button", { name: "Install hc there…" }),
+      );
+      await user.click(
+        within(
+          screen.getByRole("dialog", { name: "Install hc on buildbox?" }),
+        ).getByRole("button", { name: "Install hc there" }),
+      );
+      await advance(0);
+
+      expect(callsTo("machine_add_args")).toHaveLength(1);
+      expect(callsTo("machine_add_args")[0][1]).toMatchObject({
+        install: true,
+        req: { target: "buildbox" },
+      });
+      const { tabs } = useTerminalStore.getState();
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0]).toMatchObject({
+        title: "Install hc",
+        target: {
+          kind: "command",
+          machineId: "add:buildbox",
+          args: ["machine", "add", "buildbox", "--install"],
+        },
+      });
+      expect(useTerminalStore.getState().activeKey).toBe(tabs[0].tabKey);
+      // The sheet steps aside so the terminal can be seen and typed in.
+      expect(useAppStore.getState().sheet).toBeNull();
+      expect(useAppStore.getState().pendingAdd).toMatchObject({
+        id: null,
+        target: "buildbox",
+        tabMachineId: "add:buildbox",
+      });
+      useTerminalStore.setState({ tabs: [], activeKey: HOME });
+    }
   });
 
-  it("the_waiting_row_uses_the_working_icon_not_the_needs_you_one", async () => {
+  it("needs_login_and_unreachable_offer_terminal", async () => {
+    const user = setup();
+    const cases: Array<[string, string, string]> = [
+      [
+        "needs_login",
+        "dev@buildbox.example wants a login typed by a person (a password or a code)",
+        "buildbox needs a login that you type.",
+      ],
+      [
+        "unreachable",
+        "cannot reach dev@buildbox.example: Could not resolve hostname",
+        "Couldn’t reach buildbox.",
+      ],
+    ];
+    for (const [code, why, lead] of cases) {
+      cleanup();
+      invoke.mockClear();
+      useAppStore.setState({ sheet: "add-workbox", pendingAdd: null });
+      addResult = async () => {
+        throw rpc(
+          code,
+          why,
+          "check that `dev@buildbox.example echo ok` prints ok",
+        );
+      };
+      await addHost(user);
+
+      expect(screen.getByText(lead)).toBeVisible();
+      expect(screen.getByText(why)).toBeVisible();
+      // The core's next step is shown for an unreachable host, and only then.
+      const hint = screen.queryByText(/check that .* prints ok/);
+      if (code === "unreachable") expect(hint).toBeVisible();
+      else expect(hint).toBeNull();
+      // No install is offered for these.
+      expect(screen.queryByRole("button", { name: /Install hc/ })).toBeNull();
+
+      await user.click(
+        screen.getByRole("button", { name: "Open in terminal" }),
+      );
+      await advance(0);
+
+      // The same add, never with --install.
+      expect(callsTo("machine_add_args")).toEqual([
+        [
+          "machine_add_args",
+          {
+            req: expect.objectContaining({ target: "buildbox" }),
+            install: false,
+          },
+        ],
+      ]);
+      const { tabs } = useTerminalStore.getState();
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0]).toMatchObject({
+        title: "Add workbox",
+        target: {
+          kind: "command",
+          machineId: "add:buildbox",
+          args: ["machine", "add", "buildbox"],
+        },
+      });
+      expect(useAppStore.getState().sheet).toBeNull();
+      expect(useAppStore.getState().pendingAdd?.tabMachineId).toBe(
+        "add:buildbox",
+      );
+      useTerminalStore.setState({ tabs: [], activeKey: HOME });
+    }
+  });
+
+  it("needs_login_can_go_to_the_users_own_terminal_too", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw rpc("needs_login", "wants a login");
+    };
+    await addHost(user);
+
+    await user.click(screen.getByRole("button", { name: "Open in Ghostty" }));
+    await advance(0);
+
+    expect(callsTo("open_in_terminal")).toEqual([
+      ["open_in_terminal", { args: ["machine", "add", "buildbox"] }],
+    ]);
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+    expect(useAppStore.getState().sheet).toBeNull();
+    expect(useAppStore.getState().pendingAdd).toMatchObject({
+      target: "buildbox",
+      tabMachineId: null,
+      awaited: false,
+    });
+    expect(useAppStore.getState().toast).toMatch(/in Ghostty/);
+  });
+
+  it("name_taken_inline", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw rpc(
+        "name_taken",
+        '"gpu-box" is already a machine here',
+        "pick another with --name",
+      );
+    };
+    await open();
+    await user.click(screen.getByRole("button", { name: "gpubox" }));
+    await user.type(screen.getByLabelText("Name"), "gpu-box");
+    await user.click(screen.getByRole("button", { name: "Add workbox" }));
+    await advance(0);
+
+    const name = screen.getByLabelText("Name");
+    expect(name).toHaveAccessibleDescription(
+      '"gpu-box" is already a machine here. Pick another name.',
+    );
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    // Inline only: the sheet stays, and no terminal or install is offered.
+    expect(useAppStore.getState().sheet).toBe("add-workbox");
+    expect(
+      screen.queryByRole("button", { name: /terminal|Install/ }),
+    ).toBeNull();
+
+    // Typing another name clears it.
+    await user.type(name, "2");
+    expect(name).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("already_added_is_shown_by_the_host", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw rpc("already_added", "that core is already added as devbox");
+    };
+    await addHost(user);
+
+    expect(screen.getByLabelText("SSH host")).toHaveAccessibleDescription(
+      "That core is already added as devbox.",
+    );
+    expect(useAppStore.getState().sheet).toBe("add-workbox");
+  });
+
+  it("an_already_added_core_is_shown_by_the_custom_connection_field", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw rpc("already_added", "that core is already added as devbox");
+    };
+    await open();
+    await user.click(screen.getByText("Custom connection"));
+    await user.type(screen.getByLabelText("Connection command"), "ssh h");
+    await user.type(screen.getByLabelText("Name"), "box");
+    await user.click(screen.getByRole("button", { name: "Add workbox" }));
+    await advance(0);
+
+    expect(
+      screen.getByLabelText("Connection command"),
+    ).toHaveAccessibleDescription("That core is already added as devbox.");
+    expect(screen.getByLabelText("SSH host")).not.toHaveAttribute(
+      "aria-invalid",
+    );
+  });
+
+  it("the_words_keep_the_port", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw rpc("hc_missing", "hc is not installed");
+    };
+    await open();
+    await user.click(screen.getByRole("button", { name: "buildbox" }));
+    await user.type(screen.getByLabelText("Port"), "2222");
+    await user.click(screen.getByRole("button", { name: "Add workbox" }));
+    await advance(0);
+
+    expect(
+      screen.getByText("hc isn’t installed on buildbox:2222, or it’s too old."),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Install hc there…" }));
+    expect(
+      screen.getByRole("dialog", { name: "Install hc on buildbox:2222?" }),
+    ).toBeVisible();
+  });
+
+  it("a_failure_after_the_sheet_was_closed_is_a_toast", async () => {
+    const user = setup();
+    for (const failure of [
+      rpc("unreachable", "cannot reach dev@buildbox.example"),
+      {
+        kind: "maybeApplied",
+        argv: ["machine.add"],
+        message: "herdr-core did not answer in time. It may have been applied.",
+      } satisfies ActionError,
+    ]) {
+      cleanup();
+      useAppStore.getState().clearToast();
+      useAppStore.setState({ sheet: "add-workbox", pendingAdd: null });
+      let fail: (e: unknown) => void = () => {};
+      addResult = () =>
+        new Promise<string>((_, reject) => {
+          fail = reject;
+        });
+      await open();
+      await user.click(screen.getByRole("button", { name: "buildbox" }));
+      await user.click(screen.getByRole("button", { name: "Add workbox" }));
+      await advance(0);
+      // Cancel while the 60 s call is under way.
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(useAppStore.getState().sheet).toBeNull();
+
+      fail(failure);
+      await advance(0);
+
+      expect(useAppStore.getState().toast).toBe(
+        failure.kind === "maybeApplied"
+          ? failure.message
+          : "cannot reach dev@buildbox.example",
+      );
+      expect(useAppStore.getState().pendingAdd).toBeNull();
+    }
+  });
+
+  it("install_flag_only_after_click", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw rpc("hc_missing", "hc is not installed");
+    };
+    await addHost(user);
+    await user.click(screen.getByRole("button", { name: "Install hc there…" }));
+    // The ask is open; Escape ends it.
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await advance(5000);
+
+    // Nothing in the whole flow ran or asked for an install, and the API call has no such field.
+    for (const [, args] of invoke.mock.calls) {
+      expect(JSON.stringify(args ?? {})).not.toMatch(/install":true|--install/);
+    }
+    expect(Object.keys(added()[0]).sort()).toEqual([
+      "name",
+      "port",
+      "session",
+      "target",
+      "temporary",
+      "via",
+    ]);
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+  });
+
+  it("via_requires_name", async () => {
     const user = setup();
     await open();
-    await user.type(screen.getByLabelText("SSH host"), "staging");
-    await user.click(
-      screen.getByRole("button", { name: "Continue in Ghostty" }),
+
+    await user.click(screen.getByText("Custom connection"));
+    await user.type(
+      screen.getByLabelText("Connection command"),
+      "fly ssh console -a app --pty=false -C",
     );
+    // Without a name there is nothing to call it by.
+    expect(screen.getByLabelText("Name")).toHaveAccessibleDescription(
+      "A custom connection needs a name.",
+    );
+    expect(screen.getByRole("button", { name: "Add workbox" })).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Name"), "gpubox");
+    const add = screen.getByRole("button", { name: "Add workbox" });
+    expect(add).toBeEnabled();
+    await user.click(add);
     await advance(0);
-    const row = screen
-      .getByText("Waiting for setup in Ghostty…")
-      .closest(".checklist-row")!;
-    expect(row.querySelector(".checklist-icon")).toHaveClass(
-      "checklist-icon-active",
+
+    expect(added()).toEqual([
+      {
+        target: null,
+        port: null,
+        via: "fly ssh console -a app --pty=false -C",
+        name: "gpubox",
+        session: null,
+        temporary: false,
+      },
+    ]);
+    expect(useAppStore.getState().pendingAdd).toMatchObject({
+      id: NEW_ID,
+      target: "fly ssh console -a app --pty=false -C",
+    });
+  });
+
+  it("refuses_what_the_core_would_refuse_before_asking", async () => {
+    const user = setup();
+    await open();
+
+    await user.type(screen.getByLabelText("SSH host"), "-oProxyCommand=x");
+    expect(screen.getByRole("alert")).toHaveTextContent("can’t start with “-”");
+    expect(screen.getByRole("button", { name: "Add workbox" })).toBeDisabled();
+    await user.clear(screen.getByLabelText("SSH host"));
+    await user.type(screen.getByLabelText("SSH host"), "buildbox");
+
+    // An old herdr-style label with spaces is not a machine name.
+    await user.type(screen.getByLabelText("Name"), "Build Box");
+    expect(screen.getByLabelText("Name")).toHaveAccessibleDescription(
+      /Use 1 to 32 of a-z 0-9/,
     );
+    expect(screen.getByRole("button", { name: "Add workbox" })).toBeDisabled();
+    await user.clear(screen.getByLabelText("Name"));
+
+    await user.type(screen.getByLabelText("Remote session"), "-x");
+    expect(screen.getByRole("button", { name: "Add workbox" })).toBeDisabled();
+    expect(callsTo("add_machine")).toEqual([]);
+  });
+
+  it("a_workbox_already_added_is_not_added_twice", async () => {
+    useAppStore.setState({
+      state: appState([
+        [LOCAL, []],
+        [
+          { id: "bb", name: "build-1", target: "buildbox", session: "default" },
+          [],
+        ],
+      ]),
+    });
+    const user = setup();
+    await open();
+    await user.click(screen.getByRole("button", { name: "buildbox" }));
+
+    expect(screen.getByText("Already added as build-1")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add workbox" })).toBeDisabled();
+  });
+
+  it("a_timeout_says_it_may_have_been_applied", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw {
+        kind: "maybeApplied",
+        argv: ["machine.add"],
+        message:
+          "herdr-core did not answer in time. It may have been applied; refreshing.",
+      } satisfies ActionError;
+    };
+    await addHost(user);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "may have been applied",
+    );
+    expect(useAppStore.getState().sheet).toBe("add-workbox");
+  });
+
+  it("waits_for_machine_after_terminal_add", async () => {
+    const user = setup();
+    addResult = async () => {
+      throw rpc("needs_login", "wants a login");
+    };
+    await addHost(user);
+    await user.click(screen.getByRole("button", { name: "Open in terminal" }));
+    await advance(0);
+    expect(useAppStore.getState().sheet).toBeNull();
+
+    // Nothing yet: it waits on pushes for as long as the person needs, without polling.
+    await advance(3000);
+    await advance(8 * 60_000);
+    expect(callsTo("refresh_now")).toEqual([]);
+    expect(useAppStore.getState().pendingAdd).not.toBeNull();
+    expect(useAppStore.getState().toast).toBeNull();
+
+    // The machine the terminal added shows up in a state push.
+    act(() =>
+      useAppStore.setState({
+        state: appState([
+          [LOCAL, []],
+          [{ id: NEW_ID, name: "buildbox", target: "buildbox" }, []],
+        ]),
+      }),
+    );
+
+    expect(useAppStore.getState().toast).toBe("Added buildbox");
+    expect(useAppStore.getState().view).toEqual({
+      kind: "workbox",
+      machineId: NEW_ID,
+    });
+    // hc's last words stay readable in the tab.
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
+    expect(useAppStore.getState().pendingAdd).toBeNull();
+  });
+
+  it("cancel_closes_without_adding", async () => {
+    const user = setup();
+    await open();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(useAppStore.getState().sheet).toBeNull();
+    expect(callsTo("add_machine")).toEqual([]);
   });
 });

@@ -1,32 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type { MachineView } from "../lib/bindings/MachineView";
+import { machineView } from "../test/builders";
 import { dropBefore, groupTabs, stripOrder, tabShortcut } from "./tabOrder";
 import type { TermTab } from "./terminalStore";
 
 function machine(id: string): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: id === "local",
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: null,
-    ages: {},
-  };
+  return machineView({ id, isLocal: id === "local", lastOkMs: null }, null);
 }
 
-function tab(machineId: string, paneId: string): TermTab {
+function tab(machineId: string, address: string): TermTab {
   return {
-    tabKey: `${machineId}::${paneId}`,
-    target: { kind: "pane", machineId, paneId },
-    title: paneId,
+    tabKey: `${machineId}::${address}`,
+    target: { kind: "terminal", machineId, address: address },
+    title: address,
     machineLabel: machineId,
     state: "live",
     error: null,
     termId: null,
     exitCode: null,
+    lastLine: null,
+    waiting: null,
     attempts: 0,
   };
 }
@@ -60,20 +53,6 @@ describe("groupTabs", () => {
   it("groups_without_tabs_are_omitted", () => {
     expect(groupTabs([tab("gpubox", "p1")], machines)).toHaveLength(1);
     expect(groupTabs([], machines)).toEqual([]);
-  });
-
-  it("full_ui_tabs_group_with_their_machine", () => {
-    const full: TermTab = {
-      ...tab("buildbox", "p1"),
-      tabKey: "full::buildbox",
-      target: { kind: "full", machineId: "buildbox" },
-    };
-    const groups = groupTabs([tab("buildbox", "p1"), full], machines);
-    expect(groups).toHaveLength(1);
-    expect(groups[0].tabs.map((t) => t.tabKey)).toEqual([
-      "buildbox::p1",
-      "full::buildbox",
-    ]);
   });
 });
 

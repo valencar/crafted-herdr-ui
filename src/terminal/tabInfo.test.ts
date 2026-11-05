@@ -1,30 +1,32 @@
 import { describe, expect, it } from "vitest";
+import { rowOf } from "../test/builders";
 import type { Row } from "../lib/grouping";
-import { countNeeds, tabSubline } from "./tabInfo";
+import { countNeeds, tabDotStatus, tabStatus, tabSubline } from "./tabInfo";
 import type { TermTab } from "./terminalStore";
 
 function tab(over: Partial<TermTab> = {}): TermTab {
   return {
     tabKey: "buildbox::w1:p1",
-    target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+    target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
     title: "planner",
     machineLabel: "buildbox",
     state: "live",
     error: null,
     termId: 1,
     exitCode: null,
+    lastLine: null,
+    waiting: null,
     attempts: 0,
     ...over,
   };
 }
 
 function row(over: Partial<Row> = {}): Row {
-  return {
+  return rowOf({
     key: "buildbox::w1:p1",
     machineId: "buildbox",
     machineLabel: "buildbox",
-    paneId: "w1:p1",
-    terminalId: "t1",
+    address: "w1:p1",
     kind: "claude",
     name: "planner",
     title: "planner",
@@ -32,7 +34,7 @@ function row(over: Partial<Row> = {}): Row {
     folder: null,
     sinceMs: null,
     ...over,
-  };
+  });
 }
 
 describe("tabSubline", () => {
@@ -58,14 +60,6 @@ describe("tabSubline", () => {
     );
   });
 
-  it("subline_of_a_full_ui_tab", () => {
-    const full = tab({
-      tabKey: "full::buildbox",
-      target: { kind: "full", machineId: "buildbox" },
-    });
-    expect(tabSubline(full, undefined, "api-service")).toBe("Full herdr UI");
-  });
-
   it("subline_without_anything_is_empty", () => {
     expect(tabSubline(tab(), undefined, null)).toBe("");
   });
@@ -77,7 +71,19 @@ describe("tabSubline", () => {
 });
 
 describe("countNeeds", () => {
-  it("count_needs_counts_blocked_rows_only", () => {
+  it("count_needs_counts_error_rows_too", () => {
+    const rows = new Map<string, Row>([
+      ["buildbox::w1:p1", row({ key: "buildbox::w1:p1", status: "error" })],
+      ["buildbox::w1:p2", row({ key: "buildbox::w1:p2", status: "ended" })],
+    ]);
+    const tabs = [
+      tab({ tabKey: "buildbox::w1:p1" }),
+      tab({ tabKey: "buildbox::w1:p2" }),
+    ];
+    expect(countNeeds(tabs, rows)).toBe(1);
+  });
+
+  it("count_needs_counts_blocked_and_error_rows_only", () => {
     const rows = new Map<string, Row>([
       ["buildbox::w1:p1", row({ key: "buildbox::w1:p1", status: "blocked" })],
       ["buildbox::w1:p2", row({ key: "buildbox::w1:p2", status: "done" })],
@@ -92,5 +98,50 @@ describe("countNeeds", () => {
       tab({ tabKey: "staging::w1:p1" }), // no row
     ];
     expect(countNeeds(tabs, rows)).toBe(2);
+  });
+});
+
+describe("countNeeds with a Watch tab", () => {
+  it("count_needs_counts_a_row_once_when_it_has_an_open_and_a_watch_tab", () => {
+    const rows = new Map<string, Row>([
+      ["buildbox::w1:p1", row({ key: "buildbox::w1:p1", status: "blocked" })],
+    ]);
+    const tabs = [
+      tab({ tabKey: "buildbox::w1:p1" }),
+      tab({ tabKey: "buildbox::w1:p1::watch", observe: true }),
+    ];
+    expect(countNeeds(tabs, rows)).toBe(1);
+    // A Watch tab alone counts too.
+    expect(countNeeds(tabs.slice(1), rows)).toBe(1);
+  });
+});
+
+describe("a worker's done", () => {
+  it("reads_done_with_the_idle_dot", () => {
+    const worker = row({
+      status: "done",
+      isWorker: true,
+      parent: "buildbox::t1",
+    });
+    expect(tabStatus(tab(), worker)).toBe("Done");
+    expect(tabDotStatus(tab(), worker)).toBe("idle");
+    // An agent's own done is still unseen.
+    expect(tabStatus(tab(), row({ status: "done" }))).toBe("Done, unseen");
+  });
+});
+
+describe("tabDotStatus", () => {
+  it("a_failed_tab_has_its_own_dot_value_apart_from_an_agent_error", () => {
+    // A failed session is not an agent's Error: it must not draw the needs shape.
+    expect(tabDotStatus(tab({ state: "error" }), undefined)).toBe("failed");
+    expect(
+      tabDotStatus(tab({ state: "error" }), row({ status: "working" })),
+    ).toBe("failed");
+    // A live tab shows its agent's status, and an agent Error stays "error".
+    expect(tabDotStatus(tab({ state: "live" }), row({ status: "error" }))).toBe(
+      "error",
+    );
+    expect(tabDotStatus(tab({ state: "detached" }), row())).toBe("detached");
+    expect(tabDotStatus(tab({ state: "opening" }), row())).toBe("opening");
   });
 });

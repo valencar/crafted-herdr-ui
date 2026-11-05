@@ -1,32 +1,42 @@
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { MachineView } from "./bindings/MachineView";
 import { formatStaleness } from "./format";
-import { bySinceThenKey, type Row } from "./grouping";
+import { bySinceThenKey, isShell, shownStatus, type Row } from "./grouping";
 
 export type StatusCounts = {
   blocked: number;
+  error: number;
   done: number;
   working: number;
   idle: number;
+  ended: number;
   total: number;
 };
 
-/** Counts agents only; plain shells are left out of every field. */
+/**
+ * Counts agents only; plain shells, ended or not, are left out of every field. A worker's done
+ * counts with idle (`shownStatus`).
+ */
 export function statusCounts(rows: Row[]): StatusCounts {
   const counts: StatusCounts = {
     blocked: 0,
+    error: 0,
     done: 0,
     working: 0,
     idle: 0,
+    ended: 0,
     total: 0,
   };
   for (const r of rows) {
-    if (r.status === "shell") continue;
+    if (isShell(r)) continue;
     counts.total += 1;
-    if (r.status === "blocked") counts.blocked += 1;
-    else if (r.status === "done") counts.done += 1;
-    else if (r.status === "working") counts.working += 1;
-    else if (r.status === "idle") counts.idle += 1;
+    const { status } = shownStatus(r);
+    if (status === "blocked") counts.blocked += 1;
+    else if (status === "error") counts.error += 1;
+    else if (status === "ended") counts.ended += 1;
+    else if (status === "done") counts.done += 1;
+    else if (status === "working") counts.working += 1;
+    else if (status === "idle") counts.idle += 1;
   }
   return counts;
 }
@@ -51,7 +61,7 @@ export type OnlineSummary = {
 };
 
 export function onlineSummary(machines: MachineView[]): OnlineSummary {
-  const enabled = machines.filter((m) => m.health.kind !== "disabled");
+  const enabled = machines.filter((m) => m.health.kind !== "hidden");
   const online = enabled.filter((m) => m.health.kind === "online");
   return {
     online: online.length,
@@ -69,8 +79,8 @@ export type ResponseStats = {
 };
 
 /**
- * Median duration and failure count of the herdr calls in the last `windowMs`. Entries with a
- * `note` are commands handed to the user's terminal, not herdr calls, so they don't count.
+ * Median duration and failure count of the herdr-core calls in the last `windowMs`. Entries with a
+ * `note` are commands handed to the user's terminal, not core calls, so they don't count.
  */
 export function responseStats(
   log: CommandLogEntry[],

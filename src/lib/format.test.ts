@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { ActionError } from "./bindings/ActionError";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import {
   STATUS_LABEL,
   agoText,
   TERMINAL_LABEL,
   actionErrorMessage,
-  agentNameProblem,
   formatAge,
   formatChecked,
   lastLines,
@@ -17,6 +17,7 @@ import {
   formatStaleness,
   isSupportedVersion,
   plural,
+  terminalNameProblem,
   parseVersion,
   shellJoin,
   shellQuote,
@@ -76,7 +77,7 @@ describe("shortPath", () => {
 
 describe("STATUS_LABEL", () => {
   it("never relies on color alone", () => {
-    expect(STATUS_LABEL).toEqual({
+    expect(STATUS_LABEL).toMatchObject({
       blocked: "Needs input",
       done: "Done, unseen",
       working: "Working",
@@ -84,6 +85,24 @@ describe("STATUS_LABEL", () => {
       unknown: "Unknown",
       shell: "Shell",
     });
+  });
+
+  it("labels_for_error_and_ended", () => {
+    expect(STATUS_LABEL.error).toBe("Error");
+    expect(STATUS_LABEL.ended).toBe("Ended");
+    // Every status has words (spec section 9.1), and exactly these.
+    expect(Object.values(STATUS_LABEL).sort()).toEqual(
+      [
+        "Needs input",
+        "Error",
+        "Done, unseen",
+        "Working",
+        "Idle",
+        "Ended",
+        "Unknown",
+        "Shell",
+      ].sort(),
+    );
   });
 });
 
@@ -97,19 +116,37 @@ describe("actionErrorMessage", () => {
     ).toBe("unsure");
     expect(
       actionErrorMessage({
-        kind: "herdr",
-        error: { kind: "server", code: "agent_blocked", message: "blocked" },
+        kind: "launch",
+        message: "could not start ghostty",
       }),
-    ).toBe("blocked");
+    ).toBe("could not start ghostty");
+  });
+
+  it("words a failed core call from what the core said", () => {
+    const core = (error: Extract<ActionError, { kind: "core" }>["error"]) =>
+      actionErrorMessage({ kind: "core", error });
+    expect(core({ kind: "notFound" })).toBe("herdr-core was not found.");
+    expect(core({ kind: "timeout", method: "terminal.read" })).toBe(
+      "herdr-core did not answer in time.",
+    );
+    expect(core({ kind: "lost" })).toBe(
+      "The connection to herdr-core was lost.",
+    );
     expect(
-      actionErrorMessage({ kind: "herdr", error: { kind: "notFound" } }),
-    ).toBe("herdr was not found.");
-    expect(
-      actionErrorMessage({
-        kind: "herdr",
-        error: { kind: "timeout", argv: ["agent"] },
+      core({
+        kind: "rpc",
+        code: "not_found",
+        message: "no terminal",
+        hint: null,
       }),
-    ).toBe("herdr did not answer in time.");
+    ).toBe("no terminal");
+    expect(
+      core({
+        kind: "incompatible",
+        reason: "this core lacks: x",
+        newer: false,
+      }),
+    ).toBe("this core lacks: x");
   });
 
   it("says a maybe-applied action with no message is being refreshed", () => {
@@ -157,20 +194,29 @@ describe("versions", () => {
     expect(parseVersion("")).toBeNull();
   });
 
-  it("supports 0.9.0 and up, and nothing that does not parse", () => {
-    expect(isSupportedVersion("0.9.0")).toBe(true);
-    expect(isSupportedVersion("0.10.1")).toBe(true);
+  it("supports 0.1.17 and up, and nothing that does not parse", () => {
+    expect(isSupportedVersion("0.1.17")).toBe(true);
+    expect(isSupportedVersion("0.1.18")).toBe(true);
+    expect(isSupportedVersion("0.2.0")).toBe(true);
     expect(isSupportedVersion("1.0.0")).toBe(true);
-    expect(isSupportedVersion("0.8.9")).toBe(false);
-    expect(isSupportedVersion("0.9")).toBe(false);
+    expect(isSupportedVersion("0.1.16")).toBe(false);
+    expect(isSupportedVersion("0.0.99")).toBe(false);
+    expect(isSupportedVersion("0.1")).toBe(false);
     expect(isSupportedVersion(null)).toBe(false);
+  });
+
+  it("compares only the numeric part, so a pre-release of a good version is supported", () => {
+    expect(isSupportedVersion("0.2.0-beta.1")).toBe(true);
+    expect(isSupportedVersion("0.1.17-rc.2")).toBe(true);
+    expect(isSupportedVersion("0.1.17+build5")).toBe(true);
+    expect(isSupportedVersion("0.1.16-rc.9")).toBe(false);
   });
 });
 
 describe("shell quoting", () => {
   it("leaves plain words alone and single-quotes the rest", () => {
     expect(shellQuote("api")).toBe("api");
-    expect(shellQuote("--machine")).toBe("--machine");
+    expect(shellQuote("--name")).toBe("--name");
     expect(shellQuote("w1:p1")).toBe("w1:p1");
     expect(shellQuote("two words")).toBe("'two words'");
     expect(shellQuote("")).toBe("''");
@@ -227,52 +273,43 @@ describe("healthShape", () => {
       healthShape({ kind: "reconnecting", retry_in_ms: 4000, error: "x" }),
     ).toBe("reconnecting");
     expect(healthShape({ kind: "attention", error: "boom" })).toBe("attention");
-    expect(healthShape({ kind: "disabled" })).toBe("disabled");
+    expect(healthShape({ kind: "hidden" })).toBe("hidden");
   });
 });
 
 describe("isQuietRead", () => {
-  const entry = (
-    argv: string[],
-    over: Partial<CommandLogEntry> = {},
-  ): CommandLogEntry => ({
+  const entry = (over: Partial<CommandLogEntry> = {}): CommandLogEntry => ({
     atMs: 1,
     machine: null,
-    argv,
+    argv: ["machine.list"],
     exitCode: 0,
     durationMs: 5,
     error: null,
     note: null,
+    method: "machine.list",
+    display: "hc machine ls",
+    quiet: true,
     ...over,
   });
 
-  it("is true for successful snapshots and pane or agent reads", () => {
-    expect(isQuietRead(entry(["api", "snapshot"]))).toBe(true);
-    expect(isQuietRead(entry(["pane", "read", "w1:p1", "--lines", "3"]))).toBe(
-      true,
-    );
-    expect(isQuietRead(entry(["agent", "read", "w1:p1"]))).toBe(true);
-  });
-
-  it("is false for anything that changes something", () => {
-    expect(isQuietRead(entry(["agent", "prompt", "w1:p1", "read"]))).toBe(
-      false,
-    );
-    expect(isQuietRead(entry(["pane", "close", "w1:p1"]))).toBe(false);
-    expect(isQuietRead(entry(["machine", "list", "--json"]))).toBe(false);
-    expect(isQuietRead(entry([]))).toBe(false);
-  });
-
-  it("is false for a read that failed", () => {
-    expect(isQuietRead(entry(["api", "snapshot"], { exitCode: 1 }))).toBe(
-      false,
-    );
+  it("quiet_flag_drives_isQuietRead", () => {
+    expect(isQuietRead(entry())).toBe(true);
+    // The argv no longer decides anything: the flag does.
     expect(
-      isQuietRead(entry(["pane", "read", "w1:p1"], { exitCode: null })),
+      isQuietRead(
+        entry({ argv: ["api", "snapshot"], method: "herdr", quiet: false }),
+      ),
     ).toBe(false);
     expect(
-      isQuietRead(entry(["api", "snapshot"], { error: "timed out" })),
-    ).toBe(false);
+      isQuietRead(entry({ argv: ["pane", "close", "w1:p1"], quiet: true })),
+    ).toBe(true);
+    expect(isQuietRead(entry({ quiet: false }))).toBe(false);
+  });
+
+  it("failed_quiet_read_is_not_quiet", () => {
+    expect(isQuietRead(entry({ exitCode: 1 }))).toBe(false);
+    expect(isQuietRead(entry({ exitCode: null }))).toBe(false);
+    expect(isQuietRead(entry({ error: "timed out" }))).toBe(false);
   });
 });
 
@@ -284,18 +321,31 @@ describe("plural", () => {
   });
 });
 
-describe("agentNameProblem", () => {
-  it("accepts_a_lowercase_name_of_up_to_32_characters", () => {
-    for (const ok of ["a", "planner", "web-app_2", "a".repeat(32)]) {
-      expect(agentNameProblem(ok)).toBeNull();
+describe("terminalNameProblem", () => {
+  it("accepts_names_the_core_accepts", () => {
+    for (const ok of [
+      "a",
+      "planner",
+      "0day",
+      "web-app_2",
+      "web.app",
+      "tool",
+      "a".repeat(32),
+    ]) {
+      expect(terminalNameProblem(ok)).toBeNull();
     }
   });
 
-  it("explains_every_other_name_with_the_sentence_rust_gives", () => {
-    const rust =
-      "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.";
-    for (const bad of ["", "Bad Name", "1abc", "has.dot", "a".repeat(33)]) {
-      expect(agentNameProblem(bad)).toBe(rust);
+  it("explains_every_other_name_with_the_sentences_rust_gives", () => {
+    const help =
+      "Use 1 to 32 of a-z 0-9 - _ . starting with a letter or digit.";
+    for (const bad of ["", "Bad Name", "-x", "_x", ".x", "é", "a".repeat(33)]) {
+      expect(terminalNameProblem(bad)).toBe(help);
+    }
+    for (const shaped of ["t7", "t1b", "t12"]) {
+      expect(terminalNameProblem(shaped)).toBe(
+        `“${shaped}” looks like a terminal address (t7). Pick a name that doesn’t.`,
+      );
     }
   });
 });

@@ -78,7 +78,7 @@ export const SHEET_EXEMPT = [
 /** Keys that are not menu items, so they are not in the table: they live here. */
 const NON_MENU_ROWS: SheetRow[] = [
   { group: "list", label: "Move selection", keys: "↑ ↓" },
-  { group: "list", label: "Close pane (asks first)", keys: "⌫" },
+  { group: "list", label: "Close or remove (asks first)", keys: "⌫" },
   { group: "terminal", label: "Copy a link", keys: "⌘ click" },
   { group: "terminal", label: "Select and copy text", keys: "⌥ drag" },
 ];

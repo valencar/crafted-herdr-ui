@@ -11,7 +11,7 @@ export function HomeViewsRow() {
 
   const workboxLabel =
     view.kind === "workbox"
-      ? (state?.machines.find((m) => m.id === view.machineId)?.label ??
+      ? (state?.machines.find((m) => m.id === view.machineId)?.name ??
         view.machineId)
       : null;
 

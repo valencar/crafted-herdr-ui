@@ -1,0 +1,136 @@
+{
+  "detached": {
+    "exit_code": 0,
+    "last_line": "[detached from t7]",
+    "stderr_lines": [
+      "[detached from t7]"
+    ]
+  },
+  "detached_observe": {
+    "exit_code": 0,
+    "last_line": "[detached from t7]",
+    "stderr_lines": [
+      "[detached from t7]"
+    ]
+  },
+  "detached_remote": {
+    "exit_code": 0,
+    "last_line": "[detached from buildbox/t2]",
+    "stderr_lines": [
+      "[detached from buildbox/t2]"
+    ]
+  },
+  "program_exited": {
+    "exit_code": 0,
+    "last_line": "[t9 finished: exited]",
+    "stderr_lines": [
+      "[t9 finished: exited]"
+    ]
+  },
+  "program_exited_nonzero": {
+    "exit_code": 0,
+    "last_line": "[t11 finished: exited]",
+    "stderr_lines": [
+      "[t11 finished: exited]"
+    ]
+  },
+  "program_killed": {
+    "exit_code": 0,
+    "last_line": "[t10 finished: killed]",
+    "stderr_lines": [
+      "[t10 finished: killed]"
+    ]
+  },
+  "program_signaled_kept": {
+    "exit_code": 0,
+    "last_line": "[t12 finished: signaled]",
+    "stderr_lines": [
+      "[t12 finished: signaled]"
+    ]
+  },
+  "server_stopped": {
+    "exit_code": 0,
+    "last_line": "[t1 finished: server_stop]",
+    "stderr_lines": [
+      "[t1 finished: server_stop]"
+    ]
+  },
+  "core_lost": {
+    "exit_code": 0,
+    "last_line": "[lost the core; it keeps t6 running: hc attach t6]",
+    "stderr_lines": [
+      "[lost the core; it keeps t6 running: hc attach t6]"
+    ]
+  },
+  "not_found": {
+    "exit_code": 3,
+    "last_line": "hint: see `hc ls --all`",
+    "stderr_lines": [
+      "error: no terminal \"t99\"",
+      "hint: see `hc ls --all`"
+    ]
+  },
+  "not_found_remote": {
+    "exit_code": 3,
+    "last_line": "hint: see `hc ls --all`",
+    "stderr_lines": [
+      "error: no terminal \"t99\"",
+      "hint: see `hc ls --all`"
+    ]
+  },
+  "machine_unknown": {
+    "exit_code": 4,
+    "last_line": "hint: machines: buildbox",
+    "stderr_lines": [
+      "error: unknown machine \"nope\"",
+      "hint: machines: buildbox"
+    ]
+  },
+  "unavailable_recovering": {
+    "exit_code": 5,
+    "last_line": "hint: retry after the restarted event",
+    "stderr_lines": [
+      "error: t12 is lost, waiting for its new shell",
+      "hint: retry after the restarted event"
+    ]
+  },
+  "unavailable_machine": {
+    "exit_code": 5,
+    "last_line": "hint: hc machine ls shows when it comes back",
+    "stderr_lines": [
+      "error: devbox is unreachable: cannot reach dev@devbox.example: ssh: Could not resolve hostname devbox.example: Name or service not known",
+      "hint: hc machine ls shows when it comes back"
+    ]
+  },
+  "finished_terminal": {
+    "exit_code": 11,
+    "last_line": "hint: read what it left: hc read t8",
+    "stderr_lines": [
+      "error: t8 has finished",
+      "hint: read what it left: hc read t8"
+    ]
+  },
+  "needs_update_machine": {
+    "exit_code": 1,
+    "last_line": "hint: hc machine update edgebox",
+    "stderr_lines": [
+      "error: edgebox's hc speaks another protocol generation",
+      "hint: hc machine update edgebox"
+    ]
+  },
+  "usage": {
+    "exit_code": 2,
+    "last_line": "For more information, try '--help'.",
+    "stderr_lines": [
+      "error: unexpected argument '--bogus' found",
+      "  tip: to pass '--bogus' as a value, use '-- --bogus'",
+      "Usage: herdr-core attach [OPTIONS] [TERMINAL]",
+      "For more information, try '--help'."
+    ]
+  },
+  "command_not_found": {
+    "exit_code": 127,
+    "last_line": "",
+    "stderr_lines": []
+  }
+}

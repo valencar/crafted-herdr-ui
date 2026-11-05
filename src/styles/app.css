@@ -163,8 +163,7 @@ kbd {
 .preview-error {
   color: var(--danger);
 }
-.reply,
-.rename {
+.reply {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -206,10 +205,11 @@ kbd {
 }
 .inspector-secondary {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .inspector-secondary .btn {
-  flex: 1;
+  flex: 1 1 auto;
   justify-content: center;
 }
 .btn-wide {
@@ -280,6 +280,10 @@ kbd {
 }
 .open-split.is-needs .open-chev {
   border-left: 1px solid color-mix(in srgb, var(--on-needs) 25%, transparent);
+}
+/* Watch, beside the Open split on a Needs-input row. */
+.open-watch {
+  flex-shrink: 0;
 }
 /* Position is pinned inline (OpenButton): `.menu` in windows.css loads later and would win. */
 .menu.open-menu {
@@ -727,10 +731,31 @@ kbd {
   background: var(--text-4);
   border-color: var(--text-4);
 }
-/* Terminal tabs with no live session (`TabState`): error reads as attention, opening as the
-   first connect, detached as a dim dashed ring. */
+/* Error is an agent's status: the needs shape (a filled dot, a static halo, a pulse while live)
+   in --danger. A terminal tab with no live session (`TabState`) draws its own: failed is a
+   static hollow ring in --danger, opening the first connect, detached a dim dashed ring. */
 .sdot[data-status="error"] {
+  background: var(--danger);
   border-color: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.sdot[data-status="error"].live::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  background: var(--danger);
+  opacity: 0.6;
+  animation: st-pulse 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.sdot[data-status="failed"] {
+  border-color: var(--danger);
+}
+/* Ended: a finished terminal. A hollow square, never animated; the shell is a small solid one. */
+.sdot[data-status="ended"] {
+  border-radius: 2px;
+  background: transparent;
+  border-color: var(--text-3);
 }
 .sdot[data-status="opening"] {
   border-color: color-mix(in srgb, var(--muted) 40%, transparent);
@@ -763,7 +788,7 @@ kbd {
 .sdot[data-health="attention"] {
   border-color: var(--danger);
 }
-.sdot[data-health="disabled"] {
+.sdot[data-health="hidden"] {
   opacity: 0.45;
 }
 .health {
@@ -853,6 +878,9 @@ kbd {
 .card[data-status="blocked"] {
   border-color: color-mix(in srgb, var(--st-needs) 22%, var(--border));
 }
+.card[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 22%, var(--border));
+}
 .card[data-status="done"] {
   border-color: color-mix(in srgb, var(--st-done) 18%, var(--border));
 }
@@ -861,6 +889,9 @@ kbd {
 }
 .card[data-status="blocked"]:hover {
   border-color: color-mix(in srgb, var(--st-needs) 45%, var(--border));
+}
+.card[data-status="error"]:hover {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
 }
 .card[data-status="done"]:hover {
   border-color: color-mix(in srgb, var(--st-done) 40%, var(--border));
@@ -968,6 +999,19 @@ kbd {
   display: flex;
   flex-direction: column;
 }
+/* The pin beside a pinned agent's name: small, in line with the text, never the only cue. */
+.pin-glyph {
+  flex: none;
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-inline-start: 4px;
+  color: var(--text-3);
+}
+.row-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
 .row-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -977,6 +1021,73 @@ kbd {
 .row-note {
   font-size: var(--fs-small);
   color: var(--danger);
+}
+/* The second line of an ended row: "Ended · exit 1". */
+.row-sub {
+  font-size: var(--fs-small);
+  color: var(--text-4);
+}
+/* Status details: what a blocked agent waits on (the kind in bold, then its message) and a
+   working agent's progress, a thin bar that never animates. */
+.row-kind {
+  font-weight: 600;
+  color: var(--text-3);
+}
+.progress {
+  display: block;
+  height: 3px;
+  max-width: 240px;
+  margin-top: 4px;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--st-working) 20%, transparent);
+}
+.progress-fill {
+  display: block;
+  height: 100%;
+  width: var(--progress);
+  background: var(--st-working);
+}
+/* Workers under their agent: the row sits in from the left edge on a rail. */
+.agent-row.is-worker {
+  margin-left: 22px;
+  border-left: 2px solid var(--border-strong);
+}
+.worker-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s);
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+.worker-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.worker-count.has-needs {
+  color: var(--st-needs);
+  font-weight: 600;
+}
+.inspector-workers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inspector-workers li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .row-name,
 .row-pane {
@@ -1028,6 +1139,14 @@ kbd {
 .pill[data-status="blocked"] {
   color: var(--st-needs);
   background: color-mix(in srgb, var(--st-needs) 13%, transparent);
+}
+.pill[data-status="error"] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+.pill[data-status="ended"] {
+  color: var(--text-3);
+  background: color-mix(in srgb, var(--text-3) 10%, transparent);
 }
 .pill[data-status="done"] {
   color: var(--st-done);
@@ -1348,26 +1467,15 @@ select.field {
 .opt-line + .opt-meta {
   padding-left: 19px;
 }
-.sheet-advanced summary {
-  cursor: pointer;
-  color: var(--text-3);
-  font-size: var(--fs-meta);
-}
-.sheet-advanced[open] summary {
-  margin-bottom: 10px;
-}
-.sheet-trust {
+.opt-text {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  border: 1px solid var(--st-needs);
-  border-radius: var(--radius-m);
-  padding: 10px 12px;
+  min-width: 0;
+  gap: 2px;
 }
-.sheet-trust p {
-  margin: 0;
-  color: var(--st-needs);
+.opt[data-unavailable] {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 .sheet-failure {
   display: flex;
@@ -1527,9 +1635,42 @@ select.field {
   border-top: 1px solid var(--border);
   padding-top: 14px;
 }
-.workbox-checked {
-  margin-left: auto;
+.workbox-state {
+  margin: 0;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.temp-badge {
+  flex: none;
   font-size: var(--fs-small);
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 1px 7px;
+  color: var(--text-2);
+  border: 1px solid var(--border-strong);
+}
+.machine-fixes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.workbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.workbox-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.workbox-group-name {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+.workbox-group-path {
+  font-size: var(--fs-meta);
 }
 
 .workbox-layout {
@@ -1540,78 +1681,14 @@ select.field {
 .workbox-layout.is-dim {
   opacity: 0.6;
 }
-.workbox-workspace {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.workbox-terminals,
+.pane-family {
+  --pane-grid: repeat(auto-fill, minmax(220px, 1fr));
 }
-.workbox-workspace-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-.workbox-workspace-id {
-  font-size: var(--fs-small);
-}
-.workbox-workspace-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 6px;
-}
-.workbox-tabs {
+.workbox-terminals {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 12px;
-}
-.workbox-new-tab {
-  min-height: 120px;
-  background: transparent;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-l);
-  color: var(--text-4);
-  font-size: var(--fs-body);
-  cursor: pointer;
-}
-.workbox-new-tab:hover {
-  background: var(--hover);
-}
-
-.tab-card {
-  background: var(--bg-sidebar);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-.tab-card-head {
-  display: flex;
-  align-items: baseline;
+  grid-template-columns: var(--pane-grid);
   gap: 8px;
-}
-.tab-card-name {
-  font-weight: 600;
-}
-.tab-card-id {
-  font-size: var(--fs-small);
-}
-.tab-card-count {
-  margin-left: auto;
-  font-size: var(--fs-small);
-}
-.tab-card-panes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-height: 150px;
-}
-.tab-card-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
 }
 
 .pane-box {
@@ -1637,8 +1714,41 @@ select.field {
 .pane-box[data-status="blocked"] {
   border-color: color-mix(in srgb, var(--st-needs) 40%, transparent);
 }
+.pane-box[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
 .pane-box[data-status="done"] {
   border-color: color-mix(in srgb, var(--st-done) 35%, transparent);
+}
+/* A family: an agent's box with its fold button under it, then its workers' boxes. */
+.pane-family {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: var(--pane-grid);
+  gap: 8px;
+}
+.pane-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.pane-cell .pane-box {
+  flex: none;
+  align-self: stretch;
+}
+/* The blocker or progress line inside a box; empty for most boxes. */
+.pane-box-detail {
+  display: block;
+  width: 100%;
+}
+.pane-box-detail:empty {
+  display: none;
+}
+.pane-box.is-worker {
+  min-height: 110px;
+  border-left-width: 3px;
 }
 .pane-box-head {
   display: flex;
@@ -1679,39 +1789,6 @@ select.field {
 
 /* ---------- add workbox sheet ---------- */
 
-.checklist {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  padding: 14px 16px;
-}
-.checklist-title {
-  margin: 0;
-  font-size: var(--fs-meta);
-  font-weight: 500;
-  color: var(--text-3);
-}
-.checklist-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.checklist-icon {
-  width: 18px;
-  height: 18px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1.5px solid var(--st-needs);
-  color: var(--st-needs);
-  font-size: var(--fs-small);
-  font-weight: 700;
-}
 .sheet-foot-note {
   font-size: var(--fs-meta);
   color: var(--muted);
@@ -1720,76 +1797,33 @@ select.field {
   border-color: var(--text-4);
   color: var(--text);
 }
-
-.checklist-row-text {
+.add-advice {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.checklist-state {
-  margin-left: auto;
-  font-size: var(--fs-meta);
-  color: var(--muted);
-}
-.checklist-note {
-  font-size: var(--fs-meta);
-  color: var(--text-4);
-  overflow-wrap: anywhere;
-}
-.checklist-icon-done {
-  border-color: var(--online);
-  color: var(--online);
-}
-.checklist-icon-active {
-  border-color: var(--st-working);
-  color: var(--st-working);
-}
-.checklist-icon-failed {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-.checklist-icon-pending {
-  border-color: var(--border-strong);
-  color: var(--muted);
-}
-.setup-log {
-  font-size: var(--fs-meta);
-}
-.setup-log summary {
-  cursor: pointer;
-  color: var(--text-3);
-}
-.setup-log pre {
-  margin: 8px 0 0;
-  padding: 10px 12px;
-  max-height: 200px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  gap: 8px;
+  padding: 12px 14px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-l);
+}
+.add-advice-lead {
+  margin: 0;
+  color: var(--text);
+}
+.add-advice-why {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
   color: var(--text-3);
-  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
-.session-list {
+.add-advice-actions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 16px;
-  padding: 0;
-  border: 0;
 }
-.session-list legend {
-  padding: 0;
-  margin-bottom: 8px;
-}
-.session-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--font-mono);
+.add-port {
+  max-width: 120px;
 }
 
 /* ---------- focus ring inside the clipped group card ---------- */
@@ -1849,9 +1883,6 @@ select.field {
 .empty-body p {
   margin: 0;
 }
-.nav-item.is-dim .nav-label {
-  opacity: 0.55;
-}
 .nav-link[aria-pressed="true"] {
   color: var(--text);
 }
@@ -1881,15 +1912,21 @@ select.field {
 .onboarding-card p {
   margin: 0;
 }
-.onboarding-steps {
-  margin: 0;
-  padding-left: 20px;
+.onboarding-line {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
 }
-.onboarding-url {
+.onboarding-command {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--text);
+  font-size: var(--fs-small);
 }
 .onboarding-actions {
   display: flex;
@@ -2621,6 +2658,11 @@ select.field {
 .context-title {
   color: var(--text);
 }
+.context-watching {
+  flex: 0 0 auto;
+  color: var(--text-2);
+  white-space: nowrap;
+}
 .context-where {
   min-width: 0;
   overflow: hidden;
@@ -2825,7 +2867,7 @@ select.field {
 .palette-option.is-danger .palette-label {
   color: var(--danger);
 }
-/* A divider above Close pane…: drawn, not an element, so the listbox keeps only its options. */
+/* A divider above Close…: drawn, not an element, so the listbox keeps only its options. */
 .palette-option.is-danger:not(:first-child) {
   position: relative;
   margin-top: 9px;
@@ -3009,9 +3051,6 @@ select.field {
 }
 .rail-item[data-on="true"] {
   background: var(--wb-fill, var(--selected));
-}
-.rail-item.is-dim {
-  opacity: 0.5;
 }
 .rail-needs {
   margin-bottom: 8px;
@@ -3282,6 +3321,9 @@ select.field {
 .status-bar-seg[data-status="blocked"] {
   background: var(--st-needs);
 }
+.status-bar-seg[data-status="error"] {
+  background: var(--danger);
+}
 .status-bar-seg[data-status="done"] {
   background: var(--st-done);
 }
@@ -3290,6 +3332,9 @@ select.field {
 }
 .status-bar-seg[data-status="idle"] {
   background: var(--st-idle);
+}
+.status-bar-seg[data-status="ended"] {
+  background: var(--text-2);
 }
 
 .wb-cards {

@@ -3,34 +3,41 @@ import { copyAttach } from "../lib/copyAttach";
 import type { Row } from "../lib/grouping";
 import { openRow } from "../lib/openRow";
 import { terminalName, useTerminals } from "../lib/uiHelpers";
-import { detachReason } from "./detachReason";
+import { detachReason, WAITING_FOR_SHELL } from "./detachReason";
 import type { TermTab } from "./terminalStore";
 
 type Props = {
   tab: TermTab;
-  /** The agent the tab shows; `null` for the full herdr UI or a pane that isn't in the list. */
+  /** The terminal the tab shows; `null` when it isn't in the list. */
   row: Row | null;
-  /** The tab's workbox is reached over ssh. */
-  remote: boolean;
-  /** The pane is no longer in the app's state: nothing to reattach to. */
+  /** The terminal is no longer in the app's state: nothing to reattach to. */
   gone: boolean;
   /** Which button the user last clicked; the attempt line is named after it. */
   clicked: "Reattach" | "Retry";
   onReattach: () => void;
   onClose: () => void;
-  /** The default button, which takes focus so Enter reattaches. */
+  /** The default button, which takes focus so Enter reattaches (Close tab when there is nothing to reattach). */
   buttonRef: Ref<HTMLButtonElement>;
 };
+
+/** How a command tab ended, in a sentence. */
+function commandEnding(tab: TermTab): string | null {
+  if (tab.state === "error") return tab.error;
+  return tab.exitCode === 0
+    ? "The command finished."
+    : tab.exitCode === null
+      ? "The command ended."
+      : `The command ended with exit code ${tab.exitCode}.`;
+}
 
 /**
  * The bar docked at the bottom of a tab whose session is not running: why it ended, what to try,
  * and the ways out. It sits over the last rows only, so the output the attach command printed
- * (herdr's, ssh's or the script's own message) stays readable above it.
+ * stays readable above it.
  */
 export function TermBar({
   tab,
   row,
-  remote,
   gone,
   clicked,
   onReattach,
@@ -38,23 +45,43 @@ export function TermBar({
   buttonRef,
 }: Props) {
   const { current } = useTerminals();
+  // A finished terminal can't be attached to, so Reattach, Copy attach command and Open would
+  // all fail: Close tab is the way out, as for a terminal that is gone from the list.
+  // A command tab (Log in, Update hc) has no terminal to attach to again: it ends, and Close tab
+  // is the only way out, so running it again is a fresh click on the workbox.
+  const command = tab.target.kind === "command";
+  // A Watch tab hands out only the read-only attach (`--observe`), which marks nothing seen.
+  const observe = tab.observe === true;
+  const ended = row?.status === "ended";
+  const closeOnly = command || gone || ended;
   const opening = tab.state === "opening";
   const failed = tab.state === "error";
   const retryWord = failed ? "Retry" : "Reattach";
-  const reason = detachReason(tab.exitCode, {
-    remote,
-    label: tab.machineLabel,
-  });
-  const title = opening
-    ? "Reattaching…"
-    : gone
-      ? `This pane no longer exists on ${tab.machineLabel}.`
-      : failed
-        ? tab.error
-        : reason.title;
-  const hint = opening || gone || failed ? null : reason.hint;
+  const reason = detachReason(tab.exitCode ?? -1, tab.lastLine);
+  // A kept terminal whose shell was lost comes back by itself; the core's own loss too.
+  const waitingForShell = tab.waiting?.kind === "restart";
+  const waitingForCore = tab.waiting?.kind === "core";
+  const title = command
+    ? commandEnding(tab)
+    : opening
+      ? "Reattaching…"
+      : gone
+        ? `This terminal no longer exists on ${tab.machineLabel}.`
+        : failed
+          ? tab.error
+          : waitingForShell
+            ? WAITING_FOR_SHELL
+            : reason;
+  const hint =
+    command || opening || gone || failed
+      ? null
+      : waitingForShell
+        ? "It reattaches by itself when the new shell starts."
+        : waitingForCore
+          ? "It reattaches by itself when herdr-core is back."
+          : null;
   const attempt =
-    !opening && !gone && tab.attempts > 0
+    !command && !opening && !gone && tab.attempts > 0
       ? `${clicked} failed (attempt ${tab.attempts}).`
       : null;
 
@@ -66,7 +93,7 @@ export function TermBar({
         {hint && <span className="term-bar-hint">{hint}</span>}
       </div>
       <div className="term-bar-actions">
-        {!gone && (
+        {!closeOnly && (
           <button
             type="button"
             className="btn btn-primary"
@@ -77,30 +104,30 @@ export function TermBar({
             {retryWord}
           </button>
         )}
-        {!gone && row && (
+        {!closeOnly && row && (
           <button
             type="button"
             className="btn"
             disabled={opening}
-            onClick={() => void copyAttach(row)}
+            onClick={() => void copyAttach(row, { observe })}
           >
             Copy attach command
           </button>
         )}
-        {!gone && row && (
+        {!closeOnly && row && (
           <button
             type="button"
             className="btn"
             disabled={opening}
-            onClick={() => void openRow(row, "external")}
+            onClick={() => void openRow(row, "external", { observe })}
           >
             Open in {terminalName(current)}
           </button>
         )}
         <button
           type="button"
-          className={gone ? "btn btn-primary" : "btn"}
-          ref={gone ? buttonRef : undefined}
+          className={closeOnly ? "btn btn-primary" : "btn"}
+          ref={closeOnly ? buttonRef : undefined}
           onClick={onClose}
         >
           Close tab

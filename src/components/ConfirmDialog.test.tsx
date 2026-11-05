@@ -46,8 +46,8 @@ it("keeps Tab inside the dialog", async () => {
 });
 
 it("shows a command with its caption", () => {
-  render(<CommandBox command="herdr terminal attach term-1" />);
-  expect(screen.getByText("herdr terminal attach term-1")).toBeInTheDocument();
+  render(<CommandBox command="hc attach buildbox/t1" />);
+  expect(screen.getByText("hc attach buildbox/t1")).toBeInTheDocument();
   expect(screen.getByText("# what “Open” runs")).toBeInTheDocument();
 });
 

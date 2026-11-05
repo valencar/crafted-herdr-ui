@@ -1,5 +1,12 @@
 import { Kbd } from "../components/Kbd";
-import { useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AgentRow } from "../components/AgentRow";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { MachineNotices, NoAgentsYet } from "../components/HomeNotices";
@@ -13,12 +20,20 @@ import { failingNote, isFailing } from "../lib/dashboard";
 import { lastLines, plural } from "../lib/format";
 import {
   groupByProject,
+  groupBySpace,
   groupByStatus,
   groupByWorkbox,
+  flattenWorkers,
+  hasSpaceLayouts,
   needsYou,
+  nestWorkers,
+  sortPinnedFirst,
   projectNamesOf,
   toRows,
+  workerLabel,
+  workerSummary,
   type Group,
+  type NestedRow,
   type Row,
 } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
@@ -26,22 +41,30 @@ import { markSeen } from "../lib/openRow";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import { terminalName as terminalLabel, useTerminals } from "../lib/uiHelpers";
 import { useNow } from "../lib/useNow";
+import { useWorkerFold } from "../lib/useWorkerFold";
+import { shownMachines } from "../lib/workbox";
 import { useAppStore, type GroupBy } from "../store/appStore";
 
 const GROUP_TITLE: Record<GroupBy, string> = {
   project: "By project",
   workbox: "By workbox",
   status: "By status",
+  space: "By space",
 };
 const GROUP_HINT: Record<GroupBy, string> = {
   project: "Grouped by each agent’s working folder",
   workbox: "Grouped by the machine they run on",
   status: "Grouped by what they are doing",
+  space: "Grouped by the spaces you set up in Herdr",
 };
-const GROUPERS: Record<GroupBy, (rows: Row[]) => Group[]> = {
+const GROUPERS: Record<
+  GroupBy,
+  (rows: Row[], machines: readonly MachineView[]) => Group[]
+> = {
   project: groupByProject,
   workbox: groupByWorkbox,
   status: groupByStatus,
+  space: groupBySpace,
 };
 
 /** Shared by every card but the selected one, so a memoized card sees the same prop. */
@@ -58,7 +81,7 @@ function matches(row: Row, query: string): boolean {
 export function AllAgents() {
   const state = useAppStore((s) => s.state);
   const selectedKey = useAppStore((s) => s.selectedKey);
-  const groupBy = useAppStore((s) => s.groupBy);
+  const savedGroupBy = useAppStore((s) => s.groupBy);
   const query = useAppStore((s) => s.query);
   const select = useAppStore((s) => s.select);
   const setQuery = useAppStore((s) => s.setQuery);
@@ -75,6 +98,14 @@ export function AllAgents() {
   const [closingKey, setClosingKey] = useState<string | null>(null);
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
+  // Space is offered once a machine has a Herdr layout. A saved "space" with none goes back to
+  // grouping by project for now, and stays saved for when Herdr is back.
+  const spaces = useMemo(
+    () => (state ? hasSpaceLayouts(state.machines) : false),
+    [state],
+  );
+  const groupBy: GroupBy =
+    savedGroupBy === "space" && !spaces ? "project" : savedGroupBy;
   const machines = useMemo(
     () =>
       new Map<string, MachineView>(
@@ -96,7 +127,7 @@ export function AllAgents() {
     () => (query.trim() ? rows.filter((r) => matches(r, query)) : rows),
     [rows, query],
   );
-  const needs = useMemo(() => needsYou(visible), [visible]);
+  const needs = useMemo(() => sortPinnedFirst(needsYou(visible)), [visible]);
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
   const projectOf = useMemo(
     () => projectNamesOf(projectGroups),
@@ -106,10 +137,58 @@ export function AllAgents() {
     () =>
       groupBy === "project" && visible === rows
         ? projectGroups
-        : GROUPERS[groupBy](visible),
-    [groupBy, visible, rows, projectGroups],
+        : GROUPERS[groupBy](visible, state?.machines ?? []),
+    [groupBy, visible, rows, projectGroups, state],
   );
-  const navRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
+  // Workers sit under their parent inside each group, so the list the keyboard walks follows.
+  const { isFolded, toggle, unfold } = useWorkerFold();
+  const nestedGroups = useMemo(
+    () =>
+      groups.map((g): { group: Group; nested: NestedRow[] } => ({
+        group: g,
+        nested: nestWorkers(g.rows),
+      })),
+    [groups],
+  );
+  const navRows = useMemo(
+    () => nestedGroups.flatMap((g) => flattenWorkers(g.nested, isFolded)),
+    [nestedGroups, isFolded],
+  );
+  const rowByKey = useMemo(() => new Map(rows.map((r) => [r.key, r])), [rows]);
+  // A worker that gets selected (from a Needs-you card, the Inspector or a click elsewhere)
+  // must be on screen, or Enter and Delete would act on a row nobody sees: its parent opens.
+  // Only a change of selection does it, so the person can still fold the parent afterwards.
+  const unfoldedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedKey === unfoldedFor.current) return;
+    unfoldedFor.current = selectedKey;
+    const top = nestedGroups
+      .flatMap((g) => g.nested)
+      .find((n) => n.workers.some((w) => w.key === selectedKey));
+    if (top && isFolded(top.key)) unfold(top.key);
+  }, [selectedKey, nestedGroups, isFolded, unfold]);
+  // Folding the parent of the selected worker moves the selection to the parent, which stays
+  // drawn. Stable, so the memoized rows don't re-render with the screen; it reads the store
+  // when clicked.
+  const toggleWorkers = useCallback(
+    (key: string) => {
+      const { state: now, selectedKey: at } = useAppStore.getState();
+      if (now && at) {
+        const byKey = new Map(toRows(now).map((r) => [r.key, r]));
+        const seen = new Set<string>();
+        for (let r = byKey.get(at); r && !seen.has(r.key);) {
+          seen.add(r.key);
+          if (r.parent === key) {
+            select(key);
+            break;
+          }
+          r = r.parent === null ? undefined : byKey.get(r.parent);
+        }
+      }
+      toggle(key);
+    },
+    [select, toggle],
+  );
 
   const selectedRow = rows.find((r) => r.key === selectedKey) ?? null;
   // Keyboard shortcuts only act on a selection the user can see in the list.
@@ -151,11 +230,14 @@ export function AllAgents() {
           />
           <Kbd id="find" />
         </label>
-        <MachineNotices machines={state?.machines ?? []} nowMs={nowMs} />
+        <MachineNotices
+          machines={shownMachines(state?.machines ?? [])}
+          nowMs={nowMs}
+        />
         {state === null ? (
           <SkeletonList />
         ) : !hasAnyRows ? (
-          <NoAgentsYet machines={state.machines} />
+          <NoAgentsYet machines={shownMachines(state.machines)} />
         ) : (
           <>
             <section
@@ -188,6 +270,7 @@ export function AllAgents() {
                       previewLines={
                         r.key === selectedKey ? previewLines : NO_LINES
                       }
+                      workerLabel={workerLabel(r, rowByKey)}
                       onSelect={select}
                       onMarkSeen={markSeen}
                     />
@@ -206,7 +289,10 @@ export function AllAgents() {
                   {GROUP_TITLE[groupBy]}
                 </h2>
                 <div role="group" aria-label="Group by" className="segmented">
-                  {(["project", "workbox", "status"] as const).map((g) => (
+                  {(spaces
+                    ? (["project", "workbox", "status", "space"] as const)
+                    : (["project", "workbox", "status"] as const)
+                  ).map((g) => (
                     <button
                       key={g}
                       type="button"
@@ -232,11 +318,11 @@ export function AllAgents() {
                   <p>No sessions match “{query.trim()}”.</p>
                 </EmptyState>
               )}
-              {groups.map((g) => (
+              {nestedGroups.map(({ group: g, nested }) => (
                 <ProjectGroup
                   key={g.key}
                   group={g}
-                  showSession={groupBy === "project"}
+                  showSession={groupBy === "project" || groupBy === "space"}
                   showTile={groupBy === "workbox"}
                   onNewSession={() =>
                     openNewSession({
@@ -246,19 +332,45 @@ export function AllAgents() {
                     })
                   }
                 >
-                  {g.rows.map((r) => (
-                    <AgentRow
-                      key={r.key}
-                      row={r}
-                      selected={r.key === selectedKey}
-                      dim={dimmed(r.machineId)}
-                      note={noteFor(r.machineId)}
-                      showMachine={groupBy === "status"}
-                      nowMs={nowMs}
-                      terminalName={terminalName}
-                      onSelect={select}
-                    />
-                  ))}
+                  {nested.map((r) => {
+                    const { count, needs: workerNeeds } = workerSummary(
+                      r.workers,
+                    );
+                    const folded = isFolded(r.key);
+                    const rowProps = {
+                      showMachine: groupBy === "status",
+                      nowMs,
+                      terminalName,
+                      onSelect: select,
+                    };
+                    return (
+                      <Fragment key={r.key}>
+                        <AgentRow
+                          {...rowProps}
+                          row={r}
+                          selected={r.key === selectedKey}
+                          dim={dimmed(r.machineId)}
+                          note={noteFor(r.machineId)}
+                          workerCount={count}
+                          workerNeeds={workerNeeds}
+                          expanded={!folded}
+                          onToggleWorkers={toggleWorkers}
+                        />
+                        {!folded &&
+                          r.workers.map((w) => (
+                            <AgentRow
+                              key={w.key}
+                              {...rowProps}
+                              row={w}
+                              selected={w.key === selectedKey}
+                              dim={dimmed(w.machineId)}
+                              note={noteFor(w.machineId)}
+                              nested
+                            />
+                          ))}
+                      </Fragment>
+                    );
+                  })}
                 </ProjectGroup>
               ))}
             </section>
@@ -273,6 +385,12 @@ export function AllAgents() {
           machine={selectedMachine}
           project={projectOf.get(selectedRow.key) ?? null}
           terminalName={terminalName}
+          startedBy={
+            selectedRow.parent
+              ? (rowByKey.get(selectedRow.parent) ?? null)
+              : null
+          }
+          workers={rows.filter((r) => r.parent === selectedRow.key)}
         />
       ) : (
         <aside className="inspector" aria-label="Selected agent">

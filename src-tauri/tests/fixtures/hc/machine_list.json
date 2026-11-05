@@ -1,0 +1,63 @@
+{
+  "machines": [
+    {
+      "host": "buildbox",
+      "id": "000000000000000000000000c0de0002",
+      "name": "buildbox",
+      "session": null,
+      "state": "connected",
+      "target": "dev@buildbox.example",
+      "temporary": false,
+      "version": "0.1.18",
+      "via": false
+    },
+    {
+      "host": "gpubox",
+      "id": "000000000000000000000000c0de0003",
+      "name": "gpubox",
+      "session": "scratch",
+      "state": "connecting",
+      "target": "dev@gpubox.example:2222",
+      "temporary": false,
+      "version": "0.1.18",
+      "via": false
+    },
+    {
+      "host": "staging",
+      "id": "000000000000000000000000c0de0004",
+      "name": "staging",
+      "session": null,
+      "since_ms": 1767225917311,
+      "state": "needs_login",
+      "target": "staging",
+      "temporary": false,
+      "version": "0.1.18",
+      "via": false
+    },
+    {
+      "host": "edgebox",
+      "id": "000000000000000000000000c0de0005",
+      "name": "edgebox",
+      "session": null,
+      "since_ms": 1767225917349,
+      "state": "needs_update",
+      "target": "fly ssh console -a edgebox --pty=false -C",
+      "temporary": true,
+      "version": "0.1.12",
+      "via": true
+    },
+    {
+      "host": "devbox",
+      "id": "000000000000000000000000c0de0006",
+      "name": "devbox",
+      "session": null,
+      "since_ms": 1767225917315,
+      "state": "unreachable",
+      "target": "dev@devbox.example",
+      "temporary": false,
+      "version": "0.1.18",
+      "via": false,
+      "why": "cannot reach dev@devbox.example: ssh: Could not resolve hostname devbox.example: Name or service not known"
+    }
+  ]
+}

@@ -1,12 +1,17 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { useAppStore } from "../store/appStore";
+import {
+  agentTerm,
+  appState as buildState,
+  buildboxTerms,
+  machineView,
+  type TermSpec,
+} from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -17,15 +22,12 @@ import { MenuBar } from "./MenuBar";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const SETTINGS: Settings = {
-  herdr_path: null,
+  core_path: null,
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
-  attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
-  poll_interval_visible_ms: 2000,
-  poll_interval_hidden_ms: 10_000,
   group_by: "project",
   global_shortcut_enabled: true,
   open_after_create: true,
@@ -41,35 +43,22 @@ const SETTINGS: Settings = {
   new_session_hidden_kinds: [],
   new_session_hide_shell: false,
   workbox_colors: {},
+  hidden_workboxes: [],
 };
-const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();
 
-function machine(
-  id: string,
-  overrides: Partial<MachineView> = {},
-): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: structuredClone(fixture),
-    last_ok_ms: NOW,
-    ages: { "term-1": NOW - 2 * 60_000, "term-4": NOW - 3 * 60_000 },
-    ...overrides,
-  };
+const fixtureTerms = (): TermSpec[] =>
+  buildboxTerms({
+    "w1:p1": { sinceMs: NOW - 2 * 60_000 },
+    "w2:p1": { sinceMs: NOW - 3 * 60_000 },
+  });
+
+function machine(id: string, terms: TermSpec[] = fixtureTerms()): MachineView {
+  return machineView({ id, lastOkMs: NOW }, terms);
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: NOW,
-  };
+  return { ...buildState([], { generatedAtMs: NOW }), machines };
 }
 
 function setup(state: AppState | null) {
@@ -93,6 +82,20 @@ afterEach(() => {
 });
 
 describe("MenuBar", () => {
+  it("a_hidden_workbox_is_not_counted_or_listed", () => {
+    const hidden = machineView(
+      { id: "gpubox", health: { kind: "hidden" }, lastOkMs: NOW },
+      fixtureTerms(),
+    );
+    setup(appState(machine("buildbox"), hidden));
+    // One workbox of two, and only it in the list at the bottom.
+    expect(screen.getByText(/· 1 workbox$/)).toBeInTheDocument();
+    const boxes = within(screen.getByRole("list", { name: "Workboxes" }));
+    expect(boxes.getAllByRole("listitem")).toHaveLength(1);
+    expect(boxes.getByText("buildbox")).toBeInTheDocument();
+    expect(boxes.queryByText("gpubox")).toBeNull();
+  });
+
   it("menubar_lists_needs_you_then_working", () => {
     setup(appState(machine("buildbox"), machine("gpubox")));
 
@@ -133,6 +136,35 @@ describe("MenuBar", () => {
     );
   });
 
+  it("a_pinned_agent_leads_its_list_and_shows_a_pin", () => {
+    // Two blocked agents: the older one would lead, but the newer one is pinned.
+    const terms = [
+      agentTerm({
+        address: "t1",
+        status: "blocked",
+        name: "older",
+        sinceMs: NOW - 5 * 60_000,
+      }),
+      agentTerm({
+        address: "t2",
+        status: "blocked",
+        name: "newer",
+        sinceMs: NOW - 60_000,
+        pinned: true,
+      }),
+    ];
+    setup(appState(machine("buildbox", terms)));
+    const needs = within(screen.getByRole("region", { name: /Needs you/ }));
+    const rows = needs.getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("newer");
+    expect(rows[1]).toHaveTextContent("older");
+    // The pin has a name for a screen reader, and only the pinned row has one.
+    expect(
+      within(rows[0]).getByRole("img", { name: "Pinned" }),
+    ).toBeInTheDocument();
+    expect(needs.getAllByRole("img", { name: "Pinned" })).toHaveLength(1);
+  });
+
   it("Open with app target asks main to open the row", async () => {
     useAppStore.setState({ settings: SETTINGS });
     const user = setup(appState(machine("buildbox")));
@@ -142,7 +174,7 @@ describe("MenuBar", () => {
     await user.click(within(first).getByRole("button", { name: /^Open/ }));
     expect(invoke).toHaveBeenCalledWith("show_main_open_row", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     });
     expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
@@ -158,7 +190,8 @@ describe("MenuBar", () => {
     await user.click(within(first).getByRole("button", { name: /^Open/ }));
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 
@@ -190,9 +223,12 @@ describe("MenuBar", () => {
   });
 
   it("says_so_when_nothing_needs_you_or_nothing_is_known_yet", () => {
-    const quiet = machine("buildbox");
-    quiet.snapshot!.agents = quiet.snapshot!.agents.filter(
-      (a) => a.agent_status !== "blocked" && a.agent_status !== "done",
+    const quiet = machine(
+      "buildbox",
+      fixtureTerms().filter(
+        (t) =>
+          t.kind === "shell" || (t.status !== "blocked" && t.status !== "done"),
+      ),
     );
     setup(appState(quiet));
     expect(screen.getByText("All clear")).toBeInTheDocument();
@@ -200,6 +236,6 @@ describe("MenuBar", () => {
 
   it("shows_a_waiting_line_before_the_first_state", () => {
     setup(null);
-    expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
+    expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();
   });
 });

@@ -1,0 +1,20 @@
+{
+  "templates": [
+    {
+      "command": "",
+      "description": "",
+      "error": "/home/dev/.config/herdr-core/templates/broken.md: no command",
+      "name": "broken"
+    },
+    {
+      "command": "codex --no-daemon",
+      "description": "Breaks a task into steps before anyone codes.",
+      "name": "planner"
+    },
+    {
+      "command": "claude",
+      "description": "Read-only code review. Give it file paths and scope.",
+      "name": "reviewer"
+    }
+  ]
+}

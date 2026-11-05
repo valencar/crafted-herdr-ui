@@ -2,16 +2,16 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { AppState } from "./bindings/AppState";
 import type { ActionError } from "./bindings/ActionError";
+import type { AddMachineRequest } from "./bindings/AddMachineRequest";
+import type { AppState } from "./bindings/AppState";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CreatedSession } from "./bindings/CreatedSession";
-import type { HerdrStatus } from "./bindings/HerdrStatus";
+import type { CoreStatus } from "./bindings/CoreStatus";
 import type { MenuId } from "./bindings/MenuId";
-import type { MachineStatusEntry } from "./bindings/MachineStatusEntry";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
-import type { SetupEvent } from "./bindings/SetupEvent";
+import type { RunChoices } from "./bindings/RunChoices";
 import type { Settings } from "./bindings/Settings";
 import type { ShortcutStatus } from "./bindings/ShortcutStatus";
 import type { TermEvent } from "./bindings/TermEvent";
@@ -20,38 +20,46 @@ import type { TerminalList } from "./bindings/TerminalList";
 
 /** Every Tauri command the UI may call, mapped to its result. A Rust `()` arrives as `null`. */
 export type CommandResults = {
-  /** `null` while startup is still looking for herdr; a "state" event follows. */
+  /** `null` while startup is still looking for herdr-core; a "state" event follows. */
   get_state: AppState | null;
   create_session: CreatedSession;
-  preview_new_session: string[];
-  rename_session: null;
-  close_pane: null;
-  create_tab: CreatedSession;
-  rename_tab: null;
-  close_tab: null;
-  create_workspace: CreatedSession;
-  rename_workspace: null;
-  close_workspace: null;
+  /** The `hc run …` line, built in Rust. */
+  preview_new_session: string;
   reply_to_agent: null;
   mark_seen: null;
+  /** The text the core observed after the stop key, for a toast. */
+  interrupt_terminal: string;
+  close_terminal: null;
+  remove_terminal: null;
+  /** How many ended terminals were removed. */
+  clear_ended: number;
+  set_keep: null;
+  mark_unread: null;
+  set_pinned: null;
+  machine_connect: null;
   machine_rename: null;
-  machine_set_enabled: null;
   machine_remove: null;
-  machine_status: MachineStatusEntry[];
+  /** The settings after the change. */
+  set_workbox_hidden: Settings;
+  /** What follows the core in `machine login <name>`, for a command tab. */
+  machine_login_args: string[];
+  /** What follows the core in `machine update <name>`, for a command tab. */
+  machine_update_args: string[];
   refresh_now: null;
+  reconnect_core: null;
   get_command_log: CommandLogEntry[];
-  list_agent_kinds: string[];
+  /** The kinds (installed ones when the check worked) and, on Local, the templates. */
+  list_run_choices: RunChoices;
   open_session: null;
-  open_full_herdr: null;
   open_in_terminal: null;
   list_ssh_hosts: string[];
-  machine_add_argv: string[];
-  preview_machine_add: string;
-  preview_reconnect: string;
-  start_machine_add: null;
-  answer_machine_setup: null;
-  cancel_machine_setup: null;
-  read_pane_tail: string;
+  /** `machine.add`: the new machine's id. */
+  add_machine: string;
+  /** What follows the core in `machine add …`, for a command tab. */
+  machine_add_args: string[];
+  /** The `hc machine add …` line, built in Rust. */
+  preview_add_machine: string;
+  read_tail: string;
   get_terminals: TerminalList;
   list_terminals: TerminalList;
   copy_attach_command: string;
@@ -59,7 +67,9 @@ export type CommandResults = {
   stop_preview: null;
   get_settings: Settings;
   set_settings: Settings;
-  herdr_status: HerdrStatus;
+  core_status: CoreStatus;
+  /** Locates the core again with the settings as they are, rewires and reconnects. */
+  retry_core: CoreStatus;
   shortcut_status: ShortcutStatus;
   preview_launch_template: string;
   show_main: null;
@@ -71,70 +81,68 @@ export type CommandResults = {
   term_resize: null;
   term_close: null;
   show_main_open_row: null;
-  set_visible_row: null;
+  set_looking: null;
+  /** Whether Herdr's window is open (`herdr-app status` exits 0); reused for 5 s in Rust. */
+  herdr_app_status: boolean;
+  open_in_herdr: null;
 };
 export type CommandName = keyof CommandResults;
-
-/** The Add workbox form's fields; an empty or missing option is left out of the command. */
-export type MachineAddFields = {
-  target: string;
-  label?: string | null;
-  session?: string | null;
-};
 
 /** The arguments of each command. Keys are camelCase, which is what Tauri expects. */
 export type CommandArgs = {
   get_state: undefined;
   create_session: { req: NewSessionRequest };
   preview_new_session: { req: NewSessionRequest };
-  rename_session: {
-    machineId: string;
-    paneId: string;
-    isAgent: boolean;
-    name: string;
-  };
-  close_pane: { machineId: string; paneId: string };
-  create_tab: { machineId: string; workspaceId: string; label: string };
-  rename_tab: { machineId: string; tabId: string; label: string };
-  close_tab: { machineId: string; tabId: string };
-  create_workspace: { machineId: string; cwd: string; label: string };
-  rename_workspace: { machineId: string; workspaceId: string; label: string };
-  close_workspace: { machineId: string; workspaceId: string };
-  reply_to_agent: { machineId: string; paneId: string; text: string };
-  mark_seen: { machineId: string; paneId: string };
-  machine_rename: { id: string; label: string };
-  machine_set_enabled: { id: string; enabled: boolean };
-  machine_remove: { id: string };
-  machine_status: { id: string };
+  reply_to_agent: { machineId: string; address: string; text: string };
+  mark_seen: { machineId: string; address: string };
+  interrupt_terminal: { machineId: string; address: string };
+  /** `terminal.kill`; the UI confirms first. */
+  close_terminal: { machineId: string; address: string };
+  /** `terminal.rm` of an ended terminal; the UI confirms first. */
+  remove_terminal: { machineId: string; address: string };
+  /** Removes every ended terminal of one workbox; the UI confirms first. */
+  clear_ended: { machineId: string };
+  set_keep: { machineId: string; address: string; keep: boolean };
+  /** Goes back one turn; refused at turn 0. */
+  mark_unread: { machineId: string; address: string };
+  set_pinned: { machineId: string; address: string; pinned: boolean };
+  /** `machine.connect`: dial the workbox now. */
+  machine_connect: { machineId: string };
+  /** `machine.rename`; the name is checked in Rust like a terminal's. */
+  machine_rename: { machineId: string; newName: string };
+  /** `machine.rm`; the UI confirms first. */
+  machine_remove: { machineId: string };
+  /** An app setting (`hidden_workboxes`); no core call. */
+  set_workbox_hidden: { machineId: string; hidden: boolean };
+  machine_login_args: { machineId: string };
+  /** The UI confirms first: it copies hc to the machine and restarts its core. */
+  machine_update_args: { machineId: string };
   refresh_now: { machineId?: string | null };
+  reconnect_core: undefined;
   get_command_log: undefined;
-  list_agent_kinds: undefined;
-  open_session: { machineId: string; paneId: string };
-  open_full_herdr: { machineId: string };
-  /** What follows the herdr binary; the Rust side allows only a few shapes. */
-  open_in_terminal: { argv: string[] };
+  list_run_choices: { machineId: string };
+  /** Opens `hc attach` for the terminal in the user's terminal; `observe` is Watch (never types or resizes). */
+  open_session: { machineId: string; address: string; observe: boolean };
+  /** What follows the herdr-core binary, which Rust takes from the resolved core; only a few shapes are allowed. */
+  open_in_terminal: { args: string[] };
   list_ssh_hosts: undefined;
-  /** What follows the herdr binary in `machine add`: the argv `open_in_terminal` expects. */
-  machine_add_argv: MachineAddFields;
-  /** The `machine add` command line, as text. */
-  preview_machine_add: MachineAddFields;
-  /** `herdr machine reconnect <id>` as text, for the cards that suggest it. */
-  preview_reconnect: { id: string };
-  /** Runs `machine add` in a hidden terminal; progress arrives as `"machine-setup"` events. */
-  start_machine_add: MachineAddFields;
-  /** `"yes"` or `"no"` for a confirmation, the session's index (as text) for the picker. */
-  answer_machine_setup: { choice: string };
-  cancel_machine_setup: undefined;
-  read_pane_tail: { machineId: string; paneId: string };
+  /** `machine.add`. A refusal the core types (`hc_missing`, `needs_login`, …) arrives as a `core` error with its `code`. */
+  add_machine: { req: AddMachineRequest };
+  /** `install` is true only after the person confirmed Install hc there…. */
+  machine_add_args: { req: AddMachineRequest; install: boolean };
+  preview_add_machine: { req: AddMachineRequest };
+  read_tail: { machineId: string; address: string };
   get_terminals: undefined;
   list_terminals: undefined;
-  copy_attach_command: { machineId: string; paneId: string };
-  start_preview: { machineId: string; paneId: string; isAgent: boolean };
+  /** `observe`: the read-only attach, for a Watch tab. */
+  copy_attach_command: { machineId: string; address: string; observe: boolean };
+  start_preview: { machineId: string; address: string };
   stop_preview: undefined;
   get_settings: undefined;
   /** Merged over the current settings; refused as a whole if any value is invalid. */
   set_settings: { patch: Partial<Settings> };
-  herdr_status: undefined;
+  core_status: undefined;
+  retry_core: undefined;
   shortcut_status: undefined;
   /** The script a Custom launch command runs for a sample pane. */
   preview_launch_template: { template: string };
@@ -142,19 +150,28 @@ export type CommandArgs = {
   show_main_new_session: undefined;
   open_settings: undefined;
   /** `onEvent` (the output channel) is added by `openTerm`; callers don't pass it. */
-  term_open: { target: TermTarget; cols: number; rows: number };
+  term_open: {
+    target: TermTarget;
+    observe: boolean;
+    cols: number;
+    rows: number;
+  };
   /** Keystrokes and pastes only; the command a tab runs is built on the Rust side. */
   term_write: { id: number; data: string };
   term_resize: { id: number; cols: number; rows: number };
-  /** Kills the attach client; the herdr pane keeps running. */
+  /** Kills the attach client; the core's terminal keeps running. */
   term_close: { id: number };
-  show_main_open_row: { machineId: string; paneId: string };
-  /** The pane tab the main window is showing (`${machineId}::${paneId}`), or `null`; Rust skips notifications for it. */
-  set_visible_row: { key: string | null };
+  show_main_open_row: { machineId: string; address: string };
+  /** The rows drawn right now (`${machineId}::${address}`; none while the window is away): Rust skips their notifications and writes `herdr.seen` for them. */
+  set_looking: { keys: string[] };
+  herdr_app_status: undefined;
+  /** `herdr-app do terminal.peek`: shows the terminal in Herdr's window; only on the person's click. */
+  open_in_herdr: { machineId: string; address: string };
 };
 
 const ACTION_ERROR_KINDS: ReadonlySet<string> = new Set([
-  "herdr",
+  "launch",
+  "core",
   "maybeApplied",
   "invalid",
 ]);
@@ -240,13 +257,6 @@ export function onPreview(
   return listen<PreviewFrame>("preview", (event) => cb(event.payload));
 }
 
-/** Subscribes to the `"machine-setup"` event (the hidden `machine add` run). */
-export function onMachineSetup(
-  cb: (event: SetupEvent) => void,
-): Promise<() => void> {
-  return listen<SetupEvent>("machine-setup", (event) => cb(event.payload));
-}
-
 /** The current settings, for a window that opened after the last change. */
 export function getSettings(): Promise<Settings> {
   return invokeTyped("get_settings");
@@ -281,19 +291,21 @@ export function onOpenRow(cb: (key: string) => void): Promise<() => void> {
 
 /**
  * Opens a terminal tab on `target` and streams its output to `onEvent`. Resolves to the id the
- * `term_*` commands take. Rejects with an `ActionError`.
+ * `term_*` commands take. `observe` is Watch. Rejects with an `ActionError`.
  */
 export async function openTerm(
   target: TermTarget,
   cols: number,
   rows: number,
   onEvent: (e: TermEvent) => void,
+  observe = false,
 ): Promise<number> {
   const channel = new Channel<TermEvent>();
   channel.onmessage = onEvent;
   try {
     return await invoke<number>("term_open", {
       target,
+      observe,
       cols,
       rows,
       onEvent: channel,

@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "machines: buildbox, gpubox, staging, edgebox, devbox",
+      "kind": "machine_unknown"
+    },
+    "message": "unknown machine \"nope\""
+  }
+}

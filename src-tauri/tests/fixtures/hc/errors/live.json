@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "kill it first: hc kill t1",
+      "kind": "live"
+    },
+    "message": "t1 is still running"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "see hc templates",
+      "kind": "invalid_template"
+    },
+    "message": "/home/dev/.config/herdr-core/templates/broken.md: no command"
+  }
+}

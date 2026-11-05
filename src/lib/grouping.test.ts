@@ -1,60 +1,63 @@
 import { describe, expect, it } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
-import type { Agent } from "./bindings/Agent";
 import type { AppState } from "./bindings/AppState";
+import type { Health } from "./bindings/Health";
 import type { MachineView } from "./bindings/MachineView";
-import type { Snapshot } from "./bindings/Snapshot";
+import {
+  appState as buildState,
+  buildboxTerms,
+  agentTerm,
+  layoutOf,
+  machineView,
+  rowOf,
+  shellTerm,
+  type TermSpec,
+} from "../test/builders";
 import {
   displayName,
   groupByProject,
+  groupBySpace,
   groupByStatus,
   groupByWorkbox,
+  hasSpaceLayouts,
   isHomeLike,
   isNeedsYou,
+  isShell,
   needsYou,
+  nestWorkers,
   projectNames,
   projectNamesOf,
+  shownStatus,
+  sortPinnedFirst,
   toRows,
+  blockedKindLabel,
+  flattenWorkers,
+  workerLabel,
+  workerSummary,
+  workerSummaryText,
   type Row,
 } from "./grouping";
 
-// The raw herdr response has fields the bindings ignore, hence the cast.
-const fixture = raw.result.snapshot as unknown as Snapshot;
-
+/** A machine with the fixture's terminals, unless `terms` says otherwise (`null`: none yet). */
 function machine(
   id: string,
-  overrides: Partial<MachineView> = {},
+  over: { terms?: TermSpec[] | null; health?: Health } = {},
 ): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: structuredClone(fixture),
-    last_ok_ms: 1_000,
-    ages: {},
-    ...overrides,
-  };
+  return machineView(
+    { id, health: over.health, lastOkMs: 1_000 },
+    over.terms === undefined ? buildboxTerms() : over.terms,
+  );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/usr/local/bin/herdr",
-    generated_at_ms: 1_000,
-  };
+  return { ...buildState([], { generatedAtMs: 1_000 }), machines };
 }
 
 function row(overrides: Partial<Row>): Row {
-  return {
+  return rowOf({
     key: "m::w1:p1",
     machineId: "m",
     machineLabel: "m",
-    paneId: "w1:p1",
-    terminalId: "t",
+    address: "w1:p1",
     kind: "claude",
     name: "n",
     title: "t",
@@ -62,7 +65,7 @@ function row(overrides: Partial<Row>): Row {
     folder: null,
     sinceMs: null,
     ...overrides,
-  };
+  });
 }
 
 const buildbox = () => toRows(appState(machine("buildbox")));
@@ -72,7 +75,7 @@ describe("toRows", () => {
     const rows = buildbox();
     expect(rows).toHaveLength(6);
     expect(
-      rows.filter((r) => r.status === "shell").map((r) => r.paneId),
+      rows.filter((r) => r.status === "shell").map((r) => r.address),
     ).toEqual(["w1:p3", "w2:p3"]);
   });
 
@@ -86,17 +89,16 @@ describe("toRows", () => {
 
   it("describes an agent row from the agent and a shell row from the pane", () => {
     const rows = buildbox();
-    expect(rows.find((r) => r.paneId === "w1:p1")).toMatchObject({
+    expect(rows.find((r) => r.address === "w1:p1")).toMatchObject({
       machineId: "buildbox",
       machineLabel: "buildbox",
-      terminalId: "term-1",
       kind: "claude",
       name: "planner",
       title: "claude: refactor auth",
       status: "blocked",
       folder: "/home/dev/projects/api-service",
     });
-    expect(rows.find((r) => r.paneId === "w1:p3")).toMatchObject({
+    expect(rows.find((r) => r.address === "w1:p3")).toMatchObject({
       kind: null,
       status: "shell",
       title: "zsh",
@@ -104,28 +106,32 @@ describe("toRows", () => {
     });
   });
 
-  it("takes sinceMs from the machine ages, null when absent", () => {
+  it("takes sinceMs from the terminal, null when absent", () => {
     const rows = toRows(
-      appState(machine("buildbox", { ages: { "term-1": 500 } })),
+      appState(
+        machine("buildbox", {
+          terms: buildboxTerms({ "w1:p1": { sinceMs: 500 } }),
+        }),
+      ),
     );
-    expect(rows.find((r) => r.terminalId === "term-1")?.sinceMs).toBe(500);
-    expect(rows.find((r) => r.terminalId === "term-2")?.sinceMs).toBeNull();
+    expect(rows.find((r) => r.address === "w1:p1")?.sinceMs).toBe(500);
+    expect(rows.find((r) => r.address === "w1:p2")?.sinceMs).toBeNull();
   });
 
-  it("gives no rows for a machine without a snapshot or a disabled one", () => {
+  it("gives no rows for a machine without terminals or a hidden one", () => {
     const rows = toRows(
       appState(
         machine("a", {
-          snapshot: null,
+          terms: null,
           health: { kind: "attention", error: "x" },
         }),
-        machine("b", { health: { kind: "disabled" } }),
+        machine("b", { health: { kind: "hidden" } }),
       ),
     );
     expect(rows).toEqual([]);
   });
 
-  it("keeps the stale snapshot of a reconnecting machine", () => {
+  it("keeps the terminals of a reconnecting machine", () => {
     const rows = toRows(
       appState(
         machine("a", {
@@ -136,11 +142,136 @@ describe("toRows", () => {
     expect(rows).toHaveLength(6);
   });
 
-  it("unknown_status_kept", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[3].agent_status = "unknown";
+  it("toRows_keys_by_machine_and_address", () => {
+    const local = machineView({ id: "local", isLocal: true }, [
+      agentTerm({ address: "t1", status: "working", name: "builder" }),
+    ]);
+    const buildbox = machineView({ id: "mb-2", name: "buildbox" }, [
+      agentTerm({ address: "t1", status: "blocked", name: "planner" }),
+      agentTerm({
+        address: "t2",
+        status: "idle",
+        name: "worker",
+        parent: "t1",
+        pinned: true,
+        turn: 7,
+        statusKind: "tool",
+        statusMsg: "Reading src/auth.rs",
+        progress: 40,
+      }),
+    ]);
+    const rows = toRows(appState(local, buildbox));
+    // The same address on two machines is two rows, keyed by the machine id, not its name.
+    expect(rows.map((r) => r.key)).toEqual([
+      "local::t1",
+      "mb-2::t1",
+      "mb-2::t2",
+    ]);
+    // Calls take the address the local core knows: bare for Local, `<name>/<address>` elsewhere.
+    expect(rows.map((r) => r.fullAddress)).toEqual([
+      "t1",
+      "buildbox/t1",
+      "buildbox/t2",
+    ]);
+    expect(rows[1]).toMatchObject({
+      machineId: "mb-2",
+      machineLabel: "buildbox",
+      address: "t1",
+      isWorker: false,
+      parent: null,
+    });
+    // A parent is given as a row key; a bare parent address is on Local.
+    expect(rows[2]).toMatchObject({
+      address: "t2",
+      isWorker: true,
+      parent: "local::t1",
+      pinned: true,
+      turn: 7,
+      statusKind: "tool",
+      statusMsg: "Reading src/auth.rs",
+      progress: 40,
+    });
+  });
+
+  it("a_parent_on_another_machine_is_found_by_its_name", () => {
+    const buildbox = machineView({ id: "mb-2", name: "buildbox" }, [
+      agentTerm({ address: "t1", status: "working" }),
+    ]);
+    const local = machineView({ id: "local", isLocal: true }, [
+      agentTerm({ address: "t9", status: "idle", parent: "buildbox/t1" }),
+      agentTerm({ address: "t8", status: "idle", parent: "gone/t1" }),
+    ]);
+    const rows = toRows(appState(local, buildbox));
+    expect(rows.find((r) => r.key === "local::t9")).toMatchObject({
+      parent: "mb-2::t1",
+      isWorker: true,
+    });
+    // A parent the list doesn't know is still a worker, with no row to point at.
+    expect(rows.find((r) => r.key === "local::t8")).toMatchObject({
+      parent: null,
+      isWorker: true,
+    });
+  });
+
+  it("an_ended_shell_is_not_an_agent_and_a_reported_agent_without_a_kind_is", () => {
+    const m = machineView({ id: "buildbox" }, [
+      agentTerm({
+        address: "t1",
+        status: "idle",
+        name: "planner",
+        folder: "/home/dev/projects/api-service",
+      }),
+      shellTerm({
+        address: "t2",
+        status: "ended",
+        title: "zsh",
+        folder: "/home/dev/projects/web-app",
+      }),
+      agentTerm({
+        address: "t3",
+        status: "working",
+        kind: "",
+        folder: "/home/dev/projects/infra",
+      }),
+    ]);
     const rows = toRows(appState(m));
-    const r = rows.find((x) => x.paneId === "w2:p2")!;
+    const byAddress = (a: string) => rows.find((r) => r.address === a)!;
+    // `ended` is the status of any finished terminal, so the status cannot say what it was.
+    expect(byAddress("t2")).toMatchObject({ status: "ended", isAgent: false });
+    expect(isShell(byAddress("t2"))).toBe(true);
+    // A reported agent whose kind is empty still counts as an agent.
+    expect(byAddress("t3")).toMatchObject({ kind: null, isAgent: true });
+    expect(isShell(byAddress("t3"))).toBe(false);
+    // The ended shell makes no project group of its own: it joins nothing, so it is loose.
+    const groups = groupByProject(rows);
+    expect(groups.map((g) => g.name).sort()).toEqual([
+      "Loose sessions",
+      "api-service",
+      "infra",
+    ]);
+    expect(groups.find((g) => g.name === "Loose sessions")!.rows).toEqual([
+      byAddress("t2"),
+    ]);
+  });
+
+  it("toRows_skips_hidden_machines", () => {
+    const rows = toRows(
+      appState(
+        machine("a"),
+        machine("b", { health: { kind: "hidden" } }),
+        machine("c", { terms: [] }),
+      ),
+    );
+    expect(new Set(rows.map((r) => r.machineId))).toEqual(new Set(["a"]));
+    expect(rows).toHaveLength(6);
+  });
+
+  it("unknown_status_kept", () => {
+    const m = machine("buildbox", {
+      terms: buildboxTerms({ "w2:p2": { status: "unknown" } }),
+    });
+    const rows = toRows(appState(m));
+    const r = rows.find((x) => x.address === "w2:p2")!;
     expect(r.status).toBe("unknown");
     expect(isNeedsYou(r)).toBe(false);
     expect(groupByStatus(rows).map((g) => g.name)).toContain("Unknown");
@@ -148,22 +279,232 @@ describe("toRows", () => {
 });
 
 describe("displayName", () => {
-  const base = fixture.agents[0] as Agent;
+  const base = machineView({ id: "buildbox" }, [
+    agentTerm({ address: "w1:p1", status: "blocked" }),
+  ]).terminals[0];
 
   it("display_name_fallbacks", () => {
     expect(displayName({ ...base, name: "planner" })).toBe("planner");
+    expect(displayName({ ...base, name: null, title: "my title" })).toBe(
+      "my title",
+    );
+    expect(displayName({ ...base, name: "", title: "my title" })).toBe(
+      "my title",
+    );
+    expect(displayName({ ...base, name: null, title: null })).toBe(
+      "claude · w1:p1",
+    );
+    expect(displayName({ ...base, name: null, title: "  " })).toBe(
+      "claude · w1:p1",
+    );
+  });
+
+  it("display_name_uses_tab_name", () => {
+    // name, then Herdr's tab name, then the title, then the fallback.
+    expect(displayName({ ...base, name: "planner" }, "main")).toBe("planner");
     expect(
-      displayName({ ...base, name: null, terminal_title_stripped: "my title" }),
-    ).toBe("my title");
+      displayName({ ...base, name: null, title: "my title" }, "main"),
+    ).toBe("main");
+    expect(displayName({ ...base, name: "", title: "my title" }, "tests")).toBe(
+      "tests",
+    );
+    // An unnamed tab (or none) is no name.
+    for (const tab of ["", "  ", null, undefined]) {
+      expect(displayName({ ...base, name: null, title: "my title" }, tab)).toBe(
+        "my title",
+      );
+    }
+    expect(displayName({ ...base, name: null, title: null }, "")).toBe(
+      "claude · w1:p1",
+    );
+  });
+
+  it("toRows names a terminal after its Herdr tab when it has no name of its own", () => {
+    const layout = layoutOf([
+      { id: "s1", tab: "main", terminals: ["w1:p1", "w1:p2"] },
+    ]);
+    const rows = toRows(
+      appState(
+        machineView({ id: "buildbox", layout }, buildboxTerms()),
+        machine("gpubox"),
+      ),
+    );
+    const name = (id: string, address: string) =>
+      rows.find((r) => r.key === `${id}::${address}`)?.name;
+    // planner has a name; w1:p2 has none, so its tab's name; w2:p1 is in no space.
+    expect(name("buildbox", "w1:p1")).toBe("planner");
+    expect(name("buildbox", "w1:p2")).toBe("main");
+    expect(name("buildbox", "w2:p2")).toBe("claude");
+    // The other machine has no layout: nothing changes for it.
+    expect(name("gpubox", "w1:p2")).toBe("copilot: terraform plan");
+  });
+});
+
+describe("spaces", () => {
+  const withLayout = (layout: ReturnType<typeof layoutOf> | null) =>
+    machineView({ id: "buildbox", lastOkMs: 1_000, layout }, buildboxTerms());
+  const spaces = (state: AppState) =>
+    groupBySpace(toRows(state), state.machines);
+
+  it("group_by_space_names_unnamed_by_first_terminal", () => {
+    const layout = layoutOf([
+      // Unnamed: after the repo or folder of its first terminal (w1:p2 is in infra).
+      {
+        id: "s1",
+        folder: "/home/dev/elsewhere",
+        terminals: ["w1:p2", "w1:p1"],
+      },
+      // Unnamed, and the first terminal's folder is a loose one: the space's own folder.
+      {
+        id: "s2",
+        folder: "/home/dev/projects/docs-site/",
+        terminals: ["w2:p2"],
+      },
+      // Named: the name wins.
+      { id: "s3", name: "Releases", terminals: ["w2:p1"] },
+    ]);
+    const state = appState(withLayout(layout));
+    const groups = spaces(state);
+    const byKey = (id: string) =>
+      groups.find((g) => g.key === `buildbox::space::${id}`)!;
+    expect(byKey("s1").name).toBe("infra");
+    expect(byKey("s1").folder).toBe("/home/dev/elsewhere");
     expect(
-      displayName({ ...base, name: "", terminal_title_stripped: "my title" }),
-    ).toBe("my title");
-    expect(
-      displayName({ ...base, name: null, terminal_title_stripped: null }),
-    ).toBe("claude · w1:p1");
-    expect(
-      displayName({ ...base, name: null, terminal_title_stripped: "  " }),
-    ).toBe("claude · w1:p1");
+      byKey("s1")
+        .rows.map((r) => r.address)
+        .sort(),
+    ).toEqual(["w1:p1", "w1:p2"]);
+    expect(byKey("s2").name).toBe("docs-site");
+    expect(byKey("s3").name).toBe("Releases");
+
+    // A search that hides the first terminal doesn't rename the space.
+    const rows = toRows(state).filter((r) => r.address !== "w1:p2");
+    const filtered = groupBySpace(rows, state.machines);
+    expect(filtered.find((g) => g.key === "buildbox::space::s1")!.name).toBe(
+      "infra",
+    );
+  });
+
+  it("names a space with nothing to go on Space", () => {
+    const state = appState(
+      machineView(
+        { id: "buildbox", layout: layoutOf([{ id: "s1", terminals: ["t1"] }]) },
+        [agentTerm({ address: "t1", status: "idle", folder: null })],
+      ),
+    );
+    expect(spaces(state).map((g) => g.name)).toEqual(["Space"]);
+  });
+
+  it("not_in_a_space_group", () => {
+    const layout = layoutOf([
+      { id: "s1", name: "api", terminals: ["w1:p1", "w1:p3"] },
+    ]);
+    const state = appState(
+      withLayout(layout),
+      // No layout at all on this one: everything of it is in no space.
+      machine("gpubox"),
+    );
+    const groups = spaces(state);
+    const none = groups.filter((g) => g.name === "Not in a space");
+    expect(none.map((g) => g.machineId).sort()).toEqual(["buildbox", "gpubox"]);
+    expect(none.every((g) => g.tier === 3 && g.folder === null)).toBe(true);
+    // Last, after every space.
+    expect(groups.slice(-2).map((g) => g.name)).toEqual([
+      "Not in a space",
+      "Not in a space",
+    ]);
+    const buildboxNone = groups.find((g) => g.key === "buildbox::__nospace")!;
+    expect(buildboxNone.rows.map((r) => r.address).sort()).toEqual([
+      "w1:p2",
+      "w2:p1",
+      "w2:p2",
+      "w2:p3",
+    ]);
+    // Every row is in exactly one group.
+    expect(groups.flatMap((g) => g.rows)).toHaveLength(12);
+  });
+
+  it("a space is per machine, and its group is ordered like a project group", () => {
+    const layout = layoutOf([
+      { id: "s1", name: "Zeta", terminals: ["w1:p2"] },
+      // Needs you (blocked): first.
+      { id: "s2", name: "Alpha", terminals: ["w1:p1"] },
+      { id: "s3", name: "Beta", terminals: ["w2:p2"] },
+    ]);
+    const state = appState(
+      withLayout(layout),
+      machineView(
+        {
+          id: "gpubox",
+          lastOkMs: 1_000,
+          layout: layoutOf([{ id: "s1", name: "Zeta", terminals: ["w1:p2"] }]),
+        },
+        buildboxTerms(),
+      ),
+    );
+    const groups = spaces(state).filter((g) => g.tier !== 3);
+    // Same space id on two machines: two groups. Needs-you, then working, then the rest.
+    expect(groups.map((g) => `${g.machineId}/${g.name}`)).toEqual([
+      "buildbox/Alpha",
+      "buildbox/Zeta",
+      "gpubox/Zeta",
+      "buildbox/Beta",
+    ]);
+    expect(groups.map((g) => g.tier)).toEqual([0, 1, 1, 2]);
+  });
+
+  it("keeps pinned first, ended last and workers inside a space group", () => {
+    const terms = [
+      agentTerm({ address: "t1", status: "idle", name: "a" }),
+      agentTerm({ address: "t2", status: "ended", name: "b" }),
+      agentTerm({ address: "t3", status: "working", name: "c", pinned: true }),
+      agentTerm({
+        address: "t4",
+        status: "working",
+        name: "w",
+        parent: "buildbox/t1",
+      }),
+      agentTerm({
+        address: "t5",
+        status: "idle",
+        name: "e",
+        parent: "buildbox/t9",
+      }),
+    ];
+    const layout = layoutOf([
+      { id: "s1", name: "all", terminals: ["t1", "t2", "t3", "t4", "t5"] },
+    ]);
+    const state = appState(
+      machineView({ id: "buildbox", layout, lastOkMs: 1_000 }, terms),
+    );
+    const [group] = spaces(state);
+    // Pinned first, ended last, the rest in their order.
+    expect(group.rows.map((r) => r.address)).toEqual([
+      "t3",
+      "t1",
+      "t4",
+      "t5",
+      "t2",
+    ]);
+    // A worker nests under its parent when both are in the group.
+    const nested = nestWorkers(group.rows);
+    expect(nested.map((r) => r.address)).toEqual(["t3", "t1", "t5", "t2"]);
+    expect(nested.find((r) => r.address === "t1")!.workers).toHaveLength(1);
+  });
+
+  it("offers Space only when a shown machine has a layout", () => {
+    const layout = layoutOf([{ id: "s1", terminals: ["w1:p1"] }]);
+    expect(hasSpaceLayouts([withLayout(null), machine("gpubox")])).toBe(false);
+    expect(hasSpaceLayouts([withLayout(layout), machine("gpubox")])).toBe(true);
+    expect(hasSpaceLayouts([])).toBe(false);
+    // A layout with no spaces in it is still a layout (Herdr is there).
+    expect(hasSpaceLayouts([withLayout({ by_address: {} })])).toBe(true);
+    // A hidden machine's layout is not offered: none of its rows are shown.
+    const hidden = machineView(
+      { id: "buildbox", health: { kind: "hidden" }, layout },
+      buildboxTerms(),
+    );
+    expect(hasSpaceLayouts([hidden])).toBe(false);
   });
 });
 
@@ -174,6 +515,39 @@ describe("needsYou", () => {
     for (const status of ["working", "idle", "unknown", "shell"] as const) {
       expect(isNeedsYou(row({ status }))).toBe(false);
     }
+  });
+
+  it("needs_you_is_blocked_error_done_minus_worker_done", () => {
+    expect(isNeedsYou(row({ status: "blocked" }))).toBe(true);
+    expect(isNeedsYou(row({ status: "error" }))).toBe(true);
+    expect(isNeedsYou(row({ status: "done" }))).toBe(true);
+    for (const status of [
+      "working",
+      "idle",
+      "ended",
+      "unknown",
+      "shell",
+    ] as const) {
+      expect(isNeedsYou(row({ status })), status).toBe(false);
+    }
+    // A worker's done is not needs-you; its blocker or error still is.
+    expect(isNeedsYou(row({ status: "done", isWorker: true }))).toBe(false);
+    expect(isNeedsYou(row({ status: "blocked", isWorker: true }))).toBe(true);
+    expect(isNeedsYou(row({ status: "error", isWorker: true }))).toBe(true);
+  });
+
+  it("needs_you_lists_blocked_then_error_then_done", () => {
+    const rows = [
+      row({ key: "done", status: "done", sinceMs: 1 }),
+      row({ key: "error", status: "error", sinceMs: 2 }),
+      row({ key: "blocked", status: "blocked", sinceMs: 3 }),
+      row({ key: "worker-done", status: "done", isWorker: true, sinceMs: 0 }),
+    ];
+    expect(needsYou(rows).map((r) => r.key)).toEqual([
+      "blocked",
+      "error",
+      "done",
+    ]);
   });
 
   it("needs_you_order: blocked first, then done, oldest first, nulls last", () => {
@@ -225,17 +599,17 @@ describe("isHomeLike", () => {
 describe("groupByProject", () => {
   it("project_groups_follow_foreground_cwd", () => {
     const groups = groupByProject(buildbox());
-    const g = groups.find((x) => x.rows.some((r) => r.paneId === "w1:p2"))!;
+    const g = groups.find((x) => x.rows.some((r) => r.address === "w1:p2"))!;
     expect(g.name).toBe("infra");
     expect(g.folder).toBe("/home/dev/projects/infra");
     expect(g.key).toBe("buildbox::/home/dev/projects/infra");
-    expect(g.rows.map((r) => r.paneId)).toEqual(["w1:p2"]);
+    expect(g.rows.map((r) => r.address)).toEqual(["w1:p2"]);
   });
 
   it("home_and_container_never_group", () => {
     const groups = groupByProject(buildbox());
     const loose = groups.find((g) => g.name === "Loose sessions")!;
-    expect(loose.rows.map((r) => r.paneId).sort()).toEqual(["w2:p2", "w2:p3"]);
+    expect(loose.rows.map((r) => r.address).sort()).toEqual(["w2:p2", "w2:p3"]);
     expect(loose.key).toBe("buildbox::__loose");
     expect(loose.folder).toBeNull();
     expect(loose.tier).toBe(3);
@@ -247,52 +621,57 @@ describe("groupByProject", () => {
   it("shell_joins_enclosing_agent_group", () => {
     const groups = groupByProject(buildbox());
     const g = groups.find((x) => x.name === "api-service")!;
-    expect(g.rows.map((r) => r.paneId).sort()).toEqual(["w1:p1", "w1:p3"]);
+    expect(g.rows.map((r) => r.address).sort()).toEqual(["w1:p1", "w1:p3"]);
   });
 
   it("shell_does_not_join_another_machine_or_a_sibling_prefix", () => {
-    const a = machine("a");
-    a.snapshot!.panes[2].foreground_cwd = "/home/dev/projects/api-service-v2";
-    const b = machine("b");
-    b.snapshot!.agents = b.snapshot!.agents.filter(
-      (x) => x.pane_id !== "w1:p1",
-    );
+    const a = machine("a", {
+      terms: buildboxTerms({
+        "w1:p3": { folder: "/home/dev/projects/api-service-v2" },
+      }),
+    });
+    // b's w1:p1 stops being an agent but its pane stays, as a shell.
+    const b = machine("b", {
+      terms: buildboxTerms().map((t) =>
+        t.address === "w1:p1"
+          ? shellTerm({
+              address: t.address,
+              folder: t.folder,
+              title: "claude: refactor auth",
+            })
+          : t,
+      ),
+    });
     const groups = groupByProject(toRows(appState(a, b)));
     const aApi = groups.find(
       (g) => g.key === "a::/home/dev/projects/api-service",
     )!;
-    expect(aApi.rows.map((r) => r.paneId)).toEqual(["w1:p1"]);
+    expect(aApi.rows.map((r) => r.address)).toEqual(["w1:p1"]);
     // b's shell has no api-service agent on b, so it stays loose on b.
     const bLoose = groups.find((g) => g.key === "b::__loose")!;
-    expect(bLoose.rows.map((r) => r.paneId)).toContain("w1:p3");
+    expect(bLoose.rows.map((r) => r.address)).toContain("w1:p3");
     // a's shell is in a sibling folder, not inside api-service.
     const aLoose = groups.find((g) => g.key === "a::__loose")!;
-    expect(aLoose.rows.map((r) => r.paneId)).toContain("w1:p3");
+    expect(aLoose.rows.map((r) => r.address)).toContain("w1:p3");
   });
 
   it("an agent does not join another agent's group by nesting", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[1].foreground_cwd = "/home/dev/projects/api-service/sub";
+    const m = machine("buildbox", {
+      terms: buildboxTerms({
+        "w1:p2": { folder: "/home/dev/projects/api-service/sub" },
+      }),
+    });
     const groups = groupByProject(toRows(appState(m)));
     expect(groups.find((g) => g.name === "sub")?.rows).toHaveLength(1);
   });
 
-  it("falls back to cwd when foreground_cwd is missing", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[1].foreground_cwd = null;
-    const groups = groupByProject(toRows(appState(m)));
-    expect(
-      groups.find((g) => g.rows.some((r) => r.paneId === "w1:p2"))?.name,
-    ).toBe("api-service");
-  });
-
   it("an agent with no folder at all is loose", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[1].foreground_cwd = null;
-    m.snapshot!.agents[1].cwd = null;
+    const m = machine("buildbox", {
+      terms: buildboxTerms({ "w1:p2": { folder: null } }),
+    });
     const groups = groupByProject(toRows(appState(m)));
     const loose = groups.find((g) => g.tier === 3)!;
-    expect(loose.rows.map((r) => r.paneId)).toContain("w1:p2");
+    expect(loose.rows.map((r) => r.address)).toContain("w1:p2");
   });
 
   it("tier_order", () => {
@@ -306,9 +685,12 @@ describe("groupByProject", () => {
   });
 
   it("a group with only idle agents is tier 2 and sorts after working", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[0].agent_status = "idle";
-    m.snapshot!.agents[2].agent_status = "idle";
+    const m = machine("buildbox", {
+      terms: buildboxTerms({
+        "w1:p1": { status: "idle" },
+        "w2:p1": { status: "idle" },
+      }),
+    });
     const groups = groupByProject(toRows(appState(m)));
     expect(groups.map((g) => [g.name, g.tier])).toEqual([
       ["infra", 1],
@@ -372,8 +754,9 @@ describe("groupByWorkbox", () => {
 
 describe("groupByStatus", () => {
   it("orders blocked, done, working, idle, unknown, shell and drops empty groups", () => {
-    const m = machine("buildbox");
-    m.snapshot!.agents[3].agent_status = "unknown";
+    const m = machine("buildbox", {
+      terms: buildboxTerms({ "w2:p2": { status: "unknown" } }),
+    });
     const groups = groupByStatus(toRows(appState(m)));
     expect(groups.map((g) => g.name)).toEqual([
       "Needs input",
@@ -383,5 +766,291 @@ describe("groupByStatus", () => {
       "Shell",
     ]);
     expect(groups.find((g) => g.name === "Shell")?.rows).toHaveLength(2);
+  });
+});
+
+describe("a worker's done", () => {
+  const worker = (status: Row["status"], key = "m::t5") =>
+    row({
+      key,
+      address: key.slice(3),
+      status,
+      isWorker: true,
+      parent: "m::t1",
+    });
+
+  it("reads_done_and_ranks_with_idle", () => {
+    // Spec section 4.5: it reports to its parent, so it is Idle-ranked "Done".
+    expect(shownStatus(worker("done"))).toEqual({
+      status: "idle",
+      label: "Done",
+    });
+    // Anything else is the row's own status, a worker's blocker included.
+    expect(shownStatus(worker("blocked"))).toEqual({
+      status: "blocked",
+      label: "Needs input",
+    });
+    expect(shownStatus(row({ status: "done" }))).toEqual({
+      status: "done",
+      label: "Done, unseen",
+    });
+  });
+
+  it("groups_with_idle_by_status", () => {
+    const rows = [
+      worker("done"),
+      row({ key: "m::t1", address: "t1", status: "working" }),
+    ];
+    const groups = groupByStatus(rows);
+    expect(groups.map((g) => g.name)).toEqual(["Working", "Idle"]);
+    expect(groups[1].rows.map((r) => r.key)).toEqual(["m::t5"]);
+    expect(groups[1].tier).toBe(2);
+  });
+});
+
+describe("ended rows", () => {
+  const ended = (key: string, over: Partial<Row> = {}) =>
+    row({ key, address: key, status: "ended", sinceMs: 1, ...over });
+
+  it("ended_sorts_last_and_never_needs_you", () => {
+    const rows = [
+      ended("m::t1", { folder: "/home/dev/projects/api-service" }),
+      row({
+        key: "m::t2",
+        address: "t2",
+        status: "idle",
+        folder: "/home/dev/projects/api-service",
+      }),
+      row({
+        key: "m::t3",
+        address: "t3",
+        status: "working",
+        folder: "/home/dev/projects/api-service",
+      }),
+      ended("m::t4", { folder: "/home/dev/projects/api-service" }),
+    ];
+    // Never needs-you, however old.
+    expect(isNeedsYou(rows[0])).toBe(false);
+    expect(needsYou(rows)).toEqual([]);
+    // Inside a project and a workbox, the ended rows follow the others, keeping their order.
+    const byProject = groupByProject(rows);
+    expect(byProject[0].rows.map((r) => r.key)).toEqual([
+      "m::t2",
+      "m::t3",
+      "m::t1",
+      "m::t4",
+    ]);
+    expect(groupByWorkbox(rows)[0].rows.map((r) => r.key)).toEqual([
+      "m::t2",
+      "m::t3",
+      "m::t1",
+      "m::t4",
+    ]);
+    // By status, the Ended group is last, and it does not lift its project into Needs you.
+    expect(groupByStatus(rows).map((g) => g.name)).toEqual([
+      "Working",
+      "Idle",
+      "Ended",
+    ]);
+    expect(groupByProject([rows[0]])[0].tier).toBe(2);
+  });
+
+  it("an_ended_shell_stays_a_shell_and_never_needs_you", () => {
+    const shell = ended("m::t5", { isAgent: false, kind: null });
+    expect(isShell(shell)).toBe(true);
+    expect(isNeedsYou(shell)).toBe(false);
+  });
+});
+
+describe("sortPinnedFirst", () => {
+  const r = (address: string, pinned: boolean) =>
+    row({ key: `m::${address}`, address, pinned });
+
+  it("pinned_first_keeps_order_within_groups", () => {
+    const rows = [r("t1", false), r("t2", true), r("t3", false), r("t4", true)];
+    expect(sortPinnedFirst(rows).map((x) => x.address)).toEqual([
+      "t2",
+      "t4",
+      "t1",
+      "t3",
+    ]);
+    // Nothing pinned, or everything: the order is the list's own. The input is not changed.
+    expect(sortPinnedFirst([r("t3", false), r("t1", false)])).toEqual([
+      r("t3", false),
+      r("t1", false),
+    ]);
+    expect(rows.map((x) => x.address)).toEqual(["t1", "t2", "t3", "t4"]);
+  });
+
+  it("groups_lead_with_their_pinned_rows_and_keep_ended_last", () => {
+    const rows = [
+      row({ key: "m::t1", address: "t1", folder: "/home/dev/api-service" }),
+      row({
+        key: "m::t2",
+        address: "t2",
+        folder: "/home/dev/api-service",
+        pinned: true,
+        status: "ended",
+      }),
+      row({
+        key: "m::t3",
+        address: "t3",
+        folder: "/home/dev/api-service",
+        pinned: true,
+      }),
+      row({ key: "m::t4", address: "t4", folder: "/home/dev/api-service" }),
+    ];
+    const order = (g: { rows: Row[] }) => g.rows.map((x) => x.address);
+    expect(order(groupByProject(rows)[0])).toEqual(["t3", "t1", "t4", "t2"]);
+    expect(order(groupByWorkbox(rows)[0])).toEqual(["t3", "t1", "t4", "t2"]);
+  });
+});
+
+describe("workers under their agent", () => {
+  const at = (address: string, over: Partial<Row> = {}) =>
+    row({ key: `m::${address}`, address, name: address, ...over });
+
+  it("nests_children_under_parent", () => {
+    const rows = [
+      at("t1"),
+      at("t2", { parent: "m::t1", isWorker: true }),
+      at("t3"),
+      at("t4", { parent: "m::t1", isWorker: true }),
+    ];
+    const nested = nestWorkers(rows);
+    // The workers leave the top level; the others keep their order.
+    expect(nested.map((r) => r.key)).toEqual(["m::t1", "m::t3"]);
+    expect(nested[0].workers.map((r) => r.key)).toEqual(["m::t2", "m::t4"]);
+    expect(nested[1].workers).toEqual([]);
+    // The rows themselves are untouched.
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).not.toHaveProperty("workers");
+  });
+
+  it("orphan_worker_stands_alone", () => {
+    const rows = [
+      at("t1"),
+      // Its parent isn't in this list: not on a machine we know, or in another group.
+      at("t2", { parent: "m::t99", isWorker: true }),
+      // A worker the app could not resolve a parent for.
+      at("t3", { parent: null, isWorker: true }),
+    ];
+    const nested = nestWorkers(rows);
+    expect(nested.map((r) => r.key)).toEqual(["m::t1", "m::t2", "m::t3"]);
+    expect(nested.every((r) => r.workers.length === 0)).toBe(true);
+  });
+
+  it("a_worker_of_a_worker_goes_under_the_top_agent_and_a_loop_loses_nobody", () => {
+    const chain = nestWorkers([
+      at("t1"),
+      at("t2", { parent: "m::t1", isWorker: true }),
+      at("t3", { parent: "m::t2", isWorker: true }),
+    ]);
+    expect(chain.map((r) => r.key)).toEqual(["m::t1"]);
+    expect(chain[0].workers.map((r) => r.key)).toEqual(["m::t2", "m::t3"]);
+    const loop = nestWorkers([
+      at("t1", { parent: "m::t2", isWorker: true }),
+      at("t2", { parent: "m::t1", isWorker: true }),
+      at("t3", { parent: "m::t3", isWorker: true }),
+    ]);
+    expect(loop.map((r) => r.key)).toEqual(["m::t1", "m::t2", "m::t3"]);
+  });
+
+  it("keeps_pinned_first_and_ended_last_for_parents_and_workers", () => {
+    const [group] = groupByProject([
+      at("t1", { folder: "/home/dev/api-service" }),
+      at("t2", { folder: "/home/dev/api-service", status: "ended" }),
+      at("t3", { folder: "/home/dev/api-service", pinned: true }),
+      at("t4", {
+        folder: "/home/dev/api-service",
+        parent: "m::t3",
+        isWorker: true,
+        status: "ended",
+      }),
+      at("t5", {
+        folder: "/home/dev/api-service",
+        parent: "m::t3",
+        isWorker: true,
+      }),
+      at("t6", {
+        folder: "/home/dev/api-service",
+        parent: "m::t3",
+        isWorker: true,
+        pinned: true,
+      }),
+    ]);
+    const nested = nestWorkers(group.rows);
+    expect(nested.map((r) => r.address)).toEqual(["t3", "t1", "t2"]);
+    expect(nested[0].workers.map((r) => r.address)).toEqual(["t6", "t5", "t4"]);
+  });
+
+  it("needs_you_lists_blocked_workers_only", () => {
+    const w = (address: string, status: Row["status"]) =>
+      at(address, { status, parent: "m::t1", isWorker: true, sinceMs: 1 });
+    const listed = needsYou([
+      at("t1", { status: "working" }),
+      w("t2", "blocked"),
+      w("t3", "error"),
+      w("t4", "done"),
+      w("t5", "working"),
+      w("t6", "idle"),
+    ]);
+    expect(listed.map((r) => r.address)).toEqual(["t2", "t3"]);
+  });
+
+  it("collapsed_parent_summarizes_worker_needs", () => {
+    const w = (address: string, status: Row["status"]) =>
+      at(address, { status, parent: "m::t1", isWorker: true });
+    const summary = workerSummary([
+      w("t2", "blocked"),
+      w("t3", "error"),
+      w("t4", "done"),
+      w("t5", "working"),
+    ]);
+    // Blocked and error count; a worker's done does not.
+    expect(summary).toEqual({ count: 4, needs: 2 });
+    expect(workerSummaryText(summary)).toBe("4 workers, 2 need you");
+    expect(workerSummaryText({ count: 2, needs: 1 })).toBe(
+      "2 workers, 1 needs you",
+    );
+    expect(workerSummaryText({ count: 1, needs: 0 })).toBe("1 worker");
+    expect(workerSummaryText({ count: 3, needs: 0 })).toBe("3 workers");
+  });
+
+  it("flattens_to_the_order_on_screen_and_drops_a_collapsed_parents_workers", () => {
+    const nested = nestWorkers([
+      at("t1"),
+      at("t2", { parent: "m::t1", isWorker: true }),
+      at("t3"),
+    ]);
+    expect(flattenWorkers(nested, () => false).map((r) => r.address)).toEqual([
+      "t1",
+      "t2",
+      "t3",
+    ]);
+    expect(
+      flattenWorkers(nested, (k) => k === "m::t1").map((r) => r.address),
+    ).toEqual(["t1", "t3"]);
+  });
+
+  it("names_the_parent_of_a_worker", () => {
+    const parent = at("t1", { name: "planner" });
+    const byKey = new Map([[parent.key, parent]]);
+    expect(workerLabel(parent, byKey)).toBeNull();
+    expect(
+      workerLabel(at("t2", { parent: "m::t1", isWorker: true }), byKey),
+    ).toBe("worker of planner");
+    // A worker whose parent isn't listed is still a worker.
+    expect(workerLabel(at("t3", { isWorker: true }), byKey)).toBe("worker");
+  });
+
+  it("maps_the_blocked_kind_to_words", () => {
+    expect(blockedKindLabel("permission")).toBe("Permission");
+    expect(blockedKindLabel("question")).toBe("Question");
+    expect(blockedKindLabel("auth")).toBe("Login");
+    // Anything else is shown as given.
+    expect(blockedKindLabel("rate_limit")).toBe("rate_limit");
+    expect(blockedKindLabel(null)).toBeNull();
+    expect(blockedKindLabel("  ")).toBeNull();
   });
 });

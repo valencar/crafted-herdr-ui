@@ -1,67 +1,78 @@
 import { Kbd } from "../components/Kbd";
 import { useEffect, useMemo, useState } from "react";
+import { ClearEndedConfirm } from "../components/CloseConfirm";
 import { PaneBox } from "../components/PaneBox";
-import { TabCard } from "../components/TabCard";
+import { WorkerToggle } from "../components/WorkerToggle";
 import {
   WorkboxDialogs,
   type WorkboxDialog,
 } from "../components/WorkboxDialogs";
 import { WorkboxSummary, type Counts } from "../components/WorkboxSummary";
-import type { Pane } from "../lib/bindings/Pane";
-import type { Workspace } from "../lib/bindings/Workspace";
 import { shortPath } from "../lib/format";
-import { isNeedsYou, toRows } from "../lib/grouping";
-import { invokeTyped, toActionError } from "../lib/ipc";
-import { openFull, openRow } from "../lib/openRow";
-import { tailTargets, usePaneTails } from "../lib/usePaneTails";
+import {
+  groupByProject,
+  groupBySpace,
+  isNeedsYou,
+  isShell,
+  nestWorkers,
+  toRows,
+  workerSummary,
+} from "../lib/grouping";
+import { invokeTyped } from "../lib/ipc";
+import { openRow } from "../lib/openRow";
+import { tailTargets, useTails } from "../lib/useTails";
 import { isEditable, isInTerminal } from "../lib/uiHelpers";
 import { useNow } from "../lib/useNow";
+import { useWorkerFold } from "../lib/useWorkerFold";
 import { useAppStore } from "../store/appStore";
+import { openMachineCommand } from "../terminal/commandTabs";
 
-/** herdr's answer when a workspace has linked worktree workspaces (spec section 7). */
-const GROUP_CLOSE_CODE = "workspace_group_close_required";
-
-/** Where a workspace was started: the folder of its first pane. */
-function workspaceFolder(panes: Pane[], workspaceId: string): string | null {
-  const pane = panes.find((p) => p.workspace_id === workspaceId);
-  const folder = pane?.cwd ?? pane?.foreground_cwd ?? null;
-  return folder ? shortPath(folder) : null;
-}
-
-/** The Workbox screen: one machine's health and actions, and its workspaces drawn as tabs. */
+/** The Workbox screen: one machine's state and actions, and its terminals grouped by project. */
 export function Workbox({ machineId }: { machineId: string }) {
   const state = useAppStore((s) => s.state);
   const sheet = useAppStore((s) => s.sheet);
   const setView = useAppStore((s) => s.setView);
+  const setSettings = useAppStore((s) => s.setSettings);
   const openNewSession = useAppStore((s) => s.openNewSession);
   const report = useAppStore((s) => s.reportError);
 
   const nowMs = useNow(30_000);
   const [dialog, setDialog] = useState<WorkboxDialog | null>(null);
-  const [checkedAtMs, setCheckedAtMs] = useState<number | null>(null);
-  const [checkError, setCheckError] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const machine = state?.machines.find((m) => m.id === machineId) ?? null;
-  const snapshot = machine?.snapshot ?? null;
   const online = machine?.health.kind === "online";
-  const disabled = machine?.health.kind === "disabled";
+  // A hidden workbox is not shown (spec 7.4): it comes back from Settings.
+  const hidden = machine?.health.kind === "hidden";
 
   const allRows = useMemo(() => (state ? toRows(state) : []), [state]);
   const rows = useMemo(
     () => allRows.filter((r) => r.machineId === machineId),
     [allRows, machineId],
   );
-  const rowByPane = useMemo(
-    () => new Map(rows.map((r) => [r.paneId, r])),
-    [rows],
+  // The terminals by Herdr space when this machine has a layout (spec 7.4, 8.6), else by project
+  // folder, the same rule as everywhere else.
+  const layout = machine?.layout ?? null;
+  const groups = useMemo(
+    () =>
+      layout !== null && machine
+        ? groupBySpace(rows, [machine])
+        : groupByProject(rows),
+    [rows, layout, machine],
   );
+  // Inside a project each worker sits with the agent that started it.
+  const nestedGroups = useMemo(
+    () => groups.map((g) => ({ group: g, nested: nestWorkers(g.rows) })),
+    [groups],
+  );
+  const { isFolded, toggle: toggleWorkers } = useWorkerFold();
   // A machine that is not answering is not read; its boxes keep their last line.
   const targets = useMemo(
     () => (online ? tailTargets(rows) : []),
     [online, rows],
   );
-  const tails = usePaneTails(machineId, targets);
+  const tails = useTails(machineId, targets);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -82,72 +93,46 @@ export function Workbox({ machineId }: { machineId: string }) {
 
   const goHome = () => setView({ kind: "dashboard" });
 
-  const run = (action: Promise<unknown>) => {
-    action.catch(report);
+  const connect = () => {
+    setConnecting(true);
+    invokeTyped("machine_connect", { machineId })
+      .catch(report)
+      .finally(() => setConnecting(false));
   };
 
-  const check = async () => {
-    setChecking(true);
-    try {
-      const entries = await invokeTyped("machine_status", { id: machineId });
-      setCheckedAtMs(Date.now());
-      setCheckError(entries.find((e) => e.id === machineId)?.error ?? null);
-    } catch (e) {
-      // The last check no longer says anything about now.
-      setCheckedAtMs(null);
-      setCheckError(null);
-      report(e);
-    } finally {
-      setChecking(false);
-    }
+  // Hide is an app setting with no core call behind it (spec section 7.4). The workbox is then
+  // not shown anywhere, so the screen goes back to Home; Settings shows it again.
+  const hide = () => {
+    invokeTyped("set_workbox_hidden", { machineId, hidden: true })
+      .then((saved) => {
+        setSettings(saved);
+        goHome();
+      })
+      .catch(report);
   };
 
-  const closeWorkspace = async (workspace: Workspace) => {
-    try {
-      await invokeTyped("close_workspace", {
-        machineId,
-        workspaceId: workspace.workspace_id,
-      });
-    } catch (e) {
-      const err = toActionError(e);
-      if (
-        err.kind === "herdr" &&
-        err.error.kind === "server" &&
-        err.error.code === GROUP_CLOSE_CODE
-      ) {
-        setDialog({
-          kind: "group-close",
-          workspace,
-          message: err.error.message,
-        });
-      } else {
-        report(err);
-      }
-    }
+  const counts: Counts = {
+    sessions: rows.length,
+    agents: rows.filter((r) => !isShell(r)).length,
+    needsYou: rows.filter(isNeedsYou).length,
   };
-
-  // A disabled machine shows no workspaces, even when a snapshot is still cached, so its
-  // counts are all zero rather than a mix of cached and empty.
-  const counts: Counts = disabled
-    ? { workspaces: 0, sessions: 0, agents: 0, needsYou: 0 }
-    : {
-        workspaces: snapshot?.workspaces.length ?? 0,
-        sessions: snapshot?.panes.length ?? 0,
-        agents: snapshot?.agents.length ?? 0,
-        needsYou: rows.filter(isNeedsYou).length,
-      };
-
-  const workspaces = [...(snapshot?.workspaces ?? [])].sort(
-    (a, b) => a.number - b.number,
-  );
 
   let content;
   if (state === null) {
-    content = <p className="empty">Connecting to herdr…</p>;
+    content = <p className="empty">Connecting to herdr-core…</p>;
   } else if (machine === null) {
     content = (
       <div className="empty">
         <p>“{machineId}” isn’t one of your workboxes.</p>
+        <button type="button" className="btn" onClick={goHome}>
+          Back to all workboxes
+        </button>
+      </div>
+    );
+  } else if (hidden) {
+    content = (
+      <div className="empty">
+        <p>{machine.name} is hidden. Show it again in Settings.</p>
         <button type="button" className="btn" onClick={goHome}>
           Back to all workboxes
         </button>
@@ -160,159 +145,94 @@ export function Workbox({ machineId }: { machineId: string }) {
           machine={machine}
           counts={counts}
           nowMs={nowMs}
-          checkedAtMs={checkedAtMs}
-          checkError={checkError}
-          checking={checking}
-          onReconnect={() =>
-            run(
-              invokeTyped("open_in_terminal", {
-                argv: ["machine", "reconnect", machine.id],
-              }),
-            )
-          }
-          onCheck={() => void check()}
+          coreVersion={state.core_version}
+          connecting={connecting}
+          onConnect={connect}
+          onLogIn={() => void openMachineCommand(machine, "login")}
+          onUpdate={() => setDialog({ kind: "update" })}
           onRename={() => setDialog({ kind: "rename-box" })}
-          onDisable={() => setDialog({ kind: "disable" })}
-          onEnable={() =>
-            run(
-              invokeTyped("machine_set_enabled", {
-                id: machine.id,
-                enabled: true,
-              }),
-            )
-          }
+          onHide={hide}
           onRemove={() => setDialog({ kind: "remove" })}
         />
-        {disabled && (
+        {machine.last_ok_ms === null && rows.length === 0 && (
           <p className="empty">
-            {machine.label} is disabled. Enable it to see its workspaces.
+            Waiting for {machine.name} to report its terminals…
           </p>
         )}
-        {!disabled && snapshot === null && (
-          <p className="empty">
-            Waiting for {machine.label} to report its workspaces…
-          </p>
-        )}
-        {snapshot && !disabled && (
+        {(machine.last_ok_ms !== null || rows.length > 0) && (
           <div className={online ? "workbox-layout" : "workbox-layout is-dim"}>
-            {workspaces.length === 0 && (
+            {rows.length === 0 && (
               <p className="empty">
-                No workspaces yet. Start one with “+ New workspace”.
+                No terminals yet. Start one with “+ New session”.
               </p>
             )}
-            {workspaces.map((ws) => {
-              const headingId = `ws-${ws.workspace_id}`;
-              const folder = workspaceFolder(snapshot.panes, ws.workspace_id);
-              const tabs = snapshot.tabs
-                .filter((t) => t.workspace_id === ws.workspace_id)
-                .sort((a, b) => a.number - b.number);
-              return (
-                <section
-                  key={ws.workspace_id}
-                  className="workbox-workspace"
-                  aria-labelledby={headingId}
-                >
-                  <div className="workbox-workspace-head">
-                    <h2 id={headingId} className="section-sub">
-                      {ws.label}
-                    </h2>
-                    <span className="mono muted workbox-workspace-id">
-                      {ws.workspace_id}
-                      {folder ? ` · ${folder}` : ""}
-                    </span>
-                    <span className="workbox-workspace-actions">
-                      <button
-                        type="button"
-                        className="btn btn-small btn-ghost"
-                        onClick={() =>
-                          setDialog({ kind: "new-tab", workspace: ws })
-                        }
-                      >
-                        + Tab
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-small btn-ghost"
-                        aria-label={`Rename workspace ${ws.label}`}
-                        onClick={() =>
-                          setDialog({ kind: "rename-workspace", workspace: ws })
-                        }
-                      >
-                        Rename
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-small btn-ghost btn-danger"
-                        aria-label={`Close workspace ${ws.label}`}
-                        onClick={() =>
-                          setDialog({ kind: "close-workspace", workspace: ws })
-                        }
-                      >
-                        Close
-                      </button>
-                    </span>
-                  </div>
-                  <div className="workbox-tabs">
-                    {tabs.map((tab) => {
-                      const panes = snapshot.panes.filter(
-                        (p) => p.tab_id === tab.tab_id,
-                      );
-                      return (
-                        <TabCard
-                          key={tab.tab_id}
-                          tab={tab}
-                          paneCount={panes.length}
-                          onRename={() =>
-                            setDialog({ kind: "rename-tab", tab })
-                          }
-                          onClose={() => setDialog({ kind: "close-tab", tab })}
-                        >
-                          {panes.flatMap((p) => {
-                            const row = rowByPane.get(p.pane_id);
-                            return row
-                              ? [
-                                  <PaneBox
-                                    key={p.pane_id}
-                                    row={row}
-                                    tail={tails[p.pane_id] ?? null}
-                                    onOpen={openRow}
-                                  />,
-                                ]
-                              : [];
-                          })}
-                        </TabCard>
-                      );
-                    })}
-                    <button
-                      type="button"
-                      className="workbox-new-tab"
-                      onClick={() =>
-                        setDialog({ kind: "new-tab", workspace: ws })
-                      }
-                    >
-                      + New tab in {ws.label}
-                    </button>
-                  </div>
-                </section>
-              );
-            })}
-            <div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setDialog({ kind: "new-workspace" })}
+            {nestedGroups.map(({ group: g, nested }) => (
+              <section
+                key={g.key}
+                className="workbox-group"
+                aria-label={g.name}
               >
-                + New workspace
-              </button>
-            </div>
+                <div className="workbox-group-head">
+                  <h2 className="workbox-group-name">{g.name}</h2>
+                  {g.folder && (
+                    <span className="mono muted workbox-group-path">
+                      {shortPath(g.folder)}
+                    </span>
+                  )}
+                </div>
+                <div className="workbox-terminals">
+                  {nested.map((row) => {
+                    const box = (
+                      <PaneBox
+                        key={row.key}
+                        row={row}
+                        tail={tails[row.address] ?? null}
+                        onOpen={openRow}
+                      />
+                    );
+                    if (row.workers.length === 0) return box;
+                    const { count, needs } = workerSummary(row.workers);
+                    const folded = isFolded(row.key);
+                    return (
+                      <div key={row.key} className="pane-family">
+                        <div className="pane-cell">
+                          {box}
+                          <WorkerToggle
+                            count={count}
+                            needs={needs}
+                            expanded={!folded}
+                            onToggle={() => toggleWorkers(row.key)}
+                          />
+                        </div>
+                        {!folded &&
+                          row.workers.map((w) => (
+                            <PaneBox
+                              key={w.key}
+                              row={w}
+                              tail={tails[w.address] ?? null}
+                              onOpen={openRow}
+                              worker
+                            />
+                          ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </>
     );
   }
 
+  // Spec 7.3: "Clear ended" is offered while this workbox lists ended terminals.
+  const endedCount = hidden
+    ? 0
+    : rows.filter((r) => r.status === "ended").length;
+
   const close = () => setDialog(null);
-  const label = machine?.label ?? machineId;
+  const label = machine?.name ?? machineId;
 
   return (
     <div className="screen">
@@ -326,14 +246,15 @@ export function Workbox({ machineId }: { machineId: string }) {
             <span className="crumb-current">{label}</span>
           </nav>
           <div className="workbox-heading-actions">
-            <button
-              type="button"
-              className="btn"
-              disabled={machine === null}
-              onClick={() => void openFull(machineId, label)}
-            >
-              Open full Herdr ↗
-            </button>
+            {endedCount > 0 && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setClearing(true)}
+              >
+                Clear ended
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-primary"
@@ -346,13 +267,19 @@ export function Workbox({ machineId }: { machineId: string }) {
         {content}
       </main>
 
+      {clearing && (
+        <ClearEndedConfirm
+          machineId={machineId}
+          machineName={label}
+          count={endedCount}
+          onDone={() => setClearing(false)}
+        />
+      )}
       <WorkboxDialogs
         dialog={dialog}
         machine={machine}
-        machineId={machineId}
         onClose={close}
         onRemoved={goHome}
-        onCloseWorkspace={closeWorkspace}
       />
     </div>
   );

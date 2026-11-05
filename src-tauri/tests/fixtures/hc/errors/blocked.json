@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "typing would answer its dialog; read its screen first (hc read t3), or --force",
+      "kind": "blocked"
+    },
+    "message": "t3 is blocked (question)"
+  }
+}

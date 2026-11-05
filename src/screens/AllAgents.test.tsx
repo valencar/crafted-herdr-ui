@@ -9,25 +9,30 @@ import {
 import userEvent from "@testing-library/user-event";
 import { Profiler, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { ActionError } from "../lib/bindings/ActionError";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
+import {
+  agentTerm,
+  appState as buildState,
+  buildboxTerms,
+  layoutOf,
+  machineView,
+  type TermSpec,
+} from "../test/builders";
 import { AllAgents } from "./AllAgents";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
   onPreview: vi.fn(),
-  copyText: vi.fn(),
 }));
-import { copyText, invokeTyped, onPreview } from "../lib/ipc";
+import { invokeTyped, onPreview } from "../lib/ipc";
 
 // AgentRow and NeedsYouCard each call formatAge once per render and Home never does, so its
 // call count says how many rows rendered.
@@ -49,36 +54,42 @@ async function settleRows() {
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 let emitPreview: (frame: PreviewFrame) => void;
 
-// The raw herdr response has fields the bindings ignore, hence the cast.
-const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();
+
+type Over = {
+  /** The terminals; `null` for a machine that has not answered yet. */
+  terms?: TermSpec[] | null;
+  isLocal?: boolean;
+  name?: string;
+  lastOkMs?: number | null;
+};
+
+/** The fixture's terminals, with the two status ages every machine starts with. */
+const fixtureTerms = (): TermSpec[] =>
+  buildboxTerms({
+    "w1:p1": { sinceMs: NOW - 2 * 60_000 },
+    "w2:p1": { sinceMs: NOW - 3 * 60_000 },
+  });
 
 function machine(
   id: string,
   health: Health = { kind: "online" },
-  overrides: Partial<MachineView> = {},
+  over: Over = {},
 ): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health,
-    snapshot: structuredClone(fixture),
-    last_ok_ms: NOW,
-    ages: { "term-1": NOW - 2 * 60_000, "term-4": NOW - 3 * 60_000 },
-    ...overrides,
-  };
+  return machineView(
+    {
+      id,
+      name: over.name,
+      health,
+      isLocal: over.isLocal,
+      lastOkMs: over.lastOkMs === undefined ? NOW : over.lastOkMs,
+    },
+    over.terms === undefined ? fixtureTerms() : over.terms,
+  );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: NOW,
-  };
+  return { ...buildState([], { generatedAtMs: NOW }), machines };
 }
 
 const defaultState = () => appState(machine("buildbox"), machine("gpubox"));
@@ -133,15 +144,16 @@ beforeEach(() => {
     settings: { open_target: "external" } as unknown as Settings,
   });
   invoke.mockReset();
-  invoke.mockImplementation(async (name: string, args?: { id?: string }) =>
+  invoke.mockImplementation(async (name: string) =>
     name === "get_terminals"
       ? { installed: ["ghostty"], default: "ghostty" }
-      : name === "list_agent_kinds"
-        ? ["claude"]
-        : // The text Rust builds from the profile id.
-          name === "preview_reconnect"
-          ? `herdr machine reconnect ${args?.id}`
-          : null,
+      : name === "list_run_choices"
+        ? {
+            kinds: [{ kind: "claude", takesTask: true }],
+            templates: [],
+            kindsChecked: true,
+          }
+        : null,
   );
 });
 
@@ -171,7 +183,7 @@ describe("AllAgents", () => {
     setup(null);
     const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;
     expect(busy).not.toBeNull();
-    expect(busy).toHaveTextContent("Connecting to herdr…");
+    expect(busy).toHaveTextContent("Connecting to herdr-core…");
     expect(busy.querySelector(".skel")).not.toBeNull();
   });
 
@@ -229,6 +241,42 @@ describe("AllAgents", () => {
     );
     expect(screen.queryByText(/^Open here/)).toBeNull();
     expect(screen.queryByText(/^Open in /)).toBeNull();
+  });
+
+  it("pinned_agents_lead_needs_you_and_their_group", () => {
+    // Two blocked agents in one project: the newer one is pinned, so it leads both lists.
+    const terms = [
+      agentTerm({
+        address: "t1",
+        status: "blocked",
+        name: "older",
+        folder: "/home/dev/projects/api-service",
+        sinceMs: NOW - 5 * 60_000,
+      }),
+      agentTerm({
+        address: "t2",
+        status: "blocked",
+        name: "newer",
+        folder: "/home/dev/projects/api-service",
+        sinceMs: NOW - 60_000,
+        pinned: true,
+      }),
+    ];
+    setup(appState(machine("buildbox", { kind: "online" }, { terms })));
+    const cards = within(
+      screen.getByRole("region", { name: "Needs you" }),
+    ).getAllByRole("article");
+    expect(cards[0]).toHaveTextContent("newer");
+    expect(within(cards[0]).getByRole("img", { name: "Pinned" })).toBeVisible();
+    expect(cards[1]).toHaveTextContent("older");
+    const rows = screen
+      .getAllByRole("listitem")
+      .filter((li) => li.matches(".agent-row"));
+    expect(rows.map((r) => r.getAttribute("data-row-key"))).toEqual([
+      "buildbox::t2",
+      "buildbox::t1",
+    ]);
+    expect(within(rows[0]).getByRole("img", { name: "Pinned" })).toBeVisible();
   });
 
   it("needs_you_cards_carry_one_needs_toned_open_split_button", async () => {
@@ -337,9 +385,7 @@ describe("AllAgents", () => {
     ]);
     // The header's name is unchanged: the tile is hidden from it.
     expect(
-      screen
-        .getAllByRole("heading", { level: 3 })
-        .map((h) => h.textContent),
+      screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent),
     ).toEqual(["buildbox", "gpubox"]);
     expect(
       screen.getByRole("region", { name: "buildbox" }),
@@ -356,7 +402,8 @@ describe("AllAgents", () => {
     );
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "gpubox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 
@@ -367,7 +414,7 @@ describe("AllAgents", () => {
         machine(
           "gpubox",
           { kind: "attention", error: "ssh: connection refused" },
-          { last_ok_ms: NOW - 40_000 },
+          { lastOkMs: NOW - 40_000 },
         ),
       ),
     );
@@ -429,14 +476,14 @@ describe("AllAgents", () => {
     await user.click(within(done).getByRole("button", { name: "Mark seen" }));
     expect(invoke).toHaveBeenCalledWith("mark_seen", {
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
   });
 
   it("shows_the_message_of_a_failed_open", async () => {
     const err: ActionError = {
-      kind: "herdr",
-      error: { kind: "server", code: "x", message: "pane is gone" },
+      kind: "core",
+      error: { kind: "rpc", code: "x", message: "pane is gone", hint: null },
     };
     invoke.mockImplementation(async (name: string) => {
       if (name === "open_session") throw err;
@@ -505,19 +552,44 @@ describe("AllAgents", () => {
     expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
 
+  it("cmd_enter_does_nothing_on_an_ended_row", async () => {
+    const state = appState(
+      machine(
+        "buildbox",
+        { kind: "online" },
+        {
+          terms: buildboxTerms({ "w1:p2": { status: "ended" } }),
+        },
+      ),
+    );
+    const user = setup(state);
+    useAppStore.setState({ selectedKey: "buildbox::w1:p2" });
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("mark_seen", expect.anything());
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+    // And the row has no Open button to click.
+    expect(
+      within(rowItem("buildbox::w1:p2")).queryByRole("button", {
+        name: /^Open /,
+      }),
+    ).toBeNull();
+  });
+
   it("cmd_enter_opens_the_selection", async () => {
     const user = setup();
     useAppStore.setState({ selectedKey: "gpubox::w2:p1" });
     await user.keyboard("{Meta>}{Enter}{/Meta}");
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "gpubox",
-      paneId: "w2:p1",
+      address: "w2:p1",
+      observe: false,
     });
     // w2:p1 is a done agent: opening it marks it seen.
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "gpubox",
-        paneId: "w2:p1",
+        address: "w2:p1",
       }),
     );
   });
@@ -532,7 +604,7 @@ describe("AllAgents", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "buildbox",
-        paneId: "w2:p1",
+        address: "w2:p1",
       }),
     );
     expect(invoke.mock.calls.filter(([n]) => n === "mark_seen")).toHaveLength(
@@ -545,16 +617,22 @@ describe("AllAgents", () => {
     useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
     await user.keyboard("{Backspace}");
     const dialog = screen.getByRole("dialog");
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
 
     await user.keyboard("{Backspace}");
-    await user.click(screen.getByRole("button", { name: "Close session" }));
-    expect(invoke).toHaveBeenCalledWith("close_pane", {
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
+    expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
-      paneId: "w1:p3",
+      address: "w1:p3",
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
@@ -582,7 +660,10 @@ describe("AllAgents", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(useAppStore.getState().dialogOpen).toBe(0);
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
   });
 
   it("focusing_a_row_shows_it_even_when_the_saved_search_filtered_it_out", async () => {
@@ -643,13 +724,15 @@ describe("AllAgents", () => {
       tabs: [
         {
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "api-service",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: 1,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],
@@ -677,30 +760,24 @@ describe("AllAgents", () => {
   it("clears_the_selection_when_the_row_disappears", async () => {
     setup();
     useAppStore.setState({ selectedKey: "gpubox::w1:p1" });
-    const gone = defaultState();
-    gone.machines[1].snapshot!.agents =
-      gone.machines[1].snapshot!.agents.filter((a) => a.pane_id !== "w1:p1");
-    gone.machines[1].snapshot!.panes = gone.machines[1].snapshot!.panes.filter(
-      (p) => p.pane_id !== "w1:p1",
+    const gone = appState(
+      machine("buildbox"),
+      machine("gpubox", undefined, {
+        terms: fixtureTerms().filter((t) => t.address !== "w1:p1"),
+      }),
     );
     useAppStore.getState().setState(gone);
     await waitFor(() => expect(useAppStore.getState().selectedKey).toBeNull());
   });
 
   it("empty_state_points_at_new_session", () => {
-    setup(
-      appState(
-        machine("buildbox", undefined, {
-          snapshot: { ...structuredClone(fixture), agents: [], panes: [] },
-        }),
-      ),
-    );
+    setup(appState(machine("buildbox", undefined, { terms: [] })));
     expect(screen.getByText(/Start one with/)).toBeInTheDocument();
   });
 
   it("shows_a_connecting_state_before_the_first_state", () => {
     setup(null);
-    expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
+    expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();
   });
 
   it("selected_needs_you_card_shows_the_last_three_preview_lines", async () => {
@@ -788,11 +865,12 @@ describe("AllAgents", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("start_preview", {
         machineId: "gpubox",
-        paneId: "w1:p1",
-        isAgent: true,
+        address: "w1:p1",
       }),
     );
-    expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy command" }),
+    ).toBeInTheDocument();
   });
 
   it("backspace_and_cmd_enter_ignore_a_selection_hidden_by_search", async () => {
@@ -866,15 +944,21 @@ describe("AllAgents", () => {
 });
 
 describe("Home states", () => {
-  const LOCAL = () =>
-    machine("local", { kind: "online" }, { is_local: true, label: "Local" });
-  const noAgents = (m: MachineView): MachineView => ({
-    ...m,
-    snapshot: { ...structuredClone(fixture), agents: [], panes: [] },
-  });
+  const LOCAL = (over: Over = {}) =>
+    machine(
+      "local",
+      { kind: "online" },
+      { isLocal: true, name: "Local", ...over },
+    );
+  const noAgents = { terms: [] };
 
   it("empty_agents_state", () => {
-    setup(appState(noAgents(machine("buildbox")), noAgents(machine("gpubox"))));
+    setup(
+      appState(
+        machine("buildbox", undefined, noAgents),
+        machine("gpubox", undefined, noAgents),
+      ),
+    );
     const card = screen.getByRole("region", { name: "No agents yet" });
     expect(card).toHaveTextContent("Start one with ⌘N.");
     // There are workboxes, so no nudge to add one.
@@ -884,7 +968,7 @@ describe("Home states", () => {
   });
 
   it("the_only_local_card_offers_add_workbox_in_the_empty_state_only", async () => {
-    const user = setup(appState(noAgents(LOCAL())));
+    const user = setup(appState(LOCAL(noAgents)));
     expect(screen.getByRole("region", { name: "No agents yet" })).toBeVisible();
     const card = screen.getByRole("region", {
       name: "Only this computer so far",
@@ -900,6 +984,19 @@ describe("Home states", () => {
     ).toBeNull();
   });
 
+  it("with_every_remote_hidden_it_is_the_local_only_empty_state", () => {
+    // The sidebar and the Dashboard see one workbox; All agents must too.
+    setup(
+      appState(
+        LOCAL(noAgents),
+        machine("gpubox", { kind: "hidden" }, noAgents),
+      ),
+    );
+    expect(
+      screen.getByRole("region", { name: "Only this computer so far" }),
+    ).toBeVisible();
+  });
+
   it("stale_label_from_last_ok", () => {
     setup(
       appState(
@@ -907,9 +1004,9 @@ describe("Home states", () => {
         machine(
           "gpubox",
           { kind: "reconnecting", retry_in_ms: 5000, error: "timed out" },
-          { last_ok_ms: NOW - 40_000 },
+          { lastOkMs: NOW - 40_000 },
         ),
-        machine("stagingbox", { kind: "online" }, { last_ok_ms: NOW - 90_000 }),
+        machine("stagingbox", { kind: "online" }, { lastOkMs: NOW - 90_000 }),
       ),
     );
     expect(rowItem("gpubox::w1:p1")).toHaveTextContent(
@@ -927,7 +1024,7 @@ describe("Home states", () => {
         machine(
           "gpubox",
           { kind: "attention", error: "ssh: refused" },
-          { last_ok_ms: null },
+          { lastOkMs: null },
         ),
       ),
     );
@@ -937,17 +1034,17 @@ describe("Home states", () => {
   });
 
   describe("a Local herdr that isn't answering", () => {
-    const down = (health: Health, snapshot: Snapshot | null = null) =>
+    const down = (health: Health, terms: TermSpec[] | null = null) =>
       appState(
         machine("local", health, {
-          is_local: true,
-          label: "Local",
-          snapshot,
-          last_ok_ms: null,
+          isLocal: true,
+          name: "Local",
+          terms,
+          lastOkMs: null,
         }),
       );
 
-    it("gets_a_card_with_the_error_the_hint_and_a_retry_button", async () => {
+    it("gets_a_card_with_the_error_and_a_reconnect_button", async () => {
       const user = setup(
         down({
           kind: "reconnecting",
@@ -959,11 +1056,12 @@ describe("Home states", () => {
         name: "Local isn’t answering",
       });
       expect(card).toHaveTextContent("could not start herdr: no such file");
-      expect(card).toHaveTextContent(
-        "Start herdr with herdr in a terminal, then retry.",
-      );
-      await user.click(within(card).getByRole("button", { name: "Retry now" }));
-      expect(invoke).toHaveBeenCalledWith("refresh_now", {
+      // Connecting starts the core, so the card never sends anyone to a terminal.
+      expect(card).not.toHaveTextContent("hc server status");
+      expect(card).not.toHaveTextContent("in a terminal");
+      await user.click(within(card).getByRole("button", { name: "Reconnect" }));
+      expect(invoke).toHaveBeenCalledWith("reconnect_core");
+      expect(invoke).not.toHaveBeenCalledWith("refresh_now", {
         machineId: "local",
       });
     });
@@ -972,7 +1070,7 @@ describe("Home states", () => {
       setup(down({ kind: "attention", error: "  " }));
       expect(
         screen.getByRole("region", { name: "Local isn’t answering" }),
-      ).toHaveTextContent("herdr isn’t answering yet");
+      ).toHaveTextContent("herdr-core isn’t answering yet");
     });
 
     it("is_absent_before_the_first_poll_has_answered", () => {
@@ -987,7 +1085,7 @@ describe("Home states", () => {
       setup(
         down(
           { kind: "reconnecting", retry_in_ms: 1000, error: "boom" },
-          structuredClone(fixture),
+          fixtureTerms(),
         ),
       );
       expect(screen.queryByText("Local isn’t answering")).toBeNull();
@@ -1002,41 +1100,39 @@ describe("Home states", () => {
           "gpubox",
           { kind: "attention", error: "ssh: connection refused" },
           {
-            last_ok_ms: NOW - 40_000,
-            label: "gpu box",
-            snapshot: null,
+            lastOkMs: NOW - 40_000,
+            name: "gpu box",
+            terms: null,
           },
         ),
       );
 
-    it("gets_one_card_with_the_error_staleness_and_a_copyable_reconnect_command", async () => {
+    it("gets_one_card_with_the_error_staleness_and_a_connect_now_button", async () => {
       const user = setup(attention());
       const card = screen.getByRole("region", {
         name: "gpu box needs attention",
       });
       expect(card).toHaveTextContent("ssh: connection refused");
       expect(card).toHaveTextContent("last updated 40s ago");
-      // The profile id, which is what the Reconnect button runs, not the label.
+      // Connect now replaces the command to copy; nothing is offered that does not apply.
       expect(
-        await within(card).findByText(/herdr machine reconnect gpubox/),
-      ).toBeVisible();
-      expect(invoke).toHaveBeenCalledWith("preview_reconnect", {
-        id: "gpubox",
-      });
-      // Exactly one reconnect line on the whole screen, and the online rows are still there.
-      expect(screen.getAllByText(/herdr machine reconnect/)).toHaveLength(1);
+        within(card).queryByRole("button", { name: "Log in…" }),
+      ).toBeNull();
+      expect(
+        within(card).queryByRole("button", { name: "Update hc there…" }),
+      ).toBeNull();
+      expect(
+        screen.getAllByRole("button", { name: "Connect now" }),
+      ).toHaveLength(1);
       expect(rowItem("buildbox::w1:p1")).toBeInTheDocument();
-      expect(document.querySelector(".agent-row .cmdbox")).toBeNull();
-      expect(document.querySelector(".card .cmdbox")).toBeNull();
+      expect(document.querySelector(".cmdbox")).toBeNull();
 
-      vi.mocked(copyText).mockResolvedValue(undefined);
       await user.click(
-        within(card).getByRole("button", { name: /^Copy command/ }),
+        within(card).getByRole("button", { name: "Connect now" }),
       );
-      expect(copyText).toHaveBeenCalledWith("herdr machine reconnect gpubox");
-      expect(
-        await within(card).findByRole("button", { name: "Copied" }),
-      ).toBeVisible();
+      expect(invoke).toHaveBeenCalledWith("machine_connect", {
+        machineId: "gpubox",
+      });
     });
 
     it("keeps_the_card_on_top_when_the_machine_has_cached_rows_that_stay_dim", async () => {
@@ -1046,17 +1142,17 @@ describe("Home states", () => {
           machine(
             "gpubox",
             { kind: "attention", error: "ssh: connection refused" },
-            { last_ok_ms: NOW - 40_000 },
+            { lastOkMs: NOW - 40_000 },
           ),
         ),
       );
       expect(
-        await screen.findAllByText(/herdr machine reconnect/),
+        screen.getAllByRole("button", { name: "Connect now" }),
       ).toHaveLength(1);
       const dim = rowItem("gpubox::w1:p1");
       expect(dim).toHaveAttribute("data-dim", "true");
       expect(dim).toHaveTextContent("ssh: connection refused");
-      expect(dim).not.toHaveTextContent("herdr machine reconnect");
+      expect(dim).not.toHaveTextContent("Connect now");
       // Under the search box, above everything else.
       const main = screen.getByRole("main");
       expect(main.children[1]).toBe(
@@ -1067,11 +1163,11 @@ describe("Home states", () => {
     it("shows_the_card_even_when_no_machine_has_rows", () => {
       setup(
         appState(
-          machine("buildbox", { kind: "online" }, { snapshot: null }),
+          machine("buildbox", { kind: "online" }, { terms: null }),
           machine(
             "gpubox",
             { kind: "attention", error: "ssh: connection refused" },
-            { snapshot: null },
+            { terms: null },
           ),
         ),
       );
@@ -1107,13 +1203,15 @@ describe("Home states", () => {
   });
 
   it("labels_each_group_by_a_generated_id_even_when_the_folder_has_spaces", () => {
-    const spaced = JSON.parse(
-      JSON.stringify(fixture).replace(
-        /\/home\/dev\/projects\/api-service/g,
-        "/home/dev/projects/api service",
-      ),
-    ) as Snapshot;
-    setup(appState(machine("buildbox", undefined, { snapshot: spaced })));
+    const spaced = fixtureTerms().map((t) => ({
+      ...t,
+      folder:
+        t.folder?.replace(
+          /\/home\/dev\/projects\/api-service/g,
+          "/home/dev/projects/api service",
+        ) ?? null,
+    }));
+    setup(appState(machine("buildbox", undefined, { terms: spaced })));
     const group = document.querySelector<HTMLElement>(
       '[id^="group-"][id*=" "]',
     );
@@ -1141,5 +1239,224 @@ describe("Home states", () => {
     );
     // The view still switched.
     expect(useAppStore.getState().groupBy).toBe("status");
+  });
+});
+
+describe("AllAgents spaces", () => {
+  const withSpaces = () =>
+    appState(
+      machineView(
+        {
+          id: "buildbox",
+          lastOkMs: NOW,
+          layout: layoutOf([
+            { id: "s1", name: "Release work", terminals: ["w1:p1", "w1:p2"] },
+          ]),
+        },
+        fixtureTerms(),
+      ),
+      machine("gpubox"),
+    );
+  const groupNames = () =>
+    [...document.querySelectorAll(".group-name")].map((h) => h.textContent);
+
+  it("space_option_hidden_without_layouts", () => {
+    setup();
+    const group = screen.getByRole("group", { name: "Group by" });
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Project", "Workbox", "Status"]);
+  });
+
+  it("offers Space when a machine has a layout, and groups by it", async () => {
+    const user = setup(withSpaces());
+    invoke.mockResolvedValue(null);
+    await user.click(screen.getByRole("button", { name: "Space" }));
+    expect(useAppStore.getState().groupBy).toBe("space");
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { group_by: "space" },
+    });
+    expect(screen.getByRole("heading", { name: "By space" })).toBeVisible();
+    const region = screen.getByRole("region", { name: "Release work" });
+    expect(within(region).getAllByRole("listitem")).toHaveLength(2);
+    // Everything else, on either machine, is in no space.
+    expect(groupNames().filter((n) => n === "Not in a space")).toHaveLength(2);
+  });
+
+  it("falls back to project groups while no machine has a layout, without forgetting Space", () => {
+    setup(appState(machine("buildbox")));
+    act(() => useAppStore.setState({ groupBy: "space" }));
+    expect(screen.getByRole("heading", { name: "By project" })).toBeVisible();
+    expect(groupNames()).toContain("api-service");
+    expect(useAppStore.getState().groupBy).toBe("space");
+  });
+});
+
+describe("AllAgents workers", () => {
+  const PARENT = "buildbox/w1:p1";
+  const worker = (
+    address: string,
+    name: string,
+    status: "blocked" | "done" | "working" | "error",
+  ) =>
+    agentTerm({
+      address,
+      name,
+      status,
+      parent: PARENT,
+      folder: "/home/dev/projects/api-service",
+      sinceMs: NOW - 60_000,
+    });
+  const withWorkers = () =>
+    appState(
+      machine("buildbox", undefined, {
+        terms: [
+          ...fixtureTerms(),
+          worker("w1:p4", "linter", "blocked"),
+          worker("w1:p5", "fixer", "done"),
+          worker("w1:p6", "builder", "working"),
+        ],
+      }),
+    );
+  const keys = (list: HTMLElement) =>
+    [...list.querySelectorAll<HTMLElement>("[data-row-key]")].map(
+      (el) => el.dataset.rowKey,
+    );
+
+  it("workers_sit_under_their_parent_and_a_collapsed_parent_counts_them", async () => {
+    const user = setup(withWorkers());
+    const parent = rowItem("buildbox::w1:p1");
+    const list = parent.closest("ul") as HTMLElement;
+    // Right after the parent, indented, and in the order the group had.
+    expect(keys(list).slice(0, 4)).toEqual([
+      "buildbox::w1:p1",
+      "buildbox::w1:p4",
+      "buildbox::w1:p5",
+      "buildbox::w1:p6",
+    ]);
+    expect(rowItem("buildbox::w1:p4")).toHaveClass("is-worker");
+    expect(parent).not.toHaveClass("is-worker");
+
+    const toggle = within(parent).getByRole("button", { name: "3 workers" });
+    await user.click(toggle);
+    // Folded: the workers are gone from the list, the count says who needs you.
+    expect(
+      document.querySelector('[data-row-key="buildbox::w1:p4"]'),
+    ).toBeNull();
+    expect(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers, 1 needs you",
+      }),
+    ).toHaveAttribute("aria-expanded", "false");
+    // Arrow keys skip what is folded away.
+    await user.click(selectButton("buildbox::w1:p1"));
+    await user.keyboard("{ArrowDown}");
+    // The next row drawn, not a folded worker and not the first row of the list.
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p3");
+
+    await user.click(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers, 1 needs you",
+      }),
+    );
+    expect(rowItem("buildbox::w1:p4")).toBeInTheDocument();
+  });
+
+  it("needs_you_lists_blocked_workers_only_and_names_their_parent", () => {
+    setup(withWorkers());
+    const card = (key: string) =>
+      document.querySelector<HTMLElement>(`[data-card-key="${key}"]`);
+    expect(card("buildbox::w1:p4")).toHaveTextContent("worker of planner");
+    // A worker's Done stays under its parent; a plain agent's card has no such line.
+    expect(card("buildbox::w1:p5")).toBeNull();
+    expect(card("buildbox::w1:p6")).toBeNull();
+    expect(card("buildbox::w1:p1")).not.toHaveTextContent("worker of");
+  });
+
+  it("the_inspector_of_a_parent_lists_its_workers_and_a_worker_names_its_parent", async () => {
+    const user = setup(withWorkers());
+    await user.click(selectButton("buildbox::w1:p1"));
+    const inspector = screen.getByRole("complementary", {
+      name: "Selected agent",
+    });
+    const list = within(inspector).getByRole("list", { name: "Workers" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+    await user.click(within(list).getByRole("button", { name: "linter" }));
+    const again = screen.getByRole("complementary", {
+      name: "Selected agent",
+    });
+    expect(again).toHaveTextContent("Started byplanner");
+  });
+
+  it("selecting_a_folded_workers_card_unfolds_its_parent", async () => {
+    const user = setup(withWorkers());
+    const toggleName = "3 workers, 1 needs you";
+    await user.click(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers",
+      }),
+    );
+    expect(
+      document.querySelector('[data-row-key="buildbox::w1:p4"]'),
+    ).toBeNull();
+    // The blocked worker's Needs-you card selects it.
+    const card = document.querySelector<HTMLElement>(
+      '[data-card-key="buildbox::w1:p4"]',
+    )!;
+    await user.click(within(card).getByRole("button", { name: "Details…" }));
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p4");
+    // The selection is on screen again, under an open parent.
+    expect(rowItem("buildbox::w1:p4")).toHaveClass("is-selected");
+    expect(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers",
+      }),
+    ).toHaveAttribute("aria-expanded", "true");
+    // Folding the parent again does not leave a hidden selection behind.
+    await user.click(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: "3 workers",
+      }),
+    );
+    expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
+    expect(
+      within(rowItem("buildbox::w1:p1")).getByRole("button", {
+        name: toggleName,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("a_blocked_card_says_what_the_agent_waits_on", () => {
+    setup(
+      appState(
+        machine("buildbox", undefined, {
+          terms: [
+            ...fixtureTerms(),
+            agentTerm({
+              address: "w1:p4",
+              name: "linter",
+              status: "blocked",
+              statusKind: "permission",
+              statusMsg: "Run cargo test?",
+              parent: PARENT,
+              folder: "/home/dev/projects/api-service",
+              sinceMs: NOW - 60_000,
+            }),
+          ],
+        }),
+      ),
+    );
+    const card = document.querySelector<HTMLElement>(
+      '[data-card-key="buildbox::w1:p4"]',
+    )!;
+    expect(card).toHaveTextContent("worker of planner");
+    expect(card).toHaveTextContent("Permission Run cargo test?");
+    // A card with nothing to say adds no empty line.
+    const plain = document.querySelector<HTMLElement>(
+      '[data-card-key="buildbox::w1:p1"]',
+    )!;
+    expect(plain.querySelector(".row-detail")).toBeNull();
   });
 });

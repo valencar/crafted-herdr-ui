@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "run `hc machine add --via 'dev@staging.example' --name <name>` in a terminal",
+      "kind": "needs_login"
+    },
+    "message": "dev@staging.example wants a login typed by a person (a password or a code)"
+  }
+}

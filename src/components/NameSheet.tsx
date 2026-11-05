@@ -10,6 +10,11 @@ export type NameField = {
   placeholder?: string;
   /** Paths and ids read better in monospace. */
   mono?: boolean;
+  /**
+   * Why a non-empty (trimmed) value is refused, or `null`. Checked as the person types; the
+   * sheet won't submit a refused value. An empty value is the sheet's own "can't be empty".
+   */
+  validate?: (value: string) => string | null;
 };
 
 type Props = {
@@ -23,7 +28,7 @@ type Props = {
 
 /**
  * A small form for naming things (rename, new tab, new workspace). Every field must be
- * non-empty; an error from herdr or the app stays in the sheet so the user can fix the value.
+ * non-empty; an error from herdr-core or the app stays in the sheet so the user can fix the value.
  */
 export function NameSheet({
   title,
@@ -40,9 +45,18 @@ export function NameSheet({
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // What `validate` says of the values as typed (empty ones are left to `submit`).
+  const live: Record<string, string> = {};
+  for (const f of fields) {
+    const value = values[f.key].trim();
+    const problem = value === "" ? null : (f.validate?.(value) ?? null);
+    if (problem) live[f.key] = problem;
+  }
+  const refused = Object.keys(live).length > 0;
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy) return;
+    if (busy || refused) return;
     const trimmed = Object.fromEntries(
       fields.map((f) => [f.key, values[f.key].trim()]),
     );
@@ -81,7 +95,7 @@ export function NameSheet({
             type="submit"
             form={formId}
             className="btn btn-primary"
-            disabled={busy}
+            disabled={busy || refused}
           >
             {submitLabel}
           </button>
@@ -91,7 +105,8 @@ export function NameSheet({
       <form id={formId} className="name-form" onSubmit={submit} noValidate>
         {fields.map((f, i) => {
           const inputId = `${formId}-${f.key}`;
-          const problem = problems[f.key];
+          // What is wrong with the value as typed outranks what was wrong at the last submit.
+          const problem = live[f.key] ?? problems[f.key];
           return (
             <div key={f.key} className="sheet-field">
               <label htmlFor={inputId} className="sheet-label">
@@ -107,9 +122,15 @@ export function NameSheet({
                 aria-describedby={problem ? `${inputId}-error` : undefined}
                 autoComplete="off"
                 spellCheck={false}
-                onChange={(e) =>
-                  setValues((v) => ({ ...v, [f.key]: e.target.value }))
-                }
+                onChange={(e) => {
+                  setValues((v) => ({ ...v, [f.key]: e.target.value }));
+                  // The submit-time message was about the old value.
+                  setProblems((all) =>
+                    Object.fromEntries(
+                      Object.entries(all).filter(([key]) => key !== f.key),
+                    ),
+                  );
+                }}
               />
               {problem && (
                 <p id={`${inputId}-error`} className="field-error">

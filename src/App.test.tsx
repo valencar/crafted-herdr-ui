@@ -8,14 +8,19 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "./lib/bindings/AppState";
 import type { Health } from "./lib/bindings/Health";
 import type { MachineView } from "./lib/bindings/MachineView";
 import type { MenuId } from "./lib/bindings/MenuId";
 import type { Settings } from "./lib/bindings/Settings";
-import type { Snapshot } from "./lib/bindings/Snapshot";
 import { useAppStore } from "./store/appStore";
+import {
+  appState,
+  buildboxTerms,
+  machineView,
+  shellTerm,
+  type TermSpec,
+} from "./test/builders";
 import { HOME, useTerminalStore } from "./terminal/terminalStore";
 import App from "./App";
 
@@ -33,7 +38,6 @@ vi.mock("./terminal/TerminalView", () => ({
 const ipc = vi.hoisted(() => ({
   getState: vi.fn(),
   onState: vi.fn(),
-  onMachineSetup: vi.fn(),
   onPreview: vi.fn(),
   getSettings: vi.fn(),
   onSettings: vi.fn(),
@@ -49,18 +53,12 @@ vi.mock("./lib/ipc", () => ipc);
 
 const activeKey = () => useTerminalStore.getState().activeKey;
 
-const state: AppState = {
-  machines: [],
-  herdr_version: "0.9.4",
-  herdr_path: "/home/dev/.local/bin/herdr",
-  generated_at_ms: 1,
-};
+const state: AppState = appState([]);
 
 beforeEach(() => {
   useAppStore.setState({ state: null });
   ipc.getState.mockReset().mockResolvedValue(state);
   ipc.onState.mockReset().mockResolvedValue(() => {});
-  ipc.onMachineSetup.mockReset().mockResolvedValue(() => {});
   ipc.onPreview.mockReset().mockResolvedValue(() => {});
   ipc.getSettings.mockReset().mockRejectedValue(new Error("no settings"));
   ipc.onSettings.mockReset().mockResolvedValue(() => {});
@@ -98,9 +96,9 @@ it("loads the state on mount, then subscribes to pushes", async () => {
   );
 
   const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
-  push({ ...state, herdr_version: "0.9.5" });
+  push({ ...state, core_version: "0.9.5" });
   await waitFor(() =>
-    expect(useAppStore.getState().state?.herdr_version).toBe("0.9.5"),
+    expect(useAppStore.getState().state?.core_version).toBe("0.9.5"),
   );
 });
 
@@ -141,17 +139,7 @@ it("shows the Workbox screen when the view is a workbox, All agents or the Dashb
   ipc.getState.mockResolvedValue({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: null,
-        last_ok_ms: null,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox", lastOkMs: null }, null),
     ],
   });
   useAppStore.setState({ view: { kind: "workbox", machineId: "buildbox" } });
@@ -186,17 +174,7 @@ it("renders the Add workbox sheet over both Home and the Workbox screen", async 
   ipc.getState.mockResolvedValue({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: null,
-        last_ok_ms: null,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox", lastOkMs: null }, null),
     ],
   });
   ipc.invokeTyped.mockImplementation(async (name: string) =>
@@ -219,15 +197,12 @@ it("renders the Add workbox sheet over both Home and the Workbox screen", async 
 });
 
 const SETTINGS = {
-  herdr_path: null,
+  core_path: null,
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
-  attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
-  poll_interval_visible_ms: 2000,
-  poll_interval_hidden_ms: 10_000,
   group_by: "status",
   global_shortcut_enabled: true,
   open_after_create: true,
@@ -267,17 +242,7 @@ it("selects a row and shows Home when a notification is clicked", async () => {
   ipc.getState.mockResolvedValue({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: raw.result.snapshot as unknown as Snapshot,
-        last_ok_ms: 1,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox" }, buildboxTerms()),
     ],
   });
   // The Inspector asks for the attach command of the selected row.
@@ -300,17 +265,7 @@ function listBuildbox() {
   ipc.getState.mockResolvedValue({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: raw.result.snapshot as unknown as Snapshot,
-        last_ok_ms: 1,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox" }, buildboxTerms()),
     ],
   });
   ipc.invokeTyped.mockImplementation(async (name: string) =>
@@ -357,7 +312,8 @@ it("focus-row selects and opens", async () => {
   await waitFor(() =>
     expect(ipc.invokeTyped).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p2",
+      address: "w1:p2",
+      observe: false,
     }),
   );
   expect(useTerminalStore.getState().tabs).toEqual([]);
@@ -421,7 +377,7 @@ it("open-row event opens the tab", async () => {
   expect(useTerminalStore.getState().tabs).toMatchObject([
     {
       tabKey: "buildbox::w1:p1",
-      target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+      target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
     },
   ]);
   expect(ipc.invokeTyped).not.toHaveBeenCalledWith(
@@ -440,9 +396,11 @@ it("opens the tab but leaves the sheet alone when focus-row or open-row arrives 
     settings: { open_target: "app" } as unknown as Settings,
   });
   listBuildbox();
-  // The sheet lists agent kinds; the default mock answers every command with an object.
+  // The sheet lists the run choices; the default mock answers every command with an object.
   ipc.invokeTyped.mockImplementation(async (name: string) =>
-    name === "list_agent_kinds" ? [] : { installed: [], default: "ghostty" },
+    name === "list_run_choices"
+      ? { kinds: [], templates: [], kindsChecked: true }
+      : { installed: [], default: "ghostty" },
   );
   render(<App />);
   await waitFor(() => expect(ipc.onOpenRow).toHaveBeenCalled());
@@ -556,12 +514,12 @@ describe("menu events", () => {
   });
 });
 
-function openTabs(...paneIds: string[]) {
-  for (const paneId of paneIds) {
+function openTabs(...addresses: string[]) {
+  for (const address of addresses) {
     useTerminalStore.getState().openTab({
-      tabKey: `buildbox::${paneId}`,
-      target: { kind: "pane", machineId: "buildbox", paneId },
-      title: `agent ${paneId}`,
+      tabKey: `buildbox::${address}`,
+      target: { kind: "terminal", machineId: "buildbox", address: address },
+      title: `agent ${address}`,
       machineLabel: "buildbox",
     });
   }
@@ -601,17 +559,9 @@ describe("terminal menu ids", () => {
     // gpubox comes after buildbox in the machine list, though it was opened first.
     ipc.getState.mockResolvedValue({
       ...state,
-      machines: ["buildbox", "gpubox"].map((id) => ({
-        id,
-        label: id,
-        target: id,
-        session: "default",
-        is_local: false,
-        health: { kind: "online" as const },
-        snapshot: null,
-        last_ok_ms: 1,
-        ages: {},
-      })),
+      machines: ["buildbox", "gpubox"].map((id) =>
+        machineView({ id, target: id }, null),
+      ),
     });
     render(<App />);
     await screen.findByRole("searchbox");
@@ -621,7 +571,7 @@ describe("terminal menu ids", () => {
     act(() => {
       useTerminalStore.getState().openTab({
         tabKey: "gpubox::w1:p1",
-        target: { kind: "pane", machineId: "gpubox", paneId: "w1:p1" },
+        target: { kind: "terminal", machineId: "gpubox", address: "w1:p1" },
         title: "gpu job",
         machineLabel: "gpubox",
       });
@@ -832,17 +782,10 @@ describe("terminal menu ids", () => {
     ipc.getState.mockResolvedValue({
       ...state,
       machines: [
-        {
-          id: "buildbox",
-          label: "buildbox",
-          target: "buildbox",
-          session: "default",
-          is_local: false,
-          health: { kind: "online" },
-          snapshot: null,
-          last_ok_ms: null,
-          ages: {},
-        },
+        machineView(
+          { id: "buildbox", target: "buildbox", lastOkMs: null },
+          null,
+        ),
       ],
     });
     render(<App />);
@@ -886,17 +829,7 @@ describe("terminal menu ids", () => {
     ipc.getState.mockResolvedValue({
       ...state,
       machines: [
-        {
-          id: "buildbox",
-          label: "buildbox",
-          target: "buildbox",
-          session: "default",
-          is_local: false,
-          health: { kind: "online" },
-          snapshot: raw.result.snapshot as unknown as Snapshot,
-          last_ok_ms: 1,
-          ages: {},
-        },
+        machineView({ id: "buildbox", target: "buildbox" }, buildboxTerms()),
       ],
     });
     ipc.invokeTyped.mockImplementation(async (name: string) =>
@@ -1026,17 +959,7 @@ describe("next-needs-you, split and sidebar menu ids", () => {
   const buildboxState = (): AppState => ({
     ...state,
     machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: "buildbox",
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: raw.result.snapshot as unknown as Snapshot,
-        last_ok_ms: 1,
-        ages: {},
-      },
+      machineView({ id: "buildbox", target: "buildbox" }, buildboxTerms()),
     ],
   });
   const saved = () =>
@@ -1082,15 +1005,14 @@ describe("next-needs-you, split and sidebar menu ids", () => {
     await menu("next-needs-you");
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
     expect(activeKey()).toBe("buildbox::w1:p1");
-    // Then the done one, which is marked seen once opened.
+    // Then the done one. Its tab is only opening: nothing is marked seen until it is live and
+    // in front, which `useLooking` reports (Ruling C122).
     await menu("next-needs-you");
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w2:p1");
     expect(activeKey()).toBe("buildbox::w2:p1");
-    await waitFor(() =>
-      expect(ipc.invokeTyped).toHaveBeenCalledWith("mark_seen", {
-        machineId: "buildbox",
-        paneId: "w2:p1",
-      }),
+    expect(ipc.invokeTyped).not.toHaveBeenCalledWith(
+      "mark_seen",
+      expect.anything(),
     );
     // And round again.
     await menu("next-needs-you");
@@ -1116,7 +1038,8 @@ describe("next-needs-you, split and sidebar menu ids", () => {
     expect(activeKey()).toBe(HOME);
     expect(ipc.invokeTyped).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 
@@ -1196,14 +1119,12 @@ it("stops listening for the window events on unmount", async () => {
 
 it("onboarding_when_no_herdr", async () => {
   useAppStore.setState({ view: { kind: "all" } });
-  ipc.getState.mockResolvedValue({
-    ...state,
-    herdr_path: null,
-    herdr_version: null,
-  });
+  ipc.getState.mockResolvedValue(appState([], { path: null, version: null }));
   render(<App />);
   expect(
-    await screen.findByRole("heading", { name: "herdr wasn’t found" }),
+    await screen.findByRole("heading", {
+      name: "Crafted Herdr needs herdr-core (hc).",
+    }),
   ).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: "Choose binary…" }),
@@ -1220,10 +1141,110 @@ it("onboarding_when_no_herdr", async () => {
   expect(await screen.findByRole("searchbox")).toBeInTheDocument();
 });
 
+it("onboarding_when_the_core_is_incompatible", async () => {
+  useAppStore.setState({ view: { kind: "all" } });
+  ipc.getState.mockResolvedValue({
+    ...appState([]),
+    core_state: {
+      kind: "incompatible",
+      reason: "no such method",
+      newer: false,
+    },
+  });
+  render(<App />);
+  expect(
+    await screen.findByRole("heading", {
+      name: "This herdr-core is too old for Crafted Herdr.",
+    }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("searchbox")).toBeNull();
+
+  // Once the core is usable, the push swaps the screen for Home.
+  const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+  act(() => push(state));
+  expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+});
+
+it("onboarding_stays_up_through_a_retry_and_keeps_its_note", async () => {
+  useAppStore.setState({ view: { kind: "all" } });
+  const missing = appState([], { path: null, version: null });
+  ipc.getState.mockResolvedValue(missing);
+  ipc.invokeTyped.mockImplementation(async (name: string) =>
+    name === "retry_core" || name === "core_status"
+      ? { path: null, version: null, saved_missing: false, legacy_herdr: null }
+      : null,
+  );
+  const user = userEvent.setup();
+  render(<App />);
+  const heading = () =>
+    screen.queryByRole("heading", {
+      name: "Crafted Herdr needs herdr-core (hc).",
+    });
+  await screen.findByRole("heading", {
+    name: "Crafted Herdr needs herdr-core (hc).",
+  });
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "No herdr-core found yet.",
+  );
+
+  // Rust answers a retry with `connecting` at once and `notFound` about 100 ms later. The
+  // screen must not go away and come back: that would lose the note.
+  const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+  act(() => push({ ...missing, core_state: { kind: "connecting" } }));
+  expect(heading()).toBeInTheDocument();
+  expect(screen.queryByText("Connecting to herdr-core…")).toBeNull();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "No herdr-core found yet.",
+  );
+  act(() => push(missing));
+  expect(heading()).toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "No herdr-core found yet.",
+  );
+
+  // Once the core is usable the gate lets go.
+  act(() => push(state));
+  expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+  expect(heading()).toBeNull();
+});
+
+it("an_incompatible_core_keeps_its_own_screen_through_a_connecting_blip", async () => {
+  useAppStore.setState({ view: { kind: "all" } });
+  const old = {
+    ...appState([]),
+    core_state: {
+      kind: "incompatible" as const,
+      reason: "no such method",
+      newer: false,
+    },
+  };
+  ipc.getState.mockResolvedValue(old);
+  render(<App />);
+  await screen.findByRole("heading", {
+    name: "This herdr-core is too old for Crafted Herdr.",
+  });
+  const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+  act(() => push({ ...old, core_state: { kind: "connecting" } }));
+  expect(
+    screen.getByRole("heading", {
+      name: "This herdr-core is too old for Crafted Herdr.",
+    }),
+  ).toBeInTheDocument();
+  // A stopped core is not onboarding's to explain: the shell and the Local card are.
+  act(() =>
+    push({
+      ...state,
+      core_state: { kind: "stopped", error: "Could not start herdr-core." },
+    }),
+  );
+  expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+});
+
 it("shows_nothing_but_the_connecting_state_before_the_first_state", () => {
   render(<App />);
-  expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
-  expect(screen.queryByText("herdr wasn’t found")).toBeNull();
+  expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();
+  expect(screen.queryByText(/needs herdr-core/)).toBeNull();
 });
 
 describe("the Activity drawer", () => {
@@ -1292,31 +1313,37 @@ describe("the Activity drawer", () => {
 
 describe("the window chrome", () => {
   /** A machine with the fixture's agents. */
-  function box(id: string, health: Health = { kind: "online" }): MachineView {
-    return {
-      id,
-      label: id,
-      target: id,
-      session: "default",
-      is_local: false,
-      health,
-      snapshot: structuredClone(raw.result.snapshot) as unknown as Snapshot,
-      last_ok_ms: Date.now(),
-      ages: {},
-    };
+  function box(
+    id: string,
+    health: Health = { kind: "online" },
+    opts: { isLocal?: boolean; terms?: TermSpec[] } = {},
+  ): MachineView {
+    return machineView(
+      {
+        id,
+        target: id,
+        isLocal: opts.isLocal,
+        health,
+        lastOkMs: Date.now(),
+      },
+      opts.terms ?? buildboxTerms(),
+    );
   }
 
   function listBoxes(version = "0.9.4", ...machines: MachineView[]) {
     ipc.getState.mockResolvedValue({
-      ...state,
-      herdr_version: version,
+      ...appState([], { version }),
       machines: machines.length ? machines : [box("buildbox"), box("gpubox")],
     });
     ipc.invokeTyped.mockImplementation(async (name: string) =>
       name === "get_terminals"
         ? { installed: ["ghostty"], default: "ghostty" }
-        : name === "list_agent_kinds"
-          ? ["claude"]
+        : name === "list_run_choices"
+          ? {
+              kinds: [{ kind: "claude", takesTask: true }],
+              templates: [],
+              kindsChecked: true,
+            }
           : name === "get_command_log"
             ? []
             : null,
@@ -1387,7 +1414,7 @@ describe("the window chrome", () => {
   it("header_shows_version_and_terminal_picker_label", async () => {
     listBoxes();
     render(<App />);
-    expect(await screen.findByText("for herdr 0.9.4")).toBeInTheDocument();
+    expect(await screen.findByText("for herdr-core 0.9.4")).toBeInTheDocument();
     expect(await screen.findByText("Opens in Ghostty")).toBeInTheDocument();
   });
 
@@ -1620,7 +1647,7 @@ describe("the window chrome", () => {
     });
 
     it("hints_that_only_this_computer_is_there_until_a_workbox_is_added", async () => {
-      listBoxes("0.9.4", { ...box("local"), is_local: true });
+      listBoxes("0.9.4", box("local", undefined, { isLocal: true }));
       render(<App />);
       const sidebar = await screen.findByRole("navigation", {
         name: "Sidebar",
@@ -1632,7 +1659,10 @@ describe("the window chrome", () => {
         useAppStore.setState({
           state: {
             ...useAppStore.getState().state!,
-            machines: [{ ...box("local"), is_local: true }, box("gpubox")],
+            machines: [
+              box("local", undefined, { isLocal: true }),
+              box("gpubox"),
+            ],
           },
         }),
       );
@@ -1641,22 +1671,19 @@ describe("the window chrome", () => {
       ).toBeNull();
     });
 
-    it("dims_a_disabled_workbox_and_labels_it", async () => {
-      listBoxes("0.9.4", box("buildbox"), box("gpubox", { kind: "disabled" }));
+    it("does_not_show_a_hidden_workbox", async () => {
+      listBoxes("0.9.4", box("buildbox"), box("gpubox", { kind: "hidden" }));
       render(<App />);
       const sidebar = await screen.findByRole("navigation", {
         name: "Sidebar",
       });
       expect(
         within(sidebar).getByRole("button", {
-          name: /^gpubox\s*Disabled\s*\d+$/,
-        }),
-      ).toHaveClass("is-dim");
-      expect(
-        within(sidebar).getByRole("button", {
           name: /^buildbox\s*Online\s*\d+$/,
         }),
-      ).not.toHaveClass("is-dim");
+      ).toBeInTheDocument();
+      expect(within(sidebar).queryByText("gpubox")).toBeNull();
+      expect(within(sidebar).queryByText("Hidden")).toBeNull();
     });
 
     it("gives_each_project_dot_its_status_in_words", async () => {
@@ -1687,14 +1714,18 @@ describe("the window chrome", () => {
 
   describe("a created session with Open when ready", () => {
     const KEY = "buildbox::w9:p9";
-    const target = { key: KEY, machineId: "buildbox", paneId: "w9:p9" };
+    const target = { key: KEY, machineId: "buildbox", address: "w9:p9" };
     /** The next poll: the fixture plus the new pane. */
     const withNewPane = (): AppState => {
-      const m = box("buildbox");
-      m.snapshot!.panes.push({
-        ...m.snapshot!.panes[0],
-        pane_id: "w9:p9",
-        terminal_id: "term-99",
+      const m = box("buildbox", undefined, {
+        terms: [
+          ...buildboxTerms(),
+          shellTerm({
+            address: "w9:p9",
+            title: "claude: refactor auth",
+            folder: "/home/dev/projects/api-service",
+          }),
+        ],
       });
       return { ...state, machines: [m, box("gpubox")] };
     };
@@ -1766,7 +1797,12 @@ describe("the window chrome", () => {
       act(() => useAppStore.getState().setState(withNewPane()));
       expect(
         ipc.invokeTyped.mock.calls.filter(([n]) => n === "open_session"),
-      ).toEqual([["open_session", { machineId: "buildbox", paneId: "w9:p9" }]]);
+      ).toEqual([
+        [
+          "open_session",
+          { machineId: "buildbox", address: "w9:p9", observe: false },
+        ],
+      ]);
       expect(tabKeys()).toEqual([]);
     });
 
@@ -1817,23 +1853,23 @@ describe("the window chrome", () => {
 
   describe("the version banner", () => {
     it("unsupported_version_banner_is_shown_once_and_can_be_dismissed", async () => {
-      listBoxes("0.8.9");
+      listBoxes("0.1.16");
       const user = userEvent.setup();
       render(<App />);
       const banner = await screen.findByRole("status");
       expect(banner).toHaveTextContent(
-        "herdr 0.8.9 is older than this app supports (0.9.0+). Some actions may fail.",
+        "herdr-core 0.1.16 is older than this app supports (0.1.17+). Some actions may fail.",
       );
       await user.click(within(banner).getByRole("button", { name: "Dismiss" }));
       expect(screen.queryByText(/is older than this app supports/)).toBeNull();
     });
 
     it("stays_dismissed_across_screens_and_returns_for_another_version", async () => {
-      listBoxes("0.8.9");
+      listBoxes("0.1.16");
       const user = userEvent.setup();
       render(<App />);
       await user.click(await screen.findByRole("button", { name: "Dismiss" }));
-      expect(useAppStore.getState().dismissedVersion).toBe("0.8.9");
+      expect(useAppStore.getState().dismissedVersion).toBe("0.1.16");
       act(() =>
         useAppStore.setState({
           view: { kind: "workbox", machineId: "gpubox" },
@@ -1842,46 +1878,44 @@ describe("the window chrome", () => {
       expect(screen.queryByRole("status")).toBeNull();
       act(() =>
         useAppStore.setState({
-          state: { ...state, herdr_version: "0.8.8", machines: [] },
+          state: appState([], { version: "0.1.15" }),
         }),
       );
-      expect(screen.getByRole("status")).toHaveTextContent("herdr 0.8.8");
+      expect(screen.getByRole("status")).toHaveTextContent("herdr-core 0.1.15");
     });
 
-    it.each(["0.9.0", "0.9.4", "0.10.0", "1.0.0"])(
+    it.each(["0.1.17", "0.1.18", "0.2.0-beta.1", "1.0.0"])(
       "shows_no_banner_for_%s",
       async (version) => {
         listBoxes(version);
         render(<App />);
         await screen.findByRole("region", { name: "Needs you" });
-        expect(useAppStore.getState().state?.herdr_version).toBe(version);
+        expect(useAppStore.getState().state?.core_version).toBe(version);
         expect(
           screen.queryByText(/is older than this app supports/),
         ).toBeNull();
       },
     );
 
-    it("an_unreadable_version_gets_the_banner_too", async () => {
+    it("no_reported_version_gets_no_banner", async () => {
       listBoxes();
       render(<App />);
       await screen.findByRole("region", { name: "Needs you" });
       act(() =>
         useAppStore.setState({
-          state: { ...useAppStore.getState().state!, herdr_version: null },
+          state: { ...useAppStore.getState().state!, core_version: null },
         }),
       );
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "herdr (unknown version) is older than this app supports (0.9.0+). Some actions may fail.",
-      );
+      expect(screen.queryByRole("status")).toBeNull();
     });
 
-    it.each(["not-a-version", "0.8"])(
+    it.each(["not-a-version", "0.1"])(
       "an_unrecognised_version_%s_gets_the_banner",
       async (version) => {
         listBoxes(version);
         render(<App />);
         expect(await screen.findByRole("status")).toHaveTextContent(
-          `herdr ${version} is older than this app supports`,
+          `herdr-core ${version} is older than this app supports`,
         );
       },
     );

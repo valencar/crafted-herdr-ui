@@ -2,6 +2,8 @@ import { memo } from "react";
 import { formatAge, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { OpenButton } from "./OpenButton";
+import { PinGlyph } from "./PinGlyph";
+import { BlockedLine } from "./StatusDetail";
 import { StatusPill } from "./StatusPill";
 
 type Props = {
@@ -17,6 +19,8 @@ type Props = {
   previewLines: readonly string[];
   onSelect: (key: string) => void;
   onMarkSeen: (row: Row) => void;
+  /** "worker of {parent}" for a worker, so a blocker is never anonymous; `null` for the rest. */
+  workerLabel?: string | null;
   /** Whether the status pill loops. Only the Dashboard's short list sets it. */
   live?: boolean;
 };
@@ -32,10 +36,16 @@ export const NeedsYouCard = memo(function NeedsYouCard({
   previewLines,
   onSelect,
   onMarkSeen,
+  workerLabel = null,
   live = false,
 }: Props) {
   const age = formatAge(row.sinceMs, nowMs);
-  const since = row.status === "blocked" ? "blocked" : "finished";
+  const since =
+    row.status === "blocked"
+      ? "blocked"
+      : row.status === "error"
+        ? "errored"
+        : "finished";
   return (
     <article
       className={`card${selected ? " is-selected" : ""}${dim ? " is-dim" : ""}`}
@@ -48,8 +58,11 @@ export const NeedsYouCard = memo(function NeedsYouCard({
         {project && <span className="card-project">{project}</span>}
         {project && <span className="muted">·</span>}
         <span className="mono card-name">{row.name}</span>
+        {row.pinned && <PinGlyph />}
         <span className="chip card-chip">{row.machineLabel}</span>
       </div>
+      {workerLabel && <div className="row-sub card-worker">{workerLabel}</div>}
+      <BlockedLine row={row} />
       {row.folder && (
         <div className="mono card-folder">{shortPath(row.folder)}</div>
       )}

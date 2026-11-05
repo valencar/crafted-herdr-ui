@@ -8,7 +8,13 @@ A [Homebrew](https://brew.sh) tap for [Crafted Herdr](https://github.com/valenca
 brew install --cask valencar/tap/crafted-herdr
 ```
 
-herdr itself is installed separately (see [herdr.dev](https://herdr.dev)); the app drives your installed `herdr` CLI.
+herdr-core (`hc`) is installed separately, and there is no Homebrew formula for it:
+
+```bash
+curl -fsSL https://releases.herdr.dev/core/install.sh | sh
+```
+
+The app talks to the core you have installed (see [herdr.dev](https://herdr.dev)). It never installs it for you. If you only have herdr 0.9, the app says so and shows this line.
 
 ## Upgrade
 

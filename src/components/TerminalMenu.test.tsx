@@ -29,15 +29,12 @@ vi.mock("../terminal/Workspace", () => ({
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
 const SETTINGS: Settings = {
-  herdr_path: null,
+  core_path: null,
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
-  attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
-  poll_interval_visible_ms: 2000,
-  poll_interval_hidden_ms: 10_000,
   group_by: "project",
   global_shortcut_enabled: true,
   open_after_create: true,
@@ -53,6 +50,7 @@ const SETTINGS: Settings = {
   new_session_hidden_kinds: [],
   new_session_hide_shell: false,
   workbox_colors: {},
+  hidden_workboxes: [],
 };
 
 function setup(template = "") {

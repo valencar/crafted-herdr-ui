@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "this core speaks generation 1",
+      "kind": "unsupported_generation"
+    },
+    "message": "protocol generation 2 not supported"
+  }
+}

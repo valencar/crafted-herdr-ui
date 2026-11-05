@@ -10,29 +10,21 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 use ts_rs::TS;
 
-use crate::herdr::cli::HerdrCli;
+use crate::core::locate;
+use crate::core::{CoreClient, ProcessConnector};
+use crate::env::LoginEnv;
 use crate::lock;
+use crate::sync::CoreSync;
 use crate::terminal::{OpenMode, TerminalId};
 
-pub const MIN_POLL_INTERVAL_MS: u64 = 1000;
 /// The store file, in the app data folder.
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// What a click on a session opens: just that pane, or the whole herdr UI on its workbox.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../src/lib/bindings/")]
-pub enum AttachMode {
-    #[default]
-    Pane,
-    FullUi,
-}
 
 /// How the Home screen groups sessions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
@@ -43,6 +35,8 @@ pub enum GroupBy {
     Project,
     Workbox,
     Status,
+    /// Herdr's spaces, read from its layout document. Offered once a machine has one.
+    Space,
 }
 
 /// Where a click on a session opens it: in a tab inside this app, or in the user's own terminal.
@@ -113,20 +107,16 @@ pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=24;
 #[serde(deny_unknown_fields)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct Settings {
-    /// The herdr binary the user picked; `None` finds it automatically.
-    pub herdr_path: Option<String>,
+    /// The herdr-core binary the user picked; `None` finds it automatically. An old settings
+    /// file's `herdr_path` (herdr 0.9) is dropped, never reused.
+    pub core_path: Option<String>,
     /// `None` means the first installed of Ghostty, iTerm2, Warp, Terminal.
     pub terminal: Option<TerminalId>,
     /// The command for the Custom terminal; `{attach}` is replaced by the quoted command.
     pub terminal_custom_template: String,
     pub open_mode: OpenMode,
-    pub attach_mode: AttachMode,
     pub notify_blocked: bool,
     pub notify_done: bool,
-    #[ts(type = "number")]
-    pub poll_interval_visible_ms: u64,
-    #[ts(type = "number")]
-    pub poll_interval_hidden_ms: u64,
     pub group_by: GroupBy,
     pub global_shortcut_enabled: bool,
     /// The default of "Open in <Terminal> when ready" in the New session sheet.
@@ -161,20 +151,21 @@ pub struct Settings {
     /// is given one automatically.
     #[serde(default)]
     pub workbox_colors: BTreeMap<String, WorkboxColor>,
+    /// Workboxes (machine ids) the person hid. A hidden workbox is not shown and does not
+    /// notify; this is an app setting, with no core call behind it.
+    #[serde(default)]
+    pub hidden_workboxes: Vec<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            herdr_path: None,
+            core_path: None,
             terminal: None,
             terminal_custom_template: String::new(),
             open_mode: OpenMode::default(),
-            attach_mode: AttachMode::default(),
             notify_blocked: true,
             notify_done: true,
-            poll_interval_visible_ms: 2000,
-            poll_interval_hidden_ms: 10_000,
             group_by: GroupBy::default(),
             global_shortcut_enabled: true,
             open_after_create: true,
@@ -190,6 +181,7 @@ impl Default for Settings {
             new_session_hidden_kinds: Vec::new(),
             new_session_hide_shell: false,
             workbox_colors: BTreeMap::new(),
+            hidden_workboxes: Vec::new(),
         }
     }
 }
@@ -213,9 +205,31 @@ impl Settings {
         Ok(next)
     }
 
+    /// These settings with one workbox hidden or shown (`hidden_workboxes`). It is an app
+    /// setting and nothing else changes. This computer can't be hidden.
+    pub fn with_hidden(&self, machine_id: &str, hidden: bool) -> Result<Settings, String> {
+        let id = machine_id.trim();
+        if id.is_empty() {
+            return Err("Pick a workbox to hide or show.".to_owned());
+        }
+        if id == crate::LOCAL {
+            return Err("This computer can’t be hidden.".to_owned());
+        }
+        let mut ids: Vec<&str> = self
+            .hidden_workboxes
+            .iter()
+            .map(String::as_str)
+            .filter(|x| *x != id)
+            .collect();
+        if hidden {
+            ids.push(id);
+        }
+        self.merged(&json!({ "hidden_workboxes": ids }))
+    }
+
     fn normalize(&mut self) {
-        self.herdr_path = self
-            .herdr_path
+        self.core_path = self
+            .core_path
             .take()
             .map(|p| p.trim().to_owned())
             .filter(|p| !p.is_empty());
@@ -225,19 +239,15 @@ impl Settings {
             .map(|k| k.trim().to_owned())
             .filter(|k| !k.is_empty() && seen.insert(k.clone()))
             .collect();
+        let mut seen = std::collections::HashSet::new();
+        self.hidden_workboxes = std::mem::take(&mut self.hidden_workboxes)
+            .into_iter()
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+            .collect();
     }
 
     fn validate(&self) -> Result<(), String> {
-        for (name, ms) in [
-            ("poll_interval_visible_ms", self.poll_interval_visible_ms),
-            ("poll_interval_hidden_ms", self.poll_interval_hidden_ms),
-        ] {
-            if ms < MIN_POLL_INTERVAL_MS {
-                return Err(format!(
-                    "{name} must be at least {MIN_POLL_INTERVAL_MS} (1 second)."
-                ));
-            }
-        }
         if !SPLIT_WIDTH_RANGE.contains(&self.dashboard_split_width) {
             return Err(format!(
                 "dashboard_split_width must be between {} and {}.",
@@ -310,7 +320,7 @@ impl SharedSettings {
     }
 
     /// Waits for any change in progress, and keeps the next one waiting until the guard drops.
-    /// Without it, two quick herdr path changes could finish out of order and leave the runner
+    /// Without it, two quick core path changes could finish out of order and leave the runner
     /// pointed at the older one.
     pub async fn begin_update(&self) -> tokio::sync::OwnedMutexGuard<()> {
         self.updates.clone().lock_owned().await
@@ -396,82 +406,112 @@ impl ShortcutState {
     }
 }
 
-/// Where herdr was found, for Settings › herdr CLI.
+/// Where herdr-core was found, for Settings › herdr-core.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
-pub struct HerdrStatus {
-    /// The binary in use; `None` when herdr was not found.
+pub struct CoreStatus {
+    /// The binary in use, as found (symlinks are not resolved); `None` when no core was found.
     pub path: Option<String>,
+    /// The version it reports (`0.1.18`).
     pub version: Option<String>,
-    /// A path is saved in Settings but no file is there any more, so `path` is whatever
-    /// automatic discovery found instead.
+    /// A path is saved in Settings but it is not a usable core (the file is gone, or it is some
+    /// other program), so `path` is whatever automatic discovery found instead.
     pub saved_missing: bool,
+    /// The version of a herdr 0.9 binary, reported only when no core was found, so onboarding
+    /// can say that herdr was retired.
+    pub legacy_herdr: Option<String>,
 }
 
-/// The result of looking for herdr.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Resolved {
-    pub path: Option<PathBuf>,
-    pub saved_missing: bool,
+/// Finds the core again when the saved path changes, and points the `CoreClient` at it. It keeps
+/// what only startup can learn (the login environment) and the last result.
+pub struct CoreLocator {
+    login: Mutex<LoginEnv>,
+    status: Mutex<Option<CoreStatus>>,
+    /// The system directories searched after `~/.local/bin`. Tests give their own.
+    system_dirs: Vec<PathBuf>,
 }
 
-/// Finds herdr: the saved path if it still exists, otherwise automatic discovery (see
-/// `env::resolve_herdr`). A saved path whose file is gone is reported, not an error.
-pub fn resolve_with_saved(
-    saved: Option<&str>,
-    login_path_hit: Option<PathBuf>,
-    home: &Path,
-    exists: &dyn Fn(&Path) -> bool,
-) -> Resolved {
-    let saved = saved.map(Path::new);
-    Resolved {
-        saved_missing: saved.is_some_and(|p| !exists(p)),
-        path: crate::env::resolve_herdr(saved, login_path_hit, home, exists),
+impl Default for CoreLocator {
+    fn default() -> Self {
+        Self::with_system_dirs(locate::system_dirs())
     }
 }
 
-/// Finds herdr again when the saved path changes. It keeps what only startup can learn (the
-/// login shell's hit and the home folder) and the last result.
-pub struct HerdrLocator {
-    login_hit: Mutex<Option<PathBuf>>,
-    home: PathBuf,
-    status: Mutex<HerdrStatus>,
-}
+impl CoreLocator {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-impl HerdrLocator {
-    pub fn new(login_hit: Option<PathBuf>, home: PathBuf) -> Self {
-        Self {
-            login_hit: Mutex::new(login_hit),
-            home,
+    /// A locator whose search of the system directories (`/opt/homebrew/bin` and the like) uses
+    /// `dirs`, so a test never reaches a binary installed on the machine it runs on.
+    pub fn with_system_dirs(dirs: Vec<PathBuf>) -> Self {
+        CoreLocator {
+            login: Mutex::default(),
             status: Mutex::default(),
+            system_dirs: dirs,
         }
     }
 
-    /// Sets what the login shell found, once startup has asked it.
-    pub fn set_login_hit(&self, hit: Option<PathBuf>) {
-        *lock(&self.login_hit) = hit;
+    /// Sets the login environment, once startup has captured it.
+    pub fn set_login(&self, login: LoginEnv) {
+        *lock(&self.login) = login;
     }
 
-    pub fn status(&self) -> HerdrStatus {
-        lock(&self.status).clone()
+    pub fn login(&self) -> LoginEnv {
+        lock(&self.login).clone()
     }
 
-    /// Resolves herdr for `saved`, points `cli` at it, reads its version and remembers the
-    /// result. Without herdr, `cli` gets an empty path (every call then fails `NotFound`).
-    pub async fn locate(&self, saved: Option<&str>, cli: &HerdrCli) -> HerdrStatus {
-        let login_hit = lock(&self.login_hit).clone();
-        let resolved = resolve_with_saved(saved, login_hit, &self.home, &|p| p.is_file());
-        cli.set_bin(resolved.path.clone().unwrap_or_default());
-        let version = match &resolved.path {
-            Some(bin) => crate::env::herdr_version(bin, cli.env(), VERSION_TIMEOUT).await,
-            None => None,
+    /// The last result (all empty before the first `locate`).
+    pub fn status(&self) -> CoreStatus {
+        lock(&self.status).clone().unwrap_or_default()
+    }
+
+    /// Whether `locate` has run at least once.
+    pub fn is_located(&self) -> bool {
+        lock(&self.status).is_some()
+    }
+
+    /// Finds the core for `saved`, points `core` at it with the forwarded environment and
+    /// remembers the result. Without a core, `core` gets an empty path (every call then fails
+    /// `NotFound`).
+    pub async fn locate(&self, saved: Option<&str>, core: &CoreClient) -> CoreStatus {
+        let login = self.login();
+        let located = locate::locate(&login, saved.map(Path::new), &self.system_dirs).await;
+        let (bin, path, version) = match located.core {
+            Some((bin, version)) => {
+                let path = bin.display().to_string();
+                (bin, Some(path), Some(version))
+            }
+            None => (PathBuf::new(), None, None),
         };
-        let status = HerdrStatus {
-            path: resolved.path.map(|p| p.display().to_string()),
+        core.set_connector(Arc::new(ProcessConnector {
+            bin,
+            env: crate::env::forwarded_env(&login),
+        }));
+        let status = CoreStatus {
+            path,
             version,
-            saved_missing: resolved.saved_missing,
+            saved_missing: located.saved_missing,
+            legacy_herdr: located.legacy_herdr,
         };
-        *lock(&self.status) = status.clone();
+        *lock(&self.status) = Some(status.clone());
+        status
+    }
+
+    /// `locate`, then tells the sync: the state names the core in use, and a core that was not
+    /// found, was incompatible or was stopped gets another try with the new one (a fresh
+    /// window). Used when the saved path changes and by Try again.
+    pub async fn relocate(
+        &self,
+        saved: Option<&str>,
+        core: &CoreClient,
+        sync: Option<&CoreSync>,
+    ) -> CoreStatus {
+        let status = self.locate(saved, core).await;
+        if let Some(sync) = sync {
+            sync.set_core_path(status.path.clone());
+            sync.reconnect_now();
+        }
         status
     }
 }
@@ -479,16 +519,15 @@ impl HerdrLocator {
 /// What a settings change needs the app to do right away. Everything else is read when used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Changes {
-    pub intervals: bool,
-    pub herdr_path: bool,
+    pub hidden_workboxes: bool,
+    pub core_path: bool,
     pub shortcut: bool,
 }
 
 pub fn changes(old: &Settings, new: &Settings) -> Changes {
     Changes {
-        intervals: old.poll_interval_visible_ms != new.poll_interval_visible_ms
-            || old.poll_interval_hidden_ms != new.poll_interval_hidden_ms,
-        herdr_path: old.herdr_path != new.herdr_path,
+        hidden_workboxes: old.hidden_workboxes != new.hidden_workboxes,
+        core_path: old.core_path != new.core_path,
         shortcut: old.global_shortcut_enabled != new.global_shortcut_enabled,
     }
 }
@@ -501,14 +540,11 @@ mod tests {
     #[test]
     fn settings_defaults_match_spec() {
         let s = Settings::default();
-        assert_eq!(s.herdr_path, None);
+        assert_eq!(s.core_path, None);
         assert_eq!(s.terminal, None);
         assert_eq!(s.terminal_custom_template, "");
         assert_eq!(s.open_mode, OpenMode::Window);
-        assert_eq!(s.attach_mode, AttachMode::Pane);
         assert!(s.notify_blocked && s.notify_done);
-        assert_eq!(s.poll_interval_visible_ms, 2000);
-        assert_eq!(s.poll_interval_hidden_ms, 10_000);
         assert_eq!(s.group_by, GroupBy::Project);
         assert!(s.global_shortcut_enabled);
         assert!(s.open_after_create);
@@ -524,6 +560,7 @@ mod tests {
         assert!(s.new_session_hidden_kinds.is_empty());
         assert!(!s.new_session_hide_shell);
         assert!(s.workbox_colors.is_empty());
+        assert!(s.hidden_workboxes.is_empty());
         // The keys are exactly the spec's (section 8.8) plus `open_after_create` and the v0.2
         // terminal and layout keys.
         let keys: std::collections::BTreeSet<_> = serde_json::to_value(&s)
@@ -534,15 +571,12 @@ mod tests {
             .cloned()
             .collect();
         let expected: std::collections::BTreeSet<_> = [
-            "herdr_path",
+            "core_path",
             "terminal",
             "terminal_custom_template",
             "open_mode",
-            "attach_mode",
             "notify_blocked",
             "notify_done",
-            "poll_interval_visible_ms",
-            "poll_interval_hidden_ms",
             "group_by",
             "global_shortcut_enabled",
             "open_after_create",
@@ -558,6 +592,7 @@ mod tests {
             "new_session_hidden_kinds",
             "new_session_hide_shell",
             "workbox_colors",
+            "hidden_workboxes",
         ]
         .map(String::from)
         .into();
@@ -722,6 +757,43 @@ mod tests {
     }
 
     #[test]
+    fn hide_writes_setting_only() {
+        let base = Settings::default()
+            .merged(&json!({"hidden_workboxes": ["gpubox"]}))
+            .unwrap();
+        // Hiding adds the id and touches nothing else; showing takes only that id out.
+        let hidden = base.with_hidden("buildbox", true).unwrap();
+        assert_eq!(hidden.hidden_workboxes, ["gpubox", "buildbox"]);
+        assert_eq!(
+            Settings {
+                hidden_workboxes: base.hidden_workboxes.clone(),
+                ..hidden.clone()
+            },
+            base
+        );
+        // Hiding twice is the same as once.
+        assert_eq!(hidden.with_hidden("buildbox", true).unwrap(), hidden);
+        let shown = hidden.with_hidden("buildbox", false).unwrap();
+        assert_eq!(shown.hidden_workboxes, ["gpubox"]);
+        // Showing one that was not hidden changes nothing.
+        assert_eq!(shown.with_hidden("staging", false).unwrap(), shown);
+        // This computer and a blank id are refused.
+        assert!(base.with_hidden("local", true).is_err());
+        assert!(base.with_hidden("  ", true).is_err());
+    }
+
+    #[test]
+    fn hidden_workboxes_round_trip_and_old_files_load_empty() {
+        let set = Settings::default()
+            .merged(&json!({"hidden_workboxes": [" buildbox ", "gpubox", "buildbox", ""]}))
+            .unwrap();
+        assert_eq!(set.hidden_workboxes, ["buildbox", "gpubox"]);
+        let mut entries = Settings::default().to_entries();
+        entries.retain(|(k, _)| k != "hidden_workboxes");
+        assert!(Settings::from_entries(entries).hidden_workboxes.is_empty());
+    }
+
+    #[test]
     fn workbox_colors_round_trip() {
         let set = Settings::default()
             .merged(&json!({"workbox_colors": {"local": "violet", "buildbox": "pink"}}))
@@ -811,28 +883,27 @@ mod tests {
     }
 
     #[test]
-    fn settings_patch_validates_intervals() {
+    fn settings_patch_validates_values() {
         let base = Settings::default();
         let ok = base
-            .merged(&json!({"poll_interval_visible_ms": 1000, "notify_done": false}))
+            .merged(&json!({"dashboard_split_width": 360, "notify_done": false}))
             .unwrap();
-        assert_eq!(ok.poll_interval_visible_ms, 1000);
+        assert_eq!(ok.dashboard_split_width, 360);
         assert!(!ok.notify_done);
         // Untouched keys keep their values.
-        assert_eq!(ok.poll_interval_hidden_ms, 10_000);
+        assert_eq!(ok.terminal_font_size, 13);
 
         for bad in [
-            json!({"poll_interval_visible_ms": 999}),
-            json!({"poll_interval_hidden_ms": 0}),
+            json!({"dashboard_split_width": 359}),
+            json!({"terminal_font_size": 0}),
             // One bad value refuses the whole patch.
-            json!({"notify_done": false, "poll_interval_hidden_ms": 500}),
+            json!({"notify_done": false, "dashboard_split_width": 5000}),
         ] {
-            let err = base.merged(&bad).unwrap_err();
-            assert!(err.contains("1000"), "{err}");
+            assert!(base.merged(&bad).is_err(), "{bad}");
         }
         // A patch of the wrong shape or with an unknown key is refused too.
         assert!(
-            base.merged(&json!({"poll_interval_visible_ms": "fast"}))
+            base.merged(&json!({"dashboard_split_width": "wide"}))
                 .is_err()
         );
         assert!(base.merged(&json!({"nonsense": 1})).is_err());
@@ -840,26 +911,65 @@ mod tests {
     }
 
     #[test]
+    fn old_poll_interval_keys_are_dropped() {
+        let read = Settings::from_entries([
+            ("poll_interval_visible_ms".to_owned(), json!(5000)),
+            ("poll_interval_hidden_ms".to_owned(), json!(30000)),
+            ("notify_done".to_owned(), json!(false)),
+        ]);
+        assert!(!read.notify_done);
+        assert!(
+            !read
+                .to_entries()
+                .iter()
+                .any(|(k, _)| k.starts_with("poll_"))
+        );
+        assert!(
+            read.merged(&json!({"poll_interval_visible_ms": 5000}))
+                .is_err()
+        );
+    }
+
+    #[test]
     fn a_patch_can_clear_an_optional_key_and_blank_paths_mean_automatic() {
         let set = Settings::default()
-            .merged(&json!({"terminal": "iTerm2", "herdr_path": " /opt/herdr/bin/herdr "}))
+            .merged(&json!({"terminal": "iTerm2", "core_path": " /opt/herdr-core/bin/hc "}))
             .unwrap();
         assert_eq!(set.terminal, Some(TerminalId::ITerm2));
-        assert_eq!(set.herdr_path.as_deref(), Some("/opt/herdr/bin/herdr"));
+        assert_eq!(set.core_path.as_deref(), Some("/opt/herdr-core/bin/hc"));
         let cleared = set
-            .merged(&json!({"terminal": null, "herdr_path": "  "}))
+            .merged(&json!({"terminal": null, "core_path": "  "}))
             .unwrap();
-        assert_eq!((cleared.terminal, cleared.herdr_path), (None, None));
+        assert_eq!((cleared.terminal, cleared.core_path), (None, None));
+    }
+
+    #[test]
+    fn old_full_ui_setting_loads() {
+        // A file saved by v0.8 has `attach_mode`; the key is dropped and the rest is kept.
+        let s = Settings::from_entries([
+            ("attach_mode".to_owned(), json!("full_ui")),
+            ("open_mode".to_owned(), json!("tab")),
+        ]);
+        assert_eq!(s.open_mode, OpenMode::Tab);
+        assert!(!s.to_entries().iter().any(|(k, _)| k == "attach_mode"));
+        // And it is never written back.
+        assert_eq!(
+            Settings::from_entries([("attach_mode".to_owned(), json!("pane"))]),
+            Settings::default()
+        );
     }
 
     #[test]
     fn enums_use_the_spec_spellings() {
         let s = Settings::default()
-            .merged(&json!({"open_mode": "tab", "attach_mode": "full_ui", "group_by": "status"}))
+            .merged(&json!({"open_mode": "tab", "group_by": "status"}))
             .unwrap();
         assert_eq!(s.open_mode, OpenMode::Tab);
-        assert_eq!(s.attach_mode, AttachMode::FullUi);
         assert_eq!(s.group_by, GroupBy::Status);
+        let s = Settings::default()
+            .merged(&json!({"group_by": "space"}))
+            .unwrap();
+        assert_eq!(s.group_by, GroupBy::Space);
         assert!(
             Settings::default()
                 .merged(&json!({"open_mode": "tabs"}))
@@ -880,18 +990,18 @@ mod tests {
     #[test]
     fn stored_entries_round_trip_and_bad_ones_fall_back() {
         let custom = Settings::default()
-            .merged(&json!({"notify_blocked": false, "poll_interval_hidden_ms": 30000}))
+            .merged(&json!({"notify_blocked": false, "dashboard_split_width": 800}))
             .unwrap();
         assert_eq!(Settings::from_entries(custom.to_entries()), custom);
 
         let read = Settings::from_entries([
             ("notify_done".to_owned(), json!(false)),
-            ("poll_interval_visible_ms".to_owned(), json!(5)),
+            ("dashboard_split_width".to_owned(), json!(5)),
             ("group_by".to_owned(), json!("sideways")),
             ("removed_in_a_later_version".to_owned(), json!(1)),
         ]);
         assert!(!read.notify_done);
-        assert_eq!(read.poll_interval_visible_ms, 2000);
+        assert_eq!(read.dashboard_split_width, 420);
         assert_eq!(read.group_by, GroupBy::Project);
     }
 
@@ -906,38 +1016,6 @@ mod tests {
         assert!(!shared.get().notify_done);
     }
 
-    fn exists_only(paths: &'static [&'static str]) -> impl Fn(&Path) -> bool {
-        move |p| paths.iter().any(|x| Path::new(x) == p)
-    }
-
-    #[test]
-    fn a_saved_herdr_path_that_still_exists_wins() {
-        let r = resolve_with_saved(
-            Some("/opt/mine/herdr"),
-            Some("/opt/homebrew/bin/herdr".into()),
-            Path::new("/Users/dev"),
-            &exists_only(&["/opt/mine/herdr", "/opt/homebrew/bin/herdr"]),
-        );
-        assert_eq!(r.path, Some("/opt/mine/herdr".into()));
-        assert!(!r.saved_missing);
-    }
-
-    #[test]
-    fn a_stale_saved_herdr_path_falls_through_to_discovery_and_is_flagged() {
-        let found = exists_only(&["/opt/homebrew/bin/herdr"]);
-        let r = resolve_with_saved(Some("/gone/herdr"), None, Path::new("/Users/dev"), &found);
-        assert_eq!(r.path, Some("/opt/homebrew/bin/herdr".into()));
-        assert!(r.saved_missing);
-
-        // Nothing saved is not "missing", and nothing found is None.
-        let r = resolve_with_saved(None, None, Path::new("/Users/dev"), &|_| false);
-        assert_eq!((r.path, r.saved_missing), (None, false));
-        let r = resolve_with_saved(Some("/gone/herdr"), None, Path::new("/Users/dev"), &|_| {
-            false
-        });
-        assert_eq!((r.path, r.saved_missing), (None, true));
-    }
-
     #[test]
     fn only_the_live_settings_ask_for_work() {
         let base = Settings::default();
@@ -945,66 +1023,115 @@ mod tests {
         assert_eq!(
             none,
             Changes {
-                intervals: false,
-                herdr_path: false,
+                hidden_workboxes: false,
+                core_path: false,
                 shortcut: false
             }
         );
         let next = base
-            .merged(&json!({"poll_interval_hidden_ms": 5000, "terminal": "kitty", "notify_done": false}))
+            .merged(&json!({"terminal": "kitty", "notify_done": false}))
             .unwrap();
-        assert_eq!(
-            changes(&base, &next),
-            Changes {
-                intervals: true,
-                ..none
-            }
-        );
+        assert_eq!(changes(&base, &next), none);
         let next = base
-            .merged(&json!({"herdr_path": "/opt/herdr", "global_shortcut_enabled": false}))
+            .merged(
+                &json!({"core_path": "/opt/herdr-core/bin/hc", "global_shortcut_enabled": false}),
+            )
             .unwrap();
         assert_eq!(
             changes(&base, &next),
             Changes {
-                herdr_path: true,
+                core_path: true,
                 shortcut: true,
                 ..none
             }
         );
+        let next = base
+            .merged(&json!({"hidden_workboxes": ["buildbox"]}))
+            .unwrap();
+        assert_eq!(
+            changes(&base, &next),
+            Changes {
+                hidden_workboxes: true,
+                ..none
+            }
+        );
     }
 
-    fn fake_herdr(dir: &Path, name: &str, version: &str) -> PathBuf {
+    #[test]
+    fn old_settings_herdr_path_is_dropped() {
+        let read = Settings::from_entries([
+            ("herdr_path".to_owned(), json!("/opt/herdr/bin/herdr")),
+            ("notify_done".to_owned(), json!(false)),
+        ]);
+        assert_eq!(read.core_path, None);
+        assert!(!read.notify_done);
+        // It is never written back, and a patch that still has it is refused.
+        assert!(!read.to_entries().iter().any(|(k, _)| k == "herdr_path"));
+        assert!(
+            read.merged(&json!({"herdr_path": "/opt/herdr/bin/herdr"}))
+                .is_err()
+        );
+    }
+
+    /// A stand-in `hc`: reports `hc 0.1.18` and writes its own path to `log` on `connect`.
+    fn recording_core(dir: &Path, name: &str, log: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let bin = dir.join(name);
-        std::fs::write(&bin, format!("#!/bin/sh\necho 'herdr {version}'\n")).unwrap();
+        let script = format!(
+            "#!/bin/sh\ncase \"$1\" in\n  --version) echo 'hc 0.1.18' ;;\n  connect) echo \"$0\" >> '{}' ;;\nesac\n",
+            log.display()
+        );
+        std::fs::write(&bin, script).unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         bin
     }
 
+    /// What the recording cores logged, once a call has made the client spawn one.
+    async fn spawned(core: &CoreClient, log: &Path) -> Vec<String> {
+        let _ = core.call("local", "machine.list", json!({})).await;
+        std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
     #[tokio::test]
-    async fn locating_points_the_runner_at_the_binary_and_reads_its_version() {
+    async fn changing_core_path_relocates_and_rewires() {
         let dir = tempfile::tempdir().unwrap();
-        let on_path = fake_herdr(dir.path(), "herdr-path", "0.9.3");
-        let chosen = fake_herdr(dir.path(), "herdr-chosen", "0.9.4");
-        let cli = HerdrCli::new(PathBuf::new(), vec![]);
-        let locator = HerdrLocator::new(Some(on_path.clone()), dir.path().to_path_buf());
+        let log = dir.path().join("spawns.log");
+        let first = recording_core(dir.path(), "first-hc", &log);
+        let second = recording_core(dir.path(), "second-hc", &log);
+        let core = CoreClient::new(Arc::new(ProcessConnector {
+            bin: PathBuf::new(),
+            env: Vec::new(),
+        }));
+        let locator = CoreLocator::new();
+        locator.set_login(crate::env::parse_env_output(&format!(
+            "HOME={}\0PATH=/usr/bin:/bin\0",
+            dir.path().display()
+        )));
+        assert!(!locator.is_located());
 
-        let auto = locator.locate(None, &cli).await;
-        assert_eq!(auto.path, Some(on_path.display().to_string()));
-        assert_eq!(auto.version.as_deref(), Some("0.9.3"));
-        assert_eq!(cli.bin(), on_path);
+        let old = Settings::default()
+            .merged(&json!({"core_path": first}))
+            .unwrap();
+        let status = locator.locate(old.core_path.as_deref(), &core).await;
+        assert_eq!(status.path, Some(first.display().to_string()));
+        assert_eq!(status.version.as_deref(), Some("0.1.18"));
+        assert!(!status.saved_missing);
+        assert!(locator.is_located());
+        assert_eq!(spawned(&core, &log).await, [first.display().to_string()]);
 
-        let picked = locator.locate(Some(chosen.to_str().unwrap()), &cli).await;
-        assert_eq!(picked.version.as_deref(), Some("0.9.4"));
-        assert!(!picked.saved_missing);
-        assert_eq!(cli.bin(), chosen);
-        assert_eq!(locator.status(), picked);
-
-        // The saved file is gone: back to discovery, and Settings is told.
-        let stale = locator.locate(Some("/gone/herdr"), &cli).await;
-        assert_eq!(stale.path, Some(on_path.display().to_string()));
-        assert!(stale.saved_missing);
-        assert_eq!(cli.bin(), on_path);
+        // The setting changes: `changes` says to re-locate, and the client spawns the new one.
+        let new = old.merged(&json!({"core_path": second})).unwrap();
+        assert!(changes(&old, &new).core_path);
+        let status = locator.locate(new.core_path.as_deref(), &core).await;
+        assert_eq!(status.path, Some(second.display().to_string()));
+        assert_eq!(locator.status(), status);
+        let seen = spawned(&core, &log).await;
+        assert_eq!(seen.last(), Some(&second.display().to_string()), "{seen:?}");
+        assert_eq!(seen.first(), Some(&first.display().to_string()));
     }
 
     #[test]

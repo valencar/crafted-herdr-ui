@@ -1,14 +1,13 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { groupByProject, toRows } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import { appState, buildboxTerms, machineView } from "../test/builders";
 import { AppSidebar } from "./AppSidebar";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -16,24 +15,10 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   invokeTyped: vi.fn(),
 }));
 
-const state: AppState = {
-  machines: [
-    {
-      id: "buildbox",
-      label: "buildbox",
-      target: "buildbox",
-      session: "default",
-      is_local: false,
-      health: { kind: "online" },
-      snapshot: raw.result.snapshot as unknown as Snapshot,
-      last_ok_ms: 1,
-      ages: {},
-    },
-  ],
-  herdr_version: "0.9.4",
-  herdr_path: "/usr/local/bin/herdr",
-  generated_at_ms: 1,
-};
+const state: AppState = appState(
+  [[{ id: "buildbox", target: "buildbox" }, buildboxTerms()]],
+  { path: "/usr/local/bin/herdr" },
+);
 
 beforeEach(() => {
   useAppStore.setState({
@@ -83,12 +68,10 @@ describe("AppSidebar", () => {
   });
 
   describe("the workbox in use", () => {
-    const gpubox: MachineView = {
-      ...state.machines[0],
-      id: "gpubox",
-      label: "gpubox",
-      target: "gpubox",
-    };
+    const gpubox: MachineView = machineView(
+      { id: "gpubox", target: "gpubox" },
+      buildboxTerms(),
+    );
 
     beforeEach(() => {
       useAppStore.setState({
@@ -106,7 +89,7 @@ describe("AppSidebar", () => {
       act(() =>
         useTerminalStore.getState().openTab({
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "planner",
           machineLabel: "buildbox",
         }),

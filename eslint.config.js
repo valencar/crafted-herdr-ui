@@ -12,4 +12,9 @@ export default tseslint.config(
     files: ["**/*.{ts,tsx}"],
     languageOptions: { globals: { ...globals.browser } },
   },
+  {
+    // Extensionless Node ESM script (the hc test double); eslint skips it unless named.
+    files: ["scripts/fake-hc"],
+    languageOptions: { sourceType: "module", globals: { ...globals.node } },
+  },
 );

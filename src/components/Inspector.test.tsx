@@ -7,15 +7,20 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { toRows } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import {
+  agentTerm,
+  appState,
+  buildboxTerms,
+  machineView,
+} from "../test/builders";
 import { Inspector } from "./Inspector";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -29,25 +34,17 @@ import { copyText, invokeTyped, onPreview } from "../lib/ipc";
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const listen = vi.mocked(onPreview);
 
-const ATTACH = "ssh -t buildbox 'herdr terminal attach term-1'";
+const ATTACH = "hc attach buildbox/t1";
 
-const machine: MachineView = {
-  id: "buildbox",
-  label: "buildbox",
-  target: "buildbox",
-  session: "default",
-  is_local: false,
-  health: { kind: "online" },
-  snapshot: raw.result.snapshot as unknown as Snapshot,
-  last_ok_ms: 1,
-  ages: {},
-};
-const rows = toRows({
-  machines: [machine],
-  herdr_version: "0.9.4",
-  herdr_path: null,
-  generated_at_ms: 1,
-});
+const machine: MachineView = machineView(
+  { id: "buildbox", target: "buildbox" },
+  buildboxTerms(),
+);
+const rows = toRows(
+  appState([[{ id: "buildbox", target: "buildbox" }, buildboxTerms()]], {
+    path: null,
+  }),
+);
 const rowOf = (key: string) => rows.find((r) => r.key === key)!;
 const BLOCKED = rowOf("buildbox::w1:p1");
 const DONE = rowOf("buildbox::w2:p1");
@@ -71,7 +68,10 @@ beforeEach(() => {
   });
 });
 
-function setup(row = BLOCKED) {
+function setup(
+  row = BLOCKED,
+  extra: Partial<ComponentProps<typeof Inspector>> = {},
+) {
   const user = userEvent.setup();
   const copy = vi.mocked(copyText);
   copy.mockReset().mockResolvedValue(undefined);
@@ -81,6 +81,7 @@ function setup(row = BLOCKED) {
       machine={machine}
       project="api-service"
       terminalName="Ghostty"
+      {...extra}
     />,
   );
   return { user, copy, ...view };
@@ -97,46 +98,37 @@ describe("Inspector details", () => {
     expect(grid).toHaveTextContent("Workboxbuildbox · Online");
     expect(grid).toHaveTextContent("Sessiondefault");
     expect(grid).toHaveTextContent("Folder~/projects/api-service");
-    expect(grid).toHaveTextContent("Workspace / tabapi-service · main");
-    expect(grid).toHaveTextContent("Panew1:p1");
+    expect(grid).toHaveTextContent("Terminalw1:p1");
+  });
+
+  it("labels_an_agent_with_no_kind_agent_and_a_shell_shell", () => {
+    const noKind = { ...BLOCKED, kind: null };
+    const { unmount } = setup(noKind);
+    const badges = document.querySelector(".inspector-badges")!;
+    expect(
+      within(badges as HTMLElement).getByText("Agent"),
+    ).toBeInTheDocument();
+    expect(within(badges as HTMLElement).queryByText("Shell")).toBeNull();
+    expect(within(badges as HTMLElement).queryByText("$_")).toBeNull();
+    unmount();
+    setup(SHELL);
+    const shellBadges = document.querySelector(
+      ".inspector-badges",
+    ) as HTMLElement;
+    // The status pill and the kind label both say "Shell".
+    expect(within(shellBadges).getAllByText("Shell")).toHaveLength(2);
+    expect(within(shellBadges).getByText("$_")).toBeInTheDocument();
   });
 
   it("command_box_shows_exact_attach_argv", async () => {
     setup();
-    const box = await screen.findByText(new RegExp("terminal attach term-1"));
+    const box = await screen.findByText(new RegExp("hc attach buildbox/t1"));
     expect(box).toHaveTextContent(`$ ${ATTACH}`);
     expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
-  });
-});
-
-describe("Inspector command box and the attach mode", () => {
-  const settings = (attach_mode: "pane" | "full_ui") =>
-    ({ attach_mode }) as unknown as Settings;
-  const FULL_UI = "/opt/herdr/bin/herdr --remote buildbox";
-
-  it("asks_again_and_shows_the_full_ui_command_when_the_attach_mode_changes", async () => {
-    invoke.mockImplementation(async (name: string) =>
-      name === "copy_attach_command"
-        ? useAppStore.getState().settings?.attach_mode === "full_ui"
-          ? FULL_UI
-          : ATTACH
-        : null,
-    );
-    useAppStore.setState({ settings: settings("pane") });
-    setup();
-    expect(await screen.findByText(/terminal attach term-1/)).toHaveTextContent(
-      `$ ${ATTACH}`,
-    );
-
-    act(() => useAppStore.setState({ settings: settings("full_ui") }));
-    expect(await screen.findByText(/--remote buildbox/)).toHaveTextContent(
-      `$ ${FULL_UI}`,
-    );
-    expect(screen.queryByText(/terminal attach term-1/)).toBeNull();
-    useAppStore.setState({ settings: null });
   });
 });
 
@@ -198,7 +190,7 @@ describe("Inspector reply", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     expect(invoke).toHaveBeenCalledWith("reply_to_agent", {
       machineId: "buildbox",
-      paneId: "w2:p2",
+      address: "w2:p2",
       text: "go ahead",
     });
     await waitFor(() => expect(input).toHaveValue(""));
@@ -217,7 +209,7 @@ describe("Inspector reply", () => {
     await user.type(input, "yes{Enter}");
     expect(invoke).toHaveBeenCalledWith("reply_to_agent", {
       machineId: "buildbox",
-      paneId: "w2:p2",
+      address: "w2:p2",
       text: "yes",
     });
   });
@@ -313,7 +305,8 @@ describe("Inspector actions", () => {
     );
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 
@@ -323,7 +316,8 @@ describe("Inspector actions", () => {
     await user.click(screen.getByRole("button", { name: "Open planner" }));
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
   });
 
@@ -334,7 +328,7 @@ describe("Inspector actions", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "buildbox",
-        paneId: "w2:p1",
+        address: "w2:p1",
       }),
     );
     const names = invoke.mock.calls.map(([n]) => n);
@@ -347,92 +341,24 @@ describe("Inspector actions", () => {
     const { user } = setup();
     await user.click(screen.getByRole("button", { name: "Close" }));
     const dialog = screen.getByRole("dialog");
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
 
     await user.click(screen.getByRole("button", { name: "Close" }));
-    await user.click(screen.getByRole("button", { name: "Close session" }));
-    expect(invoke).toHaveBeenCalledWith("close_pane", {
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
+    expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     });
     expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("rename_validates_name", async () => {
-    const { user } = setup(BLOCKED);
-    await user.click(screen.getByRole("button", { name: "Rename" }));
-    const input = screen.getByLabelText("New name");
-    expect(input).toHaveValue("planner");
-
-    for (const bad of ["Bad Name", "1abc", "has.dot", "a".repeat(33)]) {
-      await user.clear(input);
-      await user.type(input, bad);
-      await user.click(screen.getByRole("button", { name: "Save" }));
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.",
-      );
-    }
-    expect(invoke).not.toHaveBeenCalledWith(
-      "rename_session",
-      expect.anything(),
-    );
-
-    await user.clear(input);
-    await user.type(input, "good_name-2");
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(invoke).toHaveBeenCalledWith("rename_session", {
-      machineId: "buildbox",
-      paneId: "w1:p1",
-      isAgent: true,
-      name: "good_name-2",
-    });
-    await waitFor(() => expect(screen.queryByLabelText("New name")).toBeNull());
-  });
-
-  it("an_agent_name_may_be_32_characters_long", async () => {
-    const { user } = setup(BLOCKED);
-    await user.click(screen.getByRole("button", { name: "Rename" }));
-    const input = screen.getByLabelText("New name");
-    await user.clear(input);
-    await user.type(input, "a".repeat(32));
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(invoke).toHaveBeenCalledWith(
-      "rename_session",
-      expect.objectContaining({ name: "a".repeat(32) }),
-    );
-  });
-
-  it("rename_accepts_any_non_empty_text_for_a_pane", async () => {
-    const { user } = setup(SHELL);
-    await user.click(screen.getByRole("button", { name: "Rename" }));
-    const input = screen.getByLabelText("New name");
-    await user.clear(input);
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Name can’t be empty");
-    expect(invoke).not.toHaveBeenCalledWith(
-      "rename_session",
-      expect.anything(),
-    );
-
-    await user.type(input, "Build Shell #1");
-    await user.keyboard("{Enter}");
-    expect(invoke).toHaveBeenCalledWith("rename_session", {
-      machineId: "buildbox",
-      paneId: "w1:p3",
-      isAgent: false,
-      name: "Build Shell #1",
-    });
-  });
-
-  it("escape_cancels_a_rename", async () => {
-    const { user } = setup();
-    await user.click(screen.getByRole("button", { name: "Rename" }));
-    await user.keyboard("{Escape}");
-    expect(screen.queryByLabelText("New name")).toBeNull();
-    expect(screen.getByRole("button", { name: "Rename" })).toHaveFocus();
   });
 
   it("copy_command_writes_to_the_clipboard_and_says_copied", async () => {
@@ -457,32 +383,196 @@ describe("Inspector actions", () => {
 
   it("mark_seen_is_offered_only_for_done_agents", async () => {
     const first = setup(DONE);
-    await first.user.click(screen.getByRole("button", { name: "Mark seen" }));
+    await first.user.click(
+      screen.getByRole("button", { name: "Mark as seen" }),
+    );
     expect(invoke).toHaveBeenCalledWith("mark_seen", {
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
     first.unmount();
     setup(BLOCKED);
-    expect(screen.queryByRole("button", { name: "Mark seen" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark as seen" })).toBeNull();
   });
 
   it("failed_actions_show_the_error", async () => {
     invoke.mockImplementation(async (name: string) => {
-      if (name === "close_pane") {
+      if (name === "close_terminal") {
         throw {
-          kind: "herdr",
-          error: { kind: "server", code: "x", message: "pane is gone" },
+          kind: "core",
+          error: {
+            kind: "rpc",
+            code: "x",
+            message: "pane is gone",
+            hint: null,
+          },
         };
       }
       return name === "copy_attach_command" ? ATTACH : null;
     });
     const { user } = setup();
     await user.click(screen.getByRole("button", { name: "Close" }));
-    await user.click(screen.getByRole("button", { name: "Close session" }));
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
     await waitFor(() =>
       expect(useAppStore.getState().toast).toBe("pane is gone"),
     );
+  });
+});
+
+describe("Inspector row actions", () => {
+  const stateWithWorkers = (n: number) => {
+    const workers = Array.from({ length: n }, (_, i) =>
+      agentTerm({
+        address: `w3:p${i + 1}`,
+        status: "working",
+        parent: "buildbox/w1:p1",
+      }),
+    );
+    return appState([
+      [
+        { id: "buildbox", target: "buildbox" },
+        [...buildboxTerms(), ...workers],
+      ],
+    ]);
+  };
+  afterEach(() => useAppStore.setState({ state: null }));
+
+  it("close_confirm_names_workers", async () => {
+    // No workers: the spec's sentence alone.
+    useAppStore.setState({ state: stateWithWorkers(0) });
+    const first = setup();
+    await first.user.click(screen.getByRole("button", { name: "Close" }));
+    let dialog = screen.getByRole("dialog", { name: "Close planner?" });
+    expect(dialog).toHaveTextContent(
+      "Ends its program and any workers it started. This can't be undone.",
+    );
+    expect(dialog).not.toHaveTextContent(/It has \d+ workers?\./);
+    first.unmount();
+
+    // Two workers: the count is named.
+    useAppStore.setState({ state: stateWithWorkers(2) });
+    const second = setup();
+    await second.user.click(screen.getByRole("button", { name: "Close" }));
+    dialog = screen.getByRole("dialog", { name: "Close planner?" });
+    expect(dialog).toHaveTextContent(
+      "Ends its program and any workers it started. This can't be undone. It has 2 workers.",
+    );
+    second.unmount();
+
+    // One worker: singular.
+    useAppStore.setState({ state: stateWithWorkers(1) });
+    const third = setup();
+    await third.user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("It has 1 worker.");
+  });
+
+  it("an_ended_terminal_is_removed_after_a_confirmation", async () => {
+    const ended = { ...SHELL, status: "ended" as const };
+    const { user } = setup(ended);
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove zsh?" });
+    expect(dialog).toHaveTextContent("This can't be undone.");
+    expect(invoke).not.toHaveBeenCalledWith(
+      "remove_terminal",
+      expect.anything(),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(invoke).not.toHaveBeenCalledWith(
+      "remove_terminal",
+      expect.anything(),
+    );
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await user.click(screen.getByRole("button", { name: "Remove terminal" }));
+    expect(invoke).toHaveBeenCalledWith("remove_terminal", {
+      machineId: "buildbox",
+      address: "w1:p3",
+    });
+  });
+
+  it("pin_and_keep_toggle_from_the_row", async () => {
+    const first = setup(WORKING);
+    await first.user.click(screen.getByRole("button", { name: "Pin" }));
+    expect(invoke).toHaveBeenCalledWith("set_pinned", {
+      machineId: "buildbox",
+      address: "w1:p2",
+      pinned: true,
+    });
+    first.unmount();
+    setup({ ...WORKING, pinned: true, keep: true });
+    expect(screen.getByRole("button", { name: "Unpin" })).toBeInTheDocument();
+  });
+
+  it("keep_is_in_the_menu_only", () => {
+    // Spec 7.2 puts Keep in the ⋯ menu; the Inspector has no button for it.
+    for (const r of [WORKING, { ...WORKING, keep: true }]) {
+      const { unmount } = setup(r);
+      expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Don't keep" })).toBeNull();
+      unmount();
+    }
+  });
+
+  it("an_ended_row_offers_only_what_works", async () => {
+    const ended = { ...SHELL, status: "ended" as const };
+    const { user } = setup(ended);
+    // No Open (C64), no Copy command (C60: nothing to attach to), no Keep.
+    expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /^More ways to open/ }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy command" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+    expect(document.querySelector(".cmdbox")).toBeNull();
+    // Pin and Remove stay, and the preview is still read: terminal.read works when finished.
+    expect(screen.getByRole("button", { name: "Pin" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("start_preview", {
+        machineId: "buildbox",
+        address: "w1:p3",
+      }),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      "copy_attach_command",
+      expect.anything(),
+    );
+    await user.click(screen.getByRole("button", { name: "Pin" }));
+    expect(invoke).toHaveBeenCalledWith("set_pinned", {
+      machineId: "buildbox",
+      address: "w1:p3",
+      pinned: true,
+    });
+  });
+
+  it("interrupt_and_mark_unread_follow_the_status", async () => {
+    const working = setup(WORKING);
+    invoke.mockImplementation(async (name: string) =>
+      name === "interrupt_terminal" ? "It stopped." : null,
+    );
+    await working.user.click(screen.getByRole("button", { name: "Interrupt" }));
+    expect(invoke).toHaveBeenCalledWith("interrupt_terminal", {
+      machineId: "buildbox",
+      address: "w1:p2",
+    });
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("It stopped."),
+    );
+    expect(screen.queryByRole("button", { name: "Mark as unread" })).toBeNull();
+    working.unmount();
+
+    const idle = setup({ ...IDLE, turn: 2 });
+    expect(screen.queryByRole("button", { name: "Interrupt" })).toBeNull();
+    await idle.user.click(
+      screen.getByRole("button", { name: "Mark as unread" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("mark_unread", {
+      machineId: "buildbox",
+      address: "w2:p2",
+    });
+    idle.unmount();
+    setup({ ...IDLE, turn: 0 });
+    expect(screen.queryByRole("button", { name: "Mark as unread" })).toBeNull();
   });
 });
 
@@ -492,8 +582,7 @@ describe("Inspector live preview", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("start_preview", {
         machineId: "buildbox",
-        paneId: "w1:p1",
-        isAgent: true,
+        address: "w1:p1",
       }),
     );
     unmount();
@@ -508,13 +597,19 @@ describe("Inspector live preview", () => {
           tabs: [
             {
               tabKey: "buildbox::w1:p3",
-              target: { kind: "pane", machineId: "buildbox", paneId: "w1:p3" },
+              target: {
+                kind: "terminal",
+                machineId: "buildbox",
+                address: "w1:p3",
+              },
               title: "shell",
               machineLabel: "buildbox",
               state: "live",
               error: null,
               termId: 1,
               exitCode: null,
+              lastLine: null,
+              waiting: null,
               attempts: 0,
             },
           ],
@@ -546,8 +641,7 @@ describe("Inspector live preview", () => {
       await waitFor(() =>
         expect(invoke).toHaveBeenCalledWith("start_preview", {
           machineId: "buildbox",
-          paneId: "w1:p1",
-          isAgent: true,
+          address: "w1:p1",
         }),
       );
       expect(names()).not.toContain("stop_preview");
@@ -616,8 +710,7 @@ describe("Inspector live preview", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("start_preview", {
         machineId: "buildbox",
-        paneId: "w1:p3",
-        isAgent: false,
+        address: "w1:p3",
       }),
     );
   });
@@ -681,9 +774,81 @@ describe("Inspector live preview", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("start_preview", {
         machineId: "buildbox",
-        paneId: "w2:p2",
-        isAgent: true,
+        address: "w2:p2",
       }),
     );
+  });
+});
+
+describe("Inspector workers and status details", () => {
+  const worker: typeof BLOCKED = {
+    ...DONE,
+    key: "buildbox::w3:p1",
+    address: "w3:p1",
+    name: "linter",
+    status: "blocked",
+    isWorker: true,
+    parent: BLOCKED.key,
+  };
+
+  it("inspector_shows_started_by_and_workers", async () => {
+    // A worker: who started it.
+    const first = setup(worker, { startedBy: BLOCKED });
+    const grid = screen.getByRole("group", { name: "Details" });
+    expect(grid).toHaveTextContent("Started byplanner");
+    expect(screen.queryByText("Workers")).toBeNull();
+    first.unmount();
+
+    // A parent: each worker with its status.
+    const doneWorker = { ...worker, key: "buildbox::w3:p2", name: "fixer" };
+    const workingWorker = {
+      ...worker,
+      key: "buildbox::w3:p3",
+      name: "builder",
+      status: "working" as const,
+    };
+    const second = setup(BLOCKED, {
+      workers: [worker, { ...doneWorker, status: "done" }, workingWorker],
+    });
+    const list = screen.getByRole("list", { name: "Workers" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveTextContent("linter");
+    expect(items[0]).toHaveTextContent("Needs input");
+    expect(items[1]).toHaveTextContent("fixer");
+    // A worker's done is Idle-ranked "Done" (spec section 4.5), never "unseen".
+    expect(items[1]).toHaveTextContent("Done");
+    expect(items[1]).not.toHaveTextContent("Done, unseen");
+    expect(items[2]).toHaveTextContent("builder");
+    expect(items[2]).toHaveTextContent("Working");
+    expect(screen.queryByText("Started by")).toBeNull();
+    // A worker's name selects it.
+    await second.user.click(
+      within(list).getByRole("button", { name: "linter" }),
+    );
+    expect(useAppStore.getState().selectedKey).toBe(worker.key);
+  });
+
+  it("a_plain_agent_shows_neither", () => {
+    setup(BLOCKED);
+    expect(screen.queryByText("Started by")).toBeNull();
+    expect(screen.queryByText("Workers")).toBeNull();
+  });
+
+  it("shows_what_a_blocked_agent_waits_on_and_working_progress", () => {
+    const blocked = {
+      ...BLOCKED,
+      statusKind: "permission",
+      statusMsg: "Run cargo test?",
+    };
+    const first = setup(blocked);
+    const head = document.querySelector(".inspector-head") as HTMLElement;
+    expect(head).toHaveTextContent("Permission");
+    expect(head).toHaveTextContent("Run cargo test?");
+    first.unmount();
+    setup({ ...WORKING, progress: 65 });
+    expect(
+      screen.getByRole("progressbar", { name: "Progress 65%" }),
+    ).toBeInTheDocument();
   });
 });

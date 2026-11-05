@@ -1,0 +1,15 @@
+{"jsonrpc":"2.0","method":"event","params":{"data":{"address":"t16","argv":["codex","--no-daemon"],"cols":200,"created_ms":1767226003300,"cwd":"/home/dev/web-app","die_with_parent":false,"exit_code":null,"finished_ms":null,"identity":"ghostty","keep":false,"labels":{"herdr-ui-qa":"1"},"name":"scratch-agent","notify":true,"parent":null,"pid":4192,"reason":null,"reported":false,"rm":false,"rows":120,"screen":"exact","signal":null,"state":"live","status":null,"status_ms":null,"template":null,"title":"","turn":0},"seq":29,"terminal":"t16","type":"created"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"argv":["codex","--no-daemon"],"cwd":"/home/dev/web-app","name":"codex","pid":4192},"seq":30,"terminal":"t16","type":"foreground"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":{"app":"codex","state":"working","title":"Try things"}},"seq":31,"terminal":"t16","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"title":"codex: try things"},"seq":32,"terminal":"t16","type":"title"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"labels":{"herdr-ui-qa":"1","herdr.seen":"0","note":"qa"}},"seq":33,"terminal":"t16","type":"labels"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"keep":true},"seq":34,"terminal":"t16","type":"keep"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"cols":100,"rows":30},"seq":35,"terminal":"t16","type":"size"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"cols":120,"rows":40},"seq":36,"terminal":"t16","type":"size"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"cols":200,"rows":120},"seq":37,"terminal":"t16","type":"size"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":{"app":"codex","msg":"All done","state":"done","title":"Try things"}},"seq":38,"terminal":"t16","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"state":"done","turn":1},"seq":39,"terminal":"t16","type":"turn"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"keep":false},"seq":40,"terminal":"t16","type":"keep"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":null},"seq":41,"terminal":"t16","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":1767226008217,"reason":"killed","signal":1},"seq":42,"terminal":"t16","type":"finished"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{},"seq":43,"terminal":"t16","type":"removed"}}

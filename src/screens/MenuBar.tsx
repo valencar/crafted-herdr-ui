@@ -1,12 +1,22 @@
 import { Kbd } from "../components/Kbd";
+import { PinGlyph } from "../components/PinGlyph";
 import { HealthDot, StatusDot } from "../components/StatusDot";
 import { useMemo } from "react";
 import { StoreToast } from "../components/Toast";
-import { HEALTH_LABEL, STATUS_LABEL, formatAge, plural } from "../lib/format";
-import { needsYou, projectNames, toRows, type Row } from "../lib/grouping";
+import { HEALTH_LABEL, formatAge, plural } from "../lib/format";
+import {
+  isShell,
+  needsYou,
+  projectNames,
+  shownStatus,
+  sortPinnedFirst,
+  toRows,
+  type Row,
+} from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { defaultOpenHow, openRow } from "../lib/openRow";
 import { useNow } from "../lib/useNow";
+import { shownMachines } from "../lib/workbox";
 import { useTheme } from "../lib/useTheme";
 import { useAppStore } from "../store/appStore";
 
@@ -25,7 +35,7 @@ function RowItem({ row, project, nowMs, primary }: RowItemProps) {
     if (defaultOpenHow() === "app") {
       invokeTyped("show_main_open_row", {
         machineId: row.machineId,
-        paneId: row.paneId,
+        address: row.address,
       }).catch(report);
     } else {
       void openRow(row, "external");
@@ -35,11 +45,14 @@ function RowItem({ row, project, nowMs, primary }: RowItemProps) {
   const detail = [project, row.machineLabel, age].filter(Boolean).join(" · ");
   return (
     <li className="pop-row" data-row-key={row.key}>
-      <StatusDot status={row.status} />
+      <StatusDot status={shownStatus(row).status} />
       <span className="pop-row-text">
-        <span className="pop-row-name">{row.name}</span>
+        <span className="pop-row-name">
+          {row.name}
+          {row.pinned && <PinGlyph />}
+        </span>
         <span className="mono muted pop-row-detail">
-          <span className="pop-row-status">{STATUS_LABEL[row.status]}</span> ·{" "}
+          <span className="pop-row-status">{shownStatus(row).label}</span> ·{" "}
           {detail}
         </span>
       </span>
@@ -68,13 +81,13 @@ export function MenuBar() {
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const projectOf = useMemo(() => projectNames(rows), [rows]);
-  const needs = useMemo(() => needsYou(rows), [rows]);
+  const needs = useMemo(() => sortPinnedFirst(needsYou(rows)), [rows]);
   const working = useMemo(
-    () => rows.filter((r) => r.status === "working"),
+    () => sortPinnedFirst(rows.filter((r) => r.status === "working")),
     [rows],
   );
   const idle = useMemo(() => rows.filter((r) => r.status === "idle"), [rows]);
-  const agentCount = rows.filter((r) => r.status !== "shell").length;
+  const agentCount = rows.filter((r) => !isShell(r)).length;
   const idleNames = [
     ...new Set(idle.map((r) => projectOf.get(r.key) ?? r.name)),
   ].join(", ");
@@ -103,14 +116,18 @@ export function MenuBar() {
         {state && (
           <span className="muted pop-count">
             {plural(agentCount, "agent", "agents")} ·{" "}
-            {plural(state.machines.length, "workbox", "workboxes")}
+            {plural(
+              shownMachines(state.machines).length,
+              "workbox",
+              "workboxes",
+            )}
           </span>
         )}
       </header>
 
       <div className="pop-body">
         {state === null ? (
-          <p className="empty pop-pad">Connecting to herdr…</p>
+          <p className="empty pop-pad">Connecting to herdr-core…</p>
         ) : (
           <>
             <section aria-labelledby="pop-needs">
@@ -165,10 +182,10 @@ export function MenuBar() {
 
       {state && (
         <ul className="pop-boxes" aria-label="Workboxes">
-          {state.machines.map((m) => (
+          {shownMachines(state.machines).map((m) => (
             <li key={m.id} className="health" data-health={m.health.kind}>
               <HealthDot health={m.health} />
-              {m.label}
+              {m.name}
               <span className="sr-only"> {HEALTH_LABEL[m.health.kind]}</span>
             </li>
           ))}

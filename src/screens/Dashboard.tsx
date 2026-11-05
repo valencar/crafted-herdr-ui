@@ -25,6 +25,7 @@ import {
   needsYou,
   projectNamesOf,
   toRows,
+  workerLabel,
   type Row,
 } from "../lib/grouping";
 import { runMenuAction } from "../lib/menuActions";
@@ -38,6 +39,7 @@ import {
 import { useNow } from "../lib/useNow";
 import { useCommandLog } from "../lib/useCommandLog";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
+import { shownMachines } from "../lib/workbox";
 import { useAppStore } from "../store/appStore";
 import { groupTabs } from "../terminal/tabOrder";
 import { useTerminalStore } from "../terminal/terminalStore";
@@ -45,7 +47,7 @@ import { useHomeVisible } from "../terminal/useHomeVisible";
 
 /** The terminal tab limit; the cap itself is `MAX_SESSIONS` in Rust. */
 const MAX_TABS = 16;
-/** Dashboard cards show no terminal preview: reading pane output would be a herdr call each. */
+/** Dashboard cards show no terminal preview: reading terminal output would be a core call each. */
 const NO_LINES: readonly string[] = [];
 const NO_ROWS: Row[] = [];
 const NOOP = () => {};
@@ -121,12 +123,14 @@ export function Dashboard({ narrow = false, visible }: Props) {
     enabled: !narrow,
   });
 
-  const machines = useMemo(() => state?.machines ?? [], [state]);
+  // A hidden workbox is not shown (spec 7.4).
+  const machines = useMemo(() => shownMachines(state?.machines ?? []), [state]);
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const projectOf = useMemo(() => projectNamesOf(groupByProject(rows)), [rows]);
   const counts = statusCounts(rows);
   const needs = useMemo(() => needsYou(rows), [rows]);
-  const blocked = needs.filter((r) => r.status === "blocked");
+  // Blocked and errored agents get a card each (blocked first); done ones a short row.
+  const cards = needs.filter((r) => r.status !== "done");
   const done = needs.filter((r) => r.status === "done");
   const working = useMemo(() => workingNow(rows), [rows]);
   const longest = oldestBlocked(rows);
@@ -139,7 +143,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
 
   const down = online.firstDown;
   const downFoot = down
-    ? `${down.label} ${HEALTH_LABEL[down.health.kind].toLowerCase()}${
+    ? `${down.name} ${HEALTH_LABEL[down.health.kind].toLowerCase()}${
         down.health.kind === "reconnecting"
           ? `, retry in ${Math.ceil(down.health.retry_in_ms / 1000)}s`
           : ""
@@ -147,6 +151,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
     : "All reachable";
 
   const project = (r: Row) => projectOf.get(r.key) ?? null;
+  const rowByKey = useMemo(() => new Map(rows.map((r) => [r.key, r])), [rows]);
   const where = (r: Row) =>
     project(r) ? `${project(r)} · ${r.machineLabel}` : r.machineLabel;
 
@@ -188,9 +193,9 @@ export function Dashboard({ narrow = false, visible }: Props) {
                   <p>Nobody needs you right now.</p>
                 </EmptyState>
               )}
-              {blocked.length > 0 && (
+              {cards.length > 0 && (
                 <div className="cards">
-                  {blocked.map((r) => (
+                  {cards.map((r) => (
                     <NeedsYouCard
                       key={r.key}
                       row={r}
@@ -201,6 +206,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
                       nowMs={nowMs}
                       terminalName={terminalName}
                       previewLines={NO_LINES}
+                      workerLabel={workerLabel(r, rowByKey)}
                       onSelect={(key) => {
                         // From the column beside a terminal the list is behind the terminal.
                         showHome();
@@ -222,7 +228,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
                       const age = formatAge(r.sinceMs, nowMs);
                       return (
                         <li key={r.key} className="dash-row">
-                          <StatusPill status={r.status} />
+                          <StatusPill status={r.status} isWorker={r.isWorker} />
                           <span className="mono dash-name">{r.name}</span>
                           <span className="muted">{where(r)}</span>
                           {age && (
@@ -276,7 +282,7 @@ export function Dashboard({ narrow = false, visible }: Props) {
                 foot={downFoot}
               />
               <MetricTile
-                label="herdr response"
+                label="Core response"
                 value={
                   response.medianMs === null ? "—" : String(response.medianMs)
                 }

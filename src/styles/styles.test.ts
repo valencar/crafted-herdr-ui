@@ -522,8 +522,11 @@ describe("status shapes", () => {
       "idle",
       "unknown",
       "shell",
-      // A terminal tab with no live session (`TabState`) draws its own shape.
       "error",
+      "ended",
+      // A terminal tab with no live session (`TabState`) draws its own shape; a failed one is
+      // "failed", never the agent's "error".
+      "failed",
       "opening",
       "detached",
     ];
@@ -535,11 +538,50 @@ describe("status shapes", () => {
       "pending",
       "reconnecting",
       "attention",
-      "disabled",
+      "hidden",
     ];
     for (const health of healths) {
       expect(selectors, health).toContain(`.sdot[data-health="${health}"]`);
     }
+  });
+
+  it("status_dot_error_uses_needs_shape_and_danger", () => {
+    // The needs shape (a filled dot with a static halo and a pulse while live) in --danger.
+    const dot = rule('.sdot[data-status="error"]');
+    expect(dot).toMatch(/background:\s*var\(--danger\)/);
+    expect(dot).toMatch(/border-color:\s*var\(--danger\)/);
+    expect(dot).toContain("box-shadow");
+    expect(dot).toContain("var(--danger)");
+    const pulse = rule('.sdot[data-status="error"].live::after');
+    expect(pulse).toMatch(/background:\s*var\(--danger\)/);
+    expect(pulse).toContain("animation: st-pulse 1.6s");
+    // The pulse stops under reduced motion, and the halo does not depend on it.
+    expect(stripComments(read("global.css"))).toContain(
+      '.sdot[data-status="error"].live::after',
+    );
+    // The blocked dot keeps the same geometry, so the two differ by colour and by words only.
+    const blocked = rule('.sdot[data-status="blocked"]');
+    expect(blocked).toContain("box-shadow");
+  });
+
+  it("a_failed_tab_dot_is_a_static_hollow_danger_ring", () => {
+    const dot = rule('.sdot[data-status="failed"]');
+    expect(dot).toMatch(/border-color:\s*var\(--danger\)/);
+    expect(dot).not.toMatch(/background/);
+    expect(dot).not.toContain("box-shadow");
+    expect(dot).not.toMatch(/animation/);
+    expect(selectors).not.toContain('.sdot[data-status="failed"].live');
+    expect(selectors).not.toContain('.sdot[data-status="failed"].live::after');
+  });
+
+  it("ended_is_a_static_hollow_square_in_text_3", () => {
+    const dot = rule('.sdot[data-status="ended"]');
+    expect(dot).toMatch(/border-color:\s*var\(--text-3\)/);
+    expect(dot).toMatch(/background:\s*transparent/);
+    expect(dot).toMatch(/border-radius:\s*2px/);
+    // Static: no loop, even when a mount site passes `live`.
+    expect(selectors).not.toContain('.sdot[data-status="ended"].live');
+    expect(dot).not.toMatch(/animation/);
   });
 
   it("blocked_keeps_a_static_halo", () => {
@@ -842,6 +884,82 @@ describe("light theme", () => {
           ratio(lc(text), under),
           `${selector}: ${text} on ${percent}% ${fill} over ${surface}`,
         ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("error_and_ended_meet_contrast", () => {
+    const themes: Array<[string, Record<string, string>]> = [
+      ["dark", dark],
+      ["light", light],
+    ];
+    const surfaces = ["--bg", "--panel", "--panel-2", "--card"];
+    // Each rule that paints the status over a tint of a token, read from app.css itself.
+    const pillOf = (status: string) => {
+      const body = rule(`.pill[data-status="${status}"]`);
+      const text = /(?:^|[\s;])color:\s*var\((--[\w-]+)\)/.exec(body)?.[1];
+      const fill =
+        /background:\s*color-mix\(in srgb,\s*var\((--[\w-]+)\)\s*(\d+)%,\s*transparent\)/.exec(
+          body,
+        );
+      expect(text, `pill ${status} text`).toBeDefined();
+      return { text: text!, fill: fill?.[1], percent: Number(fill?.[2] ?? 0) };
+    };
+    const dotColor = (status: string) =>
+      /border-color:\s*var\((--[\w-]+)\)/.exec(
+        rule(`.sdot[data-status="${status}"]`),
+      )?.[1];
+    for (const [theme, block] of themes) {
+      const c = (token: string) => parseHex(block[token]);
+      for (const status of ["error", "ended"]) {
+        const pill = pillOf(status);
+        const dot = dotColor(status);
+        expect(dot, `dot ${status}`).toBeDefined();
+        for (const surface of surfaces) {
+          expect(
+            ratio(c(pill.text), c(surface)),
+            `${theme}: ${pill.text} on ${surface}`,
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(
+            ratio(c(dot!), c(surface)),
+            `${theme}: dot ${dot} on ${surface}`,
+          ).toBeGreaterThanOrEqual(4.5);
+          if (pill.fill) {
+            expect(
+              ratio(c(pill.text), tint(c(pill.fill), c(surface), pill.percent)),
+              `${theme}: ${status} words on ${pill.percent}% ${pill.fill} over ${surface}`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+      }
+      // The failed tab ring is --danger over the surfaces it sits on.
+      for (const surface of surfaces) {
+        expect(
+          ratio(c("--danger"), c(surface)),
+          `${theme}: failed ring on ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+      // The ended segment is a different token from idle's, with a different value, so the
+      // two neighbouring segments read apart.
+      const segToken = (status: string) =>
+        /background:\s*var\((--[\w-]+)\)/.exec(
+          rule(`.status-bar-seg[data-status="${status}"]`),
+        )?.[1];
+      expect(segToken("ended")).not.toBe(segToken("idle"));
+      expect(
+        block[segToken("ended")!],
+        `${theme}: ended vs idle segment`,
+      ).not.toBe(block[segToken("idle")!]);
+      // The ended bar segment is drawn over the bar's track; it must show.
+      for (const status of ["error", "ended"]) {
+        const seg = /background:\s*var\((--[\w-]+)\)/.exec(
+          rule(`.status-bar-seg[data-status="${status}"]`),
+        )?.[1];
+        expect(seg, `segment ${status}`).toBeDefined();
+        expect(
+          ratio(c(seg!), c("--segment")),
+          `${theme}: segment ${status} on the track`,
+        ).toBeGreaterThanOrEqual(3);
       }
     }
   });

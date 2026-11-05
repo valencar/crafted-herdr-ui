@@ -46,8 +46,8 @@ export function runMenuAction(id: MenuId): void {
       break;
     case "activity": {
       const { state: current, activityOpen: open } = useAppStore.getState();
-      // Without herdr there is no command log to show.
-      if (current?.herdr_path !== null) {
+      // Without herdr-core there is no command log to show.
+      if (current?.core_path !== null) {
         useAppStore.getState().setActivityOpen(!open);
       }
       break;

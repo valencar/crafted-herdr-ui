@@ -7,12 +7,26 @@ import { actionErrorMessage } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { toActionError } from "../lib/ipc";
 
-export type GroupBy = "project" | "workbox" | "status";
+export type GroupBy = "project" | "workbox" | "status" | "space";
 export type Sheet = null | "new-session" | "add-workbox";
 /** What a "+ Session" button already knows: the project's workbox and folder. */
 export type SheetPrefill = { machineId?: string; folder?: string };
-/** A just-created pane to open in the terminal once the state lists it. */
-export type PendingOpen = { key: string; machineId: string; paneId: string };
+/** A just-created terminal to open in the terminal once the state lists it. */
+export type PendingOpen = { key: string; machineId: string; address: string };
+/**
+ * An add the app is waiting to see in the machine list: either it knows the new machine's `id`
+ * (the core said so), or it knows the `target` the machine will have (a terminal is adding it)
+ * and that it is none of `knownIds`. `tabMachineId` is the pseudo-machine of the in-app tab
+ * that does the adding, if there is one. `awaited`: a direct add that finished while its sheet
+ * was still open, so the person is waiting for it wherever the active tab is (Ruling C78).
+ */
+export type PendingAdd = {
+  id: string | null;
+  target: string;
+  knownIds: string[];
+  tabMachineId: string | null;
+  awaited: boolean;
+};
 export type ToastTone = "info" | "error";
 /** What the Home tab shows: the Dashboard, the All agents list, or one workbox's screen. */
 export type View =
@@ -31,7 +45,7 @@ type AppStore = {
   state: AppState | null;
   /** The saved settings; `null` until they have been read (screens then use the defaults). */
   settings: Settings | null;
-  /** A row key, `${machineId}::${paneId}`. */
+  /** A row key, `${machineId}::${address}`. */
   selectedKey: string | null;
   groupBy: GroupBy;
   /** What the header's search box holds. Home filters its list by it; the box is the app's. */
@@ -46,10 +60,12 @@ type AppStore = {
   /** The ⌘/ keyboard shortcuts sheet is showing. */
   shortcutsOpen: boolean;
   /**
-   * A pane the user asked to close from somewhere that unmounts as it asks (the palette). `App`
+   * A terminal the user asked to close from somewhere that unmounts as it asks (the palette). `App`
    * renders the confirmation for it (`ClosePaneHost`), so the dialog outlives the asker.
    */
   closeRow: Row | null;
+  /** The workbox whose "Clear ended" was asked for from the palette; `App` confirms it the same way. */
+  clearEndedId: string | null;
   /** Where focus goes when that confirmation ends: the control the asker was opened from. */
   closeReturn: HTMLElement | null;
   /**
@@ -74,6 +90,8 @@ type AppStore = {
   pendingOpen: PendingOpen | null;
   /** The latest live-preview frame for the selected row. */
   preview: PreviewFrame | null;
+  /** The add `AddWatcher` is waiting for; it outlives the Add workbox sheet. */
+  pendingAdd: PendingAdd | null;
   setState: (state: AppState) => void;
   setSettings: (settings: Settings) => void;
   /** A notification was clicked: show All agents with that row selected. */
@@ -88,6 +106,10 @@ type AppStore = {
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setCloseRow: (row: Row | null, returnTo?: HTMLElement | null) => void;
+  setClearEnded: (
+    machineId: string | null,
+    returnTo?: HTMLElement | null,
+  ) => void;
   dismissVersionBanner: (version: string) => void;
   /** Shows an action error. Every report restarts the auto-dismiss timer. */
   reportError: (e: unknown) => void;
@@ -99,6 +121,7 @@ type AppStore = {
   closeDialog: () => void;
   setPendingSelectKey: (key: string | null) => void;
   setPendingOpen: (open: PendingOpen | null) => void;
+  setPendingAdd: (add: PendingAdd | null) => void;
 };
 
 /** Marks a modal as open for as long as the calling component is mounted. */
@@ -146,6 +169,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   paletteOpen: false,
   shortcutsOpen: false,
   closeRow: null,
+  clearEndedId: null,
   closeReturn: null,
   dismissedVersion: null,
   toast: null,
@@ -154,6 +178,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   dialogOpen: 0,
   pendingSelectKey: null,
   pendingOpen: null,
+  pendingAdd: null,
   setState: (state) => set({ state }),
   setSettings: (settings) => set({ settings }),
   // The saved search goes too: a row it filters out would be selected but not on the page.
@@ -171,6 +196,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setCloseRow: (closeRow, returnTo = null) =>
     set({ closeRow, closeReturn: closeRow ? returnTo : null }),
+  setClearEnded: (clearEndedId, returnTo = null) =>
+    set({ clearEndedId, closeReturn: clearEndedId ? returnTo : null }),
   dismissVersionBanner: (dismissedVersion) => set({ dismissedVersion }),
   reportError: (e) => {
     get().showToast(actionErrorMessage(toActionError(e)), "error");
@@ -198,4 +225,5 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (pendingOpen !== null) armPending(get, set);
     else settlePending(get);
   },
+  setPendingAdd: (pendingAdd) => set({ pendingAdd }),
 }));

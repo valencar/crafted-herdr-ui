@@ -27,7 +27,7 @@ export function Header({
         </span>
         {herdrVersion && (
           <span className="mono muted brand-version" data-tauri-drag-region>
-            for herdr {herdrVersion}
+            for herdr-core {herdrVersion}
           </span>
         )}
       </div>

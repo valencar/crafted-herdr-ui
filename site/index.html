@@ -942,7 +942,7 @@
             >
           </div>
           <p class="tag meta">
-            v{{VERSION}} · macOS 13 or later · Apple Silicon and Intel · needs herdr 0.9 or later
+            v{{VERSION}} · macOS 13 or later · Apple Silicon and Intel · needs herdr-core 0.1.17 or later
           </p>
           <picture>
             <source
@@ -1002,7 +1002,7 @@
                 <p class="row-label">02 · Terminals</p>
                 <h3>Terminals, in tabs.</h3>
                 <p>
-                  Attach any pane in a tab inside the app, or in Ghostty, iTerm2, Warp, WezTerm,
+                  Attach any terminal in a tab inside the app, or in Ghostty, iTerm2, Warp, WezTerm,
                   Kitty, Alacritty or Terminal. Closing a tab only detaches — the agent keeps
                   running.
                 </p>
@@ -1083,10 +1083,11 @@
           <header class="head">
             <p class="kicker">Nothing hidden</p>
             <div>
-              <h2 class="display">Just your <em>herdr CLI.</em></h2>
+              <h2 class="display">Just your <em>herdr-core.</em></h2>
               <p class="lead">
-                No private protocol, no socket access. Crafted Herdr drives the public herdr CLI you
-                already have installed, and passes <code>--machine</code> for remote workboxes.
+                Only herdr-core's public interfaces: the <code>hc</code> command line and its
+                documented JSON-RPC API. Crafted Herdr talks to the core you already have installed,
+                and the core relays every remote workbox.
               </p>
             </div>
           </header>
@@ -1098,15 +1099,15 @@
                   <span class="tag mono">Activity · commands run</span>
                 </div>
               </div>
-              <pre><span class="p">$ </span>herdr api snapshot
-<span class="p">$ </span>herdr machine list --json
-<span class="p">$ </span>herdr terminal attach &lt;terminal_id&gt;
-<span class="p">$ </span>herdr agent prompt &lt;pane&gt; "&lt;text&gt;"</pre>
+              <pre><span class="p">$ </span>hc machine ls
+<span class="p">$ </span>hc attach buildbox/t7
+<span class="p">$ </span>hc attach --observe buildbox/t7
+<span class="p">$ </span>hc send buildbox/t7 "&lt;text&gt;"</pre>
             </div>
             <ul class="points">
               <li>Every command it runs is listed in the Activity drawer (⇧⌘A), with a Copy button.</li>
               <li>
-                It never answers a blocked agent for you, and never passes <code>--takeover</code>
+                It never answers a blocked agent for you, and never installs or updates a core
                 without your click.
               </li>
             </ul>
@@ -1187,8 +1188,10 @@
               <p class="kicker">Install</p>
               <h2 class="display">Herd them <em>all.</em></h2>
               <p class="lead">
-                Crafted Herdr drives the <a href="https://herdr.dev"><u>herdr</u></a> you already
-                have. It never installs or upgrades herdr, so install herdr first.
+                Crafted Herdr talks to the <a href="https://herdr.dev"><u>herdr-core</u></a> you
+                already have. It never installs or upgrades it, so install it first:
+                <code>curl -fsSL https://releases.herdr.dev/core/install.sh | sh</code> (there is no
+                Homebrew formula for it).
               </p>
             </div>
             <div class="install-main">

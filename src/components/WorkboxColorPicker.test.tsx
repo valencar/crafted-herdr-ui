@@ -9,23 +9,22 @@ import { useAppStore } from "../store/appStore";
 
 vi.mock("../lib/ipc", () => ({ invokeTyped: vi.fn() }));
 import { invokeTyped } from "../lib/ipc";
+import { machineView } from "../test/builders";
 import { WorkboxColorPicker } from "./WorkboxColorPicker";
 import { WorkboxSummary } from "./WorkboxSummary";
 
 const invoke = vi.mocked(invokeTyped);
 
 function machine(id: string): MachineView {
-  return {
-    id,
-    label: id,
-    target: id === "local" ? null : id,
-    session: "default",
-    is_local: id === "local",
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: 0,
-    ages: {},
-  };
+  return machineView(
+    {
+      id,
+      target: id === "local" ? null : id,
+      isLocal: id === "local",
+      lastOkMs: 0,
+    },
+    null,
+  );
 }
 
 beforeEach(() => {
@@ -60,16 +59,15 @@ describe("WorkboxColorPicker", () => {
     render(
       <WorkboxSummary
         machine={machine("local")}
-        counts={{ workspaces: 0, sessions: 0, agents: 0, needsYou: 0 }}
+        counts={{ sessions: 0, agents: 0, needsYou: 0 }}
         nowMs={0}
-        checkedAtMs={null}
-        checkError={null}
-        checking={false}
-        onReconnect={noop}
-        onCheck={noop}
+        coreVersion={null}
+        connecting={false}
+        onConnect={noop}
+        onLogIn={noop}
+        onUpdate={noop}
         onRename={noop}
-        onDisable={noop}
-        onEnable={noop}
+        onHide={noop}
         onRemove={noop}
       />,
     );

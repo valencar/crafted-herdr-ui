@@ -55,7 +55,8 @@ export function useHomeShortcuts({
           invokeTyped("refresh_now", {}).catch(report);
         } else if (e.key === "Enter" && onHome && actionRow) {
           e.preventDefault();
-          openRow(actionRow);
+          // A finished terminal has nothing to open.
+          if (actionRow.status !== "ended") openRow(actionRow);
         }
         return;
       }

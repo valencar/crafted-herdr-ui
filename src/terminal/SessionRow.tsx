@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { projectNames, type Row } from "../lib/grouping";
+import { projectNames, shownStatus, type Row } from "../lib/grouping";
 import { canOpenNewSession } from "../lib/newSessionTarget";
 import { useWorkboxColor } from "../lib/workboxColors";
 import { useAppStore } from "../store/appStore";
@@ -22,7 +22,7 @@ import {
   tabSubline,
 } from "./tabInfo";
 import { tabShortcut, type TabGroup } from "./tabOrder";
-import { useTerminalStore } from "./terminalStore";
+import { rowKeyOf, useTerminalStore } from "./terminalStore";
 import { useTabDrag } from "./useTabDrag";
 
 const NO_MACHINES: never[] = [];
@@ -102,14 +102,20 @@ export function SessionRow({
     >
       <div className="session-row-scroll" ref={scrollRef}>
         {group.tabs.map((tab) => {
-          const row = rows.get(tab.tabKey);
+          const row = rows.get(rowKeyOf(tab.tabKey));
           const active = tab.tabKey === activeKey;
-          // Only a tab blocked on the user is tinted; a finished one is not (spec 2.2).
-          const needs = row?.status === "blocked";
+          // Only a tab blocked or errored (what `countNeeds` counts) is tinted; a finished one
+          // is not (spec 2.2).
+          const needs = row?.status === "blocked" || row?.status === "error";
           const n = tabShortcut(tab.tabKey, allTabs, machines);
           const shortcut = n === null ? null : tabShortcutId(n);
-          const sub = tabSubline(tab, row, projects.get(tab.tabKey) ?? null);
-          const status = row?.status;
+          const sub = tabSubline(
+            tab,
+            row,
+            projects.get(rowKeyOf(tab.tabKey)) ?? null,
+          );
+          // A worker's done takes Idle's (no) tone, as everywhere (`shownStatus`).
+          const status = row && shownStatus(row).status;
           return (
             <Fragment key={tab.tabKey}>
               {drag.dragging && drag.dropBefore === tab.tabKey && dropLine}
@@ -150,7 +156,7 @@ export function SessionRow({
                       <span
                         className="session-tab-sub"
                         data-tone={
-                          status === "blocked"
+                          status === "blocked" || status === "error"
                             ? "needs"
                             : status === "done"
                               ? "done"

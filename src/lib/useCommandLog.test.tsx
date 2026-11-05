@@ -19,6 +19,9 @@ const entry = (atMs: number): CommandLogEntry => ({
   durationMs: 12,
   error: null,
   note: null,
+  method: "machine.list",
+  display: "hc machine ls",
+  quiet: true,
 });
 
 const hide = (hidden: boolean) =>

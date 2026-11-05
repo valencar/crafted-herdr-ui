@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "hc machine ls shows when it comes back",
+      "kind": "unavailable"
+    },
+    "message": "devbox is unreachable: cannot reach dev@devbox.example: ssh: Could not resolve hostname devbox.example: Name or service not known"
+  }
+}

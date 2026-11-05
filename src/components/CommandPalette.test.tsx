@@ -10,12 +10,17 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { groupByProject, toRows } from "../lib/grouping";
+import { formatShortcut } from "../lib/shortcuts";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import { useAppStore } from "../store/appStore";
+import {
+  agentTerm,
+  appState,
+  buildboxTerms,
+  machineView,
+} from "../test/builders";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { ClosePaneHost } from "./ClosePaneHost";
 import { CommandPalette } from "./CommandPalette";
@@ -42,25 +47,10 @@ vi.mock("../terminal/Workspace", () => ({
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
-const snapshot = raw.result.snapshot as unknown as Snapshot;
-const state: AppState = {
-  machines: [
-    {
-      id: "buildbox",
-      label: "buildbox",
-      target: "buildbox",
-      session: "default",
-      is_local: false,
-      health: { kind: "online" },
-      snapshot,
-      last_ok_ms: 1,
-      ages: {},
-    },
-  ],
-  herdr_version: "0.9.4",
-  herdr_path: "/usr/local/bin/herdr",
-  generated_at_ms: 1,
-};
+const state: AppState = appState(
+  [[{ id: "buildbox", target: "buildbox" }, buildboxTerms()]],
+  { path: "/usr/local/bin/herdr" },
+);
 
 const onClose = vi.fn();
 
@@ -109,6 +99,7 @@ afterEach(() => {
     settings: null,
     sheet: null,
     closeRow: null,
+    clearEndedId: null,
     closeReturn: null,
   });
 });
@@ -236,13 +227,19 @@ describe("CommandPalette", () => {
         tabs: [
           {
             tabKey: "buildbox::w1:p1",
-            target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+            target: {
+              kind: "terminal",
+              machineId: "buildbox",
+              address: "w1:p1",
+            },
             title: "planner",
             machineLabel: "buildbox",
             state: "live",
             error: null,
             termId: 1,
             exitCode: null,
+            lastLine: null,
+            waiting: null,
             attempts: 0,
           },
         ],
@@ -278,7 +275,8 @@ describe("CommandPalette", () => {
       await user.keyboard("{Meta>}{Enter}{/Meta}");
       expect(invoke).toHaveBeenCalledWith("open_session", {
         machineId: "buildbox",
-        paneId: "w1:p1",
+        address: "w1:p1",
+        observe: false,
       });
       expect(useTerminalStore.getState().activeKey).toBe(HOME);
     });
@@ -524,11 +522,63 @@ describe("CommandPalette agent frame", () => {
       "Open in Ghostty",
       "Reply…",
       "Copy attach command",
+      "Copy address",
+      "Watch (read-only)",
       "Mark as seen",
+      "Pin",
+      "Keep",
       "Show in All agents",
-      "Close pane…",
+      "Close…",
     ]);
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("a_late_open_in_herdr_keeps_the_highlighted_action", async () => {
+    let answer: (open: boolean) => void = () => {};
+    invoke.mockImplementation((name: string) =>
+      name === "herdr_app_status"
+        ? new Promise<boolean>((resolve) => (answer = resolve))
+        : Promise.resolve(null),
+    );
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    // Down to "Mark as seen", the 7th action before Herdr's answer is in.
+    await user.keyboard("{ArrowDown}".repeat(6));
+    const selected = () =>
+      screen
+        .getAllByRole("option")
+        .find((o) => o.getAttribute("aria-selected") === "true")
+        ?.querySelector(".palette-label")?.textContent;
+    expect(selected()).toBe("Mark as seen");
+    expect(labels()).not.toContain("Open in Herdr");
+
+    // The answer inserts "Open in Herdr" above it: the highlight stays on what the person chose.
+    await act(async () => answer(true));
+    await waitFor(() => expect(labels()).toContain("Open in Herdr"));
+    expect(selected()).toBe("Mark as seen");
+    await user.keyboard("{Enter}");
+    expect(invoke).toHaveBeenCalledWith("mark_seen", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("open_in_herdr", expect.anything());
+  });
+
+  it("an_ended_agents_frame_never_asks_herdr", async () => {
+    useAppStore.setState({
+      state: appState(
+        [
+          [
+            { id: "buildbox", target: "buildbox" },
+            buildboxTerms({ "w2:p1": { status: "ended" } }),
+          ],
+        ],
+        { path: "/usr/local/bin/herdr" },
+      ),
+    });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    expect(labels()[0]).toBe("Copy address");
+    expect(invoke).not.toHaveBeenCalledWith("herdr_app_status");
   });
 
   it("tab_on_a_command_does_nothing", async () => {
@@ -612,14 +662,14 @@ describe("CommandPalette agent frame", () => {
     await user.type(screen.getByRole("combobox"), "tester");
     await user.keyboard("{Tab}");
     expect(frameEl()).toHaveClass("is-switched");
-    // The divider above Close pane… is drawn by CSS: every child of the list is an option.
+    // The divider above Close… is drawn by CSS: every child of the list is an option.
     const list = screen.getByRole("listbox");
     expect(
       [...list.children].every((c) => c.getAttribute("role") === "option"),
     ).toBe(true);
     const last = list.lastElementChild;
     expect(last).toHaveClass("is-danger");
-    expect(last).toHaveTextContent("Close pane…");
+    expect(last).toHaveTextContent("Close…");
     await user.keyboard("{Backspace}");
     expect(frameEl()).toHaveClass("is-switched");
   });
@@ -635,13 +685,15 @@ describe("CommandPalette agent frame", () => {
       tabs: [
         {
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "planner",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: 1,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],
@@ -654,7 +706,8 @@ describe("CommandPalette agent frame", () => {
     await user.click(screen.getByRole("option", { name: /Open in Ghostty/ }));
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
     expect(useTerminalStore.getState().activeKey).toBe(HOME);
     cleanup();
@@ -689,7 +742,12 @@ describe("CommandPalette agent frame", () => {
     useAppStore.setState({
       state: {
         ...state,
-        machines: [{ ...state.machines[0], label: "🔧 api-service" }],
+        machines: [
+          machineView(
+            { id: "buildbox", name: "🔧 api-service", target: "buildbox" },
+            buildboxTerms(),
+          ),
+        ],
       },
     });
     const user = open();
@@ -705,6 +763,36 @@ describe("CommandPalette agent frame", () => {
     expect([...(marks ?? [])].map((m) => m.textContent)).toEqual(["api"]);
   });
 
+  it("a_workers_done_is_drawn_with_idles_dot_in_the_list", async () => {
+    useAppStore.setState({
+      state: appState([
+        [
+          { id: "buildbox", target: "buildbox" },
+          [
+            ...buildboxTerms(),
+            agentTerm({
+              address: "w9:p1",
+              status: "done",
+              name: "fixer",
+              parent: "buildbox/w1:p1",
+            }),
+          ],
+        ],
+      ]),
+    });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "fixer");
+    const option = screen
+      .getAllByRole("option")
+      .find((o) => o.querySelector(".palette-label")?.textContent === "fixer");
+    expect(option?.querySelector(".sdot")).toHaveAttribute(
+      "data-status",
+      "idle",
+    );
+    expect(option).toHaveTextContent("Done");
+    expect(option).not.toHaveTextContent("Done, unseen");
+  });
+
   it("the_selected_option_shows_its_keys_and_the_footer_lists_tab", async () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "tester");
@@ -717,7 +805,8 @@ describe("CommandPalette agent frame", () => {
     expect(screen.getAllByRole("option")[0]).toHaveTextContent("↵ Open");
     expect(screen.getAllByRole("option")[0]).not.toHaveTextContent("Actions");
     expect(document.querySelector(".palette-hint")).toHaveTextContent(
-      "Move · ↵ Open · ⌘↩ Open in Ghostty · ⇥ Actions · esc Close",
+      // A command has no second way to open, so the footer names none.
+      "Move · ↵ Open · ⇥ Actions · esc Close",
     );
   });
 
@@ -748,7 +837,7 @@ describe("CommandPalette agent frame", () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "tester");
     await user.keyboard("{Tab}copy");
-    expect(labels()).toEqual(["Copy attach command"]);
+    expect(labels()).toEqual(["Copy attach command", "Copy address"]);
   });
 
   it("the_frame_footer_names_what_cmd_enter_does_in_the_frame", async () => {
@@ -762,13 +851,15 @@ describe("CommandPalette agent frame", () => {
       tabs: [
         {
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "planner",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: 1,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],
@@ -793,13 +884,15 @@ describe("CommandPalette agent frame", () => {
       tabs: [
         {
           tabKey: "buildbox::w1:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
           title: "planner",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: 1,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],
@@ -830,7 +923,7 @@ describe("CommandPalette agent frame", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("close_pane_closes_palette_and_confirms", async () => {
+  it("close_closes_palette_and_confirms", async () => {
     const user = userEvent.setup();
     render(
       <>
@@ -840,16 +933,19 @@ describe("CommandPalette agent frame", () => {
     );
     await user.type(screen.getByRole("combobox"), "tester");
     await user.keyboard("{Tab}");
-    await user.click(screen.getByRole("option", { name: /Close pane…/ }));
+    await user.click(screen.getByRole("option", { name: /Close…/ }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("combobox")).toBeNull();
     // The palette is gone, and the confirmation is still there.
     expect(screen.getByText("Close tester?")).toBeInTheDocument();
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
-    await user.click(screen.getByRole("button", { name: "Close session" }));
-    expect(invoke).toHaveBeenCalledWith("close_pane", {
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
+    expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
     expect(useAppStore.getState().closeRow).toBeNull();
   });
@@ -867,7 +963,7 @@ describe("CommandPalette agent frame", () => {
     );
     await user.type(screen.getByRole("combobox"), "tester");
     await user.keyboard("{Tab}");
-    await user.click(screen.getByRole("option", { name: /Close pane…/ }));
+    await user.click(screen.getByRole("option", { name: /Close…/ }));
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(before).toHaveFocus());
@@ -886,8 +982,8 @@ describe("CommandPalette agent frame", () => {
     );
     await user.type(screen.getByRole("combobox"), "tester");
     await user.keyboard("{Tab}");
-    await user.click(screen.getByRole("option", { name: /Close pane…/ }));
-    await user.click(screen.getByRole("button", { name: "Close session" }));
+    await user.click(screen.getByRole("option", { name: /Close…/ }));
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
     await waitFor(() => expect(again).toHaveFocus());
   });
 
@@ -903,11 +999,122 @@ describe("CommandPalette agent frame", () => {
     );
     await user.type(screen.getByRole("combobox"), "tester");
     await user.keyboard("{Tab}");
-    await user.click(screen.getByRole("option", { name: /Close pane…/ }));
+    await user.click(screen.getByRole("option", { name: /Close…/ }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() =>
       expect(screen.getByRole("searchbox", { name: "Search" })).toHaveFocus(),
     );
+  });
+
+  it("row_actions_run_from_the_frame", async () => {
+    const user = userEvent.setup();
+    invoke.mockImplementation(async (name: string) =>
+      name === "interrupt_terminal" ? "It stopped." : null,
+    );
+    render(<Harness />);
+    await user.type(screen.getByRole("combobox"), "copilot");
+    await user.keyboard("{Tab}");
+    expect(labels()).toContain("Interrupt");
+    await user.click(screen.getByRole("option", { name: /Interrupt/ }));
+    expect(invoke).toHaveBeenCalledWith("interrupt_terminal", {
+      machineId: "buildbox",
+      address: "w1:p2",
+    });
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("It stopped."),
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("pin_runs_from_the_frame", async () => {
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    await user.click(screen.getByRole("option", { name: /^Pin/ }));
+    expect(invoke).toHaveBeenCalledWith("set_pinned", {
+      machineId: "buildbox",
+      address: "w2:p1",
+      pinned: true,
+    });
+  });
+
+  it("an_ended_terminal_is_removed_after_the_palette_closes", async () => {
+    useAppStore.setState({
+      state: appState(
+        [
+          [
+            { id: "buildbox", target: "buildbox" },
+            buildboxTerms({ "w2:p1": { status: "ended" } }),
+          ],
+        ],
+        { path: "/usr/local/bin/herdr" },
+      ),
+    });
+    const user = userEvent.setup();
+    render(
+      <>
+        <Harness />
+        <ClosePaneHost />
+      </>,
+    );
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    expect(labels()).toEqual([
+      "Copy address",
+      "Pin",
+      "Show in All agents",
+      "Remove…",
+    ]);
+    await user.click(screen.getByRole("option", { name: /Remove…/ }));
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByText("Remove tester?")).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith(
+      "remove_terminal",
+      expect.anything(),
+    );
+    await user.click(screen.getByRole("button", { name: "Remove terminal" }));
+    expect(invoke).toHaveBeenCalledWith("remove_terminal", {
+      machineId: "buildbox",
+      address: "w2:p1",
+    });
+  });
+
+  it("clear_ended_is_a_command_only_for_a_workbox_with_ended_terminals", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<Harness />);
+    await user.type(screen.getByRole("combobox"), "clear ended");
+    expect(screen.queryByRole("option", { name: /Clear ended/ })).toBeNull();
+    unmount();
+
+    useAppStore.setState({
+      state: appState(
+        [
+          [
+            { id: "buildbox", target: "buildbox" },
+            buildboxTerms({ "w2:p1": { status: "ended" } }),
+          ],
+        ],
+        { path: "/usr/local/bin/herdr" },
+      ),
+    });
+    render(
+      <>
+        <Harness />
+        <ClosePaneHost />
+      </>,
+    );
+    await user.type(screen.getByRole("combobox"), "clear ended");
+    await user.click(
+      screen.getByRole("option", { name: /Clear ended on buildbox/ }),
+    );
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByText("Clear ended on buildbox?")).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("clear_ended", expect.anything());
+    await user.click(screen.getByRole("button", { name: "Clear ended" }));
+    expect(invoke).toHaveBeenCalledWith("clear_ended", {
+      machineId: "buildbox",
+    });
+    expect(useAppStore.getState().clearEndedId).toBeNull();
   });
 
   it("reply_goes_to_the_inspector", async () => {
@@ -935,7 +1142,7 @@ describe("CommandPalette agent frame", () => {
     await user.click(screen.getByRole("option", { name: /Mark as seen/ }));
     expect(invoke).toHaveBeenCalledWith("mark_seen", {
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
     cleanup();
 
@@ -949,13 +1156,131 @@ describe("CommandPalette agent frame", () => {
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w2:p1");
   });
 
+  describe("an ended agent", () => {
+    const endedState = () =>
+      appState(
+        [
+          [
+            { id: "buildbox", target: "buildbox" },
+            buildboxTerms({ "w2:p1": { status: "ended" } }),
+          ],
+        ],
+        { path: "/usr/local/bin/herdr" },
+      );
+    /** Anything that opens or marks the terminal; the palette's own reads are not counted. */
+    const opened = () =>
+      invoke.mock.calls.filter((c) =>
+        ["open_session", "mark_seen", "open_in_terminal"].includes(c[0]),
+      );
+    const hint = () => document.querySelector(".palette-hint")!;
+    const altKeys = formatShortcut("palette-open-alt");
+
+    it("enter_opens_its_actions_instead_of_attaching", async () => {
+      useAppStore.setState({ state: endedState() });
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      // The footer for the active row: Actions, and no second way to open.
+      expect(hint()).not.toHaveTextContent(altKeys);
+      expect(hint()).not.toHaveTextContent("Open in");
+      await user.keyboard("{Enter}");
+      expect(crumb()).toHaveTextContent("tester");
+      expect(labels()).toEqual([
+        "Copy address",
+        "Pin",
+        "Show in All agents",
+        "Remove…",
+      ]);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(useTerminalStore.getState().tabs).toEqual([]);
+      expect(opened()).toEqual([]);
+    });
+
+    it("command_enter_in_the_list_does_nothing", async () => {
+      useAppStore.setState({ state: endedState() });
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+      expect(opened()).toEqual([]);
+      expect(useTerminalStore.getState().tabs).toEqual([]);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("combobox")).toBeInTheDocument();
+    });
+
+    it("command_enter_in_its_frame_does_nothing_and_the_footer_has_no_segment_for_it", async () => {
+      useAppStore.setState({ state: endedState() });
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      await user.keyboard("{Tab}");
+      expect(crumb()).toHaveTextContent("tester");
+      expect(hint()).not.toHaveTextContent(altKeys);
+      expect(hint()).not.toHaveTextContent("Open in");
+      expect(hint()).toHaveTextContent("Back");
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+      expect(opened()).toEqual([]);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(crumb()).toHaveTextContent("tester");
+      expect(screen.getByRole("combobox")).toHaveFocus();
+    });
+
+    it("a_live_agents_footer_still_names_both_ways", async () => {
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      expect(hint()).toHaveTextContent(altKeys);
+    });
+  });
+
+  describe("the footer's second way to open", () => {
+    const hint = () => document.querySelector(".palette-hint")!;
+    const altKeys = formatShortcut("palette-open-alt");
+
+    it("is_left_out_for_items_that_have_no_second_way", async () => {
+      const user = userEvent.setup();
+      // An open tab with no row, and a command: both ignore ⌘↩'s second way.
+      useTerminalStore.setState({
+        tabs: [
+          {
+            tabKey: "buildbox::t9",
+            target: { kind: "terminal", machineId: "buildbox", address: "t9" },
+            title: "scratch",
+            machineLabel: "buildbox",
+            state: "live",
+            error: null,
+            termId: 1,
+            exitCode: null,
+            lastLine: null,
+            waiting: null,
+            attempts: 0,
+          },
+        ],
+        activeKey: HOME,
+      });
+      render(<CommandPalette onClose={onClose} />);
+      await user.type(screen.getByRole("combobox"), "scratch");
+      expect(screen.getAllByRole("option")[0]).toHaveTextContent("Open tabs");
+      expect(hint()).not.toHaveTextContent(altKeys);
+      expect(hint()).not.toHaveTextContent("Open in");
+      await user.clear(screen.getByRole("combobox"));
+      await user.type(screen.getByRole("combobox"), "refresh");
+      expect(screen.getAllByRole("option")[0]).toHaveTextContent("Command");
+      expect(hint()).not.toHaveTextContent(altKeys);
+      expect(hint()).not.toHaveTextContent("Open in");
+    });
+
+    it("stays_for_an_agent", async () => {
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      expect(hint()).toHaveTextContent(altKeys);
+    });
+  });
+
   it("command_enter_in_the_frame_opens_the_other_way", async () => {
     const user = open();
     await user.type(screen.getByRole("combobox"), "planner");
     await user.keyboard("{Tab}{Meta>}{Enter}{/Meta}");
     expect(invoke).toHaveBeenCalledWith("open_session", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
+      observe: false,
     });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

@@ -2,11 +2,13 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/bindings/AppState";
-import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
+import type { CoreStatus } from "../lib/bindings/CoreStatus";
+import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
 import { useAppStore } from "../store/appStore";
+import { appState, layoutOf, machineView } from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -21,15 +23,12 @@ const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 const chooseFile = vi.mocked(openDialog);
 
 const DEFAULTS: SettingsData = {
-  herdr_path: null,
+  core_path: null,
   terminal: null,
   terminal_custom_template: "",
   open_mode: "window",
-  attach_mode: "pane",
   notify_blocked: true,
   notify_done: true,
-  poll_interval_visible_ms: 2000,
-  poll_interval_hidden_ms: 10_000,
   group_by: "project",
   global_shortcut_enabled: true,
   open_after_create: true,
@@ -45,49 +44,52 @@ const DEFAULTS: SettingsData = {
   new_session_hidden_kinds: [],
   new_session_hide_shell: false,
   workbox_colors: {},
+  hidden_workboxes: [],
 };
 
-const HERDR: HerdrStatus = {
-  path: "/home/dev/.local/bin/herdr",
-  version: "0.9.4",
+const HERDR: CoreStatus = {
+  path: "/home/dev/.local/bin/hc",
+  version: "0.1.18",
   saved_missing: false,
+  legacy_herdr: null,
 };
 
-function machine(id: string, over: Partial<MachineView> = {}): MachineView {
-  return {
-    id,
-    label: id === "local" ? "Local" : id,
-    target: id === "local" ? null : id,
-    session: "default",
-    is_local: id === "local",
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: null,
-    ages: {},
-    ...over,
-  };
+function machine(id: string, over: { health?: Health } = {}): MachineView {
+  return machineView(
+    {
+      id,
+      name: id === "local" ? "Local" : id,
+      target: id === "local" ? null : id,
+      isLocal: id === "local",
+      health: over.health,
+      lastOkMs: null,
+    },
+    null,
+  );
 }
 
 const STATE: AppState = {
+  ...appState([], { path: HERDR.path }),
   machines: [
     machine("local"),
     machine("buildbox"),
-    machine("staging", { health: { kind: "disabled" } }),
+    machine("staging", { health: { kind: "hidden" } }),
   ],
-  herdr_version: "0.9.4",
-  herdr_path: HERDR.path,
-  generated_at_ms: 1,
 };
 
-let herdr: HerdrStatus;
+let herdr: CoreStatus;
 let shortcut: ShortcutStatus;
-/** What `list_agent_kinds` does: a list, or `"fail"`. */
+/** What `list_run_choices("local")` does: the kinds it lists, or `"fail"`. */
 let kinds: string[] | "fail";
 
-function setup(settings: Partial<SettingsData> = {}, section?: string) {
+function setup(
+  settings: Partial<SettingsData> = {},
+  section?: string,
+  state: AppState = STATE,
+) {
   useAppStore.setState({
     settings: { ...DEFAULTS, ...settings },
-    state: STATE,
+    state,
     toast: null,
   });
   const user = userEvent.setup();
@@ -116,20 +118,38 @@ beforeEach(() => {
             installed: ["ghostty", "warp", "terminalApp"],
             default: "ghostty",
           };
-        case "herdr_status":
+        case "core_status":
           return herdr;
         case "shortcut_status":
           return shortcut;
-        case "list_agent_kinds":
+        case "list_run_choices":
           if (kinds === "fail") throw { kind: "invalid", message: "No herdr." };
-          return kinds;
+          return {
+            kinds: kinds.map((kind) => ({ kind, takesTask: false })),
+            templates: [],
+            kindsChecked: true,
+          };
         case "preview_launch_template":
-          return `${(args as { template: string }).template.replace("{attach}", "ssh -t buildbox 'sh -c …'")}`;
+          return `${(args as { template: string }).template.replace("{attach}", "hc attach buildbox/t7")}`;
         case "set_settings":
           return {
             ...useAppStore.getState().settings,
             ...(args as { patch: object }).patch,
           };
+        case "set_workbox_hidden": {
+          const { machineId, hidden } = args as {
+            machineId: string;
+            hidden: boolean;
+          };
+          const settings = useAppStore.getState().settings!;
+          const others = settings.hidden_workboxes.filter(
+            (x) => x !== machineId,
+          );
+          return {
+            ...settings,
+            hidden_workboxes: hidden ? [...others, machineId] : others,
+          };
+        }
         default:
           return null;
       }
@@ -267,7 +287,7 @@ describe("Settings", () => {
     expect(screen.getByLabelText("Terminal font")).toHaveValue("ibm_plex_mono");
   });
 
-  it("saves open mode and attach mode", async () => {
+  it("saves open mode, and offers no attach mode", async () => {
     const user = await setup({}, "Terminal");
     await user.selectOptions(
       screen.getByLabelText("Each session opens in a"),
@@ -276,10 +296,8 @@ describe("Settings", () => {
     expect(invoke).toHaveBeenCalledWith("set_settings", {
       patch: { open_mode: "tab" },
     });
-    await user.selectOptions(screen.getByLabelText("Attach as"), "full_ui");
-    expect(invoke).toHaveBeenCalledWith("set_settings", {
-      patch: { attach_mode: "full_ui" },
-    });
+    expect(screen.queryByLabelText("Attach as")).toBeNull();
+    expect(screen.queryByText(/Full herdr UI/)).toBeNull();
   });
 
   it("the launch command is saved on blur, previewed, and warns about double quotes", async () => {
@@ -291,7 +309,7 @@ describe("Settings", () => {
 
     await user.type(field, "myterm -e {{attach}");
     expect(
-      await screen.findByText(/myterm -e ssh -t buildbox/),
+      await screen.findByText(/myterm -e hc attach buildbox\/t7/),
     ).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
     await user.tab();
@@ -300,27 +318,36 @@ describe("Settings", () => {
     });
   });
 
-  it("lists workboxes with an enable switch each", async () => {
-    const user = await setup({}, "Workboxes");
-    const local = screen.getByRole("switch", { name: "Enable Local" });
-    expect(local).toBeChecked();
+  it("lists workboxes with a hide switch each", async () => {
+    const user = await setup({ hidden_workboxes: ["staging"] }, "Workboxes");
+    const local = screen.getByRole("switch", { name: "Hide Local" });
+    expect(local).not.toBeChecked();
     expect(local).toBeDisabled();
     expect(
-      screen.getByRole("switch", { name: "Enable buildbox" }),
-    ).toBeChecked();
-    const staging = screen.getByRole("switch", { name: "Enable staging" });
-    expect(staging).not.toBeChecked();
+      screen.getByRole("switch", { name: "Hide buildbox" }),
+    ).not.toBeChecked();
+    const staging = screen.getByRole("switch", { name: "Hide staging" });
+    expect(staging).toBeChecked();
 
+    // Show: an app setting, with no core call.
     await user.click(staging);
-    expect(invoke).toHaveBeenCalledWith("machine_set_enabled", {
-      id: "staging",
-      enabled: true,
+    expect(invoke).toHaveBeenCalledWith("set_workbox_hidden", {
+      machineId: "staging",
+      hidden: false,
     });
-    await user.click(screen.getByRole("switch", { name: "Enable buildbox" }));
-    expect(invoke).toHaveBeenCalledWith("machine_set_enabled", {
-      id: "buildbox",
-      enabled: false,
+    await user.click(screen.getByRole("switch", { name: "Hide buildbox" }));
+    expect(invoke).toHaveBeenCalledWith("set_workbox_hidden", {
+      machineId: "buildbox",
+      hidden: true,
     });
+    expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
+    for (const name of [
+      "machine_connect",
+      "machine_rename",
+      "machine_remove",
+    ]) {
+      expect(invoke).not.toHaveBeenCalledWith(name, expect.anything());
+    }
   });
 
   it("switches notifications per kind", async () => {
@@ -335,38 +362,63 @@ describe("Settings", () => {
     });
   });
 
-  it("shows the herdr binary, and picks another one with the file dialog", async () => {
-    const user = await setup({}, "herdr CLI");
+  it("settings_herdr_core_section", async () => {
+    const user = await setup({}, "herdr-core");
+    // The section is herdr-core now; the old "herdr CLI" is gone.
+    expect(screen.queryByRole("button", { name: "herdr CLI" })).toBeNull();
     expect(
-      await screen.findByText("/home/dev/.local/bin/herdr"),
+      screen.getByRole("heading", { name: "herdr-core" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/0\.9\.4/)).toBeInTheDocument();
-    expect(screen.queryByText(/Saved herdr binary not found/)).toBeNull();
-
-    chooseFile.mockResolvedValue("/opt/mine/herdr");
-    herdr = { path: "/opt/mine/herdr", version: "0.9.5", saved_missing: false };
-    await user.click(screen.getByRole("button", { name: "Choose binary…" }));
-    expect(invoke).toHaveBeenCalledWith("set_settings", {
-      patch: { herdr_path: "/opt/mine/herdr" },
-    });
     expect(
-      (await screen.findAllByText("/opt/mine/herdr")).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getByText("0.9.5")).toBeInTheDocument();
+      await screen.findByText("/home/dev/.local/bin/hc"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("0.1.18")).toBeInTheDocument();
+    expect(screen.queryByText(/The saved path is missing/)).toBeNull();
+
+    chooseFile.mockResolvedValue("/opt/mine/hc");
+    herdr = {
+      path: "/opt/mine/hc",
+      version: "0.1.19",
+      saved_missing: false,
+      legacy_herdr: null,
+    };
+    await user.click(screen.getByRole("button", { name: "Choose…" }));
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { core_path: "/opt/mine/hc" },
+    });
+    expect((await screen.findAllByText("/opt/mine/hc")).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getByText("0.1.19")).toBeInTheDocument();
 
     // Cancelling the dialog changes nothing.
     invoke.mockClear();
     chooseFile.mockResolvedValue(null);
-    await user.click(screen.getByRole("button", { name: "Choose binary…" }));
+    await user.click(screen.getByRole("button", { name: "Choose…" }));
     expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
   });
 
-  it("says when the saved herdr binary is gone and what is used instead", async () => {
+  it("says_when_the_saved_path_is_gone_or_is_not_herdr_core", async () => {
     herdr = { ...HERDR, saved_missing: true };
-    await setup({ herdr_path: "/gone/herdr" }, "herdr CLI");
+    await setup({ core_path: "/gone/hc" }, "herdr-core");
+    expect(
+      await screen.findByText("The saved path is missing or isn’t herdr-core."),
+    ).toBeInTheDocument();
+    // What is used instead is still shown.
+    expect(screen.getByText("/home/dev/.local/bin/hc")).toBeInTheDocument();
+  });
+
+  it("says_when_no_core_is_found", async () => {
+    herdr = {
+      path: null,
+      version: null,
+      saved_missing: false,
+      legacy_herdr: null,
+    };
+    await setup({}, "herdr-core");
     expect(
       await screen.findByText(
-        "Saved herdr binary not found; using /home/dev/.local/bin/herdr",
+        "herdr-core was not found. Install it, or choose the binary.",
       ),
     ).toBeInTheDocument();
   });
@@ -466,7 +518,7 @@ describe("Settings", () => {
     expect(screen.queryByText(/Couldn’t register/)).toBeNull();
   });
 
-  it("general: new-session default, grouping, and refresh intervals in seconds", async () => {
+  it("general: new-session default and grouping", async () => {
     const user = await setup();
     await user.click(
       screen.getByRole("checkbox", {
@@ -483,31 +535,44 @@ describe("Settings", () => {
     expect(invoke).toHaveBeenCalledWith("set_settings", {
       patch: { group_by: "status" },
     });
+  });
 
-    const visible = screen.getByLabelText(
-      "Refresh every, window open (seconds)",
+  const groupOptions = () =>
+    within(screen.getByLabelText("Group sessions by"))
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value);
+  const WITH_LAYOUT: AppState = {
+    ...STATE,
+    machines: [
+      {
+        ...STATE.machines[0],
+        layout: layoutOf([{ id: "s1", terminals: ["t1"] }]),
+      },
+      ...STATE.machines.slice(1),
+    ],
+  };
+
+  it("offers_group_by_space_only_with_a_herdr_layout", async () => {
+    await setup({}, "General");
+    expect(groupOptions()).toEqual(["project", "workbox", "status"]);
+  });
+
+  it("saves Group by Space when a machine has a layout", async () => {
+    const user = await setup({}, "General", WITH_LAYOUT);
+    expect(groupOptions()).toEqual(["project", "workbox", "status", "space"]);
+    await user.selectOptions(
+      screen.getByLabelText("Group sessions by"),
+      "space",
     );
-    expect(visible).toHaveValue(2);
-    await user.clear(visible);
-    await user.type(visible, "5");
-    await user.tab();
     expect(invoke).toHaveBeenCalledWith("set_settings", {
-      patch: { poll_interval_visible_ms: 5000 },
+      patch: { group_by: "space" },
     });
   });
 
-  it("refuses an interval under a second without asking Rust", async () => {
-    const user = await setup();
-    const hidden = screen.getByLabelText(
-      "Refresh every, window hidden (seconds)",
-    );
-    await user.clear(hidden);
-    await user.type(hidden, "0.5");
-    await user.tab();
-    expect(
-      await screen.findByText("Use at least 1 second."),
-    ).toBeInTheDocument();
-    expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
+  it("keeps a saved Space on the list when Herdr is gone", async () => {
+    await setup({ group_by: "space" }, "General");
+    expect(groupOptions()).toContain("space");
+    expect(screen.getByLabelText("Group sessions by")).toHaveValue("space");
   });
 
   it("shows the reason when a change is refused", async () => {
@@ -635,7 +700,7 @@ describe("Settings › New session options", () => {
 
   it("says_loading_while_the_kinds_load", async () => {
     invoke.mockImplementation(async (name: string) =>
-      name === "list_agent_kinds" ? new Promise(() => {}) : null,
+      name === "list_run_choices" ? new Promise(() => {}) : null,
     );
     await setup();
     const g = await group();
@@ -649,7 +714,11 @@ describe("Settings › New session options", () => {
       await setup();
       const g = await group();
       expect(
-        await within(g).findByText("herdr listed no agent kinds."),
+        await within(g).findByText(
+          result === "fail"
+            ? "Couldn’t read the list of agents."
+            : "No agent programs were found on this computer.",
+        ),
       ).toBeInTheDocument();
       expect(boxes(g)).toEqual(["$_Plain shell"]);
       const shell = within(g).getByRole("checkbox", { name: "Plain shell" });

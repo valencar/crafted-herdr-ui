@@ -7,24 +7,28 @@ import { shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { openRow } from "../lib/openRow";
 import { terminalName, useTerminals } from "../lib/uiHelpers";
+import { commandWords } from "./commandTabs";
 import { PaneMenu } from "./PaneMenu";
 import { useTerminalStore, type TermTab } from "./terminalStore";
 
 type Props = {
   tab: TermTab;
-  /** The agent the tab shows; `null` for the full herdr UI, or when the pane is gone. */
+  /** The agent the tab shows; `null` when the terminal is gone. */
   row: Row | null;
   onFind: () => void;
 };
 
-/** The one main action: the pane in the user's own terminal. */
-function OpenInTerminal({ row }: { row: Row }) {
+/**
+ * The one main action: the pane in the user's own terminal. From a Watch tab (`observe`) it is
+ * the same read-only attach, and it marks nothing seen.
+ */
+function OpenInTerminal({ row, observe }: { row: Row; observe: boolean }) {
   const { current } = useTerminals();
   return (
     <button
       type="button"
       className="btn btn-small"
-      onClick={() => void openRow(row, "external")}
+      onClick={() => void openRow(row, "external", { observe })}
     >
       Open in {terminalName(current)}
     </button>
@@ -34,15 +38,57 @@ function OpenInTerminal({ row }: { row: Row }) {
 /**
  * The bar above the active terminal: which agent it is, how it is doing, and what can be done
  * with it: Open in your terminal as the one main action, the rest in the ⋯ menu. Detach ends only the app's attach client, as closing the tab does.
+ * A Watch tab (`observe`) also says "Watching (read-only)".
  */
 export function ContextBar({ tab, row, onFind }: Props) {
   const closeTab = useTerminalStore((s) => s.closeTab);
+  if (tab.target.kind === "command") {
+    // Log in and Update hc: a command on a workbox, with no agent, status or pane menu.
+    return (
+      <div className="context-bar">
+        <div className="context-id">
+          <span className="context-title">{commandWords(tab).doing}</span>
+          <WorkboxTile
+            size="sm"
+            machineId={tab.target.machineId}
+            label={tab.machineLabel}
+          />
+          <span className="mono muted context-where">{tab.machineLabel}</span>
+        </div>
+        <div className="context-actions">
+          <Tooltip label="Find in terminal" shortcut="find">
+            <button
+              type="button"
+              className="btn btn-small btn-ghost"
+              aria-label={`Find in terminal (${formatShortcut("find")})`}
+              onClick={onFind}
+            >
+              <span aria-hidden="true">⌕</span>
+            </button>
+          </Tooltip>
+          <Tooltip label="Close this tab. A command still running is stopped.">
+            <button
+              type="button"
+              className="btn btn-small btn-ghost"
+              onClick={() => closeTab(tab.tabKey)}
+            >
+              Close tab
+            </button>
+          </Tooltip>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="context-bar">
       <div className="context-id">
         <span className="mono context-title">{row ? row.name : tab.title}</span>
-        {row && <StatusPill status={row.status} live />}
-        {row && <KindBadge kind={row.kind} />}
+        {row && <StatusPill status={row.status} isWorker={row.isWorker} live />}
+        {row && <KindBadge kind={row.kind} isAgent={row.isAgent} />}
+        {/* Spec 8.4: a Watch tab shows the terminal and sends it no input (it still resizes the local pty; Ruling C94). */}
+        {tab.observe && (
+          <span className="chip context-watching">Watching (read-only)</span>
+        )}
         <WorkboxTile
           size="sm"
           machineId={tab.target.machineId}
@@ -74,10 +120,15 @@ export function ContextBar({ tab, row, onFind }: Props) {
             Detach
           </button>
         </Tooltip>
-        {row && <OpenInTerminal row={row} />}
+        {/* A finished terminal has nothing to open in the user's terminal either. */}
+        {row && row.status !== "ended" && (
+          <OpenInTerminal row={row} observe={tab.observe === true} />
+        )}
         {/* Keyed by the pane, so a confirmation opened for one pane ends when another becomes
             active, instead of closing the new one. */}
-        {row && <PaneMenu key={row.key} row={row} />}
+        {row && (
+          <PaneMenu key={row.key} row={row} observe={tab.observe === true} />
+        )}
       </div>
     </div>
   );

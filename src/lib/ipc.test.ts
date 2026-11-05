@@ -51,15 +51,22 @@ describe("copyText", () => {
 describe("invokeTyped", () => {
   it("passes the command and args through and returns the result", async () => {
     invoke.mockResolvedValue({ ok: 1 });
-    const args = { machineId: "buildbox", paneId: "w1:p1" };
-    await expect(invokeTyped("close_pane", args)).resolves.toEqual({ ok: 1 });
-    expect(invoke).toHaveBeenCalledWith("close_pane", args);
+    const args = { machineId: "buildbox", address: "t1" };
+    await expect(invokeTyped("close_terminal", args)).resolves.toEqual({
+      ok: 1,
+    });
+    expect(invoke).toHaveBeenCalledWith("close_terminal", args);
   });
 
   it("rethrows a tagged ActionError unchanged", async () => {
     const err = {
-      kind: "herdr",
-      error: { kind: "server", code: "agent_blocked", message: "nope" },
+      kind: "core",
+      error: {
+        kind: "rpc",
+        code: "agent_blocked",
+        message: "nope",
+        hint: null,
+      },
     };
     invoke.mockRejectedValue(err);
     await expect(invokeTyped("get_state")).rejects.toEqual(err);
@@ -78,19 +85,23 @@ describe("invokeTyped types", () => {
   it("requires each command's arguments", () => {
     invoke.mockResolvedValue(null);
     // These only need to compile; the calls are never awaited for a result.
-    // @ts-expect-error close_pane needs machineId and paneId
-    void invokeTyped("close_pane");
+    // @ts-expect-error close_terminal needs machineId and address
+    void invokeTyped("close_terminal");
     // @ts-expect-error argument keys are camelCase
-    void invokeTyped("close_pane", { machine_id: "a", pane_id: "b" });
+    void invokeTyped("close_terminal", { machine_id: "a", address: "b" });
     void invokeTyped("refresh_now", {});
-    void invokeTyped("list_agent_kinds");
+    void invokeTyped("list_run_choices", { machineId: "local" });
   });
 });
 
 describe("toActionError", () => {
   it("passes every ActionError variant through", () => {
     for (const e of [
-      { kind: "herdr", error: { kind: "notFound" } },
+      { kind: "launch", message: "m" },
+      {
+        kind: "core",
+        error: { kind: "rpc", code: "name_taken", message: "m", hint: null },
+      },
       { kind: "maybeApplied", argv: ["tab", "create"], message: "m" },
       { kind: "invalid", message: "m" },
     ]) {
@@ -183,9 +194,9 @@ describe("openTerm", () => {
     invoke.mockResolvedValue(7);
     const events: TermEvent[] = [];
     const target: TermTarget = {
-      kind: "pane",
+      kind: "terminal",
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     };
 
     await expect(openTerm(target, 80, 24, (e) => events.push(e))).resolves.toBe(
@@ -194,16 +205,17 @@ describe("openTerm", () => {
 
     expect(invoke).toHaveBeenCalledWith("term_open", {
       target,
+      observe: false,
       cols: 80,
       rows: 24,
       onEvent: expect.any(MockChannel),
     });
     const channel = invoke.mock.calls[0][1].onEvent as MockChannel<TermEvent>;
     channel.onmessage({ kind: "data", data: "x" });
-    channel.onmessage({ kind: "exit", code: 0 });
+    channel.onmessage({ kind: "exit", code: 0, last_line: null });
     expect(events).toEqual([
       { kind: "data", data: "x" },
-      { kind: "exit", code: 0 },
+      { kind: "exit", code: 0, last_line: null },
     ]);
   });
 
@@ -213,7 +225,12 @@ describe("openTerm", () => {
       message: "herdr is still starting. Try again in a moment.",
     });
     await expect(
-      openTerm({ kind: "full", machineId: "local" }, 80, 24, () => {}),
+      openTerm(
+        { kind: "command", args: ["machine", "login", "buildbox"] },
+        80,
+        24,
+        () => {},
+      ),
     ).rejects.toEqual({
       kind: "invalid",
       message: "herdr is still starting. Try again in a moment.",

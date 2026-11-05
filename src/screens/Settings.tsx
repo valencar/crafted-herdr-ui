@@ -13,11 +13,10 @@ import {
 import { KindBadge } from "../components/KindBadge";
 import { StoreToast } from "../components/Toast";
 import type { GroupBy } from "../lib/bindings/GroupBy";
-import type { HerdrStatus } from "../lib/bindings/HerdrStatus";
+import type { CoreStatus } from "../lib/bindings/CoreStatus";
 import type { OpenMode } from "../lib/bindings/OpenMode";
 import type { RowDensity } from "../lib/bindings/RowDensity";
 import type { Theme } from "../lib/bindings/Theme";
-import type { AttachMode } from "../lib/bindings/AttachMode";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
 import type { TerminalFont } from "../lib/bindings/TerminalFont";
@@ -28,6 +27,7 @@ import {
   TERMINAL_LABEL,
   actionErrorMessage,
 } from "../lib/format";
+import { hasSpaceLayouts } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { useTheme } from "../lib/useTheme";
 import { useAppStore } from "../store/appStore";
@@ -48,7 +48,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "workboxes", label: "Workboxes" },
   { id: "notifications", label: "Notifications" },
-  { id: "herdr", label: "herdr CLI" },
+  { id: "herdr", label: "herdr-core" },
   { id: "shortcuts", label: "Shortcuts" },
 ];
 
@@ -75,8 +75,8 @@ const TITLES: Record<SectionId, { title: string; blurb: string }> = {
     blurb: "A notification names the agent, its project and its workbox.",
   },
   herdr: {
-    title: "herdr CLI",
-    blurb: "Everything the app does goes through the herdr command line.",
+    title: "herdr-core",
+    blurb: "Everything the app does goes through herdr-core (hc).",
   },
   shortcuts: {
     title: "Shortcuts",
@@ -97,7 +97,6 @@ const TERMINALS: TerminalId[] = [
   "custom",
 ];
 
-const MIN_INTERVAL_SECONDS = 1;
 const TEMPLATE_EXAMPLE = "open -na Ghostty --args -e {attach}";
 
 const SHORTCUTS: [keys: ShortcutId | { keys: string }, what: string][] = [
@@ -182,51 +181,6 @@ function Field({
   );
 }
 
-/** A number of seconds, saved when the field loses focus; under a second is refused here. */
-function SecondsField({
-  label,
-  valueMs,
-  onSave,
-}: {
-  label: string;
-  valueMs: number;
-  onSave: (ms: number) => void;
-}) {
-  const id = useId();
-  const [draft, setDraft] = useState(String(valueMs / 1000));
-  const [error, setError] = useState<string | null>(null);
-
-  const commit = () => {
-    const seconds = Number(draft);
-    if (!Number.isFinite(seconds) || seconds < MIN_INTERVAL_SECONDS) {
-      setError("Use at least 1 second.");
-      return;
-    }
-    setError(null);
-    const ms = Math.round(seconds * 1000);
-    if (ms !== valueMs) onSave(ms);
-  };
-  return (
-    <Field id={id} label={label}>
-      <input
-        id={id}
-        type="number"
-        min={MIN_INTERVAL_SECONDS}
-        step={1}
-        className="field settings-number"
-        value={draft}
-        aria-invalid={error !== null}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-        }}
-      />
-      {error && <p className="field-error">{error}</p>}
-    </Field>
-  );
-}
-
 /** Which Run options the New session sheet offers: checked = shown, and at least one stays. */
 function NewSessionOptions({
   settings,
@@ -237,16 +191,26 @@ function NewSessionOptions({
 }) {
   const labelId = useId();
   const stayId = useId();
-  // `null` while loading; a failed or empty list means herdr offers no agent kinds.
+  // `null` while loading; a failed or empty list means no agent kinds to choose from.
   const [kinds, setKinds] = useState<string[] | null>(null);
+  // The call itself failed, which is not the same as no agent being installed.
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    invokeTyped("list_agent_kinds")
-      .then((list) => {
-        if (!cancelled) setKinds(Array.isArray(list) ? list : []);
+    invokeTyped("list_run_choices", { machineId: "local" })
+      .then((choices) => {
+        if (!cancelled) {
+          setKinds(
+            Array.isArray(choices?.kinds)
+              ? choices.kinds.map((k) => k.kind)
+              : [],
+          );
+        }
       })
       .catch(() => {
-        if (!cancelled) setKinds([]);
+        if (cancelled) return;
+        setFailed(true);
+        setKinds([]);
       });
     return () => {
       cancelled = true;
@@ -333,7 +297,11 @@ function NewSessionOptions({
             ))}
           </div>
           {noKinds && (
-            <p className="muted settings-hint">herdr listed no agent kinds.</p>
+            <p className="muted settings-hint">
+              {failed
+                ? "Couldn’t read the list of agents."
+                : "No agent programs were found on this computer."}
+            </p>
           )}
           {lastOne && (
             <p id={stayId} className="muted settings-hint">
@@ -354,6 +322,12 @@ function General({
   update: Update;
 }) {
   const groupId = useId();
+  // Space comes with Herdr's layouts; a saved choice stays on the list so the field isn't blank.
+  // A boolean, so the section doesn't re-render with every state.
+  const hasLayouts = useAppStore(
+    (s) => s.state !== null && hasSpaceLayouts(s.state.machines),
+  );
+  const showSpace = hasLayouts || settings.group_by === "space";
   return (
     <div className="settings-stack">
       <Field id={groupId} label="Group sessions by">
@@ -366,6 +340,7 @@ function General({
           <option value="project">Project</option>
           <option value="workbox">Workbox</option>
           <option value="status">Status</option>
+          {showSpace && <option value="space">Space</option>}
         </select>
       </Field>
       <Check
@@ -375,24 +350,6 @@ function General({
         onChange={(open_after_create) => void update({ open_after_create })}
       />
       <NewSessionOptions settings={settings} update={update} />
-      <div className="settings-pair">
-        <SecondsField
-          key={`visible-${settings.poll_interval_visible_ms}`}
-          label="Refresh every, window open (seconds)"
-          valueMs={settings.poll_interval_visible_ms}
-          onSave={(ms) => void update({ poll_interval_visible_ms: ms })}
-        />
-        <SecondsField
-          key={`hidden-${settings.poll_interval_hidden_ms}`}
-          label="Refresh every, window hidden (seconds)"
-          valueMs={settings.poll_interval_hidden_ms}
-          onSave={(ms) => void update({ poll_interval_hidden_ms: ms })}
-        />
-      </div>
-      <p className="muted settings-hint">
-        A workbox that cannot be reached is retried after 2, 4, 8 … up to 60
-        seconds, whatever these are.
-      </p>
     </div>
   );
 }
@@ -472,7 +429,6 @@ function TerminalSection({
   const [list, setList] = useState<TerminalList | null>(null);
   const targetId = useId();
   const whereId = useId();
-  const attachId = useId();
   const fontId = useId();
   useEffect(() => {
     let cancelled = false;
@@ -616,19 +572,6 @@ function TerminalSection({
             <option value="tab">New tab (iTerm2; others open a window)</option>
           </select>
         </Field>
-        <Field id={attachId} label="Attach as">
-          <select
-            id={attachId}
-            className="field"
-            value={settings.attach_mode}
-            onChange={(e) =>
-              void update({ attach_mode: e.target.value as AttachMode })
-            }
-          >
-            <option value="pane">Just that session (terminal attach)</option>
-            <option value="full_ui">Full herdr UI on that workbox</option>
-          </select>
-        </Field>
       </div>
 
       <LaunchCommand
@@ -712,25 +655,31 @@ function Appearance({
   );
 }
 
-function Workboxes() {
+/**
+ * Hide and Show: an app setting (`hidden_workboxes`) with no core call behind it. A hidden
+ * workbox is not shown in the sidebar, the Dashboard or the lists, and this is where it comes back.
+ */
+function Workboxes({
+  hide,
+}: {
+  hide: (machineId: string, hidden: boolean) => Promise<void>;
+}) {
   const state = useAppStore((s) => s.state);
-  const report = useAppStore((s) => s.reportError);
-  const toggle = (id: string, enabled: boolean) =>
-    invokeTyped("machine_set_enabled", { id, enabled }).catch(report);
-  if (state === null) return <p className="empty">Connecting to herdr…</p>;
+  const toggle = (id: string, hidden: boolean) => void hide(id, hidden);
+  if (state === null) return <p className="empty">Connecting to herdr-core…</p>;
   return (
     <div className="settings-stack">
       <ul className="settings-list">
         {state.machines.map((m) => {
-          const label = `Enable ${m.label}`;
+          const label = `Hide ${m.name}`;
           return (
             <li key={m.id} className="settings-list-row">
               <span className="settings-list-text">
-                <span>{m.label}</span>
+                <span>{m.name}</span>
                 <span className="mono muted settings-hint">
                   {m.is_local
                     ? "This computer"
-                    : `${m.target ?? m.id} · ${m.session}`}
+                    : `${m.target ?? m.id} · ${m.session ?? "default"}`}
                 </span>
               </span>
               <span className="health" data-health={m.health.kind}>
@@ -741,9 +690,9 @@ function Workboxes() {
                 type="checkbox"
                 role="switch"
                 aria-label={label}
-                checked={m.health.kind !== "disabled"}
+                checked={m.health.kind === "hidden"}
                 disabled={m.is_local}
-                onChange={(e) => void toggle(m.id, e.target.checked)}
+                onChange={(e) => toggle(m.id, e.target.checked)}
               />
             </li>
           );
@@ -789,23 +738,23 @@ function Notifications({
   );
 }
 
-function HerdrCli({
+function HerdrCore({
   settings,
   update,
 }: {
   settings: SettingsData;
   update: Update;
 }) {
-  const [status, setStatus] = useState<HerdrStatus | null>(null);
+  const [status, setStatus] = useState<CoreStatus | null>(null);
   const refresh = useCallback(() => {
-    invokeTyped("herdr_status")
+    invokeTyped("core_status")
       .then(setStatus)
       .catch(() => {});
   }, []);
   useEffect(refresh, [refresh]);
 
   const change = async (path: string | null) => {
-    await update({ herdr_path: path });
+    await update({ core_path: path });
     refresh();
   };
   const choose = async () => {
@@ -832,33 +781,33 @@ function HerdrCli({
           </span>
         </span>
         {status === null ? (
-          <span className="muted">Looking for herdr…</span>
+          <span className="muted">Looking for herdr-core…</span>
         ) : status.path ? (
           <span className="mono">
             <span>{status.path}</span> ·{" "}
             <span>{status.version ?? "version unknown"}</span>
           </span>
         ) : (
-          <span>herdr was not found. Install it, or choose the binary.</span>
+          <span>
+            herdr-core was not found. Install it, or choose the binary.
+          </span>
         )}
       </div>
       {status?.saved_missing && (
         <p className="settings-warn" role="status">
-          {status.path
-            ? `Saved herdr binary not found; using ${status.path}`
-            : "Saved herdr binary not found, and herdr was not found on this computer."}
+          The saved path is missing or isn’t herdr-core.
         </p>
       )}
-      {settings.herdr_path && (
+      {settings.core_path && (
         <p className="muted settings-hint">
-          Saved path: <code>{settings.herdr_path}</code>
+          Saved path: <code>{settings.core_path}</code>
         </p>
       )}
       <div className="settings-actions">
         <button type="button" className="btn" onClick={() => void choose()}>
-          Choose binary…
+          Choose…
         </button>
-        {settings.herdr_path && (
+        {settings.core_path && (
           <button
             type="button"
             className="btn btn-ghost"
@@ -934,6 +883,20 @@ export function Settings() {
     [setSettings],
   );
 
+  const hide = useCallback(
+    async (machineId: string, hidden: boolean) => {
+      setError(null);
+      try {
+        setSettings(
+          await invokeTyped("set_workbox_hidden", { machineId, hidden }),
+        );
+      } catch (e) {
+        setError(actionErrorMessage(toActionError(e)));
+      }
+    },
+    [setSettings],
+  );
+
   const { title, blurb } = TITLES[section];
   return (
     <div className="settings">
@@ -969,11 +932,11 @@ export function Settings() {
         ) : section === "appearance" ? (
           <Appearance settings={settings} update={update} />
         ) : section === "workboxes" ? (
-          <Workboxes />
+          <Workboxes hide={hide} />
         ) : section === "notifications" ? (
           <Notifications settings={settings} update={update} />
         ) : section === "herdr" ? (
-          <HerdrCli settings={settings} update={update} />
+          <HerdrCore settings={settings} update={update} />
         ) : (
           <Shortcuts settings={settings} update={update} />
         )}

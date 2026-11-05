@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { rowOf } from "../test/builders";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/bindings/AppState";
@@ -22,42 +23,39 @@ vi.mock("../lib/openRow", () => ({
 }));
 import { openRow } from "../lib/openRow";
 
-const row: Row = {
+const row: Row = rowOf({
   key: "buildbox::w1:p1",
   machineId: "buildbox",
   machineLabel: "buildbox",
-  paneId: "w1:p1",
-  terminalId: "t1",
+  address: "w1:p1",
   kind: "claude",
   name: "planner",
   title: "refactor auth",
   status: "blocked",
   folder: "/home/dev/projects/api-service",
   sinceMs: null,
-};
+});
 
 const paneTab: TermTab = {
   tabKey: row.key,
-  target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+  target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
   title: "planner",
   machineLabel: "buildbox",
   state: "live",
   error: null,
   termId: 1,
   exitCode: null,
+  lastLine: null,
+  waiting: null,
   attempts: 0,
 };
 
-const fullTab: TermTab = {
-  tabKey: "full::buildbox",
-  target: { kind: "full", machineId: "buildbox" },
-  title: "herdr",
-  machineLabel: "buildbox",
-  state: "live",
-  error: null,
-  termId: 2,
-  exitCode: null,
-  attempts: 0,
+/** A second tab, so closing the first leaves one behind. */
+const otherTab: TermTab = {
+  ...paneTab,
+  tabKey: "buildbox::w9:p9",
+  target: { kind: "terminal", machineId: "buildbox", address: "w9:p9" },
+  title: "other",
 };
 
 beforeEach(() => {
@@ -71,7 +69,7 @@ beforeEach(() => {
   vi.mocked(openRow).mockReset();
   useAppStore.setState({ settings: null, state: null, dialogOpen: 0 });
   useTerminalStore.setState({
-    tabs: [paneTab, fullTab],
+    tabs: [paneTab, otherTab],
     activeKey: paneTab.tabKey,
     lastTermKey: paneTab.tabKey,
   });
@@ -88,11 +86,64 @@ afterEach(() => {
 const terminalButton = () =>
   screen.findByRole("button", { name: "Open in Ghostty" });
 
-/** Close pane… lives in the ⋯ menu. */
+/** Close… lives in the ⋯ menu. */
 async function openClosePane(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "More actions" }));
-  await user.click(screen.getByRole("menuitem", { name: "Close pane…" }));
+  await user.click(screen.getByRole("menuitem", { name: "Close…" }));
 }
+
+describe("ContextBar on a Watch tab", () => {
+  const watchTab: TermTab = {
+    ...paneTab,
+    tabKey: `${row.key}::watch`,
+    observe: true,
+  };
+
+  it("context_bar_says_watching", () => {
+    const { container } = render(
+      <ContextBar tab={watchTab} row={row} onFind={() => {}} />,
+    );
+    const bar = container.querySelector(".context-bar")!;
+    expect(bar).toHaveTextContent("Watching (read-only)");
+    // The agent is still named, and the bar keeps its other controls.
+    expect(bar.querySelector(".mono")).toHaveTextContent("planner");
+    expect(screen.getByRole("button", { name: "Detach" })).toBeInTheDocument();
+  });
+
+  it("open_in_terminal_and_copy_attach_stay_read_only", async () => {
+    const user = userEvent.setup();
+    invoke.mockImplementation(async (name: string) =>
+      name === "get_terminals"
+        ? { installed: ["ghostty"], default: "ghostty" }
+        : name === "copy_attach_command"
+          ? "hc attach --observe buildbox/w1:p1"
+          : null,
+    );
+    render(<ContextBar tab={watchTab} row={row} onFind={() => {}} />);
+    // Open in the user's terminal is the same watch (`--observe`), which marks nothing seen.
+    await user.click(await terminalButton());
+    expect(openRow).toHaveBeenCalledWith(row, "external", { observe: true });
+    // The ⋯ menu's Copy attach command copies the watching one too.
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(
+      screen.getByRole("menuitem", { name: "Copy attach command" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+      machineId: "buildbox",
+      address: "w1:p1",
+      observe: true,
+    });
+  });
+
+  it("an_ordinary_tab_does_not_say_watching", () => {
+    const { container } = render(
+      <ContextBar tab={paneTab} row={row} onFind={() => {}} />,
+    );
+    expect(container.querySelector(".context-bar")).not.toHaveTextContent(
+      "Watching",
+    );
+  });
+});
 
 describe("ContextBar", () => {
   it("pane_tab_shows_name_status_and_actions", async () => {
@@ -120,6 +171,25 @@ describe("ContextBar", () => {
     expect(
       screen.getByRole("button", { name: "More actions" }),
     ).toBeInTheDocument();
+  });
+
+  it("an_ended_terminal_has_no_open_in_terminal", async () => {
+    const { unmount } = render(
+      <ContextBar
+        tab={paneTab}
+        row={{ ...row, status: "ended", exitCode: 1 }}
+        onFind={() => {}}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "More actions" }),
+    ).toBeInTheDocument();
+    // Give the terminal's name time to arrive: the button must still not appear.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+    unmount();
+    render(<ContextBar tab={paneTab} row={row} onFind={() => {}} />);
+    expect(await terminalButton()).toBeInTheDocument();
   });
 
   it("context_bar_shows_workbox_tile", () => {
@@ -159,7 +229,7 @@ describe("ContextBar", () => {
     const user = userEvent.setup();
     render(<ContextBar tab={paneTab} row={row} onFind={() => {}} />);
     await user.click(await terminalButton());
-    expect(openRow).toHaveBeenCalledWith(row, "external");
+    expect(openRow).toHaveBeenCalledWith(row, "external", { observe: false });
   });
 
   it("detach_closes_the_tab_and_returns_home", async () => {
@@ -168,11 +238,14 @@ describe("ContextBar", () => {
     await terminalButton();
     await user.click(screen.getByRole("button", { name: "Detach" }));
     expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
-      "full::buildbox",
+      otherTab.tabKey,
     ]);
     expect(useTerminalStore.getState().activeKey).toBe(HOME);
     // Detaching ends only our attach client: no herdr command.
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
   });
 
   it("close_pane_opens_the_confirm_dialog", async () => {
@@ -182,7 +255,10 @@ describe("ContextBar", () => {
     await openClosePane(user);
     const dialog = screen.getByRole("dialog", { name: "Close planner?" });
     expect(dialog).toBeInTheDocument();
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -197,13 +273,13 @@ describe("ContextBar", () => {
     const rowB: Row = {
       ...row,
       key: "buildbox::w1:p2",
-      paneId: "w1:p2",
+      address: "w1:p2",
       name: "reviewer",
     };
     const tabB: TermTab = {
       ...paneTab,
       tabKey: rowB.key,
-      target: { kind: "pane", machineId: "buildbox", paneId: "w1:p2" },
+      target: { kind: "terminal", machineId: "buildbox", address: "w1:p2" },
       title: "reviewer",
     };
     const { rerender } = render(
@@ -218,7 +294,10 @@ describe("ContextBar", () => {
     rerender(<ContextBar tab={tabB} row={rowB} onFind={() => {}} />);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(useAppStore.getState().dialogOpen).toBe(0);
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
   });
 
   it("the_close_pane_dialog_is_outside_the_terminal_panel", async () => {
@@ -261,8 +340,8 @@ describe("ContextBar", () => {
       "Open in Ghostty",
       "More actions",
     ]);
-    // Close pane… is in the menu, not in the bar.
-    expect(screen.queryByRole("button", { name: "Close pane…" })).toBeNull();
+    // Close… is in the menu, not in the bar.
+    expect(screen.queryByRole("button", { name: "Close…" })).toBeNull();
   });
 
   it("open_in_terminal_is_outlined_and_find_and_detach_are_ghost", async () => {
@@ -299,21 +378,6 @@ describe("ContextBar", () => {
     ).toBeInTheDocument();
   });
 
-  it("full_ui_tab_has_only_find_and_detach", () => {
-    const { container } = render(
-      <ContextBar tab={fullTab} row={null} onFind={() => {}} />,
-    );
-    const bar = container.querySelector(".context-bar")!;
-    expect(bar).toHaveTextContent("herdr");
-    expect(bar).toHaveTextContent("buildbox");
-    expect(bar.querySelector(".pill")).toBeNull();
-    expect(
-      screen
-        .getAllByRole("button")
-        .map((b) => b.getAttribute("aria-label") ?? b.textContent),
-    ).toEqual(["Find in terminal (⌘F)", "Detach"]);
-  });
-
   it("a_pane_tab_whose_row_is_gone_has_the_same_short_bar", () => {
     const { container } = render(
       <ContextBar tab={paneTab} row={null} onFind={() => {}} />,
@@ -326,5 +390,33 @@ describe("ContextBar", () => {
         .getAllByRole("button")
         .map((b) => b.getAttribute("aria-label") ?? b.textContent),
     ).toEqual(["Find in terminal (⌘F)", "Detach"]);
+  });
+
+  it("a_command_tab_names_the_workbox_and_the_verb_and_has_no_pane_menu", async () => {
+    const user = userEvent.setup();
+    const login: TermTab = {
+      ...paneTab,
+      tabKey: "buildbox::cmd:machine login",
+      target: {
+        kind: "command",
+        machineId: "buildbox",
+        args: ["machine", "login", "buildbox"],
+      },
+      title: "Log in",
+    };
+    useTerminalStore.setState({
+      tabs: [login, otherTab],
+      activeKey: login.tabKey,
+    });
+    render(<ContextBar tab={login} row={null} onFind={() => {}} />);
+    expect(screen.getByText("Logging in to buildbox")).toBeInTheDocument();
+    // No agent, no Open in a terminal, no Detach, no ⋯ menu.
+    expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Detach" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /more|pane/i })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Close tab" }));
+    expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+      otherTab.tabKey,
+    ]);
   });
 });

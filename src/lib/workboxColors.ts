@@ -31,10 +31,16 @@ export function hasOwn(map: object, key: string): boolean {
  * used, the least-used one (ties go to palette order). Only listed ids count as using a color.
  * Entries for ids that are not listed are kept, so removing a workbox never recolors another.
  * The result has no prototype, so every id (even `__proto__`) is a plain key.
+ *
+ * Migration (v0.9): before herdr-core a workbox was keyed by its name, now by its permanent id.
+ * An id with no saved color whose `names[id]` has one takes it, so the workbox keeps the color it
+ * had; the result is keyed by the id, and the name entry is left where it is (so running this
+ * again, on the saved result, changes nothing). `names` maps an id to the name it shows.
  */
 export function assignColors(
   machineIds: string[],
   saved: SavedColors,
+  names: Readonly<Record<string, string>> = {},
 ): Record<string, WorkboxColor> {
   const result: Record<string, WorkboxColor> = Object.create(null);
   const uses = new Map<WorkboxColor, number>(WORKBOX_COLORS.map((c) => [c, 0]));
@@ -48,6 +54,17 @@ export function assignColors(
   const ordered = machineIds.includes("local")
     ? ["local", ...machineIds.filter((id) => id !== "local")]
     : machineIds;
+  // First every migration, so a new workbox listed before a migrating one can't take the color
+  // that one is about to be given. A v0.8 entry under the name is the same workbox, so the same
+  // color. Local was always an id.
+  for (const id of ordered) {
+    if (hasOwn(result, id) || id === "local" || !hasOwn(names, id)) continue;
+    const name = names[id];
+    if (!hasOwn(saved, name) || saved[name] === undefined) continue;
+    const color = saved[name];
+    result[id] = color;
+    uses.set(color, (uses.get(color) ?? 0) + 1);
+  }
   for (const id of ordered) {
     if (hasOwn(result, id)) continue;
     let pick = WORKBOX_COLORS[0];
@@ -81,9 +98,12 @@ export function resolveColors(
   if (memo && memo.saved === saved && memo.machines === machines) {
     return memo.resolved;
   }
+  const names: Record<string, string> = Object.create(null);
+  for (const m of machines) names[m.id] = m.name;
   const resolved = assignColors(
     machines.map((m) => m.id),
     saved,
+    names,
   );
   memo = { saved, machines, resolved };
   return resolved;

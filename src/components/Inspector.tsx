@@ -1,24 +1,22 @@
 import { formatShortcut } from "../lib/shortcuts";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { MachineView } from "../lib/bindings/MachineView";
-import { HEALTH_LABEL, agentNameProblem, shortPath } from "../lib/format";
+import { HEALTH_LABEL, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { markSeen } from "../lib/openRow";
+import { paneMenuItems } from "../lib/paneMenu";
+import { interruptRow, markUnread, setPinned } from "../lib/rowActions";
 import { REPLY_BOX_ID } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 import { CommandBox, CopyButton } from "./CommandBox";
 import { CloseConfirm } from "./CloseConfirm";
 import { KindBadge } from "./KindBadge";
 import { OpenButton } from "./OpenButton";
+import { PinGlyph } from "./PinGlyph";
 import { Preview } from "./Preview";
+import { StatusDetail } from "./StatusDetail";
 import { StatusPill } from "./StatusPill";
-
-/** Mirrors Rust's `validate_name`; Rust still has the last word. */
-function nameProblem(name: string, isAgent: boolean): string | null {
-  if (isAgent) return agentNameProblem(name);
-  return name.trim() === "" ? "Name can’t be empty." : null;
-}
 
 type Props = {
   row: Row;
@@ -26,6 +24,10 @@ type Props = {
   /** The project the row belongs to, when it has one. */
   project?: string | null;
   terminalName?: string;
+  /** The agent that started this terminal, when it is a worker and that agent is listed. */
+  startedBy?: Row | null;
+  /** The workers that report to this terminal. */
+  workers?: readonly Row[];
 };
 
 /** Everything about the selected row: details, live preview, reply, and its actions. */
@@ -34,35 +36,35 @@ export function Inspector({
   machine,
   project = null,
   terminalName = "terminal",
+  startedBy = null,
+  workers = [],
 }: Props) {
   const reportError = useAppStore((s) => s.reportError);
-  const { machineId, paneId } = row;
-  const isAgent = row.status !== "shell";
-  const target = { machineId, paneId };
+  const select = useAppStore((s) => s.select);
+  const workersId = useId();
+  const { machineId, isAgent } = row;
+  const target = { machineId, address: row.address };
+  // The ⋯ menu's list: what this row can be offered.
+  const items = paneMenuItems(row);
+  const canAttach = items.includes("copy-attach");
 
-  const snapshot = machine.snapshot;
-  const pane =
-    snapshot?.panes.find((p) => p.pane_id === paneId) ??
-    snapshot?.agents.find((a) => a.pane_id === paneId) ??
-    null;
-  const workspace = snapshot?.workspaces.find(
-    (w) => w.workspace_id === pane?.workspace_id,
-  );
-  const tab = snapshot?.tabs.find((t) => t.tab_id === pane?.tab_id);
-  const where = [workspace?.label, tab?.label].filter(Boolean).join(" · ");
-  const agentName = snapshot?.agents.find((a) => a.pane_id === paneId)?.name;
-
-  // What "Open" runs; the text comes from Rust, and follows the attach mode in Settings.
-  const attachMode = useAppStore((s) => s.settings?.attach_mode);
+  // What "Open" runs; the text comes from Rust.
   // Rust's refusal is kept too, so "Copy command" can say why there is nothing to copy.
   const [attach, setAttach] = useState<{
     command: string | null;
     refusal: { error: unknown } | null;
   }>({ command: null, refusal: null });
-  const { command, refusal } = attach;
+  const command = canAttach ? attach.command : null;
+  const refusal = canAttach ? attach.refusal : null;
   useEffect(() => {
+    // A finished terminal can't be attached to: there is no command to fetch or show.
+    if (!canAttach) return;
     let alive = true;
-    invokeTyped("copy_attach_command", { machineId, paneId })
+    invokeTyped("copy_attach_command", {
+      machineId,
+      address: row.address,
+      observe: false,
+    })
       .then(
         (c) =>
           alive &&
@@ -77,7 +79,7 @@ export function Inspector({
     return () => {
       alive = false;
     };
-  }, [machineId, paneId, row.terminalId, attachMode]);
+  }, [machineId, row.address, canAttach]);
 
   // Reply
   const hintId = useId();
@@ -103,61 +105,38 @@ export function Inspector({
     }
   };
 
-  // Rename
-  const [renaming, setRenaming] = useState(false);
-  const renameId = useId();
-  const [draft, setDraft] = useState("");
-  const [problem, setProblem] = useState<string | null>(null);
-  const renameButton = useRef<HTMLButtonElement>(null);
-  const startRename = () => {
-    setDraft(isAgent ? (agentName ?? "") : row.name);
-    setProblem(null);
-    setRenaming(true);
-  };
-  const stopRename = () => {
-    setRenaming(false);
-    // The input is gone after this render; give focus back to the button that opened it.
-    window.setTimeout(() => renameButton.current?.focus(), 0);
-  };
-  const saveRename = async () => {
-    const name = isAgent ? draft : draft.trim();
-    const bad = nameProblem(name, isAgent);
-    setProblem(bad);
-    if (bad) return;
-    try {
-      await invokeTyped("rename_session", { ...target, isAgent, name });
-      stopRename();
-    } catch (e) {
-      reportError(e);
-    }
-  };
-
   const [closing, setClosing] = useState(false);
 
   return (
     <aside className="inspector" aria-label="Selected agent">
       <header className="inspector-head">
         <div className="inspector-badges">
-          <StatusPill status={row.status} />
-          <KindBadge kind={row.kind} named />
-          <span className="muted">{row.kind ?? "Shell"}</span>
+          <StatusPill status={row.status} isWorker={row.isWorker} />
+          <KindBadge kind={row.kind} isAgent={isAgent} named />
+          <span className="muted">
+            {row.kind ?? (isAgent ? "Agent" : "Shell")}
+          </span>
         </div>
-        <h2 className="inspector-name mono">{row.name}</h2>
+        <h2 className="inspector-name mono">
+          {row.name}
+          {row.pinned && <PinGlyph />}
+        </h2>
         <span className="inspector-sub">
           {project ? `${project} on ${row.machineLabel}` : row.machineLabel}
         </span>
+        <StatusDetail row={row} />
       </header>
 
       <dl className="inspector-grid" role="group" aria-label="Details">
         <div>
           <dt>Workbox</dt>
           <dd>
-            {machine.label} · {HEALTH_LABEL[machine.health.kind]}
+            {machine.name} · {HEALTH_LABEL[machine.health.kind]}
           </dd>
         </div>
         <div>
           <dt>Session</dt>
-          <dd>{machine.session}</dd>
+          <dd>{machine.session ?? "default"}</dd>
         </div>
         {row.folder && (
           <div className="span-2">
@@ -165,16 +144,45 @@ export function Inspector({
             <dd className="mono">{shortPath(row.folder)}</dd>
           </div>
         )}
-        {where && (
-          <div>
-            <dt>Workspace / tab</dt>
-            <dd>{where}</dd>
+        <div>
+          <dt>Terminal</dt>
+          <dd className="mono">{row.address}</dd>
+        </div>
+        {startedBy && (
+          <div className="span-2">
+            <dt>Started by</dt>
+            <dd>
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => select(startedBy.key)}
+              >
+                {startedBy.name}
+              </button>
+            </dd>
           </div>
         )}
-        <div>
-          <dt>Pane</dt>
-          <dd className="mono">{paneId}</dd>
-        </div>
+        {workers.length > 0 && (
+          <div className="span-2">
+            <dt id={workersId}>Workers</dt>
+            <dd>
+              <ul className="inspector-workers" aria-labelledby={workersId}>
+                {workers.map((w) => (
+                  <li key={w.key}>
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => select(w.key)}
+                    >
+                      {w.name}
+                    </button>
+                    <StatusPill status={w.status} isWorker={w.isWorker} />
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
       </dl>
 
       <Preview row={row} />
@@ -218,93 +226,77 @@ export function Inspector({
       )}
 
       <div className="inspector-actions">
-        <OpenButton
-          row={row}
-          terminalName={terminalName}
-          wide
-          kbd={formatShortcut("open-selected")}
-        />
-        {row.status === "done" && (
-          <button type="button" className="btn" onClick={() => markSeen(row)}>
-            Mark seen
-          </button>
+        {/* A finished terminal has nothing to open; its preview above still reads. */}
+        {row.status !== "ended" && (
+          <OpenButton
+            row={row}
+            terminalName={terminalName}
+            wide
+            kbd={formatShortcut("open-selected")}
+          />
         )}
-        {renaming ? (
-          <form
-            className="rename"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void saveRename();
-            }}
-          >
-            <label htmlFor={renameId} className="inspector-label">
-              New name
-            </label>
-            <div className="reply-line">
-              <input
-                id={renameId}
-                type="text"
-                className="field mono"
-                value={draft}
-                autoFocus
-                aria-invalid={problem !== null}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    e.stopPropagation();
-                    stopRename();
-                  }
-                }}
-              />
-              <button type="submit" className="btn">
-                Save
-              </button>
-              <button type="button" className="btn" onClick={stopRename}>
-                Cancel
-              </button>
-            </div>
-            {problem && (
-              <p role="alert" className="field-error">
-                {problem}
-              </p>
-            )}
-          </form>
-        ) : (
-          <div className="inspector-secondary">
+        {/* The ⋯ menu's list (`paneMenuItems`), as buttons: what changes the row, apart from
+            the two that end it. */}
+        <div className="inspector-secondary">
+          {items.includes("mark-seen") && (
+            <button type="button" className="btn" onClick={() => markSeen(row)}>
+              Mark as seen
+            </button>
+          )}
+          {items.includes("mark-unread") && (
             <button
-              ref={renameButton}
               type="button"
               className="btn"
-              onClick={startRename}
+              onClick={() => markUnread(row)}
             >
-              Rename
+              Mark as unread
             </button>
-            {refusal ? (
-              <button
-                type="button"
-                className="btn"
-                onClick={() => reportError(refusal.error)}
-              >
-                Copy command
-              </button>
-            ) : (
-              <CopyButton
-                text={command ?? ""}
-                disabled={command === null}
-                className="btn"
-                idleText="Copy command"
-                label="Copy command"
-              />
-            )}
+          )}
+          {items.includes("interrupt") && (
             <button
               type="button"
-              className="btn btn-danger"
-              onClick={() => setClosing(true)}
+              className="btn"
+              onClick={() => void interruptRow(row)}
             >
-              Close
+              Interrupt
             </button>
-          </div>
-        )}
+          )}
+          {(items.includes("pin") || items.includes("unpin")) && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setPinned(row, !row.pinned)}
+            >
+              {items.includes("unpin") ? "Unpin" : "Pin"}
+            </button>
+          )}
+        </div>
+        <div className="inspector-secondary">
+          {!items.includes("copy-attach") ? null : refusal ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => reportError(refusal.error)}
+            >
+              Copy command
+            </button>
+          ) : (
+            <CopyButton
+              text={command ?? ""}
+              disabled={command === null}
+              className="btn"
+              idleText="Copy command"
+              label="Copy command"
+            />
+          )}
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={() => setClosing(true)}
+          >
+            {items.includes("remove") ? "Remove" : "Close"}
+          </button>
+        </div>
       </div>
 
       {command && <CommandBox command={command} />}

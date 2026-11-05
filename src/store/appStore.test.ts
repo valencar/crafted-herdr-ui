@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { appState } from "../test/builders";
 import { useAppStore } from "./appStore";
 
 const initial = useAppStore.getState();
@@ -26,12 +27,7 @@ describe("appStore", () => {
 
   it("sets each field through its setter", () => {
     const s = useAppStore.getState();
-    const app = {
-      machines: [],
-      herdr_version: null,
-      herdr_path: null,
-      generated_at_ms: 1,
-    };
+    const app = appState([]);
     s.setState(app);
     s.select("buildbox::w1:p1");
     s.setGroupBy("status");
@@ -53,8 +49,8 @@ describe("appStore", () => {
   it("reports an error as a toast that dismisses itself after 8 s", () => {
     const { reportError } = useAppStore.getState();
     reportError({
-      kind: "herdr",
-      error: { kind: "server", code: "x", message: "pane is gone" },
+      kind: "core",
+      error: { kind: "rpc", code: "x", message: "pane is gone", hint: null },
     });
     expect(useAppStore.getState().toast).toBe("pane is gone");
     vi.advanceTimersByTime(7_999);
@@ -167,7 +163,7 @@ describe("appStore", () => {
     const target = {
       key: "buildbox::w3:p1",
       machineId: "buildbox",
-      paneId: "w3:p1",
+      address: "w3:p1",
     };
     setPendingOpen(target);
     expect(useAppStore.getState().pendingOpen).toEqual(target);
@@ -186,7 +182,7 @@ describe("appStore", () => {
     setPendingOpen({
       key: "buildbox::w3:p1",
       machineId: "buildbox",
-      paneId: "w3:p1",
+      address: "w3:p1",
     });
     setPendingOpen(null);
     vi.advanceTimersByTime(20_000);
@@ -199,7 +195,7 @@ describe("appStore", () => {
     setPendingOpen({
       key: "buildbox::w3:p1",
       machineId: "buildbox",
-      paneId: "w3:p1",
+      address: "w3:p1",
     });
     setPendingSelectKey(null);
     vi.advanceTimersByTime(10_000);
@@ -244,15 +240,12 @@ describe("appStore", () => {
   it("starts without settings and keeps them once they are read", () => {
     expect(useAppStore.getState().settings).toBeNull();
     const settings = {
-      herdr_path: null,
+      core_path: null,
       terminal: null,
       terminal_custom_template: "",
       open_mode: "window",
-      attach_mode: "pane",
       notify_blocked: true,
       notify_done: true,
-      poll_interval_visible_ms: 2000,
-      poll_interval_hidden_ms: 10_000,
       group_by: "project",
       global_shortcut_enabled: true,
       open_after_create: true,
@@ -268,6 +261,7 @@ describe("appStore", () => {
       new_session_hidden_kinds: [] as string[],
       new_session_hide_shell: false,
       workbox_colors: {},
+      hidden_workboxes: [] as string[],
     } as const;
     useAppStore.getState().setSettings(settings);
     expect(useAppStore.getState().settings).toEqual(settings);

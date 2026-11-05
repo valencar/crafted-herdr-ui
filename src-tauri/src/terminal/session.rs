@@ -20,6 +20,8 @@ pub type TermId = u32;
 pub const MAX_SESSIONS: usize = 16;
 /// The most child output (in bytes) one `Data` event carries, so a burst can't flood the UI.
 pub const MAX_CHUNK: usize = 64 * 1024;
+/// How much of the end of the output is kept to read the last line from.
+pub const TAIL_BYTES: usize = 4 * 1024;
 
 const GONE: &str = "That terminal is no longer open.";
 
@@ -27,8 +29,15 @@ const GONE: &str = "That terminal is no longer open.";
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum TermEvent {
-    Data { data: String },
-    Exit { code: Option<i32> },
+    Data {
+        data: String,
+    },
+    /// `last_line` is the last non-empty line the program printed (escape codes removed), where
+    /// `hc attach` says why it ended (`[detached from t7]`, `error: …`).
+    Exit {
+        code: Option<i32>,
+        last_line: Option<String>,
+    },
 }
 
 /// Receives a session's events. Returns `false` when nobody is listening any more.
@@ -154,6 +163,8 @@ fn forward(
     sessions: SessionMap,
 ) {
     let mut pending = Vec::new();
+    // The last `TAIL_BYTES` of output, for the line `hc attach` ends with.
+    let mut tail: Vec<u8> = Vec::new();
     // Bytes read but not yet sent, so one event never carries more than `MAX_CHUNK` of them.
     let mut buffer: Vec<u8> = Vec::new();
     loop {
@@ -174,6 +185,7 @@ fn forward(
         } else {
             Vec::new()
         };
+        keep_tail(&mut tail, &buffer);
         let data = decode_utf8(&mut pending, &buffer);
         buffer = rest;
         if !data.is_empty() && !sink(TermEvent::Data { data }) {
@@ -187,7 +199,84 @@ fn forward(
     let code = control.wait();
     // Gone from the map before the UI hears of it, so a write after `Exit` is refused.
     lock(&sessions).remove(&id);
-    sink(TermEvent::Exit { code: Some(code) });
+    sink(TermEvent::Exit {
+        code: Some(code),
+        last_line: last_line(&tail),
+    });
+}
+
+/// Appends `chunk` to `tail`, keeping only the last `TAIL_BYTES`.
+fn keep_tail(tail: &mut Vec<u8>, chunk: &[u8]) {
+    tail.extend_from_slice(chunk);
+    if tail.len() > TAIL_BYTES {
+        tail.drain(..tail.len() - TAIL_BYTES);
+    }
+}
+
+/// The text of `bytes` as a terminal would show it: CSI, OSC and other escape sequences
+/// removed, control characters other than `\n` and `\r` dropped.
+fn strip_escapes(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\x1b' => match chars.next() {
+                // CSI: parameters, then a final byte in 0x40..=0x7E.
+                Some('[') => {
+                    for n in chars.by_ref() {
+                        if ('\x40'..='\x7e').contains(&n) {
+                            break;
+                        }
+                    }
+                }
+                // OSC (and DCS, APC, PM, SOS): up to BEL or ST (ESC \).
+                Some(']' | 'P' | '_' | '^' | 'X') => {
+                    while let Some(n) = chars.next() {
+                        if n == '\x07' {
+                            break;
+                        }
+                        if n == '\x1b' {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                // `ESC ( B` and the like take one more byte.
+                Some('(' | ')' | '*' | '+' | '#' | '%') => {
+                    chars.next();
+                }
+                _ => {}
+            },
+            '\n' | '\r' => out.push(c),
+            c if c.is_control() => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The last non-empty line of the output's tail. One exception: when that line is a `hint: …`
+/// and an `error: …` line comes before it, the error line is the one that says what went wrong.
+pub fn last_line(tail: &[u8]) -> Option<String> {
+    let text = strip_escapes(tail);
+    // A carriage return rewrites the line, so only what follows the last one is left.
+    let lines: Vec<&str> = text
+        .split('\n')
+        .map(|l| l.rsplit('\r').find(|s| !s.trim().is_empty()).unwrap_or(""))
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let last = *lines.last()?;
+    if last.starts_with("hint: ")
+        && let Some(error) = lines[..lines.len() - 1]
+            .iter()
+            .rev()
+            .find(|l| l.starts_with("error: "))
+    {
+        return Some((*error).to_owned());
+    }
+    Some(last.to_owned())
 }
 
 /// Appends `chunk` to `pending` and returns the text that is complete. A multibyte character cut
@@ -418,7 +507,13 @@ mod tests {
         let id = sessions
             .open(&argv(), &[], size(80, 24), sink)
             .expect("open");
-        assert_eq!(until_exit(&rx), [TermEvent::Exit { code: Some(0) }]);
+        assert_eq!(
+            until_exit(&rx),
+            [TermEvent::Exit {
+                code: Some(0),
+                last_line: None
+            }]
+        );
         let gone = Err("That terminal is no longer open.".to_owned());
         assert_eq!(sessions.write(id, "x"), gone);
         assert_eq!(sessions.resize(id, size(10, 10)), gone);
@@ -455,7 +550,13 @@ mod tests {
         assert_eq!(sessions.len(), 0);
         // The fake child "dies" when its output ends.
         lock(&spawner.open_ends).clear();
-        assert_eq!(until_exit(&rx), [TermEvent::Exit { code: Some(0) }]);
+        assert_eq!(
+            until_exit(&rx),
+            [TermEvent::Exit {
+                code: Some(0),
+                last_line: None
+            }]
+        );
     }
 
     #[test]
@@ -521,7 +622,7 @@ mod tests {
         while exit.is_none() && Instant::now() < deadline {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(TermEvent::Data { data }) => seen += &data,
-                Ok(TermEvent::Exit { code }) => exit = Some(code),
+                Ok(TermEvent::Exit { code, .. }) => exit = Some(code),
                 Err(_) => {}
             }
             if !typed && seen.contains("ready") {
@@ -531,5 +632,106 @@ mod tests {
         }
         assert!(seen.contains("got=hi"), "{seen:?}");
         assert_eq!(exit, Some(Some(0)));
+    }
+
+    #[test]
+    fn session_reports_last_line() {
+        // The screen, then what `hc attach` says on its way out, with the escape codes a real
+        // pty carries around it.
+        let spawner = FakeSpawner::new(
+            vec![
+                b"\x1b[?1049h\x1b[2J$ prompt\r\n".to_vec(),
+                b"\x1b[?1049l\x1b[0m[detached from t7]\r\n".to_vec(),
+            ],
+            false,
+        );
+        let sessions = TermSessions::new(spawner);
+        let (sink, rx) = recording_sink();
+        sessions
+            .open(&argv(), &[], size(80, 24), sink)
+            .expect("open");
+        let events = until_exit(&rx);
+        assert_eq!(
+            events.last(),
+            Some(&TermEvent::Exit {
+                code: Some(0),
+                last_line: Some("[detached from t7]".into())
+            })
+        );
+    }
+
+    #[test]
+    fn the_last_line_is_the_last_non_empty_one_without_escape_codes() {
+        let line = |s: &str| last_line(s.as_bytes());
+        assert_eq!(line(""), None);
+        assert_eq!(line("\r\n\r\n  \r\n"), None);
+        assert_eq!(line("a\r\nb\r\n\r\n"), Some("b".into()));
+        assert_eq!(
+            line("x\x1b[31m[t9 finished: exited]\x1b[0m\r\n"),
+            Some("x[t9 finished: exited]".into())
+        );
+        // OSC title (BEL and ST ended) and a charset switch are not text.
+        assert_eq!(
+            line("\x1b]0;title\x07\x1b]2;t\x1b\\\x1b(Bdone\r\n"),
+            Some("done".into())
+        );
+        // A carriage return rewrites the line.
+        assert_eq!(line("old\rnew\r\n"), Some("new".into()));
+        // Invalid bytes don't hide the line.
+        assert_eq!(
+            last_line(b"\xff\xfe[lost the core]\n"),
+            Some("\u{fffd}\u{fffd}[lost the core]".into())
+        );
+    }
+
+    #[test]
+    fn a_hint_gives_way_to_the_error_before_it() {
+        let line = |s: &str| last_line(s.as_bytes());
+        assert_eq!(
+            line("error: no terminal \"t99\"\r\nhint: see `hc ls --all`\r\n"),
+            Some("error: no terminal \"t99\"".into())
+        );
+        // A hint with no error before it stays.
+        assert_eq!(line("hint: only\r\n"), Some("hint: only".into()));
+        // Clap's usage ending is not a hint.
+        assert_eq!(
+            line(
+                "error: unexpected argument\r\nUsage: hc attach\r\nFor more information, try '--help'.\r\n"
+            ),
+            Some("For more information, try '--help'.".into())
+        );
+    }
+
+    #[test]
+    fn only_the_last_four_kilobytes_are_kept() {
+        let mut tail = Vec::new();
+        keep_tail(&mut tail, &vec![b'a'; TAIL_BYTES]);
+        keep_tail(&mut tail, b"\nlast\n");
+        assert_eq!(tail.len(), TAIL_BYTES);
+        assert_eq!(last_line(&tail), Some("last".into()));
+    }
+
+    #[test]
+    fn a_real_pty_ends_with_the_line_the_program_printed_last() {
+        let sessions = TermSessions::new(Arc::new(PortablePty));
+        let (sink, rx) = recording_sink();
+        let argv: Vec<String> = [
+            "/bin/sh",
+            "-c",
+            "printf 'screen\\n'; printf '[t9 finished: exited]\\n' >&2; exit 0",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        let env = vec![("PATH".to_owned(), "/usr/bin:/bin".to_owned())];
+        sessions
+            .open(&argv, &env, size(80, 24), sink)
+            .expect("open");
+        assert_eq!(
+            until_exit(&rx).last(),
+            Some(&TermEvent::Exit {
+                code: Some(0),
+                last_line: Some("[t9 finished: exited]".into())
+            })
+        );
     }
 }

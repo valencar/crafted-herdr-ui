@@ -1,8 +1,22 @@
 import type { MachineView } from "./bindings/MachineView";
-import { shortPath, STATUS_LABEL } from "./format";
+import { shortPath } from "./format";
 import { fuzzyMatch, fuzzyScore } from "./fuzzy";
-import { groupByProject, needsYou, type Row } from "./grouping";
+import {
+  groupByProject,
+  needsYou,
+  partitionPinned,
+  shownStatus,
+  sortPinnedFirst,
+  type Row,
+} from "./grouping";
+import {
+  isDangerItem,
+  PANE_MENU_LABEL,
+  paneMenuItems,
+  type PaneMenuItem,
+} from "./paneMenu";
 import { formatShortcut, type ShortcutId } from "./shortcuts";
+import { shownMachines } from "./workbox";
 
 export type PaletteGroup =
   "Needs you" | "Open tabs" | "Agents" | "Projects" | "Workboxes" | "Commands";
@@ -20,6 +34,11 @@ export type PaletteItem = {
   shortcut?: ShortcutId;
   /** For an agent: where ⌘Enter opens it (the other way from Enter). */
   alt?: "app" | "external";
+  /**
+   * An ended agent: it has nothing to open (attaching to a finished terminal fails), so Enter
+   * opens its action frame and ⌘Enter does nothing. `run` does nothing.
+   */
+  framed?: boolean;
   /** `"default"` is Enter, `"alt"` is ⌘Enter. */
   run: (how: "default" | "alt") => void;
 };
@@ -59,15 +78,16 @@ export const PALETTE_LIMIT = 50;
  * open; ⌘Enter opens it the other way.
  */
 export function buildItems(ctx: Context): PaletteItem[] {
-  const urgent = needsYou(ctx.rows);
+  const urgent = sortPinnedFirst(needsYou(ctx.rows));
   const urgentKeys = new Set(urgent.map((r) => r.key));
-  const other = ctx.rows.filter((r) => !urgentKeys.has(r.key));
+  const other = sortPinnedFirst(ctx.rows.filter((r) => !urgentKeys.has(r.key)));
   const tabKeys = new Set(ctx.openTabs.map((t) => t.key));
 
   // The rule of `agentActions` and the Open button: with a tab open, Enter goes to it and ⌘Enter
   // is the terminal app; without one, Enter follows the "Open sessions" setting.
   const agent = (row: Row, group: PaletteGroup): PaletteItem => {
     const hasTab = tabKeys.has(row.key);
+    const ended = row.status === "ended";
     const alt: "app" | "external" =
       hasTab || ctx.openTarget === "app" ? "external" : "app";
     return {
@@ -77,15 +97,17 @@ export function buildItems(ctx: Context): PaletteItem[] {
       detail: [
         row.machineLabel,
         row.folder === null ? null : shortPath(row.folder),
-        STATUS_LABEL[row.status],
+        shownStatus(row).label,
       ]
         .filter((part) => part !== null)
         .join(" · "),
-      keywords: [row.kind, row.title, row.paneId].filter(Boolean).join(" "),
+      keywords: [row.kind, row.title, row.address].filter(Boolean).join(" "),
       row,
-      alt,
-      run: (how) =>
-        ctx.open(row, how === "alt" ? alt : hasTab ? "app" : undefined),
+      ...(ended ? { framed: true } : { alt }),
+      run: (how) => {
+        if (ended) return;
+        ctx.open(row, how === "alt" ? alt : hasTab ? "app" : undefined);
+      },
     };
   };
 
@@ -111,11 +133,11 @@ export function buildItems(ctx: Context): PaletteItem[] {
       run: () => ctx.goToProject(g.key),
     }));
 
-  const workboxes: PaletteItem[] = ctx.machines.map((m) => ({
+  const workboxes: PaletteItem[] = shownMachines(ctx.machines).map((m) => ({
     id: `workbox:${m.id}`,
     group: "Workboxes",
-    label: m.label,
-    detail: m.is_local ? "This computer" : (m.target ?? m.session),
+    label: m.name,
+    detail: m.is_local ? "This computer" : (m.target ?? m.session ?? ""),
     keywords: `${m.id} ${m.target ?? ""}`,
     run: () => ctx.goToWorkbox(m.id),
   }));
@@ -142,7 +164,7 @@ export function buildItems(ctx: Context): PaletteItem[] {
 
 /**
  * With no query: the agents that need you, the open tabs, the commands, then the other agents
- * by name.
+ * by name; pinned agents lead the agent lists.
  * With one: every item that matches, best score of its label, detail or keywords first, and
  * equal scores keep the order of `items` (the group order above). At most `limit` items.
  */
@@ -159,7 +181,10 @@ export function rankItems(
       ...byGroup("Needs you"),
       ...byGroup("Open tabs"),
       ...byGroup("Commands"),
-      ...byGroup("Agents").sort((a, b) => a.label.localeCompare(b.label, "en")),
+      ...partitionPinned(
+        byGroup("Agents").sort((a, b) => a.label.localeCompare(b.label, "en")),
+        (item) => item.row?.pinned === true,
+      ),
     ].slice(0, limit);
   }
   const scored: { item: PaletteItem; at: number; score: number }[] = [];
@@ -182,14 +207,7 @@ export function labelPositions(item: PaletteItem, query: string): number[] {
   return fuzzyMatch(query.trim(), item.label)?.positions ?? [];
 }
 
-export type AgentActionId =
-  | "open"
-  | "open-alt"
-  | "reply"
-  | "copy-attach"
-  | "mark-seen"
-  | "show-in-all"
-  | "close-pane";
+export type AgentActionId = "open" | "open-alt" | "reply" | PaneMenuItem;
 
 /** One line of an agent's action frame (⇥ on an agent in the palette). */
 export type AgentAction = {
@@ -203,58 +221,68 @@ export type AgentAction = {
 };
 
 /**
- * What the palette can do with one agent, in order. "Reply…" is for an idle or done agent only,
- * the Inspector's rule (a blocked agent is never answered for the user); "Mark as seen" is for
- * a done one. Closing is last and asks first.
+ * What the palette can do with one agent, in order: the two ways to open it, "Reply…" (an idle
+ * or done agent only, the Inspector's rule: a blocked agent is never answered for the user), then
+ * exactly what the ⋯ menu lists (`paneMenuItems`, with its words). Closing or removing is last
+ * and asks first.
  */
 export function agentActions(
   row: Row,
-  ctx: { hasTab: boolean; openTarget: "app" | "external"; terminal: string },
+  ctx: {
+    hasTab: boolean;
+    openTarget: "app" | "external";
+    terminal: string;
+    /** Herdr's window is open: Open in Herdr is offered, after Watch. */
+    herdrApp?: boolean;
+  },
 ): AgentAction[] {
   const here = "Open in a tab here";
   const external = `Open in ${ctx.terminal}`;
   // With a tab open, Enter goes to it and the other way is always the terminal app (as the
   // Open button's menu has both); without one, the two are the "Open sessions" setting and
   // the opposite of it.
-  const actions: AgentAction[] = ctx.hasTab
-    ? [
-        { id: "open", label: "Go to tab", keys: "↵", how: "app" },
-        {
-          id: "open-alt",
-          label: external,
-          keys: formatShortcut("palette-open-alt"),
-          how: "external",
-        },
-      ]
-    : ctx.openTarget === "app"
-      ? [
-          { id: "open", label: here, keys: "↵", how: "app" },
-          {
-            id: "open-alt",
-            label: external,
-            keys: formatShortcut("palette-open-alt"),
-            how: "external",
-          },
-        ]
-      : [
-          { id: "open", label: external, keys: "↵", how: "external" },
-          {
-            id: "open-alt",
-            label: here,
-            keys: formatShortcut("palette-open-alt"),
-            how: "app",
-          },
-        ];
+  // A finished terminal has nothing to open (attaching to it fails).
+  const actions: AgentAction[] =
+    row.status === "ended"
+      ? []
+      : ctx.hasTab
+        ? [
+            { id: "open", label: "Go to tab", keys: "↵", how: "app" },
+            {
+              id: "open-alt",
+              label: external,
+              keys: formatShortcut("palette-open-alt"),
+              how: "external",
+            },
+          ]
+        : ctx.openTarget === "app"
+          ? [
+              { id: "open", label: here, keys: "↵", how: "app" },
+              {
+                id: "open-alt",
+                label: external,
+                keys: formatShortcut("palette-open-alt"),
+                how: "external",
+              },
+            ]
+          : [
+              { id: "open", label: external, keys: "↵", how: "external" },
+              {
+                id: "open-alt",
+                label: here,
+                keys: formatShortcut("palette-open-alt"),
+                how: "app",
+              },
+            ];
   if (row.status === "idle" || row.status === "done") {
     actions.push({ id: "reply", label: "Reply…" });
   }
-  actions.push({ id: "copy-attach", label: "Copy attach command" });
-  if (row.status === "done") {
-    actions.push({ id: "mark-seen", label: "Mark as seen" });
+  for (const item of paneMenuItems(row, ctx.herdrApp === true)) {
+    actions.push({
+      id: item,
+      label: PANE_MENU_LABEL[item],
+      ...(isDangerItem(item) ? { danger: true } : {}),
+    });
   }
-  actions.push(
-    { id: "show-in-all", label: "Show in All agents" },
-    { id: "close-pane", label: "Close pane…", danger: true },
-  );
   return actions;
 }

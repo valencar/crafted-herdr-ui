@@ -9,6 +9,7 @@ import { WorkboxRow } from "../terminal/WorkboxRow";
 import { groupTabs } from "../terminal/tabOrder";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
+import { machineView } from "../test/builders";
 import { Sidebar } from "./Sidebar";
 import { WorkboxColorMenu } from "./WorkboxColorMenu";
 
@@ -21,26 +22,16 @@ import { invokeTyped } from "../lib/ipc";
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
 function machine(id: string): MachineView {
-  return {
-    id,
-    label: id,
-    target: id,
-    session: "default",
-    is_local: false,
-    health: { kind: "online" },
-    snapshot: null,
-    last_ok_ms: 1,
-    ages: {},
-  } as unknown as MachineView;
+  return machineView({ id, target: id }, null);
 }
 
 const machines = [machine("buildbox"), machine("gpubox")];
 
-function openTab(machineId: string, paneId: string, title: string) {
+function openTab(machineId: string, address: string, title: string) {
   act(() =>
     useTerminalStore.getState().openTab({
-      tabKey: `${machineId}::${paneId}`,
-      target: { kind: "pane", machineId, paneId },
+      tabKey: `${machineId}::${address}`,
+      target: { kind: "terminal", machineId, address: address },
       title,
       machineLabel: machineId,
     }),
@@ -54,8 +45,8 @@ function renderSidebar() {
       agentCount={0}
       projects={[]}
       machines={machines}
-      herdrPath={null}
-      herdrVersion={null}
+      corePath={null}
+      coreVersion={null}
       activeWorkbox={null}
       dashboardActive={false}
       onDashboard={vi.fn()}

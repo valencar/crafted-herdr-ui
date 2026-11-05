@@ -1,17 +1,18 @@
 pub mod actions;
 pub mod activity;
+pub mod agents;
 pub mod commands;
+pub mod core;
 pub mod env;
-pub mod herdr;
-pub mod machine_setup;
+pub mod herdr_app;
 pub mod menu;
 pub mod notify;
-pub mod poller;
 pub mod preview;
 pub mod pty;
 pub mod settings;
 pub mod ssh_config;
 pub mod state;
+pub mod sync;
 pub mod terminal;
 pub mod tray;
 
@@ -23,23 +24,20 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
-use actions::Actions;
-use activity::ActivityTracker;
-use commands::AgentKindsCache;
-use herdr::cli::HerdrCli;
-use machine_setup::MachineSetup;
-use poller::{Poller, PollerConfig};
+use crate::core::{CommandLog, CoreClient, ProcessConnector};
+use activity::ActivityV2;
 use preview::{PREVIEW_EVENT, PreviewManager};
 use pty::PortablePty;
-use settings::{HerdrLocator, SharedSettings, ShortcutState, ShortcutStatus};
-use state::{AppState, PollIntervals};
+use settings::{CoreLocator, SharedSettings, ShortcutState, ShortcutStatus};
+use state::{AppState, CoreState};
+use sync::{CoreSync, Emit, NotifySink, SyncCell};
 use terminal::InstalledCache;
 use terminal::session::TermSessions;
 use tray::{MAIN_WINDOW, POPOVER_WINDOW, PopoverGuard};
 
 const FALLBACK_SHELL: &str = "/bin/zsh";
 
-/// Machine id that means "this computer": no `--machine` flag.
+/// Machine id that means "this computer": no machine name in the call.
 pub(crate) const LOCAL: &str = "local";
 
 /// Locks, recovering the data if another thread panicked while holding the lock.
@@ -55,81 +53,78 @@ pub(crate) fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Startup wiring: read the settings, find herdr, build the CLI runner and the poller, hand them
-/// to Tauri state, start polling, and set up the tray, notifications and the global shortcut.
-/// Without herdr there is nothing to poll, so the UI just gets a state with `herdr_path: None`.
+/// Startup wiring: read the settings, build the herdr-core client, the activity record and the
+/// managed state, and set up the tray, notifications and the global shortcut. `CoreSync` itself
+/// starts once the core is located (see `locate_and_start`), because a start before that would
+/// find no binary and wait for the Reconnect button.
 fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     let settings = settings::load(&handle);
 
     // The login shell and the version check are slow, so they run after the window is up (see
-    // the end of this function). Until then the runner has no environment and no binary, and
-    // the UI shows "Connecting to herdr…".
-    let home = app.path().home_dir()?;
-    let cli = HerdrCli::without_env(PathBuf::new());
-    let locator = HerdrLocator::new(None, home);
+    // the end of this function). Until then the client has no binary, and `get_state` answers
+    // `null`, which the UI shows as "Connecting to herdr-core…".
+    let log = Arc::new(CommandLog::default());
+    // Pointed at no binary until the core is located: a call fails `NotFound`.
+    let core = Arc::new(CoreClient::with_log(
+        Arc::new(ProcessConnector {
+            bin: PathBuf::new(),
+            env: Vec::new(),
+        }),
+        log,
+    ));
+    let locator = CoreLocator::new();
 
     let activity_path = app.path().app_data_dir()?.join("activity.json");
-    let config = PollerConfig {
-        activity_path: Some(activity_path.clone()),
-        herdr_version: None,
-        herdr_path: None,
-    };
-    // Everything that reacts to the state without calling the poller (the tray badge, the
-    // notifications) reads this channel. The poller calls `emit` while it holds its core lock,
-    // so `emit` only does non-blocking things: send the event, replace the watched value.
+    let activity = Arc::new(Mutex::new(ActivityV2::load(activity_path)));
+    // Everything that reacts to the state without calling `CoreSync` (the tray badge, the
+    // notifications) reads this channel. The sync calls `emit` under a lock that keeps states in
+    // order, so `emit` only does non-blocking things: send the event, replace the watched value.
     let (state_tx, state_rx) = watch::channel(AppState {
         machines: Vec::new(),
-        herdr_version: None,
-        herdr_path: None,
+        core_version: None,
+        core_path: None,
+        core_state: CoreState::Connecting,
         generated_at_ms: 0,
     });
     let emit_handle = handle.clone();
-    let poller = Poller::new(
-        cli.clone(),
-        ActivityTracker::load(&activity_path),
-        config,
-        Arc::new(move |state| {
-            // Nobody listening yet is fine; `get_state` covers that.
-            let _ = emit_handle.emit("state", &state);
-            state_tx.send_replace(state);
-        }),
-    );
-    poller.set_intervals(PollIntervals::from_ms(
-        settings.poll_interval_visible_ms,
-        settings.poll_interval_hidden_ms,
-    ));
-    let refresh_poller = poller.clone();
-    let actions = Actions::new(
-        cli.clone(),
-        Arc::new(move |machine| refresh_poller.refresh_now(machine)),
-    );
+    let emit: Emit = Arc::new(move |state| {
+        // Nobody listening yet is fine; `get_state` covers that.
+        let _ = emit_handle.emit("state", state);
+        state_tx.send_replace(state.clone());
+    });
+    let shared = SharedSettings::new(settings.clone());
+    let notify = notify::start(&handle, state_rx.clone(), shared.clone());
+
+    let cell = SyncCell::default();
     let preview_handle = handle.clone();
-    let visible_poller = poller.clone();
+    let visible_cell = cell.clone();
+    let address_cell = cell.clone();
     app.manage(PreviewManager::new(
-        cli.clone(),
-        Arc::new(move || visible_poller.is_visible()),
+        core.clone(),
+        Arc::new(move |machine, address| address_cell.get()?.full_address(machine, address)),
+        // Only with the window on screen and the event connection up: a read while it is down
+        // would start a stopped core.
+        Arc::new(move || visible_cell.may_read_screens()),
         Arc::new(move |frame| {
             let _ = preview_handle.emit(PREVIEW_EVENT, frame);
         }),
     ));
-    app.manage(cli);
-    app.manage(actions);
-    app.manage(AgentKindsCache::default());
+    app.manage(core);
     app.manage(InstalledCache::default());
-    app.manage(MachineSetup::new(Arc::new(PortablePty)));
+    app.manage(actions::KindsCache::default());
     // An `Arc`, so the blocking `term_*` work can move a handle into `spawn_blocking`.
     app.manage(Arc::new(TermSessions::new(Arc::new(PortablePty))));
-    app.manage(poller.clone());
+    app.manage(cell);
+    app.manage(activity.clone());
     app.manage(locator);
+    app.manage(herdr_app::HerdrApp::new());
     app.manage(PopoverGuard::default());
-    app.manage(notify::VisibleRow::default());
-    let shared = SharedSettings::new(settings.clone());
+    app.manage(notify::Looking::default());
     app.manage(shared.clone());
 
     let tray_icon = tray::create_tray(&handle)?;
-    tray::start_badge(tray_icon, state_rx.clone());
-    notify::start(&handle, &poller, state_rx, shared.clone());
+    tray::start_badge(tray_icon, state_rx);
     let shortcut = ShortcutState::default();
     if settings.global_shortcut_enabled {
         shortcut.record(ShortcutStatus::after(
@@ -139,67 +134,72 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     app.manage(shortcut);
 
-    tauri::async_runtime::spawn(locate_and_poll(handle));
+    tauri::async_runtime::spawn(locate_and_start(handle, activity, emit, notify));
     Ok(())
 }
 
-/// The slow part of startup, off the setup path: capture the login environment, find herdr and
-/// read its version, tell the UI, then start polling. Also asks `herdr status` once and logs it
-/// (the spec's startup check); nothing depends on the answer.
+/// The slow part of startup, off the setup path: capture the login environment, find herdr-core
+/// and point the `CoreClient` at it, then start `CoreSync`, which tells the UI.
 ///
 /// The settings lock is taken only once the environment is captured, so a settings save during
-/// the capture is not held up. A herdr path saved before that is read by `locate` below; one
-/// saved after waits on the lock, and `set_settings` re-resolves it because herdr is located.
-async fn locate_and_poll(handle: tauri::AppHandle) {
+/// the capture is not held up. A core path saved before that is read by `locate` below; one
+/// saved after waits on the lock, and `set_settings` re-locates it because the core is located.
+async fn locate_and_start(
+    handle: tauri::AppHandle,
+    activity: Arc<Mutex<ActivityV2>>,
+    emit: Emit,
+    notify: NotifySink,
+) {
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| FALLBACK_SHELL.to_owned());
-    let (login, login_hit) = tokio::join!(
-        env::capture_login_env(&shell),
-        env::login_which_herdr(&shell)
-    );
-    let (cli, locator, poller, shared) = (
-        handle.state::<HerdrCli>(),
-        handle.state::<HerdrLocator>(),
-        handle.state::<Poller>(),
+    let mut login = env::capture_login_env(&shell).await;
+    // The login shell for the `command -v` lookups is the one we captured the environment from.
+    login
+        .vars
+        .entry("SHELL".to_owned())
+        .or_insert_with(|| shell.clone());
+    let (core, locator, cell, shared) = (
+        handle.state::<Arc<CoreClient>>(),
+        handle.state::<CoreLocator>(),
+        handle.state::<SyncCell>(),
         handle.state::<SharedSettings>(),
     );
-    cli.set_env(env::forwarded_env(&login));
-    locator.set_login_hit(login_hit);
-    // The settings can't change herdr's path while startup is still resolving it.
+    locator.set_login(login);
+    // The settings can't change the core's path while startup is still resolving it, and the
+    // cell is filled before the guard goes: `set_settings` and `retry_core_with` read it under the
+    // same guard, so neither sees a located core without its sync.
     let update = shared.begin_update().await;
-    let herdr = locator
-        .locate(shared.get().herdr_path.as_deref(), &cli)
+    let status = locator
+        .locate(shared.get().core_path.as_deref(), &core)
         .await;
-    poller.set_herdr(herdr.path.clone(), herdr.version.clone());
-    drop(update);
-    let Some(path) = herdr.path else { return };
-    if poller.claim_start() {
-        let runner = poller.inner().clone();
-        tauri::async_runtime::spawn(async move { runner.run().await });
-    }
-    log_startup_status(&cli, PathBuf::from(path)).await;
-}
-
-/// Runs `herdr status` once and adds it to the command log.
-async fn log_startup_status(cli: &HerdrCli, bin: PathBuf) {
-    let started = now_ms();
-    let answered = env::herdr_status(&bin, cli.env(), settings::VERSION_TIMEOUT).await;
-    cli.record(
-        None,
-        vec!["status".to_owned()],
-        started,
-        answered.is_some().then_some(0),
-        answered
-            .is_none()
-            .then(|| "herdr status did not answer".to_owned()),
-        None,
+    let sync = CoreSync::start(
+        core.inner().clone(),
+        shared.inner().clone(),
+        activity,
+        emit,
+        notify,
     );
+    sync.set_core_path(status.path);
+    cell.set(sync);
+    drop(update);
+    // The UI may have said what it draws before the sync existed.
+    notify::apply_looking(&handle, None);
 }
 
-/// Polls fast only while the main window is on screen.
+/// The machine list is read often only while the main window is on screen.
 fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
+    // Whether anyone is looking is decided again whenever the window's focus or state changes.
+    if let WindowEvent::Focused(_) | WindowEvent::Resized(_) = event {
+        notify::apply_looking(
+            window.app_handle(),
+            match event {
+                WindowEvent::Focused(focused) => Some(*focused),
+                _ => None,
+            },
+        );
+    }
     let visible = match event {
         WindowEvent::Focused(true) => true,
         // Losing focus does not hide the window; being minimized or hidden does.
@@ -208,9 +208,7 @@ fn track_visibility(window: &tauri::Window, event: &WindowEvent) {
         }
         _ => return,
     };
-    if let Some(poller) = window.try_state::<Poller>() {
-        poller.set_visible(visible);
-    }
+    tray::report_visible(window.try_state::<SyncCell>().as_deref(), visible);
 }
 
 fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
@@ -259,34 +257,32 @@ pub fn run() {
             commands::get_state,
             commands::create_session,
             commands::preview_new_session,
-            commands::rename_session,
-            commands::close_pane,
-            commands::create_tab,
-            commands::rename_tab,
-            commands::close_tab,
-            commands::create_workspace,
-            commands::rename_workspace,
-            commands::close_workspace,
             commands::reply_to_agent,
+            commands::interrupt_terminal,
+            commands::close_terminal,
+            commands::remove_terminal,
+            commands::clear_ended,
+            commands::set_keep,
             commands::mark_seen,
+            commands::mark_unread,
+            commands::set_pinned,
+            commands::machine_connect,
             commands::machine_rename,
-            commands::machine_set_enabled,
             commands::machine_remove,
-            commands::machine_status,
+            commands::set_workbox_hidden,
+            commands::machine_login_args,
+            commands::machine_update_args,
             commands::refresh_now,
+            commands::reconnect_core,
             commands::get_command_log,
-            commands::list_agent_kinds,
+            commands::list_run_choices,
             commands::open_session,
-            commands::open_full_herdr,
             commands::open_in_terminal,
             commands::list_ssh_hosts,
-            commands::machine_add_argv,
-            commands::preview_machine_add,
-            commands::preview_reconnect,
-            commands::start_machine_add,
-            commands::answer_machine_setup,
-            commands::cancel_machine_setup,
-            commands::read_pane_tail,
+            commands::add_machine,
+            commands::machine_add_args,
+            commands::preview_add_machine,
+            commands::read_tail,
             commands::get_terminals,
             commands::list_terminals,
             commands::copy_attach_command,
@@ -294,7 +290,8 @@ pub fn run() {
             commands::stop_preview,
             commands::get_settings,
             commands::set_settings,
-            commands::herdr_status,
+            commands::core_status,
+            commands::retry_core,
             commands::shortcut_status,
             commands::preview_launch_template,
             commands::show_main,
@@ -305,7 +302,9 @@ pub fn run() {
             commands::term_resize,
             commands::term_close,
             commands::show_main_open_row,
-            commands::set_visible_row,
+            commands::set_looking,
+            commands::herdr_app_status,
+            commands::open_in_herdr,
         ])
         .menu(menu::build)
         .on_menu_event(menu::on_event)
@@ -327,6 +326,10 @@ pub fn run() {
         RunEvent::Exit => {
             if let Some(sessions) = app.try_state::<Arc<TermSessions>>() {
                 sessions.close_all();
+            }
+            // The seen record is saved at most every 5 s; this keeps the last change.
+            if let Some(activity) = app.try_state::<Arc<Mutex<ActivityV2>>>() {
+                lock(&activity).flush();
             }
             let _ = app.save_window_state(StateFlags::all());
         }

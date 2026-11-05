@@ -1,15 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MachineView } from "./bindings/MachineView";
+import { machineView, rowOf } from "../test/builders";
 import type { Row } from "./grouping";
+import { PANE_MENU_LABEL, paneMenuItems } from "./paneMenu";
 import { agentActions, buildItems, labelPositions, rankItems } from "./palette";
 
 function row(over: Partial<Row>): Row {
-  return {
+  return rowOf({
     key: "buildbox::w1:p1",
     machineId: "buildbox",
     machineLabel: "buildbox",
-    paneId: "w1:p1",
-    terminalId: "t-1",
+    address: "w1:p1",
     kind: "claude",
     name: "planner",
     title: "",
@@ -17,19 +18,19 @@ function row(over: Partial<Row>): Row {
     folder: "/home/dev/api-service",
     sinceMs: null,
     ...over,
-  };
+  });
 }
 
 const rows: Row[] = [
   row({
     key: "buildbox::w1:p1",
-    paneId: "w1:p1",
+    address: "w1:p1",
     name: "zeta",
     status: "idle",
   }),
   row({
     key: "buildbox::w1:p2",
-    paneId: "w1:p2",
+    address: "w1:p2",
     name: "alpha",
     status: "done",
     sinceMs: 2_000,
@@ -45,17 +46,20 @@ const rows: Row[] = [
   }),
   row({
     key: "buildbox::w1:p3",
-    paneId: "w1:p3",
+    address: "w1:p3",
     name: "builder",
     status: "working",
   }),
 ];
 
-const machines = [
-  { id: "local", label: "Local", target: null, is_local: true },
-  { id: "m-1", label: "buildbox", target: "buildbox", is_local: false },
-  { id: "m-2", label: "gpubox", target: "gpubox", is_local: false },
-] as MachineView[];
+const machines: MachineView[] = [
+  machineView(
+    { id: "local", name: "Local", target: null, isLocal: true },
+    null,
+  ),
+  machineView({ id: "m-1", name: "buildbox", target: "buildbox" }, null),
+  machineView({ id: "m-2", name: "gpubox", target: "gpubox" }, null),
+];
 
 const tabRun = vi.fn();
 const openTabs = [
@@ -68,9 +72,9 @@ const openTabs = [
     run: tabRun,
   },
   {
-    key: "full::m-1",
-    title: "herdr",
-    detail: "buildbox · Full herdr UI",
+    key: "m-1::t9",
+    title: "scratch",
+    detail: "buildbox · Detached",
     shortcut: "tab2" as const,
     row: null,
     run: vi.fn(),
@@ -113,6 +117,32 @@ describe("rankItems", () => {
       ["Agents", "builder"],
       ["Agents", "zeta"],
     ]);
+  });
+
+  it("pinned_agents_lead_each_list_in_the_palette", () => {
+    const pin = (address: string) =>
+      rows.map((r) => (r.address === address ? { ...r, pinned: true } : r));
+    const base = {
+      machines,
+      commands: [],
+      open: vi.fn(),
+      goToProject: vi.fn(),
+      goToWorkbox: vi.fn(),
+      openTarget: "app" as const,
+      openTabs: [],
+    };
+    // alpha (done) and the blocked reviewer both need you: the pinned one leads their list.
+    const needs = rankItems(
+      buildItems({ ...base, rows: pin("w1:p2") }),
+      "",
+    ).filter((i) => i.group === "Needs you");
+    expect(needs.map((i) => i.label)).toEqual(["alpha", "reviewer"]);
+    // The other agents are by name; the pinned one comes first.
+    const agents = rankItems(
+      buildItems({ ...base, rows: pin("w1:p1") }),
+      "",
+    ).filter((i) => i.group === "Agents");
+    expect(agents.map((i) => i.label)).toEqual(["zeta", "builder"]);
   });
 
   it("opens_an_agent_by_default_and_the_other_way_with_alt", () => {
@@ -239,9 +269,9 @@ describe("open tabs", () => {
     const { items } = setup("app", openTabs);
     const tab = (q: string) =>
       rankItems(items, q).find((i) => i.group === "Open tabs");
-    expect(tab("herdr")).toMatchObject({ id: "tab:full::m-1" });
-    // "full" is only in the second tab's detail; the workbox name is in both details.
-    expect(tab("full")?.id).toBe("tab:full::m-1");
+    expect(tab("scratch")).toMatchObject({ id: "tab:m-1::t9" });
+    // "detached" is only in the second tab's detail; the workbox name is in both details.
+    expect(tab("detached")?.id).toBe("tab:m-1::t9");
     expect(tab("gpubox")?.id).toBe("tab:gpubox::w1:p1");
     expect(tab("gpubox")).toMatchObject({
       label: "reviewer",
@@ -277,6 +307,24 @@ describe("agentActions", () => {
   };
   const ids = (r: Row, c = ctx) => agentActions(r, c).map((a) => a.id);
 
+  it("agent_actions_offer_open_in_herdr_only_when_its_window_is_open", () => {
+    const open = { ...ctx, herdrApp: true };
+    const list = ids(row({ status: "working" }), open);
+    // After the open items, the Watch one included, and before the row's own changes.
+    expect(list.indexOf("open-in-herdr")).toBe(list.indexOf("watch") + 1);
+    expect(
+      agentActions(row({ status: "working" }), open).find(
+        (a) => a.id === "open-in-herdr",
+      )?.label,
+    ).toBe("Open in Herdr");
+    expect(ids(row({ status: "working" }))).not.toContain("open-in-herdr");
+    expect(
+      ids(row({ status: "working" }), { ...ctx, herdrApp: false }),
+    ).not.toContain("open-in-herdr");
+    // Ended rows (C96) never.
+    expect(ids(row({ status: "ended" }), open)).not.toContain("open-in-herdr");
+  });
+
   it("agent_actions_never_reply_to_blocked", () => {
     expect(ids(row({ status: "blocked" }))).not.toContain("reply");
     expect(ids(row({ status: "unknown" }))).not.toContain("reply");
@@ -295,11 +343,53 @@ describe("agentActions", () => {
     for (const status of ["done", "idle", "working", "blocked"] as const) {
       const list = agentActions(row({ status }), ctx);
       expect(list[list.length - 1]).toMatchObject({
-        id: "close-pane",
-        label: "Close pane…",
+        id: "close",
+        label: "Close…",
         danger: true,
       });
       expect(list.slice(0, -1).some((a) => a.danger)).toBe(false);
+    }
+    // An ended terminal is removed, not closed.
+    const ended = agentActions(row({ status: "ended" }), ctx);
+    expect(ended[ended.length - 1]).toMatchObject({
+      id: "remove",
+      label: "Remove…",
+      danger: true,
+    });
+    // Ended (C60, C64): no attach, no keep, and nothing to open or reply to.
+    expect(ended.map((a) => a.id)).toEqual([
+      "copy-address",
+      "pin",
+      "show-in-all",
+      "remove",
+    ]);
+    // Any other status still opens.
+    expect(ids(row({ status: "working" })).slice(0, 2)).toEqual([
+      "open",
+      "open-alt",
+    ]);
+  });
+
+  it("palette_actions_match_menu", () => {
+    // Everything after the two open actions (and Reply…) is the ⋯ menu's list, in its order,
+    // with the same words.
+    const cases: Partial<Row>[] = [
+      { status: "blocked" },
+      { status: "done", pinned: true },
+      { status: "idle", turn: 4, keep: true },
+      { status: "working" },
+      { status: "ended", exitCode: 1 },
+      { status: "shell" },
+    ];
+    for (const over of cases) {
+      const r = row(over);
+      const rest = agentActions(r, ctx).filter(
+        (a) => a.id !== "open" && a.id !== "open-alt" && a.id !== "reply",
+      );
+      expect(rest.map((a) => a.id)).toEqual(paneMenuItems(r));
+      expect(rest.map((a) => a.label)).toEqual(
+        paneMenuItems(r).map((item) => PANE_MENU_LABEL[item]),
+      );
     }
   });
 
@@ -352,9 +442,13 @@ describe("agentActions", () => {
       "open-alt",
       "reply",
       "copy-attach",
+      "copy-address",
+      "watch",
       "mark-seen",
+      "pin",
+      "keep",
       "show-in-all",
-      "close-pane",
+      "close",
     ]);
   });
 });

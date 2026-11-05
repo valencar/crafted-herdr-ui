@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": -32000,
+    "data": {
+      "hint": "read doc.get and retry with its version",
+      "kind": "conflict"
+    },
+    "message": "document \"herdr-app\" is at version 1, not 0"
+  }
+}

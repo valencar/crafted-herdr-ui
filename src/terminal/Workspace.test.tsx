@@ -17,12 +17,15 @@ import {
   vi,
   type Mock,
 } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
 import { isInTerminal } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
+import {
+  buildboxTerms,
+  appState as buildState,
+  machine,
+} from "../test/builders";
 import type { TerminalHandle } from "./TerminalView";
 import { HOME, useTerminalStore, type TermTab } from "./terminalStore";
 import { Workspace, requestTerminalFind } from "./Workspace";
@@ -111,8 +114,6 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   invokeTyped: ipc.invokeTyped,
 }));
 
-const fixture = raw.result.snapshot as unknown as Snapshot;
-
 const SETTINGS = {
   terminal_font_size: 13,
   terminal_font: "hack",
@@ -130,30 +131,13 @@ const splitOn = (width = 420) =>
   });
 
 function appState(): AppState {
-  return {
-    machines: [
-      {
-        id: "buildbox",
-        label: "buildbox",
-        target: null,
-        session: "default",
-        is_local: false,
-        health: { kind: "online" },
-        snapshot: structuredClone(fixture),
-        last_ok_ms: 1,
-        ages: {},
-      },
-    ],
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: 1,
-  };
+  return buildState([[machine({ id: "buildbox" }), buildboxTerms()]]);
 }
 
-function open(paneId: string, title: string) {
+function open(address: string, title: string) {
   useTerminalStore.getState().openTab({
-    tabKey: `buildbox::${paneId}`,
-    target: { kind: "pane", machineId: "buildbox", paneId },
+    tabKey: `buildbox::${address}`,
+    target: { kind: "terminal", machineId: "buildbox", address: address },
     title,
     machineLabel: "buildbox",
   });

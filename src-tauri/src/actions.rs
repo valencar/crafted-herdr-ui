@@ -1,39 +1,41 @@
-//! What the UI can ask herdr to do: pure argv builders for the new-session flow (also shown to
-//! the user as the command preview) and the `Actions` runner that executes them.
+//! What the UI can ask for: the new-session flow on herdr-core's `terminal.run` (pure
+//! `run_params`, `validate_name`, the installed-agents check and `NewSessions`, which makes the
+//! calls), `MachineActions` (the Workbox screen's connect, rename and remove), and `RowActions`,
+//! what the row menus do to a terminal through herdr-core.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value, json};
+use tokio::sync::OnceCell;
 use ts_rs::TS;
 
-use crate::herdr::cli::{HerdrCli, T_AGENT_START, T_CREATE, T_DEFAULT, T_PROMPT};
-use crate::herdr::errors::HerdrError;
-use crate::herdr::model::{AgentStatus, MachineStatusEntry, parse_created_pane};
-use crate::terminal::shell_quote;
+use crate::activity::ActivityV2;
+use crate::agents::{DisplayStatus, KNOWN_AGENTS, KnownAgent, TaskArg, TerminalView};
+use crate::core::model::TemplateInfo;
+use crate::core::{CoreClient, CoreError};
+use crate::terminal::{is_session, is_target, is_via};
+use crate::{LOCAL, lock};
 
-/// Where a new session goes.
+/// What a new session runs.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
 #[serde(
-    tag = "kind",
+    tag = "type",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 #[ts(export, export_to = "../../src/lib/bindings/")]
-pub enum Placement {
-    NewTab {
-        workspace_id: String,
-    },
-    SplitBeside {
-        pane_id: String,
-    },
-    NewWorkspace,
-    /// `trust` is passed to herdr as `--trust-repository`; only an explicit click may set it.
-    Worktree {
-        branch: String,
-        trust: bool,
-    },
+pub enum RunChoice {
+    /// A known agent, by the kind the UI shows (`KNOWN_AGENTS`).
+    Agent { kind: String },
+    /// A template by name (Local workbox only).
+    Template { name: String },
+    /// The machine's own shell.
+    Shell,
+    /// A shell line, run by the machine's shell.
+    Command { line: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
@@ -42,28 +44,66 @@ pub enum Placement {
 pub struct NewSessionRequest {
     pub machine_id: String,
     pub cwd: String,
-    /// The agent kind, or `None` for a plain shell.
-    pub kind: Option<String>,
-    pub name: String,
-    pub placement: Placement,
-    pub agent_args: Vec<String>,
+    pub run: RunChoice,
+    /// The terminal's name; the core makes one up when it is absent or blank.
+    pub name: Option<String>,
+    /// The first message, for a template or an agent that takes one as an argument.
+    pub task: Option<String>,
+    pub keep: bool,
 }
 
+/// A started terminal. `address` is local to its machine (`t7`), as the UI keys rows.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct CreatedSession {
-    pub pane_id: String,
-    pub terminal_id: Option<String>,
+    pub address: String,
 }
 
-/// Why an action did not (fully) happen. Serialized tagged by `kind`, like `HerdrError`.
+/// An agent kind the machine can run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct KindChoice {
+    pub kind: String,
+    /// Whether the agent takes a starting prompt as an argument.
+    pub takes_task: bool,
+}
+
+/// What the New session sheet offers on one machine.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct RunChoices {
+    pub kinds: Vec<KindChoice>,
+    /// Local only: a remote machine resolves template names itself.
+    pub templates: Vec<TemplateInfo>,
+    /// False when the installed-agents check failed and every known kind is listed.
+    pub kinds_checked: bool,
+}
+
+impl RunChoices {
+    /// Every known kind and no templates, for a workbox that can't be asked.
+    pub fn unchecked() -> Self {
+        Self {
+            kinds: KNOWN_AGENTS.iter().map(kind_choice).collect(),
+            templates: Vec::new(),
+            kinds_checked: false,
+        }
+    }
+}
+
+/// Why an action did not (fully) happen. Serialized tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum ActionError {
+    /// The terminal app could not be started (a launcher that failed to spawn).
+    #[error("{message}")]
+    Launch { message: String },
+    /// A herdr-core call failed.
     #[error("{error}")]
-    Herdr { error: HerdrError },
+    Core { error: CoreError },
     /// The call timed out or only part of the action happened. The app refreshes; it never retries.
     #[error("{message}")]
     MaybeApplied { argv: Vec<String>, message: String },
@@ -81,582 +121,891 @@ impl ActionError {
     }
 }
 
-/// Stands in for the new pane's id in the `agent start` step until the first step has run.
-pub const PANE_PLACEHOLDER: &str = "{PANE}";
-
 const NAME_MAX_LEN: usize = 32;
 
-/// Agent names: `[a-z][a-z0-9_-]{0,31}`.
-pub fn validate_name(name: &str) -> Result<(), String> {
-    let mut chars = name.chars();
-    let starts_ok = chars.next().is_some_and(|c| c.is_ascii_lowercase());
+const NAME_HELP: &str = "Use 1 to 32 of a-z 0-9 - _ . starting with a letter or digit.";
+
+/// Terminal names: 1 to 32 of `a-z 0-9 - _ .`, starting with a letter or digit, and not shaped
+/// like an address (`t7`, `t1b`). Spec section 3.
+pub fn validate_name(s: &str) -> Result<(), String> {
+    let mut chars = s.chars();
+    let starts_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
     let rest_ok =
-        chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
-    if starts_ok && rest_ok && name.len() <= NAME_MAX_LEN {
-        Ok(())
-    } else {
-        Err(format!(
-            "Use 1 to {NAME_MAX_LEN} characters: a lowercase letter first, then lowercase letters, digits, - or _."
-        ))
+        chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'));
+    if !(starts_ok && rest_ok && s.len() <= NAME_MAX_LEN) {
+        return Err(NAME_HELP.to_owned());
     }
-}
-
-fn argv(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|p| (*p).to_owned()).collect()
-}
-
-/// The herdr calls for a new session, in order. The last step is `agent start` when `kind` is
-/// set, with `{PANE}` where the first step's pane id goes. This is also what the UI previews.
-pub fn plan_new_session(req: &NewSessionRequest) -> Vec<Vec<String>> {
-    let mut first = match &req.placement {
-        Placement::NewTab { workspace_id } => argv(&[
-            "tab",
-            "create",
-            "--workspace",
-            workspace_id,
-            "--cwd",
-            &req.cwd,
-            "--label",
-            &req.name,
-        ]),
-        Placement::SplitBeside { pane_id } => argv(&[
-            "pane",
-            "split",
-            pane_id,
-            "--direction",
-            "right",
-            "--cwd",
-            &req.cwd,
-        ]),
-        Placement::NewWorkspace => argv(&[
-            "workspace",
-            "create",
-            "--cwd",
-            &req.cwd,
-            "--label",
-            &req.name,
-        ]),
-        Placement::Worktree { branch, .. } => argv(&[
-            "worktree", "create", "--cwd", &req.cwd, "--branch", branch, "--label", &req.name,
-        ]),
-    };
-    first.push("--no-focus".into());
-    if matches!(req.placement, Placement::Worktree { trust: true, .. }) {
-        first.push("--trust-repository".into());
-    }
-    let mut steps = vec![first];
-    if let Some(kind) = &req.kind {
-        let mut start = argv(&[
-            "agent",
-            "start",
-            &req.name,
-            "--kind",
-            kind,
-            "--pane",
-            PANE_PLACEHOLDER,
-        ]);
-        if !req.agent_args.is_empty() {
-            start.push("--".into());
-            start.extend(req.agent_args.iter().cloned());
-        }
-        steps.push(start);
-    }
-    steps
-}
-
-/// One argument of a displayed command line. The pane placeholder stays readable.
-fn display_arg(arg: &str) -> String {
-    if arg == PANE_PLACEHOLDER {
-        arg.to_owned()
-    } else {
-        shell_quote(arg)
-    }
-}
-
-/// A command line for people to read and copy: `herdr [--machine <label>] <args…>`.
-fn display_command(machine_label: Option<&str>, argv: &[String]) -> String {
-    let mut parts = vec!["herdr".to_owned()];
-    if let Some(label) = machine_label {
-        parts.push("--machine".into());
-        parts.push(shell_quote(label));
-    }
-    parts.extend(argv.iter().map(|a| display_arg(a)));
-    parts.join(" ")
-}
-
-/// The command lines `create_session` will run, for the preview. `machine_label` is the
-/// remote machine's label, or `None` for Local.
-pub fn preview_new_session(req: &NewSessionRequest, machine_label: Option<&str>) -> Vec<String> {
-    plan_new_session(req)
-        .iter()
-        .map(|step| display_command(machine_label, step))
-        .collect()
-}
-
-/// Values that herdr would read as a flag, or that are empty, never reach the CLI.
-fn check_arg(what: &str, value: &str) -> Result<(), ActionError> {
-    if value.trim().is_empty() {
-        return Err(ActionError::invalid(format!("{what} can't be empty.")));
-    }
-    if value.starts_with('-') {
-        return Err(ActionError::invalid(format!(
-            "{what} can't start with '-'."
-        )));
+    // `t`, digits, then letters: what an address (or a worker's) looks like.
+    let tail = s.strip_prefix('t').unwrap_or_default();
+    let digits = tail.chars().take_while(char::is_ascii_digit).count();
+    if digits > 0 && tail[digits..].chars().all(|c| c.is_ascii_lowercase()) {
+        return Err(format!(
+            "“{s}” looks like a terminal address (t7). Pick a name that doesn’t."
+        ));
     }
     Ok(())
 }
 
-fn validate_request(req: &NewSessionRequest) -> Result<(), ActionError> {
-    check_arg("Folder", &req.cwd)?;
-    match &req.placement {
-        Placement::NewTab { workspace_id } => check_arg("Workspace", workspace_id)?,
-        Placement::SplitBeside { pane_id } => check_arg("Pane", pane_id)?,
-        Placement::NewWorkspace => {}
-        Placement::Worktree { branch, .. } => check_arg("Branch", branch)?,
-    }
-    if let Some(kind) = &req.kind {
-        check_arg("Agent kind", kind)?;
-        validate_name(&req.name).map_err(ActionError::invalid)?;
-    } else if !matches!(req.placement, Placement::SplitBeside { .. }) {
-        check_arg("Name", &req.name)?;
-    }
-    Ok(())
+fn known_agent(kind: &str) -> Option<&'static KnownAgent> {
+    KNOWN_AGENTS.iter().find(|a| a.kind == kind)
 }
 
-/// The call timed out: it may or may not have been applied, and is never retried.
-fn timed_out(argv: Vec<String>) -> ActionError {
-    ActionError::MaybeApplied {
-        message: format!(
-            "herdr did not answer in time. `herdr {}` may have been applied; refreshing.",
-            argv.join(" ")
-        ),
-        argv,
+/// The `terminal.run` params for a request. `machine_name` is the remote machine as the core
+/// names it, or `None` for Local (no `on`). Only the names the core's schema has are used.
+pub fn run_params(req: &NewSessionRequest, machine_name: Option<&str>) -> Result<Value, String> {
+    let cwd = req.cwd.trim();
+    if cwd.is_empty() {
+        return Err("Folder can’t be empty.".to_owned());
     }
-}
-
-/// herdr exited 0 but its reply could not be read, so the action was applied.
-fn unreadable_reply(argv: Vec<String>) -> ActionError {
-    ActionError::MaybeApplied {
-        message: format!(
-            "herdr applied `herdr {}` but its reply could not be read; refreshing.",
-            argv.join(" ")
-        ),
-        argv,
+    if cwd.starts_with('-') {
+        return Err("Folder can’t start with “-”.".to_owned());
     }
-}
-
-/// Tells the poller to look again. `None` means every machine and the machine list.
-pub type RefreshHook = Arc<dyn Fn(Option<&str>) + Send + Sync>;
-
-/// Per-call time limits. Tests shorten them; the app uses the defaults.
-#[derive(Debug, Clone, Copy)]
-pub struct Timeouts {
-    pub default: Duration,
-    pub create: Duration,
-    pub agent_start: Duration,
-    pub prompt: Duration,
-}
-
-impl Default for Timeouts {
-    fn default() -> Self {
-        Self {
-            default: T_DEFAULT,
-            create: T_CREATE,
-            agent_start: T_AGENT_START,
-            prompt: T_PROMPT,
+    let task = req.task.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    // An agent would read it as an option.
+    if task.is_some_and(|t| t.starts_with('-')) {
+        return Err("Task can’t start with “-”.".to_owned());
+    }
+    let mut p = Map::new();
+    match &req.run {
+        RunChoice::Agent { kind } => {
+            let agent = known_agent(kind).ok_or_else(|| format!("Unknown agent “{kind}”."))?;
+            let mut argv: Vec<String> = agent.start.iter().map(|a| (*a).to_owned()).collect();
+            if let Some(task) = task {
+                if agent.task != TaskArg::Positional {
+                    return Err(format!("{kind} doesn’t take a task here."));
+                }
+                argv.push(task.to_owned());
+            }
+            p.insert("argv".into(), json!(argv));
+        }
+        RunChoice::Template { name } => {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err("Template can’t be empty.".to_owned());
+            }
+            let mut argv = vec![name.to_owned()];
+            argv.extend(task.map(str::to_owned));
+            p.insert("argv".into(), json!(argv));
+        }
+        RunChoice::Shell | RunChoice::Command { .. } if task.is_some() => {
+            return Err("Only an agent or a template takes a task.".to_owned());
+        }
+        RunChoice::Shell => {}
+        RunChoice::Command { line } => {
+            if line.trim().is_empty() {
+                return Err("Command can’t be empty.".to_owned());
+            }
+            p.insert("line".into(), json!(line));
         }
     }
+    p.insert("cwd".into(), json!(cwd));
+    if let Some(name) = req.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        validate_name(name)?;
+        p.insert("name".into(), json!(name));
+    }
+    if let Some(on) = machine_name {
+        p.insert("on".into(), json!(on));
+    }
+    p.insert("keep".into(), json!(req.keep));
+    // The core's own rule for a client-started terminal (labels.md): nothing seen yet.
+    p.insert("labels".into(), json!({"herdr.seen": "0"}));
+    p.insert(
+        "env".into(),
+        json!({"TERM": "xterm-256color", "COLORTERM": "truecolor"}),
+    );
+    Ok(Value::Object(p))
 }
 
-/// Runs the UI's actions through `HerdrCli`. Mutations are never retried: a timeout becomes
-/// `ActionError::MaybeApplied` and the poller is asked to refresh.
-#[derive(Clone)]
-pub struct Actions {
-    cli: HerdrCli,
-    refresh: RefreshHook,
-    timeouts: Timeouts,
+/// The command line for the preview: `display("terminal.run", …)` of the very params that run.
+pub fn preview(
+    req: &NewSessionRequest,
+    machine_name: Option<&str>,
+    bin_name: &str,
+) -> Result<String, ActionError> {
+    let params = run_params(req, machine_name).map_err(ActionError::invalid)?;
+    Ok(crate::core::display::display(
+        "terminal.run",
+        &params,
+        bin_name,
+    ))
 }
 
-fn created_terminal_id(v: &Value) -> Option<String> {
-    [
-        "/result/agent/terminal_id",
-        "/result/root_pane/terminal_id",
-        "/result/pane/terminal_id",
-    ]
-    .iter()
-    .find_map(|p| v.pointer(p).and_then(Value::as_str))
-    .map(str::to_owned)
+/// One installed-agents check, shared by every ask that overlaps it.
+type Check = Arc<OnceCell<Option<HashSet<String>>>>;
+
+/// The installed programs found on each machine (by machine id), kept for the session, and the
+/// checks in flight, so asks that overlap share one `machine.exec`.
+#[derive(Default)]
+pub struct KindsCache {
+    found: Mutex<HashMap<String, HashSet<String>>>,
+    inflight: Mutex<HashMap<String, Check>>,
 }
 
-/// A create step whose outcome is unknown: the agent step never runs after it, and the message
-/// says so.
-fn agent_not_started(error: ActionError) -> ActionError {
-    match error {
-        ActionError::MaybeApplied { message, argv } => ActionError::MaybeApplied {
-            message: format!("{message} The agent was not started."),
-            argv,
-        },
-        other => other,
+/// The New session calls, through the one door.
+pub struct NewSessions<'a> {
+    core: &'a CoreClient,
+    cache: &'a KindsCache,
+}
+
+/// The shell line that prints `has:<program>` for each known agent found on the machine. The
+/// program names come only from `KNOWN_AGENTS`, never from the UI. It always exits 0.
+fn installed_check_script() -> String {
+    let programs: Vec<&str> = KNOWN_AGENTS.iter().map(|a| a.program).collect();
+    format!(
+        "for p in {}; do command -v \"$p\" >/dev/null 2>&1 && echo \"has:$p\"; done; true",
+        programs.join(" ")
+    )
+}
+
+/// The programs a finished `machine.exec` found, or `None` when the check itself failed (it
+/// ran out of time, or the reply can't be read). A nonzero exit code is still an answer.
+fn installed_programs(result: &Value) -> Option<HashSet<String>> {
+    if result.get("timed_out").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let stdout = result.get("stdout").and_then(Value::as_str)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(stdout)
+        .ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    Some(
+        text.lines()
+            .filter_map(|l| l.trim().strip_prefix("has:"))
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
+fn kind_choice(a: &KnownAgent) -> KindChoice {
+    KindChoice {
+        kind: a.kind.to_owned(),
+        takes_task: a.task == TaskArg::Positional,
     }
 }
 
-/// The new pane's id from a create reply. `mutate` already refreshed; if the reply has no pane
-/// the action was still applied, so say so rather than report a failure.
-fn created_pane(reply: &Value, argv: Vec<String>) -> Result<String, ActionError> {
-    parse_created_pane(reply).map_err(|_| unreadable_reply(argv))
+/// The address as its own machine knows it. A remote run may answer `buildbox/t7`.
+fn machine_local_address(address: &str, machine_name: Option<&str>) -> String {
+    machine_name
+        .and_then(|name| address.strip_prefix(name)?.strip_prefix('/'))
+        .unwrap_or(address)
+        .to_owned()
 }
 
-impl Actions {
-    pub fn new(cli: HerdrCli, refresh: RefreshHook) -> Self {
-        Self {
-            cli,
-            refresh,
-            timeouts: Timeouts::default(),
-        }
+impl<'a> NewSessions<'a> {
+    pub fn new(core: &'a CoreClient, cache: &'a KindsCache) -> Self {
+        Self { core, cache }
     }
 
-    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Self {
-        self.timeouts = timeouts;
-        self
-    }
-
-    /// One mutating call. Refreshes the machine afterwards unless herdr refused it. A reply that
-    /// can't be read (exit 0) counts as applied.
-    async fn mutate(
+    /// The programs on the machine, from the cache or one quiet `machine.exec`. `None` when the
+    /// check failed; a failure is not remembered. Asks that overlap share the one check.
+    async fn installed(
         &self,
-        machine: &str,
-        args: Vec<String>,
-        limit: Duration,
-    ) -> Result<Value, ActionError> {
-        match self.cli.run(Some(machine), &args, limit).await {
-            Ok(v) => {
-                (self.refresh)(Some(machine));
-                Ok(v)
+        machine_id: &str,
+        machine_name: Option<&str>,
+    ) -> Option<HashSet<String>> {
+        if let Some(found) = lock(&self.cache.found).get(machine_id) {
+            return Some(found.clone());
+        }
+        let cell = lock(&self.cache.inflight)
+            .entry(machine_id.to_owned())
+            .or_default()
+            .clone();
+        let result = cell
+            .get_or_init(|| self.check(machine_id, machine_name))
+            .await
+            .clone();
+        // The check is over: the next ask looks again (a success is in `found` by now).
+        let mut inflight = lock(&self.cache.inflight);
+        if inflight
+            .get(machine_id)
+            .is_some_and(|c| Arc::ptr_eq(c, &cell))
+        {
+            inflight.remove(machine_id);
+        }
+        result
+    }
+
+    /// One quiet `machine.exec`, remembered when it worked.
+    async fn check(&self, machine_id: &str, machine_name: Option<&str>) -> Option<HashSet<String>> {
+        let mut params = json!({
+            "argv": ["sh", "-lc", installed_check_script()],
+            "timeout": 15,
+        });
+        if let Some(on) = machine_name {
+            params["on"] = json!(on);
+        }
+        let result = self
+            .core
+            .call_quiet(machine_id, "machine.exec", params)
+            .await
+            .ok()?;
+        let found = installed_programs(&result)?;
+        lock(&self.cache.found).insert(machine_id.to_owned(), found.clone());
+        Some(found)
+    }
+
+    /// What the sheet offers on this machine. `machine_name` is `None` for Local. A workbox that
+    /// isn't online gets no check (it could hold a slot for 20 s): every kind is listed, unchecked.
+    /// Local is offline while the event connection is down: then its templates aren't read either,
+    /// since any call would start `hc connect`, which starts a stopped core.
+    pub async fn run_choices(
+        &self,
+        machine_id: &str,
+        machine_name: Option<&str>,
+        online: bool,
+    ) -> RunChoices {
+        let installed = if online {
+            self.installed(machine_id, machine_name).await
+        } else {
+            None
+        };
+        let kinds = KNOWN_AGENTS
+            .iter()
+            .filter(|a| installed.as_ref().is_none_or(|set| set.contains(a.program)))
+            .map(kind_choice)
+            .collect();
+        // The template list is Local's; a remote resolves template names itself. A list that
+        // can't be read is an empty one (the call is in the Activity log either way).
+        let templates = if machine_id == LOCAL && online {
+            match self
+                .core
+                .call_quiet(LOCAL, "templates.list", json!({}))
+                .await
+            {
+                Ok(v) => v
+                    .get("templates")
+                    .and_then(|t| serde_json::from_value(t.clone()).ok())
+                    .unwrap_or_default(),
+                Err(_) => Vec::new(),
             }
-            Err(HerdrError::Timeout { argv }) => {
-                (self.refresh)(Some(machine));
-                Err(timed_out(argv))
-            }
-            // Parse only happens after exit 0, so the mutation went through.
-            Err(HerdrError::Parse { .. }) => {
-                (self.refresh)(Some(machine));
-                Err(unreadable_reply(args))
-            }
-            Err(error) => Err(ActionError::Herdr { error }),
+        } else {
+            Vec::new()
+        };
+        RunChoices {
+            kinds,
+            templates,
+            kinds_checked: installed.is_some(),
         }
     }
 
-    /// Creates the pane and, for an agent, starts it there. If the agent fails to start, the
-    /// new pane stays open and the error says so.
-    pub async fn create_session(
+    /// Starts the terminal. A template run can take a while (the core waits for the agent), so
+    /// it gets a connection of its own. A timeout may have been applied and is never retried.
+    pub async fn create(
         &self,
         req: &NewSessionRequest,
+        machine_name: Option<&str>,
     ) -> Result<CreatedSession, ActionError> {
-        validate_request(req)?;
-        let mut steps = plan_new_session(req).into_iter();
-        let Some(first) = steps.next() else {
-            return Err(ActionError::invalid("Nothing to create."));
-        };
-        // An agent's later step never runs after an unknown create, and the error says so.
-        let not_started = |e: ActionError| {
-            if req.kind.is_some() {
-                agent_not_started(e)
-            } else {
-                e
-            }
-        };
-        let created = self
-            .mutate(&req.machine_id, first.clone(), self.timeouts.create)
-            .await
-            .map_err(not_started)?;
-        let pane_id = created_pane(&created, first).map_err(not_started)?;
-        let session = CreatedSession {
-            terminal_id: created_terminal_id(&created),
-            pane_id,
-        };
-        let Some(mut start) = steps.next() else {
-            return Ok(session);
-        };
-        for a in &mut start {
-            if a == PANE_PLACEHOLDER {
-                a.clone_from(&session.pane_id);
-            }
-        }
-        let step = start.clone();
-        match self
-            .mutate(&req.machine_id, start, self.timeouts.agent_start)
-            .await
-        {
-            Ok(started) => Ok(CreatedSession {
-                terminal_id: created_terminal_id(&started).or(session.terminal_id),
-                pane_id: session.pane_id,
-            }),
-            // Timed out or unreadable reply: the agent may be running.
-            Err(ActionError::MaybeApplied { argv, .. }) => Err(ActionError::MaybeApplied {
-                message: format!(
-                    "The pane {} was created; the agent may or may not have started; refreshing.",
-                    session.pane_id
-                ),
-                argv,
-            }),
-            Err(e) => Err(ActionError::MaybeApplied {
-                message: format!(
-                    "The pane {} was created, but the agent did not start ({e}). The pane was left open.",
-                    session.pane_id
-                ),
-                argv: step,
-            }),
-        }
-    }
-
-    pub async fn rename_session(
-        &self,
-        machine: &str,
-        pane_id: &str,
-        is_agent: bool,
-        name: &str,
-    ) -> Result<(), ActionError> {
-        check_arg("Pane", pane_id)?;
-        if is_agent {
-            validate_name(name).map_err(ActionError::invalid)?;
+        let params = run_params(req, machine_name).map_err(ActionError::invalid)?;
+        let long = matches!(req.run, RunChoice::Template { .. });
+        let result = if long {
+            self.core
+                .call_long(&req.machine_id, "terminal.run", params)
+                .await
         } else {
-            check_arg("Name", name)?;
-        }
-        let group = if is_agent { "agent" } else { "pane" };
-        self.mutate(
-            machine,
-            argv(&[group, "rename", pane_id, name]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn close_pane(&self, machine: &str, pane_id: &str) -> Result<(), ActionError> {
-        check_arg("Pane", pane_id)?;
-        self.mutate(
-            machine,
-            argv(&["pane", "close", pane_id]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn rename_tab(
-        &self,
-        machine: &str,
-        tab_id: &str,
-        label: &str,
-    ) -> Result<(), ActionError> {
-        check_arg("Tab", tab_id)?;
-        check_arg("Name", label)?;
-        self.mutate(
-            machine,
-            argv(&["tab", "rename", tab_id, label]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn close_tab(&self, machine: &str, tab_id: &str) -> Result<(), ActionError> {
-        check_arg("Tab", tab_id)?;
-        self.mutate(
-            machine,
-            argv(&["tab", "close", tab_id]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn rename_workspace(
-        &self,
-        machine: &str,
-        workspace_id: &str,
-        label: &str,
-    ) -> Result<(), ActionError> {
-        check_arg("Workspace", workspace_id)?;
-        check_arg("Name", label)?;
-        self.mutate(
-            machine,
-            argv(&["workspace", "rename", workspace_id, label]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    /// Plain `workspace close`. If herdr answers `workspace_group_close_required`, the error
-    /// comes back unchanged and the UI decides what to offer (spec section 7).
-    pub async fn close_workspace(
-        &self,
-        machine: &str,
-        workspace_id: &str,
-    ) -> Result<(), ActionError> {
-        check_arg("Workspace", workspace_id)?;
-        self.mutate(
-            machine,
-            argv(&["workspace", "close", workspace_id]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn create_tab(
-        &self,
-        machine: &str,
-        workspace_id: &str,
-        label: &str,
-    ) -> Result<CreatedSession, ActionError> {
-        check_arg("Workspace", workspace_id)?;
-        check_arg("Name", label)?;
-        let args = argv(&[
-            "tab",
-            "create",
-            "--workspace",
-            workspace_id,
-            "--label",
-            label,
-            "--no-focus",
-        ]);
-        self.created(machine, args).await
-    }
-
-    pub async fn create_workspace(
-        &self,
-        machine: &str,
-        cwd: &str,
-        label: &str,
-    ) -> Result<CreatedSession, ActionError> {
-        check_arg("Folder", cwd)?;
-        check_arg("Name", label)?;
-        let args = argv(&[
-            "workspace",
-            "create",
-            "--cwd",
-            cwd,
-            "--label",
-            label,
-            "--no-focus",
-        ]);
-        self.created(machine, args).await
-    }
-
-    async fn created(
-        &self,
-        machine: &str,
-        args: Vec<String>,
-    ) -> Result<CreatedSession, ActionError> {
-        let v = self
-            .mutate(machine, args.clone(), self.timeouts.create)
-            .await?;
+            self.core
+                .call(&req.machine_id, "terminal.run", params)
+                .await
+        };
+        let on = machine_name.unwrap_or("Local");
+        let reply = result.map_err(|e| core_failure(e, "terminal.run", on))?;
+        let address = reply
+            .get("address")
+            .and_then(Value::as_str)
+            .filter(|a| !a.is_empty())
+            .ok_or_else(|| ActionError::MaybeApplied {
+                message: format!(
+                    "herdr-core started a terminal on {on}, but its reply could not be read; refreshing."
+                ),
+                argv: vec!["terminal.run".to_owned()],
+            })?;
         Ok(CreatedSession {
-            pane_id: created_pane(&v, args)?,
-            terminal_id: created_terminal_id(&v),
+            address: machine_local_address(address, machine_name),
+        })
+    }
+}
+
+/// What follows the core binary in `machine login <name>` or `machine update <name>`, the two
+/// commands that run in an in-app terminal tab. The name is checked with `validate_name`, so a
+/// flag, an address or shell text never becomes part of a command. `verb` is `login` or `update`.
+pub fn machine_command_args(verb: &str, name: &str) -> Result<Vec<String>, String> {
+    validate_name(name)?;
+    Ok(["machine", verb, name].map(str::to_owned).to_vec())
+}
+
+/// What the Add workbox sheet sends. Exactly one of `target` (an SSH host or Host alias) and
+/// `via` (a custom connection command, which needs a `name`); `port` goes with a `target`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct AddMachineRequest {
+    pub target: Option<String>,
+    pub port: Option<u16>,
+    pub via: Option<String>,
+    /// What to call it here; the core derives one from the host when it is absent.
+    pub name: Option<String>,
+    /// The hc session on that machine.
+    pub session: Option<String>,
+    pub temporary: bool,
+}
+
+/// How the new machine is reached.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reach {
+    /// `host` or `host:port`, as the core takes it.
+    Target(String),
+    /// A custom connection command.
+    Via(String),
+}
+
+/// An `AddMachineRequest` that passed `check_add`: trimmed, joined and safe to send or to put in
+/// a command.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CheckedAdd {
+    pub reach: Reach,
+    pub name: Option<String>,
+    pub session: Option<String>,
+    pub temporary: bool,
+}
+
+const TARGET_HELP: &str =
+    "The SSH host may only use letters, digits and . _ @ : -, and can’t start with “-”.";
+const SESSION_HELP: &str = "The remote session may only use letters, digits and . _ - (up to 64), starting with a letter or digit.";
+const VIA_HELP: &str =
+    "The custom connection can’t start with “-”, or hold a backslash or a control character.";
+
+fn given(v: &Option<String>) -> Option<&str> {
+    v.as_deref().map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// Checks a request before anything is sent or run: one way in, the port joined onto the host, a
+/// name `validate_name` accepts, a session and a host that ssh and a shell read as plain words.
+/// The words are for the sheet to show.
+pub fn check_add(req: &AddMachineRequest) -> Result<CheckedAdd, String> {
+    let name = given(&req.name);
+    let reach = match (given(&req.target), given(&req.via)) {
+        (Some(_), Some(_)) => {
+            return Err("Use an SSH host or a custom connection, not both.".to_owned());
+        }
+        (None, None) => return Err("Enter an SSH host.".to_owned()),
+        (Some(target), None) => {
+            if !is_target(target) {
+                return Err(TARGET_HELP.to_owned());
+            }
+            match req.port {
+                None => Reach::Target(target.to_owned()),
+                Some(0) => return Err("The port must be between 1 and 65535.".to_owned()),
+                Some(_) if target.contains(':') => {
+                    return Err("The host already names a port.".to_owned());
+                }
+                Some(port) => Reach::Target(format!("{target}:{port}")),
+            }
+        }
+        (None, Some(via)) => {
+            if req.port.is_some() {
+                return Err("A port goes with an SSH host, not a custom connection.".to_owned());
+            }
+            if name.is_none() {
+                return Err("A custom connection needs a name.".to_owned());
+            }
+            if !is_via(via) {
+                return Err(VIA_HELP.to_owned());
+            }
+            Reach::Via(via.to_owned())
+        }
+    };
+    if let Some(name) = name {
+        validate_name(name)?;
+    }
+    let session = given(&req.session);
+    if session.is_some_and(|s| !is_session(s)) {
+        return Err(SESSION_HELP.to_owned());
+    }
+    Ok(CheckedAdd {
+        reach,
+        name: name.map(str::to_owned),
+        session: session.map(str::to_owned),
+        temporary: req.temporary,
+    })
+}
+
+/// The `machine.add` params for a checked request: the schema's own names, only the ones given
+/// (and `temporary`).
+pub fn add_params(add: &CheckedAdd) -> Value {
+    let mut p = Map::new();
+    match &add.reach {
+        Reach::Target(target) => p.insert("target".into(), json!(target)),
+        Reach::Via(via) => p.insert("via".into(), json!(via)),
+    };
+    if let Some(name) = &add.name {
+        p.insert("name".into(), json!(name));
+    }
+    if let Some(session) = &add.session {
+        p.insert("session".into(), json!(session));
+    }
+    p.insert("temporary".into(), json!(add.temporary));
+    Value::Object(p)
+}
+
+/// The `hc machine add …` line the request would run, built from the very params that run.
+pub fn preview_add(req: &AddMachineRequest, bin_name: &str) -> Result<String, ActionError> {
+    let add = check_add(req).map_err(ActionError::invalid)?;
+    Ok(crate::core::display::display(
+        "machine.add",
+        &add_params(&add),
+        bin_name,
+    ))
+}
+
+/// What the Workbox screen does to a saved machine, through the one door (`CoreClient`). Each
+/// runs only when the person clicked; the UI confirms `remove` first. A machine's state is not
+/// in the event stream (spec section 4.3), so every action, a failed one included, asks the sync
+/// to read the machine list again. Renames need nothing more: rows, tabs and colors are keyed by
+/// machine id, and the sync copes with the list learning the new name first.
+pub struct MachineActions<'a> {
+    core: &'a CoreClient,
+    sync: &'a crate::sync::CoreSync,
+}
+
+impl<'a> MachineActions<'a> {
+    pub fn new(core: &'a CoreClient, sync: &'a crate::sync::CoreSync) -> Self {
+        Self { core, sync }
+    }
+
+    /// The name the core calls the machine now (the `machine` param). Local is not a saved
+    /// machine, and an id the core doesn't list may have been removed meanwhile.
+    fn name_of(&self, machine_id: &str) -> Result<String, ActionError> {
+        if machine_id == LOCAL {
+            return Err(ActionError::invalid("This computer isn’t a saved workbox."));
+        }
+        self.sync
+            .machine_name(machine_id)
+            .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))
+    }
+
+    async fn run(
+        &self,
+        machine_id: &str,
+        method: &str,
+        params: impl FnOnce(&str) -> Value,
+    ) -> Result<(), ActionError> {
+        let name = self.name_of(machine_id)?;
+        // These calls go to our own core, which names the machine in the params.
+        let result = self.core.call(LOCAL, method, params(&name)).await;
+        self.sync.refresh_machines();
+        result
+            .map(|_| ())
+            .map_err(|e| core_failure(e, method, &name))
+    }
+
+    /// `machine.connect`: dials the machine now instead of waiting for the next try.
+    pub async fn connect(&self, machine_id: &str) -> Result<(), ActionError> {
+        self.run(
+            machine_id,
+            "machine.connect",
+            |name| json!({ "machine": name }),
+        )
+        .await
+    }
+
+    /// `machine.rename`. The new name is checked with `validate_name` first.
+    pub async fn rename(&self, machine_id: &str, new_name: &str) -> Result<(), ActionError> {
+        let new_name = new_name.trim();
+        validate_name(new_name).map_err(ActionError::invalid)?;
+        self.run(
+            machine_id,
+            "machine.rename",
+            |name| json!({ "machine": name, "new_name": new_name }),
+        )
+        .await
+    }
+
+    /// `machine.add`: dials the machine over ssh (or the custom connection), checks that hc
+    /// answers there and keeps it under a name. It gets a connection of its own, because the
+    /// dial can take a while. The core's typed refusals (`hc_missing`, `needs_login`, …) come back
+    /// as `ActionError::Core` for the sheet to word; a timeout is `MaybeApplied` and is never
+    /// retried. Answers the new machine's id.
+    pub async fn add(&self, req: &AddMachineRequest) -> Result<String, ActionError> {
+        let add = check_add(req).map_err(ActionError::invalid)?;
+        let what = match &add.reach {
+            Reach::Target(target) => target.clone(),
+            Reach::Via(_) => add.name.clone().unwrap_or_default(),
+        };
+        let result = self
+            .core
+            .call_long(LOCAL, "machine.add", add_params(&add))
+            .await;
+        let reply = match result {
+            Ok(reply) => reply,
+            Err(e) => {
+                let failure = core_failure(e, "machine.add", &what);
+                if matches!(failure, ActionError::MaybeApplied { .. }) {
+                    self.sync.refresh_machines();
+                }
+                return Err(failure);
+            }
+        };
+        // The new machine should show up without waiting for the next tick.
+        self.sync.refresh_machines();
+        reply
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| ActionError::MaybeApplied {
+                message: format!(
+                    "herdr-core added {what}, but its reply could not be read; refreshing."
+                ),
+                argv: vec!["machine.add".to_owned()],
+            })
+    }
+
+    /// `machine.rm`: forgets the machine here; its terminals keep running there.
+    pub async fn remove(&self, machine_id: &str) -> Result<(), ActionError> {
+        self.run(machine_id, "machine.rm", |name| json!({ "machine": name }))
+            .await
+    }
+}
+
+// ---- Row actions on herdr-core (v0.9) ----
+
+/// Why a row action found no cached terminal.
+const NOT_LISTED: &str = "That terminal is no longer listed.";
+
+/// The label `herdr-app` and this app share: the last turn the person has seen. A string.
+pub(crate) const SEEN_LABEL: &str = "herdr.seen";
+/// The label for a pinned agent: `"1"` pins, `""` unpins.
+const PINNED_LABEL: &str = "herdr.pinned";
+
+/// A core call failed. A timeout on a mutation, or a connection that dropped during it, may
+/// have been applied (the request may have reached the core), so it is `MaybeApplied`; the
+/// exception is the pool connection's own `hello`, which times out before the request was ever
+/// sent. `terminal` is the full address the call was about.
+fn core_failure(error: CoreError, method: &str, terminal: &str) -> ActionError {
+    match error {
+        CoreError::Timeout { method: timed } if timed != "hello" => ActionError::MaybeApplied {
+            message: format!(
+                "herdr-core did not answer in time. `{method}` on {terminal} may have been applied; refreshing."
+            ),
+            argv: vec![method.to_owned(), terminal.to_owned()],
+        },
+        CoreError::Lost => ActionError::MaybeApplied {
+            message: format!(
+                "The connection to herdr-core dropped during `{method}` on {terminal}. It may have been applied; refreshing."
+            ),
+            argv: vec![method.to_owned(), terminal.to_owned()],
+        },
+        error => ActionError::Core { error },
+    }
+}
+
+/// Why a reply to a terminal in this status is refused here, without a call. `None` for idle
+/// and done, the only statuses a reply goes to.
+fn reply_refusal(status: DisplayStatus) -> Option<&'static str> {
+    match status {
+        DisplayStatus::Idle | DisplayStatus::Done => None,
+        DisplayStatus::Blocked => {
+            Some("This agent is waiting for approval. Open it to answer there.")
+        }
+        DisplayStatus::Error => Some("This agent hit an error. Open it to see what happened."),
+        DisplayStatus::Working => Some("This agent is working. Reply when it is idle."),
+        DisplayStatus::Ended => Some("This terminal has ended, so there is nobody to reply to."),
+        DisplayStatus::Unknown => Some(
+            "This agent doesn't report its status, so the app can't tell it is ready. Open it to type there.",
+        ),
+        DisplayStatus::Shell => Some("This is a shell, not an agent. Open it to type there."),
+    }
+}
+
+/// What `terminal.interrupt` found, in words for a toast.
+fn interrupt_words(reply: &Value) -> String {
+    let key = reply.get("key").and_then(Value::as_str);
+    let outcome = match reply.get("outcome").and_then(Value::as_str) {
+        Some("stopped") => Some("it stopped"),
+        Some("exited") => Some("it exited"),
+        Some("still_working") => Some("it is still working"),
+        Some("unknown") => Some("it doesn't report its status"),
+        _ => None,
+    };
+    match (key, outcome) {
+        (Some(key), Some(outcome)) => format!("Pressed {key}: {outcome}."),
+        (None, Some(outcome)) => format!("Interrupted: {outcome}."),
+        (Some(key), None) => format!("Pressed {key}."),
+        (None, None) => "Interrupt sent.".to_owned(),
+    }
+}
+
+/// What the row menus do to a terminal, through the one door (`CoreClient`). A mutation is never
+/// retried: a timeout is `ActionError::MaybeApplied` and the sync reads the machines again. The
+/// destructive ones (close, remove) run only when the person clicked; the UI confirms first.
+pub struct RowActions<'a> {
+    core: &'a CoreClient,
+    sync: &'a crate::sync::CoreSync,
+    activity: &'a Mutex<ActivityV2>,
+}
+
+impl<'a> RowActions<'a> {
+    pub fn new(
+        core: &'a CoreClient,
+        sync: &'a crate::sync::CoreSync,
+        activity: &'a Mutex<ActivityV2>,
+    ) -> Self {
+        Self {
+            core,
+            sync,
+            activity,
+        }
+    }
+
+    /// The address as the local core knows it, or why there is none.
+    fn full(&self, machine_id: &str, address: &str) -> Result<String, ActionError> {
+        if address.trim().is_empty() {
+            return Err(ActionError::invalid("Terminal can't be empty."));
+        }
+        self.sync
+            .full_address(machine_id, address)
+            .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))
+    }
+
+    /// The cached terminal, for the checks that are refused without a call.
+    fn cached(&self, machine_id: &str, address: &str) -> Result<TerminalView, ActionError> {
+        self.sync
+            .terminal(machine_id, address)
+            .ok_or_else(|| ActionError::invalid(NOT_LISTED))
+    }
+
+    /// One mutating call. A timeout asks the sync to look again.
+    async fn mutate(
+        &self,
+        machine_id: &str,
+        method: &str,
+        terminal: &str,
+        params: Value,
+        long: bool,
+    ) -> Result<Value, ActionError> {
+        let result = if long {
+            self.core.call_long(machine_id, method, params).await
+        } else {
+            self.core.call(machine_id, method, params).await
+        };
+        result.map_err(|error| {
+            let failure = core_failure(error, method, terminal);
+            if matches!(failure, ActionError::MaybeApplied { .. }) {
+                self.sync.refresh_machines();
+            }
+            failure
         })
     }
 
-    /// Sends `text` to an agent. `cached_status` is what the poller last saw for it: only an
-    /// idle or done agent is replied to; any other known status is refused here without calling
-    /// herdr (a blocked agent is never answered: the app doesn't approve things for the user).
-    /// With no cached status herdr decides (it rejects a blocked agent with `agent_blocked`).
+    async fn label(
+        &self,
+        machine_id: &str,
+        full: &str,
+        name: &str,
+        value: String,
+    ) -> Result<(), ActionError> {
+        self.mutate(
+            machine_id,
+            "terminal.label",
+            full,
+            json!({"terminal": full, "labels": { name: value }}),
+            false,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Types `text` and presses Enter, for an idle or done agent only. Never forced: a blocked
+    /// program is refused by the core, and the app never answers a dialog for the person. The
+    /// call can take minutes (the core waits for the person's own draft), so it has a
+    /// connection of its own.
     pub async fn reply_to_agent(
         &self,
-        machine: &str,
-        pane_id: &str,
+        machine_id: &str,
+        address: &str,
         text: &str,
-        cached_status: Option<AgentStatus>,
     ) -> Result<(), ActionError> {
-        check_arg("Pane", pane_id)?;
+        let full = self.full(machine_id, address)?;
         if text.trim().is_empty() {
             return Err(ActionError::invalid("Reply can't be empty."));
         }
-        match cached_status {
-            None | Some(AgentStatus::Idle | AgentStatus::Done) => {}
-            Some(AgentStatus::Blocked) => {
-                return Err(ActionError::invalid(
-                    "This agent is waiting for approval. Open it to answer there.",
-                ));
-            }
-            Some(AgentStatus::Working | AgentStatus::Unknown) => {
-                return Err(ActionError::invalid("Reply when the agent is idle."));
-            }
+        let view = self.cached(machine_id, address)?;
+        if let Some(refusal) = reply_refusal(view.status) {
+            return Err(ActionError::invalid(refusal));
         }
-        let mut args = argv(&["agent", "prompt", pane_id]);
-        if text.starts_with('-') {
-            // Otherwise herdr would read the text as a flag.
-            args.push("--".into());
-        }
-        args.push(text.to_owned());
-        self.mutate(machine, args, self.timeouts.prompt)
-            .await
-            .map(drop)
-    }
-
-    /// `agent focus`, which herdr treats as "seen" (spec section 7 caveat).
-    pub async fn mark_seen(&self, machine: &str, pane_id: &str) -> Result<(), ActionError> {
-        check_arg("Pane", pane_id)?;
         self.mutate(
-            machine,
-            argv(&["agent", "focus", pane_id]),
-            self.timeouts.default,
+            machine_id,
+            "terminal.send",
+            &full,
+            json!({"terminal": full, "text": text}),
+            true,
         )
         .await
         .map(drop)
     }
 
-    /// Saved-machine changes are local configuration, so they never carry `--machine`. These
-    /// commands print plain text rather than JSON, so they go through `run_text`.
-    async fn machine_config(&self, args: Vec<String>) -> Result<(), ActionError> {
-        let result = self.cli.run_text(None, &args, self.timeouts.default).await;
-        match result {
-            Ok(_) => {
-                (self.refresh)(None);
-                Ok(())
-            }
-            Err(HerdrError::Timeout { argv }) => {
-                (self.refresh)(None);
-                Err(timed_out(argv))
-            }
-            Err(error) => Err(ActionError::Herdr { error }),
+    /// Presses the stop key once. The words say what the core saw happen.
+    pub async fn interrupt_terminal(
+        &self,
+        machine_id: &str,
+        address: &str,
+    ) -> Result<String, ActionError> {
+        let full = self.full(machine_id, address)?;
+        let reply = self
+            .mutate(
+                machine_id,
+                "terminal.interrupt",
+                &full,
+                json!({"terminal": full}),
+                true,
+            )
+            .await?;
+        Ok(interrupt_words(&reply))
+    }
+
+    /// Ends the program (`terminal.kill`). The UI asks first.
+    pub async fn close_terminal(&self, machine_id: &str, address: &str) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        self.mutate(
+            machine_id,
+            "terminal.kill",
+            &full,
+            json!({"terminal": full}),
+            false,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Removes a finished terminal (`terminal.rm`); a live one is refused here.
+    pub async fn remove_terminal(
+        &self,
+        machine_id: &str,
+        address: &str,
+    ) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        let view = self.cached(machine_id, address)?;
+        if view.status != DisplayStatus::Ended {
+            return Err(ActionError::invalid(
+                "Only an ended terminal can be removed. Close it first.",
+            ));
         }
+        self.mutate(
+            machine_id,
+            "terminal.rm",
+            &full,
+            json!({"terminal": full}),
+            false,
+        )
+        .await
+        .map(drop)
     }
 
-    pub async fn machine_rename(&self, id: &str, label: &str) -> Result<(), ActionError> {
-        check_arg("Machine", id)?;
-        check_arg("Name", label)?;
-        self.machine_config(argv(&["machine", "rename", id, "--label", label]))
-            .await
-    }
-
-    pub async fn machine_set_enabled(&self, id: &str, enabled: bool) -> Result<(), ActionError> {
-        check_arg("Machine", id)?;
-        let verb = if enabled { "enable" } else { "disable" };
-        self.machine_config(argv(&["machine", verb, id])).await
-    }
-
-    pub async fn machine_remove(&self, id: &str) -> Result<(), ActionError> {
-        check_arg("Machine", id)?;
-        self.machine_config(argv(&["machine", "remove", id])).await
-    }
-
-    /// `machine status <id> --json`: does not prompt for authentication.
-    pub async fn machine_status(&self, id: &str) -> Result<Vec<MachineStatusEntry>, ActionError> {
-        check_arg("Machine", id)?;
-        let args = argv(&["machine", "status", id, "--json"]);
-        let v = self
-            .cli
-            .run(None, &args, self.timeouts.default)
-            .await
-            .map_err(|error| ActionError::Herdr { error })?;
-        serde_json::from_value(v).map_err(|e| ActionError::Herdr {
-            error: HerdrError::Parse {
-                message: format!("machine status: {e}"),
-            },
+    /// Removes every ended terminal of one workbox, and says how many went. A terminal already
+    /// gone (`not_found`, or no longer in the cache) is skipped. Any other failure does not
+    /// stop the sweep; if one happened, the error says how many were removed.
+    pub async fn clear_ended(&self, machine_id: &str) -> Result<u32, ActionError> {
+        let state = self
+            .sync
+            .state()
+            .ok_or_else(|| ActionError::invalid("herdr-core is not connected yet."))?;
+        let machine = state
+            .machines
+            .iter()
+            .find(|m| m.id == machine_id)
+            .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))?;
+        let ended: Vec<String> = machine
+            .terminals
+            .iter()
+            .filter(|t| t.status == DisplayStatus::Ended)
+            .map(|t| t.address.clone())
+            .collect();
+        let mut removed = 0u32;
+        let mut failed: Vec<ActionError> = Vec::new();
+        for address in ended {
+            match self.remove_terminal(machine_id, &address).await {
+                Ok(()) => removed += 1,
+                Err(ActionError::Core {
+                    error: CoreError::Rpc { code, .. },
+                }) if code == "not_found" => {}
+                Err(ActionError::Invalid { message }) if message == NOT_LISTED => {}
+                Err(error) => failed.push(error),
+            }
+        }
+        let Some(first) = failed.first() else {
+            return Ok(removed);
+        };
+        self.sync.refresh_machines();
+        Err(ActionError::MaybeApplied {
+            message: format!(
+                "Removed {removed} ended terminal{}, but {} could not be removed: {first}",
+                if removed == 1 { "" } else { "s" },
+                failed.len()
+            ),
+            argv: vec!["clear_ended".to_owned(), machine_id.to_owned()],
         })
+    }
+
+    /// Keeps a live terminal after its shell is lost, or stops keeping it.
+    pub async fn set_keep(
+        &self,
+        machine_id: &str,
+        address: &str,
+        keep: bool,
+    ) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        self.mutate(
+            machine_id,
+            "terminal.keep",
+            &full,
+            json!({"terminal": full, "keep": keep}),
+            false,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Marks the terminal's current turn as seen. The shared label is written only to raise it
+    /// (or when it is missing); the app's own record moves either way. The cache is read before
+    /// the activity lock is taken, never while holding it.
+    pub async fn mark_seen(&self, machine_id: &str, address: &str) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        let view = self.cached(machine_id, address)?;
+        let written = if view.seen_turn.is_none_or(|seen| seen < view.turn) {
+            self.label(machine_id, &full, SEEN_LABEL, view.turn.to_string())
+                .await
+        } else {
+            Ok(())
+        };
+        // The app's own record is the fallback when the shared label is missing, so it moves
+        // even when the write failed; the write's error is still the answer.
+        crate::lock(self.activity).mark_seen(machine_id, address, view.turn);
+        self.sync.refresh_view();
+        written
+    }
+
+    /// The one write that lowers the shared label: the seen turn goes back by one.
+    pub async fn mark_unread(&self, machine_id: &str, address: &str) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        let view = self.cached(machine_id, address)?;
+        let Some(before) = view.turn.checked_sub(1) else {
+            return Err(ActionError::invalid("Nothing to mark unread yet."));
+        };
+        self.label(machine_id, &full, SEEN_LABEL, before.to_string())
+            .await
+    }
+
+    pub async fn set_pinned(
+        &self,
+        machine_id: &str,
+        address: &str,
+        pinned: bool,
+    ) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        let value = if pinned { "1" } else { "" };
+        self.label(machine_id, &full, PINNED_LABEL, value.to_owned())
+            .await
     }
 }
 
@@ -664,202 +1013,506 @@ impl Actions {
 mod tests {
     use super::*;
 
-    fn s(v: &[&str]) -> Vec<String> {
-        v.iter().map(|x| x.to_string()).collect()
-    }
-
-    fn req(kind: Option<&str>, placement: Placement, agent_args: &[&str]) -> NewSessionRequest {
+    fn req(run: RunChoice) -> NewSessionRequest {
         NewSessionRequest {
-            machine_id: "buildbox".into(),
+            machine_id: "local".into(),
             cwd: "/home/dev/api-service".into(),
-            kind: kind.map(str::to_owned),
-            name: "orders".into(),
-            placement,
-            agent_args: s(agent_args),
+            run,
+            name: None,
+            task: None,
+            keep: false,
         }
     }
 
-    #[test]
-    fn plan_new_tab_agent() {
-        let plan = plan_new_session(&req(
-            Some("claude"),
-            Placement::NewTab {
-                workspace_id: "w1".into(),
-            },
-            &[],
-        ));
-        assert_eq!(
-            plan,
-            vec![
-                s(&[
-                    "tab",
-                    "create",
-                    "--workspace",
-                    "w1",
-                    "--cwd",
-                    "/home/dev/api-service",
-                    "--label",
-                    "orders",
-                    "--no-focus"
-                ]),
-                s(&[
-                    "agent", "start", "orders", "--kind", "claude", "--pane", "{PANE}"
-                ]),
-            ]
-        );
+    fn agent(kind: &str) -> RunChoice {
+        RunChoice::Agent { kind: kind.into() }
     }
 
     #[test]
-    fn plan_split_shell() {
-        let plan = plan_new_session(&req(
+    fn run_params_agent_with_task_positional() {
+        let mut r = req(agent("claude"));
+        r.task = Some("fix the flaky test".into());
+        r.name = Some("orders".into());
+        r.keep = true;
+        let p = run_params(&r, None).unwrap();
+        assert_eq!(
+            p,
+            json!({
+                "argv": ["claude", "fix the flaky test"],
+                "cwd": "/home/dev/api-service",
+                "name": "orders",
+                "keep": true,
+                "labels": {"herdr.seen": "0"},
+                "env": {"TERM": "xterm-256color", "COLORTERM": "truecolor"},
+            })
+        );
+        // Codex starts with `--no-daemon`, then its task.
+        let mut c = req(agent("codex"));
+        c.task = Some("review".into());
+        assert_eq!(
+            run_params(&c, None).unwrap()["argv"],
+            json!(["codex", "--no-daemon", "review"])
+        );
+        // No task: just the start argv. A blank task is no task.
+        let mut bare = req(agent("claude"));
+        bare.task = Some("  ".into());
+        assert_eq!(run_params(&bare, None).unwrap()["argv"], json!(["claude"]));
+        assert!(run_params(&bare, None).unwrap().get("name").is_none());
+    }
+
+    #[test]
+    fn run_params_task_refused_without_rule() {
+        let mut r = req(agent("opencode"));
+        r.task = Some("do it".into());
+        let e = run_params(&r, None).unwrap_err();
+        assert!(e.contains("opencode") && e.contains("task"), "{e}");
+        // Not for a shell or a command either, and an unknown kind is refused.
+        let mut shell = req(RunChoice::Shell);
+        shell.task = Some("x".into());
+        assert!(run_params(&shell, None).is_err());
+        assert!(run_params(&req(agent("nope")), None).is_err());
+    }
+
+    #[test]
+    fn run_params_template() {
+        let mut r = req(RunChoice::Template {
+            name: "reviewer".into(),
+        });
+        assert_eq!(run_params(&r, None).unwrap()["argv"], json!(["reviewer"]));
+        r.task = Some("src/lib.rs".into());
+        assert_eq!(
+            run_params(&r, None).unwrap()["argv"],
+            json!(["reviewer", "src/lib.rs"])
+        );
+        let blank = req(RunChoice::Template { name: " ".into() });
+        assert!(run_params(&blank, None).is_err());
+    }
+
+    #[test]
+    fn run_params_shell_has_no_argv() {
+        let p = run_params(&req(RunChoice::Shell), None).unwrap();
+        assert!(p.get("argv").is_none() && p.get("line").is_none(), "{p}");
+        assert_eq!(p["cwd"], "/home/dev/api-service");
+        assert_eq!(p["keep"], false);
+    }
+
+    #[test]
+    fn run_params_command_uses_line() {
+        let p = run_params(
+            &req(RunChoice::Command {
+                line: "npm test && echo done".into(),
+            }),
             None,
-            Placement::SplitBeside {
-                pane_id: "w1:p2".into(),
-            },
-            &[],
-        ));
-        assert_eq!(
-            plan,
-            vec![s(&[
-                "pane",
-                "split",
-                "w1:p2",
-                "--direction",
-                "right",
-                "--cwd",
-                "/home/dev/api-service",
-                "--no-focus"
-            ])]
-        );
+        )
+        .unwrap();
+        assert_eq!(p["line"], "npm test && echo done");
+        assert!(p.get("argv").is_none());
+        let empty = req(RunChoice::Command { line: "  ".into() });
+        assert!(run_params(&empty, None).is_err());
     }
 
     #[test]
-    fn plan_new_workspace_shell() {
-        let plan = plan_new_session(&req(None, Placement::NewWorkspace, &[]));
-        assert_eq!(
-            plan,
-            vec![s(&[
-                "workspace",
-                "create",
-                "--cwd",
-                "/home/dev/api-service",
-                "--label",
-                "orders",
-                "--no-focus"
-            ])]
+    fn run_params_remote_sets_on() {
+        let p = run_params(&req(RunChoice::Shell), Some("buildbox")).unwrap();
+        assert_eq!(p["on"], "buildbox");
+        assert!(
+            run_params(&req(RunChoice::Shell), None)
+                .unwrap()
+                .get("on")
+                .is_none()
         );
+        // A folder is required, and one that looks like a flag is refused.
+        let mut no_folder = req(RunChoice::Shell);
+        no_folder.cwd = " ".into();
+        assert!(run_params(&no_folder, None).is_err());
+        no_folder.cwd = "--help".into();
+        assert!(run_params(&no_folder, None).is_err());
     }
 
     #[test]
-    fn plan_worktree_trust_flag_only_when_true() {
-        let placement = |trust| Placement::Worktree {
-            branch: "feat/x".into(),
-            trust,
-        };
-        let without = plan_new_session(&req(None, placement(false), &[]));
-        let with = plan_new_session(&req(None, placement(true), &[]));
+    fn starts_with_seen_zero_string_label() {
+        let p = run_params(&req(RunChoice::Shell), None).unwrap();
+        assert_eq!(p["labels"], json!({"herdr.seen": "0"}));
+        assert!(p["labels"]["herdr.seen"].is_string());
         assert_eq!(
-            without[0],
-            s(&[
-                "worktree",
-                "create",
-                "--cwd",
-                "/home/dev/api-service",
-                "--branch",
-                "feat/x",
-                "--label",
-                "orders",
-                "--no-focus"
-            ])
+            p["env"],
+            json!({"TERM": "xterm-256color", "COLORTERM": "truecolor"})
         );
-        assert!(!without[0].contains(&"--trust-repository".to_string()));
-        let mut expected = without[0].clone();
-        expected.push("--trust-repository".into());
-        assert_eq!(with[0], expected);
+        // The name is checked here too.
+        let mut bad = req(RunChoice::Shell);
+        bad.name = Some("t7".into());
+        assert!(run_params(&bad, None).is_err());
     }
 
     #[test]
-    fn agent_args_after_double_dash() {
-        let plan = plan_new_session(&req(
-            Some("codex"),
-            Placement::NewWorkspace,
-            &["--model", "o3"],
-        ));
-        assert_eq!(
-            plan[1],
-            s(&[
-                "agent", "start", "orders", "--kind", "codex", "--pane", "{PANE}", "--", "--model",
-                "o3"
-            ])
-        );
-    }
-
-    #[test]
-    fn validate_name_cases() {
-        assert!(validate_name("orders-index").is_ok());
-        assert!(validate_name("a").is_ok());
-        assert!(validate_name("a_b-9").is_ok());
-        assert!(validate_name(&format!("a{}", "b".repeat(31))).is_ok());
-        for bad in ["Orders", "1abc", "", "-a", "a b", "a.b", "é"] {
+    fn validate_name_rules() {
+        for ok in [
+            "orders",
+            "a",
+            "0day",
+            "api-agent",
+            "web_app.2",
+            &"a".repeat(32),
+            "tool",
+            "t",
+        ] {
+            assert_eq!(validate_name(ok), Ok(()), "{ok:?}");
+        }
+        for bad in [
+            "t7",
+            "t1b",
+            "t12",
+            "-x",
+            "_x",
+            ".x",
+            "Orders",
+            "",
+            "a b",
+            "a/b",
+            "é",
+            &"a".repeat(33),
+        ] {
             assert!(validate_name(bad).is_err(), "{bad:?}");
         }
-        assert!(validate_name(&format!("a{}", "b".repeat(32))).is_err());
+        // Two different sentences: the shape rule says what an address looks like.
+        let shaped = validate_name("t7").unwrap_err();
+        assert!(shaped.contains("t7"), "{shaped}");
+        assert_ne!(shaped, validate_name("Orders").unwrap_err());
     }
 
     #[test]
-    fn preview_shows_the_machine_label_and_quotes_unsafe_arguments() {
-        let mut r = req(
-            Some("claude"),
-            Placement::NewWorkspace,
-            &["--note", "it's $HOME"],
-        );
-        r.cwd = "/home/dev/my project".into();
-        let lines = preview_new_session(&r, Some("Build box"));
-        assert_eq!(
-            lines[0],
-            "herdr --machine 'Build box' workspace create --cwd '/home/dev/my project' --label orders --no-focus"
-        );
-        assert_eq!(
-            lines[1],
-            "herdr --machine 'Build box' agent start orders --kind claude --pane {PANE} -- --note 'it'\\''s $HOME'"
-        );
-        let local = preview_new_session(&req(None, Placement::NewWorkspace, &[]), None);
-        assert!(local[0].starts_with("herdr workspace create "));
-        assert_eq!(display_arg(""), "''");
-        assert_eq!(display_arg(PANE_PLACEHOLDER), PANE_PLACEHOLDER);
-    }
-
-    #[test]
-    fn requests_that_herdr_would_misread_are_refused() {
-        let ok = req(Some("claude"), Placement::NewWorkspace, &[]);
-        assert!(validate_request(&ok).is_ok());
-        let mut bad_name = ok.clone();
-        bad_name.name = "Orders".into();
-        let mut bad_cwd = ok.clone();
-        bad_cwd.cwd = "--help".into();
-        let bad_branch = req(
-            None,
-            Placement::Worktree {
-                branch: "-x".into(),
-                trust: false,
-            },
-            &[],
-        );
-        for r in [bad_name, bad_cwd, bad_branch] {
-            assert!(matches!(
-                validate_request(&r),
-                Err(ActionError::Invalid { .. })
-            ));
+    fn known_agents_programs_are_safe_in_the_check_script() {
+        for a in KNOWN_AGENTS {
+            assert_eq!(a.start[0], a.program, "{}", a.kind);
+            assert!(
+                a.program
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                "{}",
+                a.program
+            );
         }
-        // A split shell does not use the name at all.
-        let mut split = req(
-            None,
-            Placement::SplitBeside {
-                pane_id: "w1:p1".into(),
-            },
-            &[],
+    }
+
+    #[test]
+    fn preview_matches_display() {
+        let mut r = req(agent("claude"));
+        r.task = Some("fix it".into());
+        r.name = Some("orders".into());
+        r.keep = true;
+        let line = preview(&r, Some("buildbox"), "hc").unwrap();
+        let params = run_params(&r, Some("buildbox")).unwrap();
+        assert_eq!(
+            line,
+            crate::core::display::display("terminal.run", &params, "hc")
         );
-        split.name = String::new();
-        assert!(validate_request(&split).is_ok());
+        assert_eq!(
+            line,
+            "hc run --bg --on buildbox --cwd /home/dev/api-service --name orders --keep claude 'fix it'"
+        );
+        // Bookkeeping stays out of the line.
+        assert!(!line.contains("herdr.seen") && !line.contains("TERM"));
+        let local = preview(&req(RunChoice::Shell), None, "hc").unwrap();
+        assert_eq!(local, "hc run --bg --cwd /home/dev/api-service");
+        // A refused request has no preview.
+        let mut bad = req(RunChoice::Shell);
+        bad.name = Some("T7".into());
+        assert!(matches!(
+            preview(&bad, None, "hc"),
+            Err(ActionError::Invalid { .. })
+        ));
+    }
+
+    #[test]
+    fn run_params_task_starting_with_a_dash_is_refused() {
+        // claude, codex and gemini would read it as an option.
+        let mut r = req(agent("claude"));
+        r.task = Some("  --dangerously-skip-permissions".into());
+        let e = run_params(&r, None).unwrap_err();
+        assert!(e.contains("Task") && e.contains('-'), "{e}");
+        let mut t = req(RunChoice::Template {
+            name: "reviewer".into(),
+        });
+        t.task = Some("-rf".into());
+        assert!(run_params(&t, None).is_err());
+        // A dash inside the task is fine.
+        t.task = Some("fix the a-b case".into());
+        assert!(run_params(&t, None).is_ok());
+    }
+
+    #[test]
+    fn unchecked_choices_list_every_known_kind_and_no_templates() {
+        let c = RunChoices::unchecked();
+        assert!(!c.kinds_checked && c.templates.is_empty());
+        assert_eq!(c.kinds.len(), KNOWN_AGENTS.len());
+        assert_eq!(c.kinds[0].kind, "claude");
+        assert!(c.kinds[0].takes_task);
+    }
+
+    /// A core that answers `hello` and then `terminal.run` with `run`.
+    fn core_running(run: fn() -> (u64, crate::core::testing::Reply)) -> CoreClient {
+        use crate::core::connection::{BoxFuture, Connection, Connector, Notification};
+        use crate::core::testing::{Reply, connect, hello_result};
+        struct Fake(fn() -> (u64, Reply));
+        type Opened = (
+            Connection,
+            tokio::sync::mpsc::UnboundedReceiver<Notification>,
+        );
+        impl Connector for Fake {
+            fn connect(&self) -> BoxFuture<'static, Result<Opened, CoreError>> {
+                let run = self.0;
+                let (conn, notes, core) = connect(move |req| match req["method"].as_str() {
+                    Some("hello") => (0, Reply::Result(hello_result())),
+                    _ => run(),
+                });
+                let opened = (conn.keep_alive(core), notes);
+                Box::pin(async move { Ok(opened) })
+            }
+        }
+        CoreClient::new(Arc::new(Fake(run)))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_run_that_times_out_may_have_been_applied() {
+        let core = core_running(|| (0, crate::core::testing::Reply::Silent));
+        let cache = KindsCache::default();
+        let err = NewSessions::new(&core, &cache)
+            .create(&req(RunChoice::Shell), None)
+            .await
+            .unwrap_err();
+        match err {
+            ActionError::MaybeApplied { message, argv } => {
+                assert!(message.contains("terminal.run"), "{message}");
+                assert!(message.contains("may have been applied"), "{message}");
+                assert_eq!(argv[0], "terminal.run");
+            }
+            other => panic!("expected MaybeApplied, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_run_reply_without_an_address_may_have_been_applied() {
+        use crate::core::testing::Reply;
+        let runs: [fn() -> (u64, Reply); 3] = [
+            || (0, Reply::Result(json!({}))),
+            || (0, Reply::Result(json!({"address": ""}))),
+            || (0, Reply::Result(json!({"address": 7}))),
+        ];
+        for run in runs {
+            let core = core_running(run);
+            let cache = KindsCache::default();
+            let err = NewSessions::new(&core, &cache)
+                .create(&req(RunChoice::Shell), Some("buildbox"))
+                .await
+                .unwrap_err();
+            match err {
+                ActionError::MaybeApplied { message, .. } => {
+                    assert!(message.contains("buildbox"), "{message}");
+                    assert!(message.contains("could not be read"), "{message}");
+                }
+                other => panic!("expected MaybeApplied, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_timed_out_mutation_may_have_been_applied_but_a_hello_timeout_did_not() {
+        let timeout = |method: &str| CoreError::Timeout {
+            method: method.to_owned(),
+        };
+        assert!(matches!(
+            core_failure(timeout("terminal.kill"), "terminal.kill", "t7"),
+            ActionError::MaybeApplied { .. }
+        ));
+        assert_eq!(
+            core_failure(timeout("hello"), "terminal.kill", "t7"),
+            ActionError::Core {
+                error: timeout("hello")
+            }
+        );
+        // The request may have reached the core before the connection dropped.
+        assert!(matches!(
+            core_failure(CoreError::Lost, "terminal.kill", "t7"),
+            ActionError::MaybeApplied { .. }
+        ));
+        assert!(matches!(
+            core_failure(CoreError::NotFound, "terminal.kill", "t7"),
+            ActionError::Core { .. }
+        ));
+    }
+
+    #[test]
+    fn interrupt_says_what_the_core_saw() {
+        assert_eq!(
+            interrupt_words(&json!({"outcome": "stopped", "key": "esc"})),
+            "Pressed esc: it stopped."
+        );
+        assert_eq!(
+            interrupt_words(&json!({"outcome": "still_working", "key": "ctrl+c"})),
+            "Pressed ctrl+c: it is still working."
+        );
+        assert_eq!(interrupt_words(&json!({})), "Interrupt sent.");
+    }
+    fn add_req() -> AddMachineRequest {
+        AddMachineRequest {
+            target: Some("dev@staging.example".into()),
+            ..AddMachineRequest::default()
+        }
+    }
+
+    #[test]
+    fn add_params_use_the_schemas_names_and_join_the_port() {
+        let mut req = add_req();
+        req.port = Some(2222);
+        req.name = Some(" staging ".into());
+        req.session = Some("qa".into());
+        req.temporary = true;
+        let params = add_params(&check_add(&req).unwrap());
+        assert_eq!(
+            params,
+            json!({
+                "target": "dev@staging.example:2222",
+                "name": "staging",
+                "session": "qa",
+                "temporary": true,
+            })
+        );
+        // Only what was given: the core fills in the rest.
+        let params = add_params(&check_add(&add_req()).unwrap());
+        assert_eq!(
+            params,
+            json!({"target": "dev@staging.example", "temporary": false})
+        );
+        // `display()` reads exactly these names.
+        assert_eq!(
+            crate::core::display::display("machine.add", &params, "hc"),
+            "hc machine add dev@staging.example"
+        );
+    }
+
+    #[test]
+    fn via_requires_name() {
+        let via = AddMachineRequest {
+            via: Some("ssh -p 2222 dev@host".into()),
+            ..AddMachineRequest::default()
+        };
+        assert_eq!(
+            check_add(&via).unwrap_err(),
+            "A custom connection needs a name."
+        );
+        let named = AddMachineRequest {
+            name: Some("gpubox".into()),
+            ..via.clone()
+        };
+        let params = add_params(&check_add(&named).unwrap());
+        assert_eq!(
+            params,
+            json!({"via": "ssh -p 2222 dev@host", "name": "gpubox", "temporary": false})
+        );
+        // A blank name is no name.
+        let blank = AddMachineRequest {
+            name: Some("  ".into()),
+            ..via
+        };
+        assert!(check_add(&blank).is_err());
+    }
+
+    #[test]
+    fn a_request_names_exactly_one_way_in() {
+        let mut both = add_req();
+        both.via = Some("ssh h".into());
+        both.name = Some("box".into());
+        assert!(check_add(&both).unwrap_err().contains("not both"));
+        assert!(
+            check_add(&AddMachineRequest::default())
+                .unwrap_err()
+                .contains("Enter")
+        );
+        let blank = AddMachineRequest {
+            target: Some("   ".into()),
+            via: Some("".into()),
+            ..AddMachineRequest::default()
+        };
+        assert!(check_add(&blank).is_err());
+    }
+
+    #[test]
+    fn add_refuses_what_ssh_or_a_shell_would_misread() {
+        for bad in ["-oProxyCommand=x", "bad target", "a;b", "$(id)", "a\\b"] {
+            let mut req = add_req();
+            req.target = Some(bad.into());
+            assert!(check_add(&req).is_err(), "target {bad:?}");
+        }
+        // The port is a number of its own, and the host may not carry one too.
+        let mut req = add_req();
+        req.port = Some(0);
+        assert!(check_add(&req).is_err());
+        req.port = Some(22);
+        req.target = Some("dev@staging.example:2222".into());
+        assert!(check_add(&req).is_err());
+        // A name is a machine name: `validate_name`, so an old herdr-style label is refused.
+        for bad in ["Build Box", "t7", "-x", "a b", &"x".repeat(33)] {
+            let mut req = add_req();
+            req.name = Some(bad.into());
+            assert!(check_add(&req).is_err(), "name {bad:?}");
+        }
+        // The session: [A-Za-z0-9][A-Za-z0-9._-]{0,63}.
+        for ok in ["work", "Work.2", "0", &"a".repeat(64)] {
+            let mut req = add_req();
+            req.session = Some(ok.into());
+            assert!(check_add(&req).is_ok(), "session {ok:?}");
+        }
+        for bad in ["-x", "a b", "a/b", "_x", ".x", "é", &"a".repeat(65)] {
+            let mut req = add_req();
+            req.session = Some(bad.into());
+            assert!(check_add(&req).is_err(), "session {bad:?}");
+        }
+        // A port does not go with a custom connection.
+        let via = AddMachineRequest {
+            via: Some("ssh h".into()),
+            name: Some("box".into()),
+            port: Some(22),
+            ..AddMachineRequest::default()
+        };
+        assert!(check_add(&via).is_err());
+        // A backslash (fish reads `\\` and `\'` inside single quotes differently), a control
+        // character, or a leading dash.
+        for bad in ["ssh a\\b", "ssh a\nb", "ssh a\tb", "-oX=y", "ssh a\\'b"] {
+            let req = AddMachineRequest {
+                via: Some(bad.into()),
+                name: Some("box".into()),
+                ..AddMachineRequest::default()
+            };
+            assert!(check_add(&req).is_err(), "via {bad:?}");
+        }
+    }
+
+    #[test]
+    fn login_and_update_args_pass_allowlist() {
+        use crate::terminal::allowed_core_args;
+        assert_eq!(
+            machine_command_args("login", "buildbox"),
+            Ok(vec![
+                "machine".to_owned(),
+                "login".into(),
+                "buildbox".into()
+            ])
+        );
+        assert_eq!(
+            machine_command_args("update", "gpubox"),
+            Ok(vec!["machine".to_owned(), "update".into(), "gpubox".into()])
+        );
+        for verb in ["login", "update"] {
+            let args = machine_command_args(verb, "buildbox").unwrap();
+            assert!(allowed_core_args(&args), "{args:?}");
+        }
+        // A name `validate_name` refuses never becomes a command: a flag, an address, shell text.
+        for bad in ["-x", "t7", "a b", "x;y", "$(id)", "Build", ""] {
+            assert!(machine_command_args("login", bad).is_err(), "{bad:?}");
+            assert!(machine_command_args("update", bad).is_err(), "{bad:?}");
+        }
+        // And the allowlist itself no longer takes an address-shaped name either.
+        let shaped: Vec<String> = ["machine", "login", "t7"].map(str::to_owned).to_vec();
+        assert!(!allowed_core_args(&shaped));
     }
 }

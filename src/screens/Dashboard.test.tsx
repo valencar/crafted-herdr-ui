@@ -1,15 +1,19 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import raw from "../../src-tauri/tests/fixtures/snapshot_buildbox.json";
 import type { AppState } from "../lib/bindings/AppState";
 import type { CommandLogEntry } from "../lib/bindings/CommandLogEntry";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
-import type { Snapshot } from "../lib/bindings/Snapshot";
+import type { DisplayStatus } from "../lib/bindings/DisplayStatus";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
+import {
+  appState as buildState,
+  buildboxTerms,
+  machineView,
+} from "../test/builders";
 import { Dashboard } from "./Dashboard";
 
 // xterm is tested on its own; `runMenuAction` only drags the workspace in with it.
@@ -23,8 +27,6 @@ import { invokeTyped } from "../lib/ipc";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
-// The raw herdr response has fields the bindings ignore, hence the cast.
-const fixture = raw.result.snapshot as unknown as Snapshot;
 const NOW = Date.now();
 const MIN = 60_000;
 
@@ -40,45 +42,53 @@ function entry(over: Partial<CommandLogEntry>): CommandLogEntry {
     durationMs: 10,
     error: null,
     note: null,
+    method: "machine.list",
+    display: "hc machine ls",
+    quiet: true,
     ...over,
   };
 }
 
-function snapshotWith(statuses: Record<string, string>): Snapshot {
-  const snap = structuredClone(fixture);
-  for (const a of snap.agents) {
-    const status = statuses[a.pane_id];
-    if (status) (a as { agent_status: string }).agent_status = status;
-  }
-  return snap;
-}
+type Over = {
+  /** The terminals; `null` for a machine that has not answered yet. */
+  terms?: ReturnType<typeof buildboxTerms> | null;
+  /** Address → when its status began. Replaces the default two. */
+  since?: Record<string, number>;
+  /** Address → the status to give that agent. */
+  statuses?: Record<string, string>;
+  isLocal?: boolean;
+  lastOkMs?: number | null;
+};
 
 function machine(
   id: string,
   health: Health = { kind: "online" },
-  overrides: Partial<MachineView> = {},
+  over: Over = {},
 ): MachineView {
-  return {
-    id,
-    label: id,
-    target: null,
-    session: "default",
-    is_local: false,
-    health,
-    snapshot: structuredClone(fixture),
-    last_ok_ms: NOW,
-    ages: { "term-1": NOW - 2 * MIN, "term-4": NOW - 3 * MIN },
-    ...overrides,
+  const since = over.since ?? {
+    "w1:p1": NOW - 2 * MIN,
+    "w2:p1": NOW - 3 * MIN,
   };
+  const patch: Parameters<typeof buildboxTerms>[0] = {};
+  for (const [address, sinceMs] of Object.entries(since)) {
+    patch[address] = { sinceMs };
+  }
+  for (const [address, status] of Object.entries(over.statuses ?? {})) {
+    patch[address] = { ...patch[address], status: status as DisplayStatus };
+  }
+  return machineView(
+    {
+      id,
+      health,
+      isLocal: over.isLocal,
+      lastOkMs: over.lastOkMs === undefined ? NOW : over.lastOkMs,
+    },
+    over.terms === undefined ? buildboxTerms(patch) : over.terms,
+  );
 }
 
 function appState(...machines: MachineView[]): AppState {
-  return {
-    machines,
-    herdr_version: "0.9.4",
-    herdr_path: "/home/dev/.local/bin/herdr",
-    generated_at_ms: NOW,
-  };
+  return { ...buildState([], { generatedAtMs: NOW }), machines };
 }
 
 const defaultState = () => appState(machine("buildbox"), machine("gpubox"));
@@ -120,14 +130,12 @@ beforeEach(() => {
     settings: { open_target: "external" } as unknown as Settings,
   });
   invoke.mockReset();
-  invoke.mockImplementation(async (name: string, args?: { id?: string }) =>
+  invoke.mockImplementation(async (name: string) =>
     name === "get_terminals"
       ? { installed: ["ghostty"], default: "ghostty" }
       : name === "get_command_log"
         ? log
-        : name === "preview_reconnect"
-          ? `herdr machine reconnect ${args?.id}`
-          : null,
+        : null,
   );
 });
 
@@ -168,7 +176,7 @@ describe("Dashboard", () => {
     setup(null);
     const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;
     expect(busy).not.toBeNull();
-    expect(busy).toHaveTextContent("Connecting to herdr…");
+    expect(busy).toHaveTextContent("Connecting to herdr-core…");
     expect(busy.querySelector(".skel")).not.toBeNull();
   });
 
@@ -231,7 +239,7 @@ describe("Dashboard", () => {
     expect(calls("mark_seen")).toHaveLength(1);
     expect(calls("mark_seen")[0][1]).toEqual({
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
     // It marks seen only: nothing was opened.
     expect(calls("open_session")).toHaveLength(0);
@@ -269,16 +277,14 @@ describe("Dashboard", () => {
 
   it("says_it_is_connecting_before_the_first_state", () => {
     setup(null);
-    expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
+    expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { level: 1, name: "Dashboard" }),
     ).toBeInTheDocument();
   });
 
   it("heading_counts_workboxes_agents_and_tabs_and_offers_next_needs_you", () => {
-    setup(
-      appState(machine("buildbox"), machine("gpubox", { kind: "disabled" })),
-    );
+    setup(appState(machine("buildbox"), machine("gpubox", { kind: "hidden" })));
     // Disabled workboxes don't count; a disabled box gives no rows.
     expect(
       screen.getByText("1 workbox · 4 agents · 0 terminal tabs open"),
@@ -375,7 +381,8 @@ describe("Dashboard", () => {
     );
     expect(calls("open_session")[0][1]).toEqual({
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
+      observe: false,
     });
     expect(calls("mark_seen")).toHaveLength(1);
   });
@@ -394,18 +401,20 @@ describe("Dashboard", () => {
     expect(useAppStore.getState().selectedKey).toBeNull();
   });
 
-  it("go_to_tab_on_a_done_row_activates_the_tab_and_marks_it_seen", async () => {
+  it("go_to_tab_on_a_done_row_activates_the_tab_and_leaves_seen_to_looking", async () => {
     useTerminalStore.setState({
       tabs: [
         {
           tabKey: "buildbox::w2:p1",
-          target: { kind: "pane", machineId: "buildbox", paneId: "w2:p1" },
+          target: { kind: "terminal", machineId: "buildbox", address: "w2:p1" },
           title: "tester",
           machineLabel: "buildbox",
           state: "live",
           error: null,
           termId: null,
           exitCode: null,
+          lastLine: null,
+          waiting: null,
           attempts: 0,
         },
       ],
@@ -414,17 +423,30 @@ describe("Dashboard", () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: /^Go to tab tester/ }));
     expect(useTerminalStore.getState().activeKey).toBe("buildbox::w2:p1");
-    expect(calls("mark_seen")).toHaveLength(1);
+    // In-app, the live tab now in front is what clears Done (`useLooking`, Ruling C122).
+    expect(calls("mark_seen")).toHaveLength(0);
     expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
+  });
+
+  it("an_error_agent_gets_a_needs_you_card_and_an_ended_one_does_not", () => {
+    // w1:p1 errored (older than the blocked agent would be), w2:p1 ended, w2:p2 idle.
+    const statuses = { "w1:p1": "error", "w2:p1": "ended", "w2:p2": "idle" };
+    setup(appState(machine("buildbox", undefined, { statuses })));
+    const needs = section("Needs you");
+    expect(within(needs).getByText("1 waiting")).toBeInTheDocument();
+    const cards = within(needs).getAllByRole("article");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveAttribute("data-status", "error");
+    expect(within(cards[0]).getByText("Error")).toBeInTheDocument();
+    expect(within(needs).queryByText("Ended")).toBeNull();
+    // The Agents tile counts them in words.
+    expect(tile("Agents")).toHaveTextContent("1 error");
+    expect(tile("Agents")).toHaveTextContent("1 ended");
   });
 
   it("nobody_waiting_says_so", () => {
     const quiet = { "w1:p1": "working", "w2:p1": "idle" };
-    setup(
-      appState(
-        machine("buildbox", undefined, { snapshot: snapshotWith(quiet) }),
-      ),
-    );
+    setup(appState(machine("buildbox", undefined, { statuses: quiet })));
     const needs = section("Needs you");
     expect(within(needs).getByText("0 waiting")).toBeInTheDocument();
     expect(
@@ -452,7 +474,7 @@ describe("Dashboard", () => {
     setup(
       appState(
         machine("buildbox", undefined, {
-          ages: { "term-1": NOW - 10_000, "term-4": NOW - 20_000 },
+          since: { "w1:p1": NOW - 10_000, "w2:p1": NOW - 20_000 },
         }),
       ),
     );
@@ -472,7 +494,7 @@ describe("Dashboard", () => {
   });
 
   it("blocked_the_longest_shows_a_dash_when_the_blocked_age_is_unknown", () => {
-    setup(appState(machine("buildbox", undefined, { ages: {} })));
+    setup(appState(machine("buildbox", undefined, { since: {} })));
     const t = tile("Blocked the longest");
     expect(t.querySelector(".tile-num")).toHaveTextContent("—");
     expect(t).not.toHaveTextContent("None");
@@ -483,7 +505,7 @@ describe("Dashboard", () => {
     setup(
       appState(
         machine("buildbox", undefined, {
-          snapshot: snapshotWith({ "w1:p1": "idle" }),
+          statuses: { "w1:p1": "idle" },
         }),
       ),
     );
@@ -501,7 +523,7 @@ describe("Dashboard", () => {
           retry_in_ms: 7_500,
           error: "timed out",
         }),
-        machine("staging", { kind: "disabled" }),
+        machine("staging", { kind: "hidden" }),
       ),
     );
     const t = tile("Workboxes online");
@@ -530,7 +552,7 @@ describe("Dashboard", () => {
     ];
     setup();
     await settle();
-    const t = tile("herdr response");
+    const t = tile("Core response");
     expect(t).toHaveTextContent("25 ms");
     expect(
       within(t).getByText("Median, last 5 min · 1 failed call"),
@@ -540,7 +562,7 @@ describe("Dashboard", () => {
   it("response_tile_shows_dash_with_no_calls", async () => {
     setup();
     await settle();
-    const t = tile("herdr response");
+    const t = tile("Core response");
     expect(t).toHaveTextContent("—");
     expect(t).not.toHaveTextContent("ms");
     expect(
@@ -553,14 +575,14 @@ describe("Dashboard", () => {
     expect(tile("Terminal tabs")).toHaveTextContent("0 of 16");
     expect(within(tile("Terminal tabs")).getByText("None open")).toBeVisible();
     act(() => {
-      for (const [machineId, paneId] of [
+      for (const [machineId, address] of [
         ["buildbox", "w1:p1"],
         ["buildbox", "w1:p2"],
         ["gpubox", "w1:p1"],
       ]) {
         useTerminalStore.getState().openTab({
-          tabKey: `${machineId}::${paneId}`,
-          target: { kind: "pane", machineId, paneId },
+          tabKey: `${machineId}::${address}`,
+          target: { kind: "terminal", machineId, address: address },
           title: "claude",
           machineLabel: machineId,
         });
@@ -575,6 +597,15 @@ describe("Dashboard", () => {
     ).toBeInTheDocument();
   });
 
+  it("temporary_badge_shown", () => {
+    const temp = machineView({ id: "edgebox", temporary: true }, []);
+    setup(appState(machine("buildbox"), temp));
+    const card = (name: string) =>
+      within(section("Workboxes")).getByRole("article", { name });
+    expect(within(card("edgebox")).getByText("Temporary")).toBeInTheDocument();
+    expect(within(card("buildbox")).queryByText("Temporary")).toBeNull();
+  });
+
   it("workbox_card_actions_follow_health", async () => {
     const user = setup(
       appState(
@@ -584,19 +615,17 @@ describe("Dashboard", () => {
           retry_in_ms: 5000,
           error: "timed out",
         }),
-        machine("staging", { kind: "disabled" }),
+        machine("staging", { kind: "hidden" }),
       ),
     );
     const card = (name: string) =>
       within(section("Workboxes")).getByRole("article", { name });
 
     expect(within(card("buildbox")).getByText("Online")).toBeInTheDocument();
-    await user.click(
-      within(card("buildbox")).getByRole("button", { name: "Open herdr" }),
-    );
-    expect(calls("open_full_herdr")).toEqual([
-      ["open_full_herdr", { machineId: "buildbox" }],
-    ]);
+    // There is no herdr TUI to open any more.
+    expect(
+      within(card("buildbox")).queryByRole("button", { name: "Open herdr" }),
+    ).toBeNull();
     expect(
       within(card("buildbox")).queryByRole("button", { name: "Retry now" }),
     ).toBeNull();
@@ -610,12 +639,16 @@ describe("Dashboard", () => {
     await user.click(
       within(card("gpubox")).getByRole("button", { name: "Retry now" }),
     );
-    expect(calls("refresh_now")).toEqual([
-      ["refresh_now", { machineId: "gpubox" }],
+    // A remote workbox dials the machine (`machine.connect`); it does not just re-read the list.
+    expect(calls("machine_connect")).toEqual([
+      ["machine_connect", { machineId: "gpubox" }],
     ]);
+    expect(calls("refresh_now")).toEqual([]);
 
-    expect(within(card("staging")).getByText("Disabled")).toBeInTheDocument();
-    expect(within(card("staging")).queryByRole("button")).toBeNull();
+    // A hidden workbox has no card at all (spec 7.4).
+    expect(
+      within(section("Workboxes")).queryByRole("article", { name: "staging" }),
+    ).toBeNull();
   });
 
   it("workbox_card_shows_its_mix_its_freshness_and_its_tabs", () => {
@@ -623,7 +656,7 @@ describe("Dashboard", () => {
     act(() =>
       useTerminalStore.getState().openTab({
         tabKey: "gpubox::w1:p1",
-        target: { kind: "pane", machineId: "gpubox", paneId: "w1:p1" },
+        target: { kind: "terminal", machineId: "gpubox", address: "w1:p1" },
         title: "claude",
         machineLabel: "gpubox",
       }),
@@ -652,7 +685,7 @@ describe("Dashboard", () => {
     // on an online workbox says nothing about how fresh the data is.
     setup(
       appState(
-        machine("buildbox", { kind: "online" }, { last_ok_ms: NOW - 10 * MIN }),
+        machine("buildbox", { kind: "online" }, { lastOkMs: NOW - 10 * MIN }),
       ),
     );
     const card = within(section("Workboxes")).getByRole("article", {
@@ -669,7 +702,7 @@ describe("Dashboard", () => {
         machine(
           "gpubox",
           { kind: "reconnecting", retry_in_ms: 5000, error: "timed out" },
-          { last_ok_ms: NOW - 2 * MIN },
+          { lastOkMs: NOW - 2 * MIN },
         ),
       ),
     );
@@ -690,9 +723,9 @@ describe("Dashboard", () => {
     const user = setup(
       appState(
         machine("buildbox", undefined, {
-          ages: { "term-2": NOW - 10 * MIN },
+          since: { "w1:p2": NOW - 10 * MIN },
         }),
-        machine("gpubox", undefined, { ages: { "term-2": NOW - 20 * MIN } }),
+        machine("gpubox", undefined, { since: { "w1:p2": NOW - 20 * MIN } }),
       ),
     );
     const working = section("Working now");
@@ -709,7 +742,8 @@ describe("Dashboard", () => {
     await user.click(within(items[0]).getByRole("button", { name: /^Open / }));
     expect(calls("open_session")[0][1]).toEqual({
       machineId: "gpubox",
-      paneId: "w1:p2",
+      address: "w1:p2",
+      observe: false,
     });
 
     await user.click(
@@ -737,7 +771,7 @@ describe("Dashboard", () => {
     act(() =>
       useTerminalStore.getState().openTab({
         tabKey: "buildbox::w1:p1",
-        target: { kind: "pane", machineId: "buildbox", paneId: "w1:p1" },
+        target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
         title: "claude",
         machineLabel: "buildbox",
       }),
@@ -781,14 +815,7 @@ describe("Dashboard", () => {
   });
 
   it("no_agents_shows_the_empty_states", () => {
-    const empty = structuredClone(fixture);
-    empty.agents = [];
-    empty.panes = [];
-    setup(
-      appState(
-        machine("local", undefined, { is_local: true, snapshot: empty }),
-      ),
-    );
+    setup(appState(machine("local", undefined, { isLocal: true, terms: [] })));
     expect(screen.getByText("No agents yet")).toBeInTheDocument();
     expect(screen.getByText("Only this computer so far")).toBeInTheDocument();
     expect(
@@ -812,8 +839,8 @@ describe("Dashboard", () => {
           "local",
           { kind: "attention", error: "no herdr" },
           {
-            is_local: true,
-            snapshot: null,
+            isLocal: true,
+            terms: null,
           },
         ),
         machine("buildbox", { kind: "attention", error: "ssh failed" }),
@@ -826,34 +853,30 @@ describe("Dashboard", () => {
   it("null_snapshot_machine_renders_without_throwing", async () => {
     setup(
       appState(
-        machine(
-          "local",
-          { kind: "online" },
-          { is_local: true, snapshot: null },
-        ),
+        machine("local", { kind: "online" }, { isLocal: true, terms: null }),
         machine(
           "buildbox",
           { kind: "reconnecting", retry_in_ms: 3000, error: "timed out" },
-          { snapshot: null, last_ok_ms: null },
+          { terms: null, lastOkMs: null },
         ),
         machine(
           "gpubox",
           { kind: "attention", error: "ssh failed" },
-          { snapshot: null },
+          { terms: null },
         ),
-        machine("staging", { kind: "disabled" }, { snapshot: null }),
+        machine("staging", { kind: "hidden" }, { terms: null }),
       ),
     );
     await settle();
     const cards = within(section("Workboxes")).getAllByRole("article");
-    expect(cards).toHaveLength(4);
+    // The hidden one has no card.
+    expect(cards).toHaveLength(3);
     expect(tile("Agents")).toHaveTextContent("0");
     expect(within(cards[1]).getByText("Not updated yet")).toBeInTheDocument();
     expect(cards[1]).toHaveClass("is-stale");
     expect(
       within(cards[2]).getByRole("button", { name: "Retry now" }),
     ).toBeVisible();
-    expect(within(cards[3]).queryByRole("button")).toBeNull();
   });
 
   it("cmd_n_and_cmd_r_work_here_but_the_list_keys_do_nothing", async () => {
