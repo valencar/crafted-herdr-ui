@@ -1,4 +1,6 @@
 import type { AppState } from "./bindings/AppState";
+import type { MachineView } from "./bindings/MachineView";
+import type { SpacePlace } from "./bindings/SpacePlace";
 import type { TerminalView } from "./bindings/TerminalView";
 import { plural, STATUS_LABEL, type RowStatus } from "./format";
 
@@ -55,6 +57,7 @@ export type Group = {
 };
 
 export const LOOSE_NAME = "Loose sessions";
+export const NO_SPACE_NAME = "Not in a space";
 
 /** Most urgent first: needs-you statuses, then the rest, ended last. */
 export const STATUS_ORDER: RowStatus[] = [
@@ -73,12 +76,17 @@ function nonEmpty(s: string | null | undefined): string | null {
   return t ? t : null;
 }
 
-/** name, then the terminal title, then `<kind> · <address>` (`shell` for a plain shell). */
+/**
+ * name, then Herdr's name for the terminal's tab (`tabName`, when the machine has a layout and
+ * the tab is named), then the title, then `<kind> · <address>` (`shell` for a plain shell).
+ */
 export function displayName(
   t: Pick<TerminalView, "name" | "title" | "kind" | "address" | "is_agent">,
+  tabName?: string | null,
 ): string {
   return (
     nonEmpty(t.name) ??
+    nonEmpty(tabName) ??
     nonEmpty(t.title) ??
     (t.is_agent ? `${nonEmpty(t.kind) ?? "agent"} · ${t.address}` : "shell")
   );
@@ -112,7 +120,7 @@ export function toRows(state: AppState): Row[] {
         kind: t.is_agent ? nonEmpty(t.kind) : null,
         program: nonEmpty(t.program),
         isAgent: t.is_agent,
-        name: displayName(t),
+        name: displayName(t, m.layout?.by_address[t.address]?.tab_name),
         title: nonEmpty(t.title) ?? "",
         status: t.status,
         folder: nonEmpty(t.folder),
@@ -385,6 +393,100 @@ export function groupByWorkbox(rows: Row[]): Group[] {
     g.rows = endedLast(sortPinnedFirst(g.rows));
   }
   return out;
+}
+
+/** Whether Group by Space makes sense: a machine whose rows are shown has a Herdr layout. */
+export function hasSpaceLayouts(machines: readonly MachineView[]): boolean {
+  return machines.some((m) => m.layout !== null && m.health.kind !== "hidden");
+}
+
+/** The last segment of a folder; `~` for a home folder; `""` for none. */
+function folderName(path: string): string {
+  const p = trimSlash(path.trim());
+  if (/^\/(Users|home)\/[^/]+$/.test(p) || p === "/root") return "~";
+  return p === "" ? "" : baseName(p);
+}
+
+/**
+ * What a space is called: its own name, else (as Herdr does it) after the folder of its first
+ * terminal, the way `groupByProject` reads a folder (a loose folder names nothing), else its
+ * own folder, else "Space". The first terminal is read from the machine, not from the rows
+ * shown, so a search doesn't rename the space.
+ */
+function spaceName(
+  machine: MachineView | undefined,
+  place: SpacePlace,
+): string {
+  const named = nonEmpty(place.space_name);
+  if (named !== null) return named;
+  const first = Object.entries(machine?.layout?.by_address ?? {}).find(
+    ([, p]) => p.space_id === place.space_id && p.first_in_space,
+  );
+  const folder = nonEmpty(
+    machine?.terminals.find((t) => t.address === first?.[0])?.folder,
+  );
+  if (folder !== null && !isHomeLike(folder))
+    return baseName(trimSlash(folder));
+  return folderName(place.space_folder) || "Space";
+}
+
+/**
+ * Herdr's own grouping (read-only, from its layout document): one group per (machine, space).
+ * A terminal in no space, or on a machine with no layout, is in that machine's "Not in a space",
+ * which comes last. Groups are ordered like project groups (needs-you, working, the rest, each
+ * A to Z), and each keeps pinned first and ended last.
+ */
+export function groupBySpace(
+  rows: Row[],
+  machines: readonly MachineView[],
+): Group[] {
+  const byId = new Map(machines.map((m) => [m.id, m]));
+  const spaces = new Map<string, Group>();
+  const none = new Map<string, Group>();
+  for (const r of rows) {
+    const machine = byId.get(r.machineId);
+    const place = machine?.layout?.by_address[r.address];
+    if (!place) {
+      const key = `${r.machineId}::__nospace`;
+      let g = none.get(key);
+      if (!g) {
+        g = {
+          key,
+          machineId: r.machineId,
+          machineLabel: r.machineLabel,
+          name: NO_SPACE_NAME,
+          folder: null,
+          rows: [],
+          tier: 3,
+        };
+        none.set(key, g);
+      }
+      g.rows.push(r);
+      continue;
+    }
+    const key = `${r.machineId}::space::${place.space_id}`;
+    let g = spaces.get(key);
+    if (!g) {
+      g = {
+        key,
+        machineId: r.machineId,
+        machineLabel: r.machineLabel,
+        name: spaceName(machine, place),
+        folder: nonEmpty(place.space_folder),
+        rows: [],
+        tier: 2,
+      };
+      spaces.set(key, g);
+    }
+    g.rows.push(r);
+  }
+  const groups = [...spaces.values()];
+  for (const g of groups) g.tier = tierOf(g.rows);
+  for (const g of [...groups, ...none.values()]) {
+    g.rows = endedLast(sortPinnedFirst(g.rows));
+  }
+  groups.sort((a, b) => a.tier - b.tier || byNameThenMachine(a, b));
+  return [...groups, ...[...none.values()].sort(byNameThenMachine)];
 }
 
 /** One group per status that has rows, needs-you first and ended last. */

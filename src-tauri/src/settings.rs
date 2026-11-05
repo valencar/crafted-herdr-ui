@@ -35,6 +35,8 @@ pub enum GroupBy {
     Project,
     Workbox,
     Status,
+    /// Herdr's spaces, read from its layout document. Offered once a machine has one.
+    Space,
 }
 
 /// Where a click on a session opens it: in a tab inside this app, or in the user's own terminal.
@@ -964,6 +966,10 @@ mod tests {
             .unwrap();
         assert_eq!(s.open_mode, OpenMode::Tab);
         assert_eq!(s.group_by, GroupBy::Status);
+        let s = Settings::default()
+            .merged(&json!({"group_by": "space"}))
+            .unwrap();
+        assert_eq!(s.group_by, GroupBy::Space);
         assert!(
             Settings::default()
                 .merged(&json!({"open_mode": "tabs"}))

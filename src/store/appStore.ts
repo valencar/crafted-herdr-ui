@@ -7,7 +7,7 @@ import { actionErrorMessage } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { toActionError } from "../lib/ipc";
 
-export type GroupBy = "project" | "workbox" | "status";
+export type GroupBy = "project" | "workbox" | "status" | "space";
 export type Sheet = null | "new-session" | "add-workbox";
 /** What a "+ Session" button already knows: the project's workbox and folder. */
 export type SheetPrefill = { machineId?: string; folder?: string };

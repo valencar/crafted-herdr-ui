@@ -8,7 +8,7 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings as SettingsData } from "../lib/bindings/Settings";
 import type { ShortcutStatus } from "../lib/bindings/ShortcutStatus";
 import { useAppStore } from "../store/appStore";
-import { appState, machineView } from "../test/builders";
+import { appState, layoutOf, machineView } from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
@@ -82,10 +82,14 @@ let shortcut: ShortcutStatus;
 /** What `list_run_choices("local")` does: the kinds it lists, or `"fail"`. */
 let kinds: string[] | "fail";
 
-function setup(settings: Partial<SettingsData> = {}, section?: string) {
+function setup(
+  settings: Partial<SettingsData> = {},
+  section?: string,
+  state: AppState = STATE,
+) {
   useAppStore.setState({
     settings: { ...DEFAULTS, ...settings },
-    state: STATE,
+    state,
     toast: null,
   });
   const user = userEvent.setup();
@@ -531,6 +535,44 @@ describe("Settings", () => {
     expect(invoke).toHaveBeenCalledWith("set_settings", {
       patch: { group_by: "status" },
     });
+  });
+
+  const groupOptions = () =>
+    within(screen.getByLabelText("Group sessions by"))
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value);
+  const WITH_LAYOUT: AppState = {
+    ...STATE,
+    machines: [
+      {
+        ...STATE.machines[0],
+        layout: layoutOf([{ id: "s1", terminals: ["t1"] }]),
+      },
+      ...STATE.machines.slice(1),
+    ],
+  };
+
+  it("offers_group_by_space_only_with_a_herdr_layout", async () => {
+    await setup({}, "General");
+    expect(groupOptions()).toEqual(["project", "workbox", "status"]);
+  });
+
+  it("saves Group by Space when a machine has a layout", async () => {
+    const user = await setup({}, "General", WITH_LAYOUT);
+    expect(groupOptions()).toEqual(["project", "workbox", "status", "space"]);
+    await user.selectOptions(
+      screen.getByLabelText("Group sessions by"),
+      "space",
+    );
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { group_by: "space" },
+    });
+  });
+
+  it("keeps a saved Space on the list when Herdr is gone", async () => {
+    await setup({ group_by: "space" }, "General");
+    expect(groupOptions()).toContain("space");
+    expect(screen.getByLabelText("Group sessions by")).toHaveValue("space");
   });
 
   it("shows the reason when a change is refused", async () => {

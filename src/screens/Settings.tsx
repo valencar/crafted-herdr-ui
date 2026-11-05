@@ -27,6 +27,7 @@ import {
   TERMINAL_LABEL,
   actionErrorMessage,
 } from "../lib/format";
+import { hasSpaceLayouts } from "../lib/grouping";
 import { invokeTyped, toActionError } from "../lib/ipc";
 import { useTheme } from "../lib/useTheme";
 import { useAppStore } from "../store/appStore";
@@ -321,6 +322,11 @@ function General({
   update: Update;
 }) {
   const groupId = useId();
+  const state = useAppStore((s) => s.state);
+  // Space comes with Herdr's layouts; a saved choice stays on the list so the field isn't blank.
+  const showSpace =
+    (state !== null && hasSpaceLayouts(state.machines)) ||
+    settings.group_by === "space";
   return (
     <div className="settings-stack">
       <Field id={groupId} label="Group sessions by">
@@ -333,6 +339,7 @@ function General({
           <option value="project">Project</option>
           <option value="workbox">Workbox</option>
           <option value="status">Status</option>
+          {showSpace && <option value="space">Space</option>}
         </select>
       </Field>
       <Check

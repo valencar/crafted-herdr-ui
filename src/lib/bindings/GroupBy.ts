@@ -3,4 +3,4 @@
 /**
  * How the Home screen groups sessions.
  */
-export type GroupBy = "project" | "workbox" | "status";
+export type GroupBy = "project" | "workbox" | "status" | "space";

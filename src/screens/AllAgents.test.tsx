@@ -21,6 +21,7 @@ import {
   agentTerm,
   appState as buildState,
   buildboxTerms,
+  layoutOf,
   machineView,
   type TermSpec,
 } from "../test/builders";
@@ -1238,6 +1239,58 @@ describe("Home states", () => {
     );
     // The view still switched.
     expect(useAppStore.getState().groupBy).toBe("status");
+  });
+});
+
+describe("AllAgents spaces", () => {
+  const withSpaces = () =>
+    appState(
+      machineView(
+        {
+          id: "buildbox",
+          lastOkMs: NOW,
+          layout: layoutOf([
+            { id: "s1", name: "Release work", terminals: ["w1:p1", "w1:p2"] },
+          ]),
+        },
+        fixtureTerms(),
+      ),
+      machine("gpubox"),
+    );
+  const groupNames = () =>
+    [...document.querySelectorAll(".group-name")].map((h) => h.textContent);
+
+  it("space_option_hidden_without_layouts", () => {
+    setup();
+    const group = screen.getByRole("group", { name: "Group by" });
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Project", "Workbox", "Status"]);
+  });
+
+  it("offers Space when a machine has a layout, and groups by it", async () => {
+    const user = setup(withSpaces());
+    invoke.mockResolvedValue(null);
+    await user.click(screen.getByRole("button", { name: "Space" }));
+    expect(useAppStore.getState().groupBy).toBe("space");
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      patch: { group_by: "space" },
+    });
+    expect(screen.getByRole("heading", { name: "By space" })).toBeVisible();
+    const region = screen.getByRole("region", { name: "Release work" });
+    expect(within(region).getAllByRole("listitem")).toHaveLength(2);
+    // Everything else, on either machine, is in no space.
+    expect(groupNames().filter((n) => n === "Not in a space")).toHaveLength(2);
+  });
+
+  it("falls back to project groups while no machine has a layout, without forgetting Space", () => {
+    setup(appState(machine("buildbox")));
+    act(() => useAppStore.setState({ groupBy: "space" }));
+    expect(screen.getByRole("heading", { name: "By project" })).toBeVisible();
+    expect(groupNames()).toContain("api-service");
+    expect(useAppStore.getState().groupBy).toBe("space");
   });
 });
 

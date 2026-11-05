@@ -20,9 +20,11 @@ import { failingNote, isFailing } from "../lib/dashboard";
 import { lastLines, plural } from "../lib/format";
 import {
   groupByProject,
+  groupBySpace,
   groupByStatus,
   groupByWorkbox,
   flattenWorkers,
+  hasSpaceLayouts,
   needsYou,
   nestWorkers,
   sortPinnedFirst,
@@ -47,16 +49,22 @@ const GROUP_TITLE: Record<GroupBy, string> = {
   project: "By project",
   workbox: "By workbox",
   status: "By status",
+  space: "By space",
 };
 const GROUP_HINT: Record<GroupBy, string> = {
   project: "Grouped by each agent’s working folder",
   workbox: "Grouped by the machine they run on",
   status: "Grouped by what they are doing",
+  space: "Grouped by the spaces you set up in Herdr",
 };
-const GROUPERS: Record<GroupBy, (rows: Row[]) => Group[]> = {
+const GROUPERS: Record<
+  GroupBy,
+  (rows: Row[], machines: readonly MachineView[]) => Group[]
+> = {
   project: groupByProject,
   workbox: groupByWorkbox,
   status: groupByStatus,
+  space: groupBySpace,
 };
 
 /** Shared by every card but the selected one, so a memoized card sees the same prop. */
@@ -73,7 +81,7 @@ function matches(row: Row, query: string): boolean {
 export function AllAgents() {
   const state = useAppStore((s) => s.state);
   const selectedKey = useAppStore((s) => s.selectedKey);
-  const groupBy = useAppStore((s) => s.groupBy);
+  const savedGroupBy = useAppStore((s) => s.groupBy);
   const query = useAppStore((s) => s.query);
   const select = useAppStore((s) => s.select);
   const setQuery = useAppStore((s) => s.setQuery);
@@ -90,6 +98,14 @@ export function AllAgents() {
   const [closingKey, setClosingKey] = useState<string | null>(null);
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
+  // Space is offered once a machine has a Herdr layout. A saved "space" with none goes back to
+  // grouping by project for now, and stays saved for when Herdr is back.
+  const spaces = useMemo(
+    () => (state ? hasSpaceLayouts(state.machines) : false),
+    [state],
+  );
+  const groupBy: GroupBy =
+    savedGroupBy === "space" && !spaces ? "project" : savedGroupBy;
   const machines = useMemo(
     () =>
       new Map<string, MachineView>(
@@ -121,8 +137,8 @@ export function AllAgents() {
     () =>
       groupBy === "project" && visible === rows
         ? projectGroups
-        : GROUPERS[groupBy](visible),
-    [groupBy, visible, rows, projectGroups],
+        : GROUPERS[groupBy](visible, state?.machines ?? []),
+    [groupBy, visible, rows, projectGroups, state],
   );
   // Workers sit under their parent inside each group, so the list the keyboard walks follows.
   const { isFolded, toggle, unfold } = useWorkerFold();
@@ -273,7 +289,10 @@ export function AllAgents() {
                   {GROUP_TITLE[groupBy]}
                 </h2>
                 <div role="group" aria-label="Group by" className="segmented">
-                  {(["project", "workbox", "status"] as const).map((g) => (
+                  {(spaces
+                    ? (["project", "workbox", "status", "space"] as const)
+                    : (["project", "workbox", "status"] as const)
+                  ).map((g) => (
                     <button
                       key={g}
                       type="button"
@@ -303,7 +322,7 @@ export function AllAgents() {
                 <ProjectGroup
                   key={g.key}
                   group={g}
-                  showSession={groupBy === "project"}
+                  showSession={groupBy === "project" || groupBy === "space"}
                   showTile={groupBy === "workbox"}
                   onNewSession={() =>
                     openNewSession({

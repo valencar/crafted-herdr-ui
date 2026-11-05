@@ -6,6 +6,7 @@ import {
   appState as buildState,
   buildboxTerms,
   agentTerm,
+  layoutOf,
   machineView,
   rowOf,
   shellTerm,
@@ -14,8 +15,10 @@ import {
 import {
   displayName,
   groupByProject,
+  groupBySpace,
   groupByStatus,
   groupByWorkbox,
+  hasSpaceLayouts,
   isHomeLike,
   isNeedsYou,
   isShell,
@@ -293,6 +296,214 @@ describe("displayName", () => {
     expect(displayName({ ...base, name: null, title: "  " })).toBe(
       "claude · w1:p1",
     );
+  });
+
+  it("display_name_uses_tab_name", () => {
+    // name, then Herdr's tab name, then the title, then the fallback.
+    expect(displayName({ ...base, name: "planner" }, "main")).toBe("planner");
+    expect(
+      displayName({ ...base, name: null, title: "my title" }, "main"),
+    ).toBe("main");
+    expect(displayName({ ...base, name: "", title: "my title" }, "tests")).toBe(
+      "tests",
+    );
+    // An unnamed tab (or none) is no name.
+    for (const tab of ["", "  ", null, undefined]) {
+      expect(displayName({ ...base, name: null, title: "my title" }, tab)).toBe(
+        "my title",
+      );
+    }
+    expect(displayName({ ...base, name: null, title: null }, "")).toBe(
+      "claude · w1:p1",
+    );
+  });
+
+  it("toRows names a terminal after its Herdr tab when it has no name of its own", () => {
+    const layout = layoutOf([
+      { id: "s1", tab: "main", terminals: ["w1:p1", "w1:p2"] },
+    ]);
+    const rows = toRows(
+      appState(
+        machineView({ id: "buildbox", layout }, buildboxTerms()),
+        machine("gpubox"),
+      ),
+    );
+    const name = (id: string, address: string) =>
+      rows.find((r) => r.key === `${id}::${address}`)?.name;
+    // planner has a name; w1:p2 has none, so its tab's name; w2:p1 is in no space.
+    expect(name("buildbox", "w1:p1")).toBe("planner");
+    expect(name("buildbox", "w1:p2")).toBe("main");
+    expect(name("buildbox", "w2:p2")).toBe("claude");
+    // The other machine has no layout: nothing changes for it.
+    expect(name("gpubox", "w1:p2")).toBe("copilot: terraform plan");
+  });
+});
+
+describe("spaces", () => {
+  const withLayout = (layout: ReturnType<typeof layoutOf> | null) =>
+    machineView({ id: "buildbox", lastOkMs: 1_000, layout }, buildboxTerms());
+  const spaces = (state: AppState) =>
+    groupBySpace(toRows(state), state.machines);
+
+  it("group_by_space_names_unnamed_by_first_terminal", () => {
+    const layout = layoutOf([
+      // Unnamed: after the repo or folder of its first terminal (w1:p2 is in infra).
+      {
+        id: "s1",
+        folder: "/home/dev/elsewhere",
+        terminals: ["w1:p2", "w1:p1"],
+      },
+      // Unnamed, and the first terminal's folder is a loose one: the space's own folder.
+      {
+        id: "s2",
+        folder: "/home/dev/projects/docs-site/",
+        terminals: ["w2:p2"],
+      },
+      // Named: the name wins.
+      { id: "s3", name: "Releases", terminals: ["w2:p1"] },
+    ]);
+    const state = appState(withLayout(layout));
+    const groups = spaces(state);
+    const byKey = (id: string) =>
+      groups.find((g) => g.key === `buildbox::space::${id}`)!;
+    expect(byKey("s1").name).toBe("infra");
+    expect(byKey("s1").folder).toBe("/home/dev/elsewhere");
+    expect(
+      byKey("s1")
+        .rows.map((r) => r.address)
+        .sort(),
+    ).toEqual(["w1:p1", "w1:p2"]);
+    expect(byKey("s2").name).toBe("docs-site");
+    expect(byKey("s3").name).toBe("Releases");
+
+    // A search that hides the first terminal doesn't rename the space.
+    const rows = toRows(state).filter((r) => r.address !== "w1:p2");
+    const filtered = groupBySpace(rows, state.machines);
+    expect(filtered.find((g) => g.key === "buildbox::space::s1")!.name).toBe(
+      "infra",
+    );
+  });
+
+  it("names a space with nothing to go on Space", () => {
+    const state = appState(
+      machineView(
+        { id: "buildbox", layout: layoutOf([{ id: "s1", terminals: ["t1"] }]) },
+        [agentTerm({ address: "t1", status: "idle", folder: null })],
+      ),
+    );
+    expect(spaces(state).map((g) => g.name)).toEqual(["Space"]);
+  });
+
+  it("not_in_a_space_group", () => {
+    const layout = layoutOf([
+      { id: "s1", name: "api", terminals: ["w1:p1", "w1:p3"] },
+    ]);
+    const state = appState(
+      withLayout(layout),
+      // No layout at all on this one: everything of it is in no space.
+      machine("gpubox"),
+    );
+    const groups = spaces(state);
+    const none = groups.filter((g) => g.name === "Not in a space");
+    expect(none.map((g) => g.machineId).sort()).toEqual(["buildbox", "gpubox"]);
+    expect(none.every((g) => g.tier === 3 && g.folder === null)).toBe(true);
+    // Last, after every space.
+    expect(groups.slice(-2).map((g) => g.name)).toEqual([
+      "Not in a space",
+      "Not in a space",
+    ]);
+    const buildboxNone = groups.find((g) => g.key === "buildbox::__nospace")!;
+    expect(buildboxNone.rows.map((r) => r.address).sort()).toEqual([
+      "w1:p2",
+      "w2:p1",
+      "w2:p2",
+      "w2:p3",
+    ]);
+    // Every row is in exactly one group.
+    expect(groups.flatMap((g) => g.rows)).toHaveLength(12);
+  });
+
+  it("a space is per machine, and its group is ordered like a project group", () => {
+    const layout = layoutOf([
+      { id: "s1", name: "Zeta", terminals: ["w1:p2"] },
+      // Needs you (blocked): first.
+      { id: "s2", name: "Alpha", terminals: ["w1:p1"] },
+      { id: "s3", name: "Beta", terminals: ["w2:p2"] },
+    ]);
+    const state = appState(
+      withLayout(layout),
+      machineView(
+        {
+          id: "gpubox",
+          lastOkMs: 1_000,
+          layout: layoutOf([{ id: "s1", name: "Zeta", terminals: ["w1:p2"] }]),
+        },
+        buildboxTerms(),
+      ),
+    );
+    const groups = spaces(state).filter((g) => g.tier !== 3);
+    // Same space id on two machines: two groups. Needs-you, then working, then the rest.
+    expect(groups.map((g) => `${g.machineId}/${g.name}`)).toEqual([
+      "buildbox/Alpha",
+      "buildbox/Zeta",
+      "gpubox/Zeta",
+      "buildbox/Beta",
+    ]);
+    expect(groups.map((g) => g.tier)).toEqual([0, 1, 1, 2]);
+  });
+
+  it("keeps pinned first, ended last and workers inside a space group", () => {
+    const terms = [
+      agentTerm({ address: "t1", status: "idle", name: "a" }),
+      agentTerm({ address: "t2", status: "ended", name: "b" }),
+      agentTerm({ address: "t3", status: "working", name: "c", pinned: true }),
+      agentTerm({
+        address: "t4",
+        status: "working",
+        name: "w",
+        parent: "buildbox/t1",
+      }),
+      agentTerm({
+        address: "t5",
+        status: "idle",
+        name: "e",
+        parent: "buildbox/t9",
+      }),
+    ];
+    const layout = layoutOf([
+      { id: "s1", name: "all", terminals: ["t1", "t2", "t3", "t4", "t5"] },
+    ]);
+    const state = appState(
+      machineView({ id: "buildbox", layout, lastOkMs: 1_000 }, terms),
+    );
+    const [group] = spaces(state);
+    // Pinned first, ended last, the rest in their order.
+    expect(group.rows.map((r) => r.address)).toEqual([
+      "t3",
+      "t1",
+      "t4",
+      "t5",
+      "t2",
+    ]);
+    // A worker nests under its parent when both are in the group.
+    const nested = nestWorkers(group.rows);
+    expect(nested.map((r) => r.address)).toEqual(["t3", "t1", "t5", "t2"]);
+    expect(nested.find((r) => r.address === "t1")!.workers).toHaveLength(1);
+  });
+
+  it("offers Space only when a shown machine has a layout", () => {
+    const layout = layoutOf([{ id: "s1", terminals: ["w1:p1"] }]);
+    expect(hasSpaceLayouts([withLayout(null), machine("gpubox")])).toBe(false);
+    expect(hasSpaceLayouts([withLayout(layout), machine("gpubox")])).toBe(true);
+    expect(hasSpaceLayouts([])).toBe(false);
+    // A layout with no spaces in it is still a layout (Herdr is there).
+    expect(hasSpaceLayouts([withLayout({ by_address: {} })])).toBe(true);
+    // A hidden machine's layout is not offered: none of its rows are shown.
+    const hidden = machineView(
+      { id: "buildbox", health: { kind: "hidden" }, layout },
+      buildboxTerms(),
+    );
+    expect(hasSpaceLayouts([hidden])).toBe(false);
   });
 });
 

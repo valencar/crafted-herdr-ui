@@ -13,6 +13,8 @@ import type { AppState } from "../lib/bindings/AppState";
 import type { DisplayStatus } from "../lib/bindings/DisplayStatus";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
+import type { SpaceLayout } from "../lib/bindings/SpaceLayout";
+import type { SpacePlace } from "../lib/bindings/SpacePlace";
 import type { TerminalView } from "../lib/bindings/TerminalView";
 import type { Row } from "../lib/grouping";
 
@@ -37,6 +39,8 @@ export type MachineSpec = {
   /** Unix ms when the machine entered its state; `null` for none. */
   stateSinceMs?: number | null;
   host?: string | null;
+  /** Herdr's spaces on the machine; `null` (the default) when it has none. */
+  layout?: SpaceLayout | null;
 };
 
 export type AgentTermSpec = {
@@ -142,7 +146,36 @@ export function machine(spec: MachineSpec): Required<MachineSpec> {
     via: spec.via ?? false,
     stateSinceMs: spec.stateSinceMs ?? null,
     host: spec.host ?? null,
+    layout: spec.layout ?? null,
   };
+}
+
+/**
+ * Where Herdr put terminals, for a machine's `layout`: each space with its tab and the
+ * addresses in it, in document order (the first of a space is its `first_in_space`).
+ */
+export function layoutOf(
+  spaces: Array<{
+    id: string;
+    name?: string;
+    folder?: string;
+    tab?: string;
+    terminals: string[];
+  }>,
+): SpaceLayout {
+  const by_address: Record<string, SpacePlace> = {};
+  for (const space of spaces) {
+    space.terminals.forEach((address, i) => {
+      by_address[address] = {
+        space_id: space.id,
+        space_name: space.name ?? "",
+        space_folder: space.folder ?? "",
+        tab_name: space.tab ?? "",
+        first_in_space: i === 0,
+      };
+    });
+  }
+  return { by_address };
 }
 
 /** The core's word that matches a health, for a machine whose test doesn't name one. */
@@ -308,7 +341,7 @@ export function machineView(
     state_since_ms: m.stateSinceMs,
     last_ok_ms: m.lastOkMs,
     terminals: (terms ?? []).map(terminalOf),
-    layout: null,
+    layout: m.layout,
   };
 }
 
