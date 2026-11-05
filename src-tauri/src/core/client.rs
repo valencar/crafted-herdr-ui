@@ -304,6 +304,31 @@ impl CoreClient {
         self.push_note("event", machine_id, display, note);
     }
 
+    /// Adds a command the app ran itself that is not a core call (`herdr-app do …`) and failed,
+    /// the way a failed call is logged: its exit code when it had one, how long it took, and the
+    /// error. Its method is `"launch"`, like the note its success leaves.
+    pub fn log_launch_failure(
+        &self,
+        machine_id: &str,
+        display: String,
+        exit_code: Option<i32>,
+        took: Duration,
+        error: &str,
+    ) {
+        self.log.push(CommandLogEntry {
+            at_ms: now_ms().saturating_sub(took.as_millis() as u64),
+            machine: remote(machine_id),
+            argv: Vec::new(),
+            exit_code,
+            duration_ms: took.as_millis() as u64,
+            error: Some(error.to_owned()),
+            note: None,
+            method: "launch".to_owned(),
+            display,
+            quiet: false,
+        });
+    }
+
     fn push_note(&self, method: &str, machine_id: &str, display: String, note: &str) {
         self.log.push(CommandLogEntry {
             at_ms: now_ms(),

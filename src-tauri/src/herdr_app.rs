@@ -147,7 +147,8 @@ impl From<PeekError> for ActionError {
     }
 }
 
-/// Runs `herdr-app do terminal.peek` and adds it to the command log.
+/// Runs `herdr-app do terminal.peek` and adds it to the command log: "shown in Herdr", or, like a
+/// failed call, its exit code and error (spec 8.5).
 pub async fn open_in_herdr(
     app: &Path,
     env: &[(String, String)],
@@ -166,6 +167,39 @@ async fn open_in_herdr_within(
     full_address: &str,
     limit: Duration,
 ) -> Result<(), PeekError> {
+    let started = Instant::now();
+    match peek(app, env, full_address, limit).await {
+        Ok(()) => {
+            core.log_note(machine_id, peek_display(full_address), "shown in Herdr");
+            Ok(())
+        }
+        Err((e, exit_code)) => {
+            let display = peek_display(full_address);
+            core.log_launch_failure(
+                machine_id,
+                display,
+                exit_code,
+                started.elapsed(),
+                &e.to_string(),
+            );
+            Err(e)
+        }
+    }
+}
+
+/// `herdr-app do terminal.peek`, and its exit code when it failed with one.
+async fn peek(
+    app: &Path,
+    env: &[(String, String)],
+    full_address: &str,
+    limit: Duration,
+) -> Result<(), (PeekError, Option<i32>)> {
+    let failed = |e: std::io::Error| {
+        (
+            PeekError::Failed(format!("Couldn't run herdr-app: {e}.")),
+            None,
+        )
+    };
     let argv = peek_argv(app, full_address);
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..])
@@ -175,26 +209,25 @@ async fn open_in_herdr_within(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let child = cmd
-        .spawn()
-        .map_err(|e| PeekError::Failed(format!("Couldn't run herdr-app: {e}.")))?;
+    let child = cmd.spawn().map_err(failed)?;
     let output = timeout(limit, child.wait_with_output())
         .await
-        .map_err(|_| PeekError::TimedOut {
-            argv: argv.clone(),
-            message: "Herdr didn't answer in time.".to_owned(),
+        .map_err(|_| {
+            let message = "Herdr didn't answer in time.".to_owned();
+            (PeekError::TimedOut { argv, message }, None)
         })?
-        .map_err(|e| PeekError::Failed(format!("Couldn't run herdr-app: {e}.")))?;
+        .map_err(failed)?;
     if !output.status.success() {
         let reason = peek_failure(&output.stdout, &output.stderr);
+        let code = output.status.code();
         // Exit 2 is `herdr-app` itself failing to reach a window; exit 1 is the window's answer.
-        return Err(if output.status.code() == Some(2) {
+        let e = if code == Some(2) {
             PeekError::NoWindow(reason)
         } else {
             PeekError::Failed(reason)
-        });
+        };
+        return Err((e, code));
     }
-    core.log_note(machine_id, peek_display(full_address), "shown in Herdr");
     Ok(())
 }
 
@@ -643,8 +676,20 @@ esac"#
         assert_eq!(log[0].note.as_deref(), Some("shown in Herdr"));
     }
 
+    /// The one log entry a failed peek leaves: like a failed call, with its exit and error, and
+    /// never "shown in Herdr" (spec 8.5).
+    fn failed_entry(core: &CoreClient) -> crate::core::CommandLogEntry {
+        let log = core.command_log();
+        assert_eq!(log.len(), 1, "{log:?}");
+        let entry = log[0].clone();
+        assert_eq!(entry.method, "launch");
+        assert_eq!(entry.note, None);
+        assert!(entry.error.is_some());
+        entry
+    }
+
     #[tokio::test]
-    async fn a_failed_peek_is_an_error_with_stderr_and_is_not_logged_as_shown() {
+    async fn a_failed_peek_is_an_error_with_stderr_and_is_logged_with_it() {
         let tmp = tempfile::tempdir().unwrap();
         let app = script(
             tmp.path(),
@@ -656,7 +701,14 @@ esac"#
             .await
             .unwrap_err();
         assert!(err.to_string().contains("no Herdr window"), "{err}");
-        assert!(core.command_log().is_empty());
+        let entry = failed_entry(&core);
+        assert_eq!(
+            entry.display,
+            r#"herdr-app do terminal.peek '{"terminal":"t7"}'"#
+        );
+        assert_eq!(entry.machine, None);
+        assert_eq!(entry.exit_code, Some(2));
+        assert_eq!(entry.error.as_deref(), Some(err.to_string().as_str()));
     }
 
     #[test]
@@ -781,7 +833,9 @@ esac"#
             .unwrap_err();
         assert!(matches!(err, PeekError::Failed(_)), "{err:?}");
         assert!(err.to_string().contains("no such terminal"), "{err}");
-        assert!(core.command_log().is_empty());
+        let entry = failed_entry(&core);
+        assert_eq!(entry.exit_code, Some(1));
+        assert!(entry.error.unwrap().contains("no such terminal"));
         // An error object with a message works too.
         let app = script(
             tmp.path(),
@@ -808,7 +862,10 @@ esac"#
             matches!(&action, ActionError::MaybeApplied { argv, .. } if argv[1..] == ["do", "terminal.peek", r#"{"terminal":"t7"}"#]),
             "{action:?}"
         );
-        assert!(core.command_log().is_empty());
+        // No exit to report: it was still running.
+        let entry = failed_entry(&core);
+        assert_eq!(entry.exit_code, None);
+        assert_eq!(entry.error.as_deref(), Some("Herdr didn't answer in time."));
     }
 
     #[tokio::test]
