@@ -13,6 +13,10 @@
 #   HC_SESSION=herdr-ui-qa XDG_STATE_HOME=... XDG_CONFIG_HOME=... XDG_RUNTIME_DIR=... scripts/capture-raw-fixtures.sh
 # It refuses unless HC_SESSION is exactly herdr-ui-qa and all three XDG variables are set.
 # There is no override: even a read-only connect auto-starts the person's core.
+#
+# The reads start the sandbox core if it is stopped. When this run started it (no sandbox socket
+# before it ran anything), it stops it again at the end, the one stop rule 4 allows; a core that
+# was already running there (or a socket left behind) is left alone.
 set -u
 
 root=$(git rev-parse --show-toplevel) || exit 2
@@ -29,7 +33,6 @@ for var in XDG_STATE_HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR; do
     exit 2
   fi
 done
-mkdir -p "$out"
 
 # HC_SOCKET would point hc at some other core whatever HC_SESSION says. The terminal variables
 # make hc act as a child of the terminal this runs in.
@@ -38,6 +41,16 @@ if [ -n "${HC_SOCKET:-}" ]; then
   exit 2
 fi
 unset HC_TERMINAL_SOCKET HC_TERMINAL_ID HC_SCOPE
+mkdir -p "$out"
+
+# Whether the sandbox core runs already, decided before any hc command can start it: the core
+# listens on $XDG_RUNTIME_DIR/herdr-core/<session>.sock and removes it when it stops.
+socket="$XDG_RUNTIME_DIR/herdr-core/herdr-ui-qa.sock"
+if [ -S "$socket" ]; then
+  started_here=0
+else
+  started_here=1
+fi
 
 # A binary counts only if --version prints `hc X.Y.Z` (another program also ships an `hc`).
 hc=""
@@ -52,6 +65,20 @@ if [ -z "$hc" ]; then
   echo "capture-raw-fixtures: no herdr-core binary found (herdr-core or hc printing 'hc X.Y.Z')" >&2
   exit 2
 fi
+
+# On the way out, also after a failure: stop the sandbox core only if this run started it.
+stop_if_started() {
+  if [ "$started_here" != 1 ]; then
+    echo "the sandbox core was already running before this run; left running"
+    return
+  fi
+  if said=$("$hc" server stop 2>&1); then
+    echo "stopped the sandbox core this run started: $said"
+  else
+    echo "capture-raw-fixtures: COULD NOT STOP the sandbox core this run started: $said" >&2
+  fi
+}
+trap stop_if_started EXIT
 
 capture() {
   local name=$1
