@@ -13,6 +13,7 @@ import { CommandBox, CopyButton } from "./CommandBox";
 import { CloseConfirm } from "./CloseConfirm";
 import { KindBadge } from "./KindBadge";
 import { OpenButton } from "./OpenButton";
+import { PinGlyph } from "./PinGlyph";
 import { Preview } from "./Preview";
 import { StatusPill } from "./StatusPill";
 
@@ -103,7 +104,10 @@ export function Inspector({
             {row.kind ?? (isAgent ? "Agent" : "Shell")}
           </span>
         </div>
-        <h2 className="inspector-name mono">{row.name}</h2>
+        <h2 className="inspector-name mono">
+          {row.name}
+          {row.pinned && <PinGlyph />}
+        </h2>
         <span className="inspector-sub">
           {project ? `${project} on ${row.machineLabel}` : row.machineLabel}
         </span>

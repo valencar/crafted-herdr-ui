@@ -22,6 +22,7 @@ import {
   needsYou,
   projectNames,
   projectNamesOf,
+  sortPinnedFirst,
   toRows,
   type Row,
 } from "./grouping";
@@ -601,5 +602,49 @@ describe("ended rows", () => {
     const shell = ended("m::t5", { isAgent: false, kind: null });
     expect(isShell(shell)).toBe(true);
     expect(isNeedsYou(shell)).toBe(false);
+  });
+});
+
+describe("sortPinnedFirst", () => {
+  const r = (address: string, pinned: boolean) =>
+    row({ key: `m::${address}`, address, pinned });
+
+  it("pinned_first_keeps_order_within_groups", () => {
+    const rows = [r("t1", false), r("t2", true), r("t3", false), r("t4", true)];
+    expect(sortPinnedFirst(rows).map((x) => x.address)).toEqual([
+      "t2",
+      "t4",
+      "t1",
+      "t3",
+    ]);
+    // Nothing pinned, or everything: the order is the list's own. The input is not changed.
+    expect(sortPinnedFirst([r("t3", false), r("t1", false)])).toEqual([
+      r("t3", false),
+      r("t1", false),
+    ]);
+    expect(rows.map((x) => x.address)).toEqual(["t1", "t2", "t3", "t4"]);
+  });
+
+  it("groups_lead_with_their_pinned_rows_and_keep_ended_last", () => {
+    const rows = [
+      row({ key: "m::t1", address: "t1", folder: "/home/dev/api-service" }),
+      row({
+        key: "m::t2",
+        address: "t2",
+        folder: "/home/dev/api-service",
+        pinned: true,
+        status: "ended",
+      }),
+      row({
+        key: "m::t3",
+        address: "t3",
+        folder: "/home/dev/api-service",
+        pinned: true,
+      }),
+      row({ key: "m::t4", address: "t4", folder: "/home/dev/api-service" }),
+    ];
+    const order = (g: { rows: Row[] }) => g.rows.map((x) => x.address);
+    expect(order(groupByProject(rows)[0])).toEqual(["t3", "t1", "t4", "t2"]);
+    expect(order(groupByWorkbox(rows)[0])).toEqual(["t3", "t1", "t4", "t2"]);
   });
 });

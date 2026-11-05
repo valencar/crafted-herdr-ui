@@ -995,6 +995,13 @@ kbd {
   display: flex;
   flex-direction: column;
 }
+/* The pin beside a pinned agent's name: small, in line with the text, never the only cue. */
+.pin-glyph {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-inline-start: 4px;
+  color: var(--text-3);
+}
 .row-title {
   overflow: hidden;
   text-overflow: ellipsis;

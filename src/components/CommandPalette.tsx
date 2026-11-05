@@ -1,4 +1,5 @@
 import { Kbd } from "./Kbd";
+import { PinGlyph } from "./PinGlyph";
 import { StatusDot } from "./StatusDot";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { fuzzyMatch } from "../lib/fuzzy";
@@ -565,6 +566,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                         text={item.label}
                         positions={labelPositions(item, query)}
                       />
+                      {item.row?.pinned && <PinGlyph />}
                     </span>
                     <span className="palette-detail mono">{item.detail}</span>
                     {index === at && (

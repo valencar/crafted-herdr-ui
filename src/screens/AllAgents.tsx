@@ -16,6 +16,7 @@ import {
   groupByStatus,
   groupByWorkbox,
   needsYou,
+  sortPinnedFirst,
   projectNamesOf,
   toRows,
   type Group,
@@ -97,7 +98,7 @@ export function AllAgents() {
     () => (query.trim() ? rows.filter((r) => matches(r, query)) : rows),
     [rows, query],
   );
-  const needs = useMemo(() => needsYou(visible), [visible]);
+  const needs = useMemo(() => sortPinnedFirst(needsYou(visible)), [visible]);
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
   const projectOf = useMemo(
     () => projectNamesOf(projectGroups),

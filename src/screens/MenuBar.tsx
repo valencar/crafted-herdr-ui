@@ -1,4 +1,5 @@
 import { Kbd } from "../components/Kbd";
+import { PinGlyph } from "../components/PinGlyph";
 import { HealthDot, StatusDot } from "../components/StatusDot";
 import { useMemo } from "react";
 import { StoreToast } from "../components/Toast";
@@ -7,6 +8,7 @@ import {
   isShell,
   needsYou,
   projectNames,
+  sortPinnedFirst,
   toRows,
   type Row,
 } from "../lib/grouping";
@@ -44,7 +46,10 @@ function RowItem({ row, project, nowMs, primary }: RowItemProps) {
     <li className="pop-row" data-row-key={row.key}>
       <StatusDot status={row.status} />
       <span className="pop-row-text">
-        <span className="pop-row-name">{row.name}</span>
+        <span className="pop-row-name">
+          {row.name}
+          {row.pinned && <PinGlyph />}
+        </span>
         <span className="mono muted pop-row-detail">
           <span className="pop-row-status">{STATUS_LABEL[row.status]}</span> ·{" "}
           {detail}
@@ -75,9 +80,9 @@ export function MenuBar() {
 
   const rows = useMemo(() => (state ? toRows(state) : []), [state]);
   const projectOf = useMemo(() => projectNames(rows), [rows]);
-  const needs = useMemo(() => needsYou(rows), [rows]);
+  const needs = useMemo(() => sortPinnedFirst(needsYou(rows)), [rows]);
   const working = useMemo(
-    () => rows.filter((r) => r.status === "working"),
+    () => sortPinnedFirst(rows.filter((r) => r.status === "working")),
     [rows],
   );
   const idle = useMemo(() => rows.filter((r) => r.status === "idle"), [rows]);

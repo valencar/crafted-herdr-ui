@@ -3,6 +3,7 @@ import { formatAge } from "../lib/format";
 import { endedDetail, type Row } from "../lib/grouping";
 import { KindBadge } from "./KindBadge";
 import { OpenButton } from "./OpenButton";
+import { PinGlyph } from "./PinGlyph";
 import { StatusPill } from "./StatusPill";
 
 type Props = {
@@ -46,7 +47,10 @@ export const AgentRow = memo(function AgentRow({
         <StatusPill status={row.status} />
         <KindBadge kind={row.kind} isAgent={row.isAgent} />
         <span className="row-text">
-          <span className="row-title">{title}</span>
+          <span className="row-title">
+            {title}
+            {row.pinned && <PinGlyph />}
+          </span>
           {ended && <span className="row-sub">{ended}</span>}
           {note && <span className="row-note">{note}</span>}
         </span>

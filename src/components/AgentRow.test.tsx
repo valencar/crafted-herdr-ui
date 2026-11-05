@@ -41,6 +41,27 @@ function renderRow(r: Row, note: string | null = null) {
 }
 
 describe("AgentRow", () => {
+  it("pin_glyph_has_label", () => {
+    const { rerender } = renderRow(row({ pinned: true, status: "idle" }));
+    // Beside the name, and named for a screen reader.
+    expect(screen.getByRole("img", { name: "Pinned" })).toBeInTheDocument();
+    rerender(
+      <ul>
+        <AgentRow
+          row={row({ pinned: false, status: "idle" })}
+          selected={false}
+          dim={false}
+          note={null}
+          showMachine={false}
+          nowMs={1_000}
+          terminalName="Ghostty"
+          onSelect={() => {}}
+        />
+      </ul>,
+    );
+    expect(screen.queryByRole("img", { name: "Pinned" })).toBeNull();
+  });
+
   it("ended_row_shows_exit_or_reason", () => {
     const { rerender, container } = renderRow(row({ exitCode: 1 }));
     expect(screen.getByText("Ended · exit 1")).toHaveClass("row-sub");

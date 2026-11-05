@@ -18,6 +18,7 @@ import type { Settings } from "../lib/bindings/Settings";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { useAppStore } from "../store/appStore";
 import {
+  agentTerm,
   appState as buildState,
   buildboxTerms,
   machineView,
@@ -239,6 +240,42 @@ describe("AllAgents", () => {
     );
     expect(screen.queryByText(/^Open here/)).toBeNull();
     expect(screen.queryByText(/^Open in /)).toBeNull();
+  });
+
+  it("pinned_agents_lead_needs_you_and_their_group", () => {
+    // Two blocked agents in one project: the newer one is pinned, so it leads both lists.
+    const terms = [
+      agentTerm({
+        address: "t1",
+        status: "blocked",
+        name: "older",
+        folder: "/home/dev/projects/api-service",
+        sinceMs: NOW - 5 * 60_000,
+      }),
+      agentTerm({
+        address: "t2",
+        status: "blocked",
+        name: "newer",
+        folder: "/home/dev/projects/api-service",
+        sinceMs: NOW - 60_000,
+        pinned: true,
+      }),
+    ];
+    setup(appState(machine("buildbox", { kind: "online" }, { terms })));
+    const cards = within(
+      screen.getByRole("region", { name: "Needs you" }),
+    ).getAllByRole("article");
+    expect(cards[0]).toHaveTextContent("newer");
+    expect(within(cards[0]).getByRole("img", { name: "Pinned" })).toBeVisible();
+    expect(cards[1]).toHaveTextContent("older");
+    const rows = screen
+      .getAllByRole("listitem")
+      .filter((li) => li.matches(".agent-row"));
+    expect(rows.map((r) => r.getAttribute("data-row-key"))).toEqual([
+      "buildbox::t2",
+      "buildbox::t1",
+    ]);
+    expect(within(rows[0]).getByRole("img", { name: "Pinned" })).toBeVisible();
   });
 
   it("needs_you_cards_carry_one_needs_toned_open_split_button", async () => {

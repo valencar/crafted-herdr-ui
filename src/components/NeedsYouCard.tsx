@@ -2,6 +2,7 @@ import { memo } from "react";
 import { formatAge, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { OpenButton } from "./OpenButton";
+import { PinGlyph } from "./PinGlyph";
 import { StatusPill } from "./StatusPill";
 
 type Props = {
@@ -53,6 +54,7 @@ export const NeedsYouCard = memo(function NeedsYouCard({
         {project && <span className="card-project">{project}</span>}
         {project && <span className="muted">·</span>}
         <span className="mono card-name">{row.name}</span>
+        {row.pinned && <PinGlyph />}
         <span className="chip card-chip">{row.machineLabel}</span>
       </div>
       {row.folder && (

@@ -151,6 +151,24 @@ export function isNeedsYou(r: Row): boolean {
   );
 }
 
+/**
+ * Pinned items first, each side in the order the list already had (a stable partition applied
+ * inside each list's own order: a group, Needs you, the palette, the popover). The input is not
+ * changed. `pinned` says which items count; `sortPinnedFirst` is the one for rows.
+ */
+export function partitionPinned<T>(
+  items: readonly T[],
+  pinned: (item: T) => boolean,
+): T[] {
+  return [...items.filter(pinned), ...items.filter((i) => !pinned(i))];
+}
+
+export function sortPinnedFirst<T extends Pick<Row, "pinned">>(
+  rows: readonly T[],
+): T[] {
+  return partitionPinned(rows, (r) => r.pinned);
+}
+
 /** Oldest first (smallest `sinceMs`), unknown age last, then by key. */
 export function bySinceThenKey(a: Row, b: Row): number {
   if (a.sinceMs !== b.sinceMs) {
@@ -316,7 +334,10 @@ export function groupByProject(rows: Row[]): Group[] {
 
   const projects = [...groups.values()];
   for (const g of projects) g.tier = tierOf(g.rows);
-  for (const g of [...projects, ...loose.values()]) g.rows = endedLast(g.rows);
+  // Pinned first, then ended last: an ended row never leads its group.
+  for (const g of [...projects, ...loose.values()]) {
+    g.rows = endedLast(sortPinnedFirst(g.rows));
+  }
   projects.sort((a, b) => a.tier - b.tier || byNameThenMachine(a, b));
   return [...projects, ...[...loose.values()].sort(byNameThenMachine)];
 }
@@ -361,7 +382,7 @@ export function groupByWorkbox(rows: Row[]): Group[] {
   const out = [...groups.values()];
   for (const g of out) {
     g.tier = tierOf(g.rows);
-    g.rows = endedLast(g.rows);
+    g.rows = endedLast(sortPinnedFirst(g.rows));
   }
   return out;
 }
@@ -378,7 +399,7 @@ export function groupByStatus(rows: Row[]): Group[] {
       machineLabel: "",
       name: STATUS_LABEL[status],
       folder: null,
-      rows: inStatus,
+      rows: sortPinnedFirst(inStatus),
       tier: tierOf(inStatus),
     });
   }

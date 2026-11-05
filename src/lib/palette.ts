@@ -1,7 +1,13 @@
 import type { MachineView } from "./bindings/MachineView";
 import { shortPath, STATUS_LABEL } from "./format";
 import { fuzzyMatch, fuzzyScore } from "./fuzzy";
-import { groupByProject, needsYou, type Row } from "./grouping";
+import {
+  groupByProject,
+  needsYou,
+  partitionPinned,
+  sortPinnedFirst,
+  type Row,
+} from "./grouping";
 import {
   isDangerItem,
   PANE_MENU_LABEL,
@@ -71,9 +77,11 @@ export const PALETTE_LIMIT = 50;
  * open; ⌘Enter opens it the other way.
  */
 export function buildItems(ctx: Context): PaletteItem[] {
-  const urgent = needsYou(ctx.rows);
+  const urgent = sortPinnedFirst(needsYou(ctx.rows));
   const urgentKeys = new Set(urgent.map((r) => r.key));
-  const other = ctx.rows.filter((r) => !urgentKeys.has(r.key));
+  const other = sortPinnedFirst(
+    ctx.rows.filter((r) => !urgentKeys.has(r.key)),
+  );
   const tabKeys = new Set(ctx.openTabs.map((t) => t.key));
 
   // The rule of `agentActions` and the Open button: with a tab open, Enter goes to it and ⌘Enter
@@ -157,7 +165,7 @@ export function buildItems(ctx: Context): PaletteItem[] {
 
 /**
  * With no query: the agents that need you, the open tabs, the commands, then the other agents
- * by name.
+ * by name; pinned agents lead the agent lists.
  * With one: every item that matches, best score of its label, detail or keywords first, and
  * equal scores keep the order of `items` (the group order above). At most `limit` items.
  */
@@ -174,7 +182,10 @@ export function rankItems(
       ...byGroup("Needs you"),
       ...byGroup("Open tabs"),
       ...byGroup("Commands"),
-      ...byGroup("Agents").sort((a, b) => a.label.localeCompare(b.label, "en")),
+      ...partitionPinned(
+        byGroup("Agents").sort((a, b) => a.label.localeCompare(b.label, "en")),
+        (item) => item.row?.pinned === true,
+      ),
     ].slice(0, limit);
   }
   const scored: { item: PaletteItem; at: number; score: number }[] = [];

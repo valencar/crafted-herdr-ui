@@ -6,6 +6,7 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import type { Settings } from "../lib/bindings/Settings";
 import { useAppStore } from "../store/appStore";
 import {
+  agentTerm,
   appState as buildState,
   buildboxTerms,
   machineView,
@@ -133,6 +134,35 @@ describe("MenuBar", () => {
     expect(screen.getByRole("list", { name: "Workboxes" })).toHaveTextContent(
       "gpubox",
     );
+  });
+
+  it("a_pinned_agent_leads_its_list_and_shows_a_pin", () => {
+    // Two blocked agents: the older one would lead, but the newer one is pinned.
+    const terms = [
+      agentTerm({
+        address: "t1",
+        status: "blocked",
+        name: "older",
+        sinceMs: NOW - 5 * 60_000,
+      }),
+      agentTerm({
+        address: "t2",
+        status: "blocked",
+        name: "newer",
+        sinceMs: NOW - 60_000,
+        pinned: true,
+      }),
+    ];
+    setup(appState(machine("buildbox", terms)));
+    const needs = within(screen.getByRole("region", { name: /Needs you/ }));
+    const rows = needs.getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("newer");
+    expect(rows[1]).toHaveTextContent("older");
+    // The pin has a name for a screen reader, and only the pinned row has one.
+    expect(
+      within(rows[0]).getByRole("img", { name: "Pinned" }),
+    ).toBeInTheDocument();
+    expect(needs.getAllByRole("img", { name: "Pinned" })).toHaveLength(1);
   });
 
   it("Open with app target asks main to open the row", async () => {

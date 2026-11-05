@@ -119,6 +119,32 @@ describe("rankItems", () => {
     ]);
   });
 
+  it("pinned_agents_lead_each_list_in_the_palette", () => {
+    const pin = (address: string) =>
+      rows.map((r) => (r.address === address ? { ...r, pinned: true } : r));
+    const base = {
+      machines,
+      commands: [],
+      open: vi.fn(),
+      goToProject: vi.fn(),
+      goToWorkbox: vi.fn(),
+      openTarget: "app" as const,
+      openTabs: [],
+    };
+    // alpha (done) and the blocked reviewer both need you: the pinned one leads their list.
+    const needs = rankItems(
+      buildItems({ ...base, rows: pin("w1:p2") }),
+      "",
+    ).filter((i) => i.group === "Needs you");
+    expect(needs.map((i) => i.label)).toEqual(["alpha", "reviewer"]);
+    // The other agents are by name; the pinned one comes first.
+    const agents = rankItems(
+      buildItems({ ...base, rows: pin("w1:p1") }),
+      "",
+    ).filter((i) => i.group === "Agents");
+    expect(agents.map((i) => i.label)).toEqual(["zeta", "builder"]);
+  });
+
   it("opens_an_agent_by_default_and_the_other_way_with_alt", () => {
     const { items, open } = setup("app");
     const builder = items.find((i) => i.label === "builder");
