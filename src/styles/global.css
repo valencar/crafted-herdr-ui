@@ -122,6 +122,14 @@ body,
   height: 100%;
 }
 
+/* The page never scrolls: each window scrolls only inside its own containers, and WKWebView
+   would otherwise rubber-band the whole UI on a trackpad overscroll. */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   background: var(--bg);
