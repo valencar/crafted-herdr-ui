@@ -22,7 +22,10 @@ const EVENTS_RENAME: &str = include_str!("../tests/fixtures/hc/events_rename.jso
 const HELLO_OLD: &str = include_str!("../tests/fixtures/hc/hello_old.json");
 const UNSUPPORTED: &str = include_str!("../tests/fixtures/hc/errors/unsupported_generation.json");
 
+const DOC_HERDR_APP: &str = include_str!("../tests/fixtures/hc/doc_herdr_app.json");
+
 const BUILDBOX: &str = "000000000000000000000000c0de0002";
+const GPUBOX: &str = "000000000000000000000000c0de0003";
 
 fn json_of(text: &str) -> Value {
     serde_json::from_str(text).unwrap()
@@ -56,6 +59,15 @@ struct Script {
     label_fails: AtomicBool,
     /// How long `terminal.label` takes to answer, in milliseconds.
     label_delay_ms: AtomicU64,
+    /// What `doc.get` answers, by the machine it was asked on (`""`: the local core). A machine
+    /// with none has never written the document.
+    docs: Mutex<std::collections::HashMap<String, Value>>,
+    /// The params of every `doc.get`.
+    doc_gets: Mutex<Vec<Value>>,
+    /// `doc.get` answers with an error.
+    doc_fails: AtomicBool,
+    /// Every method the app called, in order.
+    methods: Mutex<Vec<String>>,
 }
 
 fn nth(list: &Mutex<Vec<Value>>, n: usize) -> Value {
@@ -83,43 +95,61 @@ impl Connector for TestConnector {
             }
             let index = lock(&script.cores).len();
             let s = script.clone();
-            let (conn, notes, core) = connect(move |req| match req["method"].as_str() {
-                Some("hello") => match lock(&s.hello_error).clone() {
-                    Some(error) => (0, Reply::Error(error)),
-                    None => (
-                        0,
-                        Reply::Result(lock(&s.hello).clone().unwrap_or_else(hello_result)),
-                    ),
-                },
-                Some("events.subscribe") => {
-                    let n = s.subscribes.fetch_add(1, Ordering::SeqCst) + 1;
-                    *lock(&s.events_core) = Some(index);
-                    (0, Reply::Result(nth(&s.subscribe, n)))
-                }
-                Some("machine.list") => {
-                    let n = s.lists.fetch_add(1, Ordering::SeqCst) + 1;
-                    let delay = if n > 1 {
-                        s.list_delay_ms.load(Ordering::SeqCst)
-                    } else {
-                        0
-                    };
-                    if n > 1 && s.list_silent.load(Ordering::SeqCst) {
-                        return (0, Reply::Silent);
+            let (conn, notes, core) = connect(move |req| {
+                lock(&s.methods).push(req["method"].as_str().unwrap_or_default().to_owned());
+                match req["method"].as_str() {
+                    Some("hello") => match lock(&s.hello_error).clone() {
+                        Some(error) => (0, Reply::Error(error)),
+                        None => (
+                            0,
+                            Reply::Result(lock(&s.hello).clone().unwrap_or_else(hello_result)),
+                        ),
+                    },
+                    Some("events.subscribe") => {
+                        let n = s.subscribes.fetch_add(1, Ordering::SeqCst) + 1;
+                        *lock(&s.events_core) = Some(index);
+                        (0, Reply::Result(nth(&s.subscribe, n)))
                     }
-                    (delay, Reply::Result(nth(&s.machine_list, n)))
-                }
-                Some("terminal.label") => {
-                    lock(&s.labels).push(req["params"].clone());
-                    if s.label_fails.load(Ordering::SeqCst) {
-                        let error = json!({"code": "internal", "message": "nope"});
-                        return (0, Reply::Error(error));
+                    Some("machine.list") => {
+                        let n = s.lists.fetch_add(1, Ordering::SeqCst) + 1;
+                        let delay = if n > 1 {
+                            s.list_delay_ms.load(Ordering::SeqCst)
+                        } else {
+                            0
+                        };
+                        if n > 1 && s.list_silent.load(Ordering::SeqCst) {
+                            return (0, Reply::Silent);
+                        }
+                        (delay, Reply::Result(nth(&s.machine_list, n)))
                     }
-                    (
-                        s.label_delay_ms.load(Ordering::SeqCst),
-                        Reply::Result(json!({"ok": true})),
-                    )
+                    Some("terminal.label") => {
+                        lock(&s.labels).push(req["params"].clone());
+                        if s.label_fails.load(Ordering::SeqCst) {
+                            let error = json!({"code": "internal", "message": "nope"});
+                            return (0, Reply::Error(error));
+                        }
+                        (
+                            s.label_delay_ms.load(Ordering::SeqCst),
+                            Reply::Result(json!({"ok": true})),
+                        )
+                    }
+                    Some("doc.get") => {
+                        lock(&s.doc_gets).push(req["params"].clone());
+                        if s.doc_fails.load(Ordering::SeqCst) {
+                            let error = json!({"code": "needs_update", "message": "update hc"});
+                            return (0, Reply::Error(error));
+                        }
+                        let on = req["params"]["on"].as_str().unwrap_or_default();
+                        let doc = lock(&s.docs).get(on).cloned();
+                        (
+                            0,
+                            Reply::Result(
+                                doc.unwrap_or_else(|| json!({"value": null, "version": 0})),
+                            ),
+                        )
+                    }
+                    _ => (0, Reply::Result(json!({"ok": true}))),
                 }
-                _ => (0, Reply::Result(json!({"ok": true}))),
             });
             lock(&script.cores).push(Some(core));
             Ok((conn, notes))
@@ -154,6 +184,33 @@ impl Harness {
             activity: Arc::new(Mutex::new(ActivityV2::new(None))),
             sync: None,
         }
+    }
+
+    /// What `doc.get herdr-app` answers on `on` (`""`: the local core).
+    fn doc(self, on: &str, value: Value, version: u64) -> Self {
+        lock(&self.script.docs).insert(on.to_owned(), json!({"value": value, "version": version}));
+        self
+    }
+
+    /// The `on` of every `doc.get` so far (`""`: the local core), in order.
+    fn doc_gets(&self) -> Vec<String> {
+        lock(&self.script.doc_gets)
+            .iter()
+            .map(|p| {
+                assert_eq!(p["name"], "herdr-app");
+                p["on"].as_str().unwrap_or_default().to_owned()
+            })
+            .collect()
+    }
+
+    /// A `doc` event, `on` the machine it came from (`""`: the local core).
+    fn doc_event(&self, seq: u64, name: &str, on: &str) {
+        let mut line = json!({"jsonrpc": "2.0", "method": "event",
+            "params": {"seq": seq, "type": "doc", "data": {"name": name, "version": 2}}});
+        if !on.is_empty() {
+            line["params"]["machine"] = json!(on);
+        }
+        self.send(&line.to_string());
     }
 
     fn start(&mut self) {
@@ -1761,4 +1818,245 @@ async fn a_remote_terminal_is_written_by_its_full_address() {
         .set_looking([(BUILDBOX.to_owned(), "t2".to_owned())]);
     settle().await;
     assert_eq!(h.seen_writes(), [write("buildbox/t2", 0)]);
+}
+
+fn doc_of(text: &str) -> Value {
+    json_of(text)["value"].clone()
+}
+
+/// A layout with one space holding one terminal.
+fn one_space(id: &str, name: &str, terminal: &str) -> Value {
+    json!({"spaces": [{"id": id, "name": name, "folder": "/home/dev/web-app", "tabs": [
+        {"id": "tab", "name": "main", "root": {"type": "block", "content": {"terminal": terminal}}}]}]})
+}
+
+fn layout_of<'a>(state: &'a AppState, id: &str) -> Option<&'a crate::state::SpaceLayout> {
+    machine(state, id).layout.as_ref()
+}
+
+#[tokio::test(start_paused = true)]
+async fn reads_the_layout_of_the_local_core_and_each_connected_machine_after_subscribe() {
+    let h = Harness::new()
+        .doc("", doc_of(DOC_HERDR_APP), 1)
+        .doc("buildbox", one_space("b1", "ops", "t2"), 4)
+        .up()
+        .await;
+    // Local and the one machine that is connected; gpubox is connecting, staging needs login.
+    let mut gets = h.doc_gets();
+    gets.sort();
+    assert_eq!(gets, ["", "buildbox"]);
+    let state = h.state();
+    let local = layout_of(&state, "local").unwrap();
+    assert_eq!(local.by_address["t1"].space_name, "api-service");
+    assert_eq!(local.by_address["t1"].tab_name, "main");
+    assert!(local.by_address["t1"].first_in_space);
+    // Keyed by the machine id, with the machine-local address.
+    let remote = layout_of(&state, BUILDBOX).unwrap();
+    assert_eq!(remote.by_address["t2"].space_name, "ops");
+    assert!(layout_of(&state, GPUBOX).is_none());
+    // The calls are quiet reads in the command log.
+    let log = h.client.command_log();
+    let reads: Vec<_> = log.iter().filter(|e| e.method == "doc.get").collect();
+    assert_eq!(reads.len(), 2);
+    assert!(reads.iter().all(|e| e.quiet));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_machine_that_never_wrote_the_document_has_no_layout() {
+    let h = Harness::new().up().await;
+    let state = h.state();
+    assert!(state.machines.iter().all(|m| m.layout.is_none()));
+    assert!(h.notes().iter().all(|n| !n.contains("herdr-app")));
+}
+
+#[tokio::test(start_paused = true)]
+async fn refetches_on_doc_event_for_that_machine() {
+    let h = Harness::new()
+        .doc("", doc_of(DOC_HERDR_APP), 1)
+        .doc("buildbox", one_space("b1", "ops", "t2"), 4)
+        .up()
+        .await;
+    assert_eq!(h.doc_gets().len(), 2);
+
+    // The buildbox document moved: only buildbox is read again, and the state follows.
+    *lock(&h.script.docs) = [
+        (
+            "".to_owned(),
+            json!({"value": doc_of(DOC_HERDR_APP), "version": 1}),
+        ),
+        (
+            "buildbox".to_owned(),
+            json!({"value": one_space("b1", "renamed", "t2"), "version": 5}),
+        ),
+    ]
+    .into();
+    h.doc_event(40, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    assert_eq!(&h.doc_gets()[2..], ["buildbox"]);
+    let state = h.state();
+    assert_eq!(
+        layout_of(&state, BUILDBOX).unwrap().by_address["t2"].space_name,
+        "renamed"
+    );
+    assert_eq!(
+        layout_of(&state, "local").unwrap().by_address["t1"].space_name,
+        "api-service"
+    );
+
+    // The local core's own event reads the local document.
+    h.doc_event(41, "herdr-app", "");
+    settle().await;
+    settle().await;
+    assert_eq!(&h.doc_gets()[3..], [""]);
+
+    // Another document, or a machine nobody knows: nothing to read.
+    h.doc_event(42, "something-else", "buildbox");
+    h.doc_event(43, "herdr-app", "nowhere");
+    settle().await;
+    settle().await;
+    assert_eq!(h.doc_gets().len(), 4);
+}
+
+#[tokio::test(start_paused = true)]
+async fn refetches_after_missed() {
+    let h = Harness::new().doc("", doc_of(DOC_HERDR_APP), 1).up().await;
+    assert_eq!(h.doc_gets().len(), 2);
+    h.send(
+        &json!({"jsonrpc": "2.0", "method": "missed",
+            "params": {"seq": 40, "terminals": json_of(SUBSCRIBE)["terminals"]}})
+        .to_string(),
+    );
+    settle().await;
+    settle().await;
+    let mut gets = h.doc_gets()[2..].to_vec();
+    gets.sort();
+    assert_eq!(gets, ["", "buildbox"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn refetches_after_a_resubscribe() {
+    let h = Harness::new().doc("", doc_of(DOC_HERDR_APP), 1).up().await;
+    assert_eq!(h.doc_gets().len(), 2);
+    h.drop_events();
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert!(h.doc_gets().len() >= 4);
+    assert!(layout_of(&h.state(), "local").is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn reads_the_layout_when_a_machine_turns_connected() {
+    let mut second = json_of(MACHINE_LIST);
+    second["machines"][1]["state"] = json!("connected");
+    let h = Harness::new().up().await;
+    *lock(&h.script.machine_list) = vec![json_of(MACHINE_LIST), second];
+    *lock(&h.script.docs) = [(
+        "gpubox".to_owned(),
+        json!({"value": one_space("g1", "gpu work", "t9"), "version": 1}),
+    )]
+    .into();
+    assert!(!h.doc_gets().contains(&"gpubox".to_owned()));
+    h.sync().refresh_machines();
+    settle().await;
+    settle().await;
+    assert_eq!(&h.doc_gets()[2..], ["gpubox"]);
+    assert_eq!(
+        layout_of(&h.state(), GPUBOX).unwrap().by_address["t9"].space_name,
+        "gpu work"
+    );
+    // Connected both times round: not read again.
+    h.sync().refresh_machines();
+    settle().await;
+    settle().await;
+    assert_eq!(h.doc_gets().len(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failing_doc_get_means_no_layout_and_never_changes_health() {
+    let h = Harness::new()
+        .doc("", doc_of(DOC_HERDR_APP), 1)
+        .doc("buildbox", one_space("b1", "ops", "t2"), 4)
+        .up()
+        .await;
+    assert!(layout_of(&h.state(), BUILDBOX).is_some());
+    let before = h.state();
+    h.script.doc_fails.store(true, Ordering::SeqCst);
+    h.doc_event(40, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    let state = h.state();
+    assert!(layout_of(&state, BUILDBOX).is_none());
+    assert_eq!(machine(&state, BUILDBOX).health, Health::Online);
+    assert_eq!(
+        machine(&state, BUILDBOX).health,
+        machine(&before, BUILDBOX).health
+    );
+    assert_eq!(state.core_state, CoreState::Ready);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_parse_failure_is_logged_once_per_machine_and_version() {
+    let garbage = json!({"spaces": "no"});
+    let h = Harness::new()
+        .doc("buildbox", garbage.clone(), 3)
+        .up()
+        .await;
+    let said = |h: &Harness| {
+        h.notes()
+            .into_iter()
+            .filter(|n| n.contains("herdr-app") && n.contains("not understood"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(said(&h).len(), 1);
+    let note = &said(&h)[0];
+    assert!(note.contains("version 3"), "{note}");
+    let entry = h
+        .client
+        .command_log()
+        .into_iter()
+        .find(|e| e.note.as_deref().is_some_and(|n| n.contains("herdr-app")))
+        .unwrap();
+    assert_eq!(entry.machine.as_deref(), Some(BUILDBOX));
+    // No layout, and nothing else changed for the machine.
+    let state = h.state();
+    assert!(layout_of(&state, BUILDBOX).is_none());
+    assert_eq!(machine(&state, BUILDBOX).health, Health::Online);
+
+    // The same version again: not said again.
+    h.doc_event(40, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    assert_eq!(said(&h).len(), 1);
+    // A new version that is still garbage: said once more.
+    lock(&h.script.docs).insert("buildbox".into(), json!({"value": garbage, "version": 4}));
+    h.doc_event(41, "herdr-app", "buildbox");
+    settle().await;
+    settle().await;
+    assert_eq!(said(&h).len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn never_calls_doc_set() {
+    let h = Harness::new()
+        .doc("", doc_of(DOC_HERDR_APP), 1)
+        .doc("buildbox", one_space("b1", "ops", "t2"), 4)
+        .up()
+        .await;
+    h.doc_event(40, "herdr-app", "buildbox");
+    h.doc_event(41, "herdr-app", "");
+    h.send(
+        &json!({"jsonrpc": "2.0", "method": "missed",
+            "params": {"seq": 50, "terminals": json_of(SUBSCRIBE)["terminals"]}})
+        .to_string(),
+    );
+    settle().await;
+    settle().await;
+    let methods = lock(&h.script.methods).clone();
+    assert!(methods.iter().any(|m| m == "doc.get"));
+    assert!(
+        methods
+            .iter()
+            .all(|m| !m.starts_with("doc.") || m == "doc.get")
+    );
+    assert!(!crate::core::USES.contains(&"doc.set"));
 }

@@ -167,3 +167,28 @@ async fn drop_then_reconnect() {
     assert_eq!(state.machines[0].health, Health::Online);
     assert_eq!(state.core_state, CoreState::Ready);
 }
+
+#[tokio::test]
+async fn reads_the_herdr_app_layout_through_a_real_connection() {
+    let dir = fake();
+    // The fixture is the `doc.get` result; fake-hc answers every `doc.get` with it.
+    fs::copy(
+        Path::new(FIXTURES).join("doc_herdr_app.json"),
+        dir.path().join("doc.get.json"),
+    )
+    .unwrap();
+    let run = start(&dir);
+
+    until("the local layout", || {
+        run.sync.state().unwrap().machines[0].layout.is_some()
+    })
+    .await;
+    let state = run.sync.state().unwrap();
+    let layout = state.machines[0].layout.as_ref().unwrap();
+    assert_eq!(layout.by_address["t1"].space_name, "api-service");
+    assert_eq!(state.machines[0].health, Health::Online);
+    // Read-only: the calls are doc.get and nothing else under doc.
+    let calls = fs::read_to_string(dir.path().join("calls.log")).unwrap();
+    assert!(calls.contains(r#""method":"doc.get""#));
+    assert!(!calls.contains("doc.set"));
+}

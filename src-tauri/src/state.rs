@@ -1,15 +1,34 @@
 //! What the UI sees: one `AppState` with a `MachineView` per machine, built by `sync.rs` from
 //! the herdr-core event stream and `machine.list` (spec §4.4).
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 use ts_rs::TS;
 
 use crate::agents::TerminalView;
 
-/// Reads of the spaces layout (Task 18); empty until then.
+/// Where Herdr (herdr-app) put a terminal, read from its layout document (spec §8.6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct SpacePlace {
+    pub space_id: String,
+    /// The name someone gave the space; empty when it is unnamed.
+    pub space_name: String,
+    pub space_folder: String,
+    /// The tab's name; empty when it is unnamed.
+    pub tab_name: String,
+    /// The first terminal of its space, in document order.
+    pub first_in_space: bool,
+}
+
+/// A machine's spaces: the place of each terminal, by its machine-local address. Terminals in no
+/// space have none.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
-pub struct SpaceLayout {}
+pub struct SpaceLayout {
+    pub by_address: BTreeMap<String, SpacePlace>,
+}
 
 /// How a machine is doing. Serialized tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

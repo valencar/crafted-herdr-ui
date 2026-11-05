@@ -6,6 +6,7 @@ pub mod connection;
 pub mod display;
 pub mod errors;
 pub mod events;
+pub mod layout_doc;
 pub mod locate;
 pub mod log;
 pub mod model;

@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use super::connection::Notification;
+use super::layout_doc::LAYOUT_DOC;
 use super::model::{CoreTerminal, Foreground, StatusRecord};
 
 /// Every terminal the core knows, by full address (`t7`, `buildbox/t7`).
@@ -26,7 +27,8 @@ pub struct Applied {
     pub changed: bool,
     /// A `missed` replaced everything.
     pub missed: bool,
-    /// One entry per `doc` event: the machine it came from, `None` for the local core.
+    /// One entry per `doc` event for the `herdr-app` document (the only one the app reads): the
+    /// machine it came from, `None` for the local core. Events for other documents are dropped.
     pub docs: Vec<Option<String>>,
     /// Addresses that had a `turn` event.
     pub turns: Vec<String>,
@@ -81,8 +83,11 @@ impl TerminalMap {
                     _ => return applied,
                 }
                 if ty == "doc" {
-                    // No terminal: only the machine whose document moved. The app re-reads it.
-                    applied.docs.push(machine.clone());
+                    // No terminal: only the machine whose document moved. The app re-reads it,
+                    // when it is the layout document.
+                    if data.get("name").and_then(Value::as_str) == Some(LAYOUT_DOC) {
+                        applied.docs.push(machine.clone());
+                    }
                 } else {
                     self.apply_event(ty, terminal.as_deref(), data, now_ms, &mut applied);
                 }
@@ -813,6 +818,18 @@ mod tests {
         assert_eq!(applied[1].docs, [Some("buildbox".to_string())]);
         assert!(applied.iter().all(|a| !a.changed));
         assert_eq!(map.terminals, before);
+        assert_eq!(map.seq, Some(30));
+    }
+
+    #[test]
+    fn doc_event_for_another_document_reports_nothing() {
+        let mut map = subscribed();
+        let applied = apply_all(
+            &mut map,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"data":{"name":"other","version":2},"seq":29,"type":"doc"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"version":2},"machine":"buildbox","seq":30,"type":"doc"}}"#,
+        );
+        assert!(applied.iter().all(|a| a.docs.is_empty() && !a.changed));
         assert_eq!(map.seq, Some(30));
     }
 
