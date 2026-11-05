@@ -35,6 +35,7 @@ function OpenInTerminal({ row }: { row: Row }) {
 /**
  * The bar above the active terminal: which agent it is, how it is doing, and what can be done
  * with it: Open in your terminal as the one main action, the rest in the ⋯ menu. Detach ends only the app's attach client, as closing the tab does.
+ * A Watch tab (`observe`) also says "Watching (read-only)".
  */
 export function ContextBar({ tab, row, onFind }: Props) {
   const closeTab = useTerminalStore((s) => s.closeTab);
@@ -81,6 +82,10 @@ export function ContextBar({ tab, row, onFind }: Props) {
         <span className="mono context-title">{row ? row.name : tab.title}</span>
         {row && <StatusPill status={row.status} live />}
         {row && <KindBadge kind={row.kind} isAgent={row.isAgent} />}
+        {/* Spec 8.4: a Watch tab shows the terminal and sends it nothing, not even a resize. */}
+        {tab.observe && (
+          <span className="chip context-watching">Watching (read-only)</span>
+        )}
         <WorkboxTile
           size="sm"
           machineId={tab.target.machineId}

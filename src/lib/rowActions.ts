@@ -2,7 +2,7 @@ import { useAppStore } from "../store/appStore";
 import { copyAttach } from "./copyAttach";
 import type { Row } from "./grouping";
 import { copyText, invokeTyped } from "./ipc";
-import { markSeen } from "./openRow";
+import { markSeen, openRow } from "./openRow";
 import type { PaneMenuItem } from "./paneMenu";
 import { showHomeView } from "./uiHelpers";
 
@@ -78,6 +78,9 @@ export function runRowItem(
       break;
     case "copy-address":
       void copyAddress(row);
+      break;
+    case "watch":
+      void openRow(row, "app", { observe: true });
       break;
     case "mark-seen":
       markSeen(row);

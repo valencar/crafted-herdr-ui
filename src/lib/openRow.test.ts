@@ -64,6 +64,50 @@ describe("openRow on an ended terminal", () => {
   });
 });
 
+describe("Watch (openRow with observe)", () => {
+  it("watch_and_open_coexist", async () => {
+    openSessionsIn("app");
+    await openRow(row("blocked"));
+    await openRow(row("blocked"), undefined, { observe: true });
+    const { tabs, activeKey } = useTerminalStore.getState();
+    expect(tabs.map((t) => t.tabKey)).toEqual([
+      "buildbox::w1:p1",
+      "buildbox::w1:p1::watch",
+    ]);
+    expect(tabs[0].observe).toBeFalsy();
+    expect(tabs[1]).toMatchObject({
+      observe: true,
+      target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
+    });
+    expect(activeKey).toBe("buildbox::w1:p1::watch");
+    // A second Watch focuses the one already there.
+    await openRow(row("blocked"), undefined, { observe: true });
+    expect(useTerminalStore.getState().tabs).toHaveLength(2);
+  });
+
+  it("watch_opens_in_the_app_whatever_the_setting_says_and_marks_nothing_seen", async () => {
+    openSessionsIn("external");
+    await openRow(row("done"), undefined, { observe: true });
+    expect(useTerminalStore.getState().tabs).toHaveLength(1);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("watch_in_the_external_terminal_passes_observe", async () => {
+    await openRow(row("blocked"), "external", { observe: true });
+    expect(invoke.mock.calls).toEqual([
+      ["open_session", { ...opened, observe: true }],
+    ]);
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+  });
+
+  it("watch_refuses_an_ended_terminal", async () => {
+    await openRow(row("ended"), "app", { observe: true });
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(useAppStore.getState().toast).toBe("This terminal has ended.");
+  });
+});
+
 describe("openRow", () => {
   it("app target opens a tab and marks done rows seen", async () => {
     openSessionsIn("app");

@@ -92,6 +92,34 @@ async function openClosePane(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("menuitem", { name: "Close…" }));
 }
 
+describe("ContextBar on a Watch tab", () => {
+  const watchTab: TermTab = {
+    ...paneTab,
+    tabKey: `${row.key}::watch`,
+    observe: true,
+  };
+
+  it("context_bar_says_watching", () => {
+    const { container } = render(
+      <ContextBar tab={watchTab} row={row} onFind={() => {}} />,
+    );
+    const bar = container.querySelector(".context-bar")!;
+    expect(bar).toHaveTextContent("Watching (read-only)");
+    // The agent is still named, and the bar keeps its other controls.
+    expect(bar.querySelector(".mono")).toHaveTextContent("planner");
+    expect(screen.getByRole("button", { name: "Detach" })).toBeInTheDocument();
+  });
+
+  it("an_ordinary_tab_does_not_say_watching", () => {
+    const { container } = render(
+      <ContextBar tab={paneTab} row={row} onFind={() => {}} />,
+    );
+    expect(container.querySelector(".context-bar")).not.toHaveTextContent(
+      "Watching",
+    );
+  });
+});
+
 describe("ContextBar", () => {
   it("pane_tab_shows_name_status_and_actions", async () => {
     const { container } = render(

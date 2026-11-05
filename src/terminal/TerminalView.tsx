@@ -16,7 +16,7 @@ import type { TerminalFont } from "../lib/bindings/TerminalFont";
 import { copyText } from "../lib/ipc";
 import { useResolvedTheme } from "../lib/theme";
 import { useAppStore } from "../store/appStore";
-import { useTerminalStore, type TermTab } from "./terminalStore";
+import { rowKeyOf, useTerminalStore, type TermTab } from "./terminalStore";
 import { TermBar } from "./TermBar";
 import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
@@ -327,7 +327,7 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
   // The bar needs the pane's row (to copy or open its attach command) and its workbox (ssh or
   // not). The pane is "gone" only when its workbox has a list to look in and it is not on it.
   const rows = useRowsByKey();
-  const row = rows.get(tab.tabKey);
+  const row = rows.get(rowKeyOf(tab.tabKey));
   const machine = useAppStore((s) =>
     s.state?.machines.find((m) => m.id === tab.target.machineId),
   );

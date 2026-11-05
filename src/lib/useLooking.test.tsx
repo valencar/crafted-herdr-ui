@@ -136,6 +136,33 @@ describe("useLooking", () => {
     expect(invoke).toHaveBeenLastCalledWith("set_looking", looking([]));
   });
 
+  it("a_live_watch_tab_counts_as_looking_under_its_row_key", () => {
+    render(<Probe />);
+    act(() => {
+      useTerminalStore.getState().openTab({
+        tabKey: "buildbox::t1::watch",
+        target: { kind: "terminal", machineId: "buildbox", address: "t1" },
+        title: "planner",
+        machineLabel: "Build box",
+        observe: true,
+      });
+      useTerminalStore
+        .getState()
+        .updateTab("buildbox::t1::watch", { state: "live" });
+    });
+    // Ruling C89: the Watch tab's terminal is drawn, and the key is the row's, not the tab's.
+    expect(invoke).toHaveBeenLastCalledWith(
+      "set_looking",
+      looking(["buildbox::t1"]),
+    );
+    act(() =>
+      useTerminalStore
+        .getState()
+        .updateTab("buildbox::t1::watch", { state: "detached" }),
+    );
+    expect(invoke).toHaveBeenLastCalledWith("set_looking", looking([]));
+  });
+
   it("reports_nothing_for_a_command_tab", () => {
     render(<Probe />);
     act(() => {

@@ -35,6 +35,21 @@ export function commandTabKey(machineId: string, args: string[]): string {
   return `${machineId}::cmd:${verb}${install ? " --install" : ""}`;
 }
 
+/** What a Watch tab's key adds to its row's key, so Open and Watch on one row are two tabs. */
+export const WATCH_SUFFIX = "::watch";
+
+/** The key of the Watch tab of the row with `rowKey`. */
+export function watchTabKey(rowKey: string): string {
+  return `${rowKey}${WATCH_SUFFIX}`;
+}
+
+/** The row key a tab shows: a Watch tab's key without its `::watch`, any other key as it is. */
+export function rowKeyOf(tabKey: string): string {
+  return tabKey.endsWith(WATCH_SUFFIX)
+    ? tabKey.slice(0, -WATCH_SUFFIX.length)
+    : tabKey;
+}
+
 export type CoreKind = CoreState["kind"];
 
 /** What the reattach rules read of a tab's row. */
@@ -49,7 +64,7 @@ export type Waiting =
   { kind: "restart"; restarts: number } | { kind: "core"; sawDown: boolean };
 
 export type TermTab = {
-  /** `${machineId}::${address}`, the row's key (a command tab's key is `commandTabKey`). */
+  /** `${machineId}::${address}`, the row's key (a Watch tab's is `watchTabKey`, a command tab's `commandTabKey`). */
   tabKey: string;
   target: TabTarget;
   title: string;
@@ -73,6 +88,12 @@ export type TermTab = {
    * changes. Absent (0) for a tab that was never rerun.
    */
   run?: number;
+  /**
+   * Watch: the tab runs the observe attach (`hc attach --observe`), which shows the terminal but
+   * never types into it or resizes it. Nothing is sent to its session (`useTermSession`), and it
+   * stays so across a reattach.
+   */
+  observe?: boolean;
   /** What the tab waits for before it reattaches on its own; null when only the button reattaches. */
   waiting: Waiting | null;
   /** Reattach and Retry clicks since a session last ended normally (exit 0); the first open does not count. */
@@ -82,7 +103,8 @@ export type TermTab = {
 /** The key of the pinned Home tab; every other key is a terminal tab's `tabKey`. */
 export const HOME = "home";
 
-type NewTab = Pick<TermTab, "tabKey" | "target" | "title" | "machineLabel">;
+type NewTab = Pick<TermTab, "tabKey" | "target" | "title" | "machineLabel"> &
+  Partial<Pick<TermTab, "observe">>;
 
 type TerminalStore = {
   tabs: TermTab[];

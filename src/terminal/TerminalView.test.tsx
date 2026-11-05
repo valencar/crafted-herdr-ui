@@ -663,6 +663,72 @@ describe("TerminalView", () => {
     expect(term().write).toHaveBeenCalledWith("hello");
   });
 
+  describe("a Watch tab", () => {
+    const WATCH = `${KEY}::watch`;
+    beforeEach(() => {
+      useTerminalStore.getState().openTab({
+        tabKey: WATCH,
+        target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
+        title: "agent",
+        machineLabel: "buildbox",
+        observe: true,
+      });
+    });
+
+    it("watch_tab_runs_observe_argv", async () => {
+      render(<Harness tabKey={WATCH} />);
+      await flush();
+      // Rust builds `[core, "attach", "--observe", address]` from this flag.
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(open.mock.calls[0][0]).toEqual({
+        kind: "terminal",
+        machineId: "buildbox",
+        address: "w1:p1",
+      });
+      expect(open.mock.calls[0][4]).toBe(true);
+    });
+
+    it("an_ordinary_tab_does_not_observe", async () => {
+      render(<Harness />);
+      await flush();
+      expect(open.mock.calls[0][4]).toBe(false);
+    });
+
+    it("watch_tab_sends_no_keys_or_resizes", async () => {
+      vi.useFakeTimers();
+      render(<Harness tabKey={WATCH} />);
+      await flush();
+      expect(open).toHaveBeenCalledTimes(1);
+      // Keystrokes, pastes and the terminal's own replies all arrive as onData.
+      term().dataHandler?.("ls\r");
+      term().dataHandler?.("\x1b[?1;2c");
+      await flush();
+      // A refit to a new size, and a font change.
+      h.fitDims = { cols: 120, rows: 40 };
+      act(() => h.observers.forEach((o) => o.cb()));
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      // OSC 52 query: never answered.
+      await act(async () => {
+        await h.osc.get(52)?.("c;?");
+      });
+      expect(invoke).not.toHaveBeenCalledWith("term_write", expect.anything());
+      expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
+    });
+
+    it("a_reattach_still_watches", async () => {
+      render(<Harness tabKey={WATCH} />);
+      await flush();
+      emit({ kind: "exit", code: 0, last_line: "[detached from t7]" });
+      await flush();
+      fireEvent.click(screen.getByRole("button", { name: "Reattach" }));
+      await flush();
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(open.mock.calls[1][4]).toBe(true);
+    });
+  });
+
   it("keystrokes_are_written_to_the_session", async () => {
     render(<Harness />);
     await flush();
@@ -1049,7 +1115,11 @@ describe("TerminalView", () => {
       kept(0);
       render(<Harness />);
       await flush();
-      emit({ kind: "exit", code: 0, last_line: "[w1:p1 finished: server_stop]" });
+      emit({
+        kind: "exit",
+        code: 0,
+        last_line: "[w1:p1 finished: server_stop]",
+      });
       coreIs("connecting");
       await flush();
       expect(
@@ -1455,6 +1525,23 @@ describe("TerminalView", () => {
       // So Enter closes the tab.
       await user.keyboard("{Enter}");
       expect(useTerminalStore.getState().tabs).toEqual([]);
+    });
+
+    it("a_watch_tab_whose_row_ended_gets_close_tab_only", async () => {
+      useTerminalStore.getState().openTab({
+        tabKey: `${KEY}::watch`,
+        target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
+        title: "agent (watching)",
+        machineLabel: "buildbox",
+        observe: true,
+      });
+      listed({ ended: true });
+      render(<Harness tabKey={`${KEY}::watch`} />);
+      await flush();
+      emit({ kind: "exit", code: 0, last_line: null });
+      expect(screen.queryByRole("button", { name: "Reattach" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+      expect(screen.getByRole("button", { name: "Close tab" })).toHaveFocus();
     });
 
     it("a_workbox_without_a_snapshot_does_not_make_the_pane_look_gone", async () => {

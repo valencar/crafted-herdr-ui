@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useAppStore } from "../store/appStore";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { useTerminalStore, watchTabKey } from "../terminal/terminalStore";
 import type { OpenTarget } from "./bindings/OpenTarget";
 import type { Row } from "./grouping";
 import { invokeTyped } from "./ipc";
@@ -16,8 +16,17 @@ export function defaultOpenHow(): OpenHow {
  * Opens a row in a terminal tab here, or in the user's terminal; `how` defaults to the
  * "Open sessions" setting. Opening a "done" agent also marks it seen (spec section 7), but only
  * once it really opened. Errors go to the toast.
+ *
+ * `opts.observe` is Watch (spec 8.4): the same attach with `--observe`, which only shows the
+ * terminal. It is its own tab (`watchTabKey`) next to an Open tab of the row, it goes to a tab
+ * here unless `how` says otherwise, and it marks nothing seen (looking at it does, once per turn).
  */
-export async function openRow(row: Row, how?: OpenHow): Promise<void> {
+export async function openRow(
+  row: Row,
+  how?: OpenHow,
+  opts?: { observe?: boolean },
+): Promise<void> {
+  const observe = opts?.observe === true;
   // A finished terminal can't be attached to. The buttons don't offer it; this covers the ways
   // a click or a notification can still reach it (a race with the state, a just-created session).
   if (row.status === "ended") {
@@ -25,25 +34,26 @@ export async function openRow(row: Row, how?: OpenHow): Promise<void> {
     return;
   }
   try {
-    if ((how ?? defaultOpenHow()) === "app") {
+    if ((how ?? (observe ? "app" : defaultOpenHow())) === "app") {
       useTerminalStore.getState().openTab({
-        tabKey: row.key,
+        tabKey: observe ? watchTabKey(row.key) : row.key,
         target: {
           kind: "terminal",
           machineId: row.machineId,
           address: row.address,
         },
-        title: row.name,
+        title: observe ? `${row.name} (watching)` : row.name,
         machineLabel: row.machineLabel,
+        ...(observe ? { observe: true } : {}),
       });
     } else {
       await invokeTyped("open_session", {
         machineId: row.machineId,
         address: row.address,
-        observe: false,
+        observe,
       });
     }
-    if (row.status === "done") {
+    if (row.status === "done" && !observe) {
       await invokeTyped("mark_seen", {
         machineId: row.machineId,
         address: row.address,

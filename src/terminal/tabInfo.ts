@@ -4,7 +4,7 @@ import { shortPath, STATUS_LABEL } from "../lib/format";
 import { isNeedsYou, toRows, type Row } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import type { DotStatus } from "../components/StatusDot";
-import type { TermTab } from "./terminalStore";
+import { rowKeyOf, type TermTab } from "./terminalStore";
 
 /** The agent rows by key, for matching a tab to the pane it shows. */
 export function useRowsByKey(): Map<string, Row> {
@@ -16,12 +16,14 @@ export function useRowsByKey(): Map<string, Row> {
   }, [state]);
 }
 
-/** The row a tab shows in `state`, if the state has it. */
+/** The row a tab shows in `state`, if the state has it (a Watch tab shows its row too). */
 export function rowFor(
   state: AppState | null,
   tabKey: string,
 ): Row | undefined {
-  return state ? toRows(state).find((r) => r.key === tabKey) : undefined;
+  return state
+    ? toRows(state).find((r) => r.key === rowKeyOf(tabKey))
+    : undefined;
 }
 
 const STATE_WORDS: Record<Exclude<TermTab["state"], "live">, string> = {
@@ -84,7 +86,7 @@ export function tabSubline(
 /** How many of the tabs show a blocked or errored agent (a done one is not counted). */
 export function countNeeds(tabs: TermTab[], rows: Map<string, Row>): number {
   return tabs.filter((t) => {
-    const status = rows.get(t.tabKey)?.status;
+    const status = rows.get(rowKeyOf(t.tabKey))?.status;
     return status === "blocked" || status === "error";
   }).length;
 }

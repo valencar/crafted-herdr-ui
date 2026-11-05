@@ -281,6 +281,10 @@ kbd {
 .open-split.is-needs .open-chev {
   border-left: 1px solid color-mix(in srgb, var(--on-needs) 25%, transparent);
 }
+/* Watch, beside the Open split on a Needs-input row. */
+.open-watch {
+  flex-shrink: 0;
+}
 /* Position is pinned inline (OpenButton): `.menu` in windows.css loads later and would win. */
 .menu.open-menu {
   min-width: 200px;
@@ -2653,6 +2657,11 @@ select.field {
 }
 .context-title {
   color: var(--text);
+}
+.context-watching {
+  flex: 0 0 auto;
+  color: var(--text-2);
+  white-space: nowrap;
 }
 .context-where {
   min-width: 0;

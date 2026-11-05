@@ -425,6 +425,7 @@ describe("agentActions", () => {
       "reply",
       "copy-attach",
       "copy-address",
+      "watch",
       "mark-seen",
       "pin",
       "keep",

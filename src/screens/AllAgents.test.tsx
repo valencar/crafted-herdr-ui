@@ -292,7 +292,7 @@ describe("AllAgents", () => {
     );
     expect(
       within(screen.getByRole("menu")).getAllByRole("menuitem"),
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   });
 
   it("open_buttons_name_their_row_for_screen_readers", () => {

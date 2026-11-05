@@ -3,6 +3,7 @@ import { useAppStore, type View } from "../store/appStore";
 import {
   HOME,
   useTerminalStore,
+  rowKeyOf,
   type TermTab,
 } from "../terminal/terminalStore";
 import { invokeTyped } from "./ipc";
@@ -21,7 +22,7 @@ export type LookingInput = {
 /**
  * The row keys (`${machineId}::${address}`) the person is really looking at, sorted:
  * - the active terminal tab's row, when its session is live (an opening, detached or failed tab
- *   shows no output; a command tab has no row);
+ *   shows no output; a command tab has no row); a Watch tab counts, as its row;
  * - the Inspector's row while Home is the active tab, All agents is the view and a row is
  *   selected (its preview is showing; under a terminal tab the Home slot is hidden).
  *
@@ -37,7 +38,8 @@ export function lookingKeys(input: LookingInput): string[] {
   } else {
     const tab = input.tabs.find((t) => t.tabKey === input.activeKey);
     if (tab && tab.state === "live" && tab.target.kind === "terminal") {
-      keys.add(tab.tabKey);
+      // A Watch tab draws its row's terminal too (Ruling C89), under the row's key.
+      keys.add(rowKeyOf(tab.tabKey));
     }
   }
   return [...keys].sort();

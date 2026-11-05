@@ -79,6 +79,7 @@ describe("PaneMenu", () => {
     expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
       "Copy attach command",
       "Copy address",
+      "Watch (read-only)",
       "Pin",
       "Keep",
       "Show in All agents",
@@ -97,6 +98,7 @@ describe("PaneMenu", () => {
     expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
       "Copy attach command",
       "Copy address",
+      "Watch (read-only)",
       "Unpin",
       "Interrupt",
       "Don't keep",

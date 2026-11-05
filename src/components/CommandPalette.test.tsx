@@ -518,6 +518,7 @@ describe("CommandPalette agent frame", () => {
       "Reply…",
       "Copy attach command",
       "Copy address",
+      "Watch (read-only)",
       "Mark as seen",
       "Pin",
       "Keep",

@@ -27,12 +27,17 @@ type Writer = { id: number; busy: boolean; pending: string };
  * tab decided to by itself (see `settle` in the store), so it does not count as an attempt.
  * Declare this hook after the effect that creates the terminal, so the terminal exists when the
  * session opens.
+ *
+ * A Watch tab (`observe`) opens the observe attach and sends nothing to it, ever: no keystroke,
+ * no paste and no reply xterm makes to a terminal query (all of them arrive as `onData`), and no
+ * resize. The remote terminal keeps the size its owner gave it.
  */
 export function useTermSession(
-  tab: Pick<TermTab, "tabKey" | "target" | "run">,
+  tab: Pick<TermTab, "tabKey" | "target" | "run" | "observe">,
   termRef: RefObject<Terminal | null>,
 ) {
   const { tabKey } = tab;
+  const observe = tab.observe === true;
   const run = tab.run ?? 0;
   // The run whose output the terminal shows; a new run clears it (a Reattach keeps it).
   const shownRun = useRef(run);
@@ -48,14 +53,17 @@ export function useTermSession(
   const writer = useRef<Writer | null>(null);
 
   /** Tells the session the terminal's size; does nothing without a session or a change. */
-  const resize = useCallback((cols: number, rows: number) => {
-    const id = idRef.current;
-    const last = sentSize.current;
-    if (id === null || cols < 1 || rows < 1) return;
-    if (last && last.cols === cols && last.rows === rows) return;
-    sentSize.current = { cols, rows };
-    invokeTyped("term_resize", { id, cols, rows }).catch(() => {});
-  }, []);
+  const resize = useCallback(
+    (cols: number, rows: number) => {
+      const id = idRef.current;
+      const last = sentSize.current;
+      if (observe || id === null || cols < 1 || rows < 1) return;
+      if (last && last.cols === cols && last.rows === rows) return;
+      sentSize.current = { cols, rows };
+      invokeTyped("term_resize", { id, cols, rows }).catch(() => {});
+    },
+    [observe],
+  );
 
   const open = useCallback(async () => {
     const term = termRef.current;
@@ -124,7 +132,7 @@ export function useTermSession(
           if (!e.code)
             useTerminalStore.getState().updateTab(tabKey, { attempts: 0 });
         },
-        false,
+        observe,
       );
       if (mine !== generation.current) {
         // Unmounted, or replaced by a newer open, while this one was starting.
@@ -133,7 +141,8 @@ export function useTermSession(
       }
       if (exited) return;
       idRef.current = id;
-      writer.current = { id, busy: false, pending: "" };
+      // A Watch tab never gets a writer, so nothing can be sent to it.
+      writer.current = observe ? null : { id, busy: false, pending: "" };
       // Keystrokes go through from here (an ssh prompt is output, so it is live by then anyway).
       useTerminalStore
         .getState()
@@ -150,7 +159,7 @@ export function useTermSession(
         error: actionErrorMessage(toActionError(e)),
       });
     }
-  }, [tabKey, targetJson, run, termRef, resize]);
+  }, [tabKey, targetJson, run, observe, termRef, resize]);
 
   useEffect(() => {
     void open();
@@ -190,12 +199,12 @@ export function useTermSession(
     };
     const sub = term.onData((data) => {
       const w = writer.current;
-      if (!w) return;
+      if (!w || observe) return;
       if (w.busy) w.pending += data;
       else send(w, data);
     });
     return () => sub.dispose();
-  }, [termRef]);
+  }, [termRef, observe]);
 
   const reattach = useCallback(() => {
     asked.current = true;

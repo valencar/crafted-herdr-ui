@@ -21,7 +21,7 @@ import {
   useRowsByKey,
 } from "../terminal/tabInfo";
 import { groupTabs, tabShortcut } from "../terminal/tabOrder";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { rowKeyOf, useTerminalStore } from "../terminal/terminalStore";
 
 /** How many projects show before "{n} more". */
 const PROJECTS_SHOWN = 3;
@@ -335,7 +335,7 @@ export function Sidebar({
             </button>
           </Tooltip>
           {(tabsByMachine.get(m.id) ?? []).map((tab) => {
-            const row = rows.get(tab.tabKey);
+            const row = rows.get(rowKeyOf(tab.tabKey));
             const n = tabShortcut(tab.tabKey, tabs, machines);
             const shortcut = n === null ? null : tabShortcutId(n);
             return (

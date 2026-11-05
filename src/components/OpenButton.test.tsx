@@ -112,6 +112,63 @@ afterEach(() => {
   });
 });
 
+describe("OpenButton Watch", () => {
+  it("needs_input_row_offers_watch", async () => {
+    const { user } = setup();
+    // Beside Open, for a blocked agent.
+    const watch = screen.getByRole("button", { name: "Watch api-service" });
+    expect(watch).toHaveTextContent("Watch");
+    await user.click(watch);
+    expect(openRow).toHaveBeenLastCalledWith(ROW, "app", { observe: true });
+  });
+
+  it("the_chevron_menu_lists_watch_for_any_live_row", async () => {
+    const { user } = setup({ row: { ...ROW, status: "working" } });
+    // Not beside Open: only a Needs-input row gets the button.
+    expect(
+      screen.queryByRole("button", { name: "Watch api-service" }),
+    ).toBeNull();
+    await user.click(chevron());
+    await user.click(
+      screen.getByRole("menuitem", { name: "Watch (read-only)" }),
+    );
+    expect(openRow).toHaveBeenLastCalledWith(
+      { ...ROW, status: "working" },
+      "app",
+      { observe: true },
+    );
+  });
+
+  it("an_open_tab_does_not_stand_in_for_watch", () => {
+    useTerminalStore.setState({ tabs: [tab("w1:p1")], activeKey: HOME });
+    setup();
+    expect(
+      screen.getByRole("button", { name: /^Go to tab api-service/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Watch api-service" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a_watch_tab_does_not_make_open_read_go_to_tab", () => {
+    useTerminalStore.setState({
+      tabs: [{ ...tab("w1:p1"), tabKey: `${ROW.key}::watch`, observe: true }],
+      activeKey: HOME,
+    });
+    setup();
+    expect(
+      screen.getByRole("button", { name: "Open api-service" }),
+    ).toBeInTheDocument();
+  });
+
+  it("an_ended_row_offers_no_watch", async () => {
+    const { user } = setup({ row: { ...ROW, status: "ended" } });
+    expect(screen.queryByRole("button", { name: /^Watch/ })).toBeNull();
+    await user.click(chevron());
+    expect(screen.queryByRole("menuitem", { name: /Watch/ })).toBeNull();
+  });
+});
+
 describe("OpenButton", () => {
   it("main_button_opens_by_default", async () => {
     const { user } = setup();
@@ -171,6 +228,7 @@ describe("OpenButton", () => {
     expect(items().map((i) => i.textContent)).toEqual([
       "Open here",
       "Open in Ghostty",
+      "Watch (read-only)",
       "Copy attach command",
     ]);
     expect(screen.getByRole("separator")).toBeInTheDocument();
@@ -290,15 +348,15 @@ describe("OpenButton", () => {
     const all = items();
     expect(all[0]).toHaveFocus();
     await user.keyboard("{ArrowUp}");
-    expect(all[2]).toHaveFocus();
+    expect(all[3]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(all[0]).toHaveFocus();
-    await user.keyboard("{ArrowDown}{ArrowDown}");
-    expect(all[2]).toHaveFocus();
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
+    expect(all[3]).toHaveFocus();
     await user.keyboard("{Home}");
     expect(all[0]).toHaveFocus();
     await user.keyboard("{End}");
-    expect(all[2]).toHaveFocus();
+    expect(all[3]).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
     expect(chevron()).toHaveFocus();

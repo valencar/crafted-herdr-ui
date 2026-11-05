@@ -25,6 +25,7 @@ describe("paneMenuItems", () => {
     expect(paneMenuItems(row("blocked"))).toEqual([
       "copy-attach",
       "copy-address",
+      "watch",
       "pin",
       "keep",
       "show-in-all",
@@ -34,6 +35,7 @@ describe("paneMenuItems", () => {
     expect(paneMenuItems(row("done"))).toEqual([
       "copy-attach",
       "copy-address",
+      "watch",
       "mark-seen",
       "pin",
       "keep",
@@ -47,6 +49,7 @@ describe("paneMenuItems", () => {
     expect(paneMenuItems(row("idle", { turn: 3 }))).toEqual([
       "copy-attach",
       "copy-address",
+      "watch",
       "mark-unread",
       "pin",
       "keep",
@@ -57,6 +60,7 @@ describe("paneMenuItems", () => {
     expect(paneMenuItems(row("working"))).toEqual([
       "copy-attach",
       "copy-address",
+      "watch",
       "pin",
       "interrupt",
       "keep",
@@ -68,6 +72,7 @@ describe("paneMenuItems", () => {
       [
         "copy-attach",
         "copy-address",
+        "watch",
         "unpin",
         "interrupt",
         "unkeep",
@@ -89,6 +94,13 @@ describe("paneMenuItems", () => {
       "show-in-all",
       "remove",
     ]);
+    // Watch sits right after Copy address (Task 17), and an ended row has none.
+    expect(paneMenuItems(row("blocked")).slice(0, 3)).toEqual([
+      "copy-attach",
+      "copy-address",
+      "watch",
+    ]);
+    expect(paneMenuItems(row("ended"))).not.toContain("watch");
     for (const s of ["unknown", "shell"] as const) {
       const items = paneMenuItems(row(s));
       for (const only of ["mark-seen", "mark-unread", "interrupt"] as const) {

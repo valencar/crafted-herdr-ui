@@ -30,7 +30,7 @@ import {
 import { useAppStore, useModalOpen } from "../store/appStore";
 import { tabStatus, useRowsByKey } from "../terminal/tabInfo";
 import { stripOrder, tabShortcut } from "../terminal/tabOrder";
-import { useTerminalStore } from "../terminal/terminalStore";
+import { rowKeyOf, useTerminalStore } from "../terminal/terminalStore";
 
 /** The first of these that focus can go back to: on the page, visible, and not the body. */
 function firstRestorable(els: (HTMLElement | null)[]): HTMLElement | undefined {
@@ -259,7 +259,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         },
       ],
       openTabs: stripOrder(tabs, machines ?? []).map((tab) => {
-        const row = rowsByKey.get(tab.tabKey) ?? null;
+        const row = rowsByKey.get(rowKeyOf(tab.tabKey)) ?? null;
         const words = tabStatus(tab, row ?? undefined);
         const n = tabShortcut(tab.tabKey, tabs, machines ?? []);
         return {

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Row } from "../lib/grouping";
 import { copyText, invokeTyped } from "../lib/ipc";
 import { openRow } from "../lib/openRow";
+import { PANE_MENU_LABEL } from "../lib/paneMenu";
+import { Tooltip } from "./Tooltip";
 import { PINNED, useMenuBehavior } from "../lib/useMenuBehavior";
 import { useAppStore } from "../store/appStore";
 import { tabShortcut } from "../terminal/tabOrder";
@@ -46,7 +48,12 @@ export function OpenButton({
   const reportError = useAppStore((s) => s.reportError);
   const showToast = useAppStore((s) => s.showToast);
 
+  // An Open tab only: a Watch tab of the row (`::watch`) is a different tab.
   const hasTab = tabs.some((t) => t.tabKey === row.key);
+  // Watch is offered beside Open on a Needs-input row, and in the menu on any live row. A
+  // finished terminal can't be attached to, observed or not.
+  const canWatch = row.status !== "ended";
+  const watchBeside = row.status === "blocked";
   const shortcut = hasTab ? tabShortcut(row.key, tabs, machines) : null;
   const label = hasTab ? "Go to tab" : "Open";
   // "Go to tab" shows its own ⌘ number or nothing; the `kbd` hint belongs to "Open".
@@ -107,6 +114,9 @@ export function OpenButton({
     action();
   };
 
+  // Read-only, in a tab here: the Open setting doesn't apply to a view that can't be typed into.
+  const watch = () => void openRow(row, "app", { observe: true });
+
   const copyAttach = () => {
     const copy = async (command: string) => {
       try {
@@ -135,69 +145,98 @@ export function OpenButton({
     .join(" ");
 
   return (
-    // The cards select themselves on click; the menu must not hand that click to them.
-    <div
-      className={classes}
-      data-menu-root
-      ref={rootRef}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <button
-        type="button"
-        className="btn open-main"
-        aria-label={name}
-        // An open tab is focused by `openTab`; `openRow` also marks a done row seen.
-        onClick={() => void (hasTab ? openRow(row, "app") : openRow(row))}
+    <>
+      {/* The cards select themselves on click; the menu must not hand that click to them. */}
+      <div
+        className={classes}
+        data-menu-root
+        ref={rootRef}
+        onClick={(e) => e.stopPropagation()}
       >
-        {label}
-        {hint && <Kbd keys={hint} className="mono" />}
-      </button>
-      <button
-        ref={chevronRef}
-        type="button"
-        className="btn open-chev"
-        aria-label={`More ways to open ${row.name}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={toggle}
-      >
-        <span aria-hidden="true">▾</span>
-      </button>
-      {open && (
-        <div
-          className="menu open-menu"
-          role="menu"
-          aria-label={`Open ${row.name}`}
-          style={place}
+        <button
+          type="button"
+          className="btn open-main"
+          aria-label={name}
+          // An open tab is focused by `openTab`; `openRow` also marks a done row seen.
+          onClick={() => void (hasTab ? openRow(row, "app") : openRow(row))}
         >
+          {label}
+          {hint && <Kbd keys={hint} className="mono" />}
+        </button>
+        <button
+          ref={chevronRef}
+          type="button"
+          className="btn open-chev"
+          aria-label={`More ways to open ${row.name}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={toggle}
+        >
+          <span aria-hidden="true">▾</span>
+        </button>
+        {open && (
+          <div
+            className="menu open-menu"
+            role="menu"
+            aria-label={`Open ${row.name}`}
+            style={place}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              onClick={() => choose(() => void openRow(row, "app"))}
+            >
+              Open here
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              onClick={() => choose(() => void openRow(row, "external"))}
+            >
+              Open in {terminalName}
+            </button>
+            {canWatch && (
+              <button
+                type="button"
+                role="menuitem"
+                className="menu-item"
+                onClick={() => choose(watch)}
+              >
+                {PANE_MENU_LABEL.watch}
+              </button>
+            )}
+            <div className="menu-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              onClick={() => choose(copyAttach)}
+            >
+              Copy attach command
+            </button>
+          </div>
+        )}
+      </div>
+      {canWatch && watchBeside && (
+        <Tooltip label="Look without typing. Nothing is sent to the agent.">
           <button
             type="button"
-            role="menuitem"
-            className="menu-item"
-            onClick={() => choose(() => void openRow(row, "app"))}
+            className={
+              "btn open-watch" + (size === "small" ? " btn-small" : "")
+            }
+            aria-label={`Watch ${row.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              watch();
+            }}
           >
-            Open here
+            Watch
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="menu-item"
-            onClick={() => choose(() => void openRow(row, "external"))}
-          >
-            Open in {terminalName}
-          </button>
-          <div className="menu-sep" role="separator" />
-          <button
-            type="button"
-            role="menuitem"
-            className="menu-item"
-            onClick={() => choose(copyAttach)}
-          >
-            Copy attach command
-          </button>
-        </div>
+        </Tooltip>
       )}
-    </div>
+    </>
   );
 }
 
