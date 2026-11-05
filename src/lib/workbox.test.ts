@@ -54,11 +54,36 @@ describe("stateLine", () => {
 });
 
 describe("offers", () => {
-  it("update_offered_on_needs_update_or_version_mismatch", () => {
+  it("update_offered_on_needs_update_or_an_older_hc_there", () => {
     expect(updateOffered(box({ state: "needs_update" }), "0.1.18")).toBe(true);
-    // Connected, but not the hc running here.
+    // The core says so even when the hc there is newer: it can't talk to it.
+    expect(
+      updateOffered(
+        box({ state: "needs_update", hcVersion: "0.2.0" }),
+        "0.1.18",
+      ),
+    ).toBe(true);
+    // Connected, with an older hc than the one running here: lower.
     expect(updateOffered(box({ hcVersion: "0.1.12" }), "0.1.18")).toBe(true);
+    expect(updateOffered(box({ hcVersion: "0.0.99" }), "0.1.0")).toBe(true);
+    // Equal: nothing to do.
     expect(updateOffered(box({ hcVersion: "0.1.18" }), "0.1.18")).toBe(false);
+    // Higher there: `hc machine update` would copy this older hc over it.
+    expect(updateOffered(box({ hcVersion: "0.1.19" }), "0.1.18")).toBe(false);
+    expect(updateOffered(box({ hcVersion: "0.2.0" }), "0.1.18")).toBe(false);
+    expect(updateOffered(box({ hcVersion: "1.0.0" }), "0.9.9")).toBe(false);
+    // Numerically, not as text: 0.1.9 is older than 0.1.18.
+    expect(updateOffered(box({ hcVersion: "0.1.9" }), "0.1.18")).toBe(true);
+    expect(updateOffered(box({ hcVersion: "0.1.18" }), "0.1.9")).toBe(false);
+    // Only the X.Y.Z part counts (Ruling C21): a pre-release of the same release is equal.
+    expect(updateOffered(box({ hcVersion: "0.1.18-beta.1" }), "0.1.18")).toBe(
+      false,
+    );
+    expect(updateOffered(box({ hcVersion: "0.1.17-beta.1" }), "0.1.18")).toBe(
+      true,
+    );
+    // A version that doesn't read as X.Y.Z is not offered on a guess.
+    expect(updateOffered(box({ hcVersion: "dev" }), "0.1.18")).toBe(false);
     // Nothing to compare with: not offered on a guess.
     expect(updateOffered(box({ hcVersion: null }), "0.1.18")).toBe(false);
     expect(updateOffered(box({ hcVersion: "0.1.12" }), null)).toBe(false);

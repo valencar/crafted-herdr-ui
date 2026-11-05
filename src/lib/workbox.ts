@@ -1,5 +1,5 @@
 import type { MachineView } from "./bindings/MachineView";
-import { formatAge } from "./format";
+import { formatAge, isOlderVersion } from "./format";
 
 /** The core's states for a saved machine, in the words the Workbox screen shows. */
 const STATE_WORDS: Record<string, string> = {
@@ -40,7 +40,9 @@ export function needsLogin(machine: MachineView): boolean {
 
 /**
  * Whether Update hc there… is offered: the core says the machine needs an update, or the hc
- * there is not the one running here (`coreVersion`, this computer's).
+ * there is numerically older than the one running here (`coreVersion`, this computer's).
+ * `hc machine update` copies this computer's hc there, so a newer one there is never offered
+ * it: that would be a downgrade called Update.
  */
 export function updateOffered(
   machine: MachineView,
@@ -48,9 +50,27 @@ export function updateOffered(
 ): boolean {
   if (machine.is_local) return false;
   if (machine.state === "needs_update") return true;
+  return isOlderVersion(machine.hc_version, coreVersion);
+}
+
+/**
+ * What the Update hc there… confirm says: both versions when both are known, so the person sees
+ * what replaces what; the one copied when the machine's is unknown; else the plain sentence.
+ */
+export function updateBody(
+  machine: MachineView,
+  coreVersion: string | null,
+): string {
   const there = machine.hc_version?.trim();
   const here = coreVersion?.trim();
-  return !!there && !!here && there !== here;
+  const after = "and restarts its core. Its terminals keep running.";
+  if (there && here) {
+    return `Replaces hc ${there} on ${machine.name} with ${here} from this computer ${after}`;
+  }
+  if (here) {
+    return `Copies hc ${here} from this computer to ${machine.name} ${after}`;
+  }
+  return `Copies this hc there ${after}`;
 }
 
 /** The machines the person has not hidden: what the sidebar and the lists show. */

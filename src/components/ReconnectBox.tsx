@@ -9,8 +9,8 @@ import { UpdateConfirm } from "./WorkboxDialogs";
 /**
  * What can be done about a workbox that needs attention, as buttons: Connect now (`machine.connect`),
  * Log in… when the core waits for a login, and Update hc there… when it needs an update or runs
- * another hc than this computer. Log in and Update open a tab here; Update asks first. Nothing runs
- * until a click.
+ * an older hc than this computer (`updateOffered`). Log in and Update open a tab here; Update asks
+ * first. Nothing runs until a click.
  */
 export function ReconnectBox({ machine }: { machine: MachineView }) {
   const report = useAppStore((s) => s.reportError);

@@ -467,9 +467,10 @@ describe("Workbox", () => {
     const dialog = screen.getByRole("dialog", {
       name: "Update hc on buildbox?",
     });
+    // Both versions are named, so an update can't hide a downgrade.
     expect(
       within(dialog).getByText(
-        "Copies this hc there and restarts its core. Its terminals keep running.",
+        "Replaces hc 0.1.12 on buildbox with 0.1.18 from this computer and restarts its core. Its terminals keep running.",
       ),
     ).toBeInTheDocument();
     expect(calls("machine_update_args")).toEqual([]);
@@ -490,6 +491,40 @@ describe("Workbox", () => {
       title: "Update hc",
       target: { args: ["machine", "update", "buildbox"] },
     });
+  });
+
+  it("a_connected_machine_on_a_newer_or_the_same_hc_is_not_offered_the_update", () => {
+    // Updating would copy this computer's older hc over it.
+    setup(appState(machine("buildbox", { hcVersion: "0.1.19" })));
+    expect(
+      screen.queryByRole("button", { name: "Update hc there…" }),
+    ).toBeNull();
+    cleanup();
+    setup(appState(machine("buildbox", { hcVersion: "0.1.18" })));
+    expect(
+      screen.queryByRole("button", { name: "Update hc there…" }),
+    ).toBeNull();
+  });
+
+  it("the_update_confirm_without_a_version_there_names_the_one_copied", async () => {
+    const user = setup(
+      appState(
+        machine(
+          "buildbox",
+          { state: "needs_update", hcVersion: "" },
+          { kind: "attention", error: "Needs an hc update" },
+        ),
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Update hc there…" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Update hc on buildbox?",
+    });
+    expect(
+      within(dialog).getByText(
+        "Copies hc 0.1.18 from this computer to buildbox and restarts its core. Its terminals keep running.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("a_connected_machine_on_another_hc_is_offered_the_update", () => {

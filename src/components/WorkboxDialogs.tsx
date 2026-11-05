@@ -1,6 +1,7 @@
 import type { MachineView } from "../lib/bindings/MachineView";
 import { terminalNameProblem } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
+import { updateBody } from "../lib/workbox";
 import { openMachineCommand } from "../terminal/commandTabs";
 import { useAppStore } from "../store/appStore";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -18,15 +19,14 @@ type Props = {
   onRemoved: () => void;
 };
 
-/** What Update hc there… says before it copies hc to a machine and restarts its core (spec 7.4). */
-export const UPDATE_BODY =
-  "Copies this hc there and restarts its core. Its terminals keep running.";
-
 /** What Remove… says before it forgets a machine (spec 7.4). */
 export const REMOVE_BODY =
   "Forgets this machine here. Its terminals keep running there.";
 
-/** The confirm before `hc machine update <name>` runs in a tab; confirming opens the tab. */
+/**
+ * The confirm before `hc machine update <name>` runs in a tab; confirming opens the tab. It names
+ * the hc there and the one copied from this computer (spec 7.4, `updateBody`).
+ */
 export function UpdateConfirm({
   machine,
   onClose,
@@ -34,10 +34,11 @@ export function UpdateConfirm({
   machine: MachineView;
   onClose: () => void;
 }) {
+  const coreVersion = useAppStore((s) => s.state?.core_version ?? null);
   return (
     <ConfirmDialog
       title={`Update hc on ${machine.name}?`}
-      body={UPDATE_BODY}
+      body={updateBody(machine, coreVersion)}
       confirmLabel="Update hc there"
       danger={false}
       onConfirm={() => {

@@ -149,17 +149,34 @@ export function parseVersion(text: string): [number, number, number] | null {
   return parts.map(Number) as [number, number, number];
 }
 
+/** Negative, zero or positive as `a` is below, equal to or above `b`, part by part. */
+function compareParsed(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
 /**
  * True when the version parses and is at least `MIN_VERSION`. Only the numeric X.Y.Z part is
  * compared: a pre-release or build suffix (`0.2.0-beta.1`) is ignored, as `parseVersion` does.
  */
 export function isSupportedVersion(version: string | null): boolean {
   const parsed = version === null ? null : parseVersion(version);
-  if (!parsed) return false;
-  for (let i = 0; i < 3; i++) {
-    if (parsed[i] !== MIN_VERSION[i]) return parsed[i] > MIN_VERSION[i];
-  }
-  return true;
+  return parsed !== null && compareParsed(parsed, MIN_VERSION) >= 0;
+}
+
+/**
+ * True when both versions parse and `a` is numerically lower than `b`, comparing the X.Y.Z part
+ * only (Ruling C21: `0.1.18-beta.1` equals `0.1.18`). Unknown on either side is `false`.
+ */
+export function isOlderVersion(a: string | null, b: string | null): boolean {
+  const pa = a === null ? null : parseVersion(a);
+  const pb = b === null ? null : parseVersion(b);
+  return pa !== null && pb !== null && compareParsed(pa, pb) < 0;
 }
 
 /** Quotes one word for a POSIX shell: plain words stay as they are (Rust `shell_quote`). */
