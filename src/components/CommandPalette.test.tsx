@@ -528,6 +528,54 @@ describe("CommandPalette agent frame", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("a_late_open_in_herdr_keeps_the_highlighted_action", async () => {
+    let answer: (open: boolean) => void = () => {};
+    invoke.mockImplementation((name: string) =>
+      name === "herdr_app_status"
+        ? new Promise<boolean>((resolve) => (answer = resolve))
+        : Promise.resolve(null),
+    );
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    // Down to "Mark as seen", the 7th action before Herdr's answer is in.
+    await user.keyboard("{ArrowDown}".repeat(6));
+    const selected = () =>
+      screen
+        .getAllByRole("option")
+        .find((o) => o.getAttribute("aria-selected") === "true")
+        ?.querySelector(".palette-label")?.textContent;
+    expect(selected()).toBe("Mark as seen");
+    expect(labels()).not.toContain("Open in Herdr");
+
+    // The answer inserts "Open in Herdr" above it: the highlight stays on what the person chose.
+    await act(async () => answer(true));
+    await waitFor(() => expect(labels()).toContain("Open in Herdr"));
+    expect(selected()).toBe("Mark as seen");
+    await user.keyboard("{Enter}");
+    expect(invoke).toHaveBeenCalledWith("mark_seen", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("open_in_herdr", expect.anything());
+  });
+
+  it("an_ended_agents_frame_never_asks_herdr", async () => {
+    useAppStore.setState({
+      state: appState(
+        [
+          [
+            { id: "buildbox", target: "buildbox" },
+            buildboxTerms({ "w2:p1": { status: "ended" } }),
+          ],
+        ],
+        { path: "/usr/local/bin/herdr" },
+      ),
+    });
+    const user = open();
+    await user.type(screen.getByRole("combobox"), "tester");
+    await user.keyboard("{Tab}");
+    expect(labels()[0]).toBe("Copy address");
+    expect(invoke).not.toHaveBeenCalledWith("herdr_app_status");
+  });
+
   it("tab_on_a_command_does_nothing", async () => {
     const user = open();
     const input = screen.getByRole("combobox");

@@ -86,7 +86,7 @@ pub async fn locate_app_in(
     applications: &[PathBuf],
     limit: Duration,
 ) -> Option<PathBuf> {
-    let forwarded = crate::env::herdr_app_env(env);
+    let forwarded = crate::env::herdr_app_env(env, env);
     for candidate in app_candidates(env, applications) {
         if !candidate.is_file() {
             continue;
@@ -122,6 +122,31 @@ pub fn peek_display(full_address: &str) -> String {
     args_display(COMMAND, &argv[1..])
 }
 
+/// Why `herdr-app do terminal.peek` did not show the terminal.
+#[derive(Debug, thiserror::Error)]
+pub enum PeekError {
+    /// There is no Herdr window to ask (`herdr-app` exits 2).
+    #[error("{0}")]
+    NoWindow(String),
+    /// The window, or `herdr-app`, refused or failed.
+    #[error("{0}")]
+    Failed(String),
+    /// No answer in time. The window may already have the request.
+    #[error("{message}")]
+    TimedOut { argv: Vec<String>, message: String },
+}
+
+impl From<PeekError> for ActionError {
+    fn from(e: PeekError) -> Self {
+        match e {
+            PeekError::NoWindow(message) | PeekError::Failed(message) => {
+                ActionError::invalid(message)
+            }
+            PeekError::TimedOut { argv, message } => ActionError::MaybeApplied { argv, message },
+        }
+    }
+}
+
 /// Runs `herdr-app do terminal.peek` and adds it to the command log.
 pub async fn open_in_herdr(
     app: &Path,
@@ -129,34 +154,74 @@ pub async fn open_in_herdr(
     core: &CoreClient,
     machine_id: &str,
     full_address: &str,
-) -> Result<(), ActionError> {
+) -> Result<(), PeekError> {
+    open_in_herdr_within(app, env, core, machine_id, full_address, PEEK_TIMEOUT).await
+}
+
+async fn open_in_herdr_within(
+    app: &Path,
+    env: &[(String, String)],
+    core: &CoreClient,
+    machine_id: &str,
+    full_address: &str,
+    limit: Duration,
+) -> Result<(), PeekError> {
     let argv = peek_argv(app, full_address);
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..])
         .env_clear()
         .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     let child = cmd
         .spawn()
-        .map_err(|e| ActionError::invalid(format!("Couldn't run herdr-app: {e}.")))?;
-    let output = timeout(PEEK_TIMEOUT, child.wait_with_output())
+        .map_err(|e| PeekError::Failed(format!("Couldn't run herdr-app: {e}.")))?;
+    let output = timeout(limit, child.wait_with_output())
         .await
-        .map_err(|_| ActionError::invalid("Herdr didn't answer in time."))?
-        .map_err(|e| ActionError::invalid(format!("Couldn't run herdr-app: {e}.")))?;
+        .map_err(|_| PeekError::TimedOut {
+            argv: argv.clone(),
+            message: "Herdr didn't answer in time.".to_owned(),
+        })?
+        .map_err(|e| PeekError::Failed(format!("Couldn't run herdr-app: {e}.")))?;
     if !output.status.success() {
-        return Err(ActionError::invalid(peek_failure(&output.stderr)));
+        let reason = peek_failure(&output.stdout, &output.stderr);
+        // Exit 2 is `herdr-app` itself failing to reach a window; exit 1 is the window's answer.
+        return Err(if output.status.code() == Some(2) {
+            PeekError::NoWindow(reason)
+        } else {
+            PeekError::Failed(reason)
+        });
     }
     core.log_note(machine_id, peek_display(full_address), "shown in Herdr");
     Ok(())
 }
 
-/// Why `herdr-app do` failed, from the first line of what it printed to stderr.
-fn peek_failure(stderr: &[u8]) -> String {
-    let text = String::from_utf8_lossy(stderr);
-    match text.lines().map(str::trim).find(|l| !l.is_empty()) {
+/// Why `herdr-app do` failed. The window's own refusal (exit 1) is the `error` of the JSON on
+/// stdout (a string, or an object with a `message`); `herdr-app`'s own failure (exit 2) is a line
+/// on stderr. Whichever is there, first line only.
+fn peek_failure(stdout: &[u8], stderr: &[u8]) -> String {
+    let from_json = serde_json::from_slice::<serde_json::Value>(stdout)
+        .ok()
+        .and_then(|v| match v.get("error")? {
+            serde_json::Value::String(s) => Some(s.clone()),
+            other => other
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        });
+    let first_line = |bytes: &[u8]| {
+        String::from_utf8_lossy(bytes)
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(str::to_owned)
+    };
+    let reason = from_json
+        .and_then(|r| first_line(r.as_bytes()))
+        .or_else(|| first_line(stderr));
+    match reason {
         Some(line) => format!("Herdr couldn't show the terminal: {line}"),
         None => "Herdr couldn't show the terminal.".to_owned(),
     }
@@ -166,18 +231,26 @@ fn peek_failure(stderr: &[u8]) -> String {
 pub struct HerdrApp {
     applications: Vec<PathBuf>,
     ttl: Duration,
+    process: LoginEnv,
     cache: tokio::sync::Mutex<Cache>,
 }
 
 #[derive(Default)]
 struct Cache {
     path: Option<PathBuf>,
-    status: Option<(Instant, bool)>,
+    status: Option<Status>,
+}
+
+/// The last `status` answer, and the environment that got it (the one the click then uses).
+struct Status {
+    at: Instant,
+    /// The environment `herdr-app` answered under; `None` when neither did.
+    env: Option<Vec<(String, String)>>,
 }
 
 impl Default for HerdrApp {
     fn default() -> Self {
-        Self::with(system_app_dirs(), STATUS_TTL)
+        Self::with(system_app_dirs(), STATUS_TTL).with_process_env(crate::env::process_env())
     }
 }
 
@@ -186,12 +259,20 @@ impl HerdrApp {
         Self::default()
     }
 
+    /// With no process environment: tests never depend on the one they run in.
     pub fn with(applications: Vec<PathBuf>, ttl: Duration) -> Self {
         HerdrApp {
             applications,
             ttl,
+            process: LoginEnv::default(),
             cache: tokio::sync::Mutex::default(),
         }
+    }
+
+    /// The environment of this process, where the window's own variables are read first.
+    pub fn with_process_env(mut self, process: LoginEnv) -> Self {
+        self.process = process;
+        self
     }
 
     /// The `herdr-app` in use, found again when none was found or the file is gone.
@@ -208,20 +289,86 @@ impl HerdrApp {
         cache.path.clone()
     }
 
+    /// The environments to ask `herdr-app` under, best first (Ruling C103). The two variables
+    /// that choose the window (`HERDR_APP_HOME`, `XDG_CONFIG_HOME`) come first from this
+    /// process: a Herdr.app started from the Dock shares its launch environment, not the login
+    /// shell's. If the login shell's values differ, they are the second try.
+    fn env_choices(&self, login: &LoginEnv) -> Vec<Vec<(String, String)>> {
+        let mut choices = vec![crate::env::herdr_app_env(login, &self.process)];
+        let from_login = crate::env::herdr_app_env(login, login);
+        if !choices.contains(&from_login) {
+            choices.push(from_login);
+        }
+        choices
+    }
+
+    /// Asks `status` under each environment in turn; the first to answer wins and is cached
+    /// with the answer for the ttl. Returns the winning environment, if any.
+    async fn status_in(
+        &self,
+        cache: &mut Cache,
+        login: &LoginEnv,
+    ) -> Option<(PathBuf, Option<Vec<(String, String)>>)> {
+        let app = self.path_in(cache, login).await?;
+        if let Some(status) = &cache.status
+            && status.at.elapsed() < self.ttl
+        {
+            return Some((app, status.env.clone()));
+        }
+        let mut won = None;
+        for env in self.env_choices(login) {
+            if window_open(&app, &env, PROBE_TIMEOUT).await {
+                won = Some(env);
+                break;
+            }
+        }
+        cache.status = Some(Status {
+            at: Instant::now(),
+            env: won.clone(),
+        });
+        Some((app, won))
+    }
+
     /// Whether Herdr's window is open, answered from the last check for 5 s.
     pub async fn is_open(&self, login: &LoginEnv) -> bool {
         let mut cache = self.cache.lock().await;
-        if let Some((at, open)) = cache.status
-            && at.elapsed() < self.ttl
-        {
-            return open;
+        match self.status_in(&mut cache, login).await {
+            Some((_, env)) => env.is_some(),
+            None => {
+                cache.status = None;
+                false
+            }
         }
-        let open = match self.path_in(&mut cache, login).await {
-            Some(app) => window_open(&app, &crate::env::herdr_app_env(login), PROBE_TIMEOUT).await,
-            None => false,
+    }
+
+    /// Shows a terminal in Herdr's window, under the environment its `status` answered under.
+    /// With no window, it still tries the first environment, so the person reads Herdr's own
+    /// words. A "no window" answer drops the cached open.
+    pub async fn open(
+        &self,
+        login: &LoginEnv,
+        core: &CoreClient,
+        machine_id: &str,
+        full_address: &str,
+    ) -> Result<(), ActionError> {
+        let (app, env) = {
+            let mut cache = self.cache.lock().await;
+            let (app, env) = self
+                .status_in(&mut cache, login)
+                .await
+                .ok_or_else(|| ActionError::invalid("Herdr was not found on this computer."))?;
+            let env = env.unwrap_or_else(|| self.env_choices(login).swap_remove(0));
+            (app, env)
         };
-        cache.status = Some((Instant::now(), open));
-        open
+        match open_in_herdr(&app, &env, core, machine_id, full_address).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if matches!(e, PeekError::NoWindow(_)) {
+                    self.cache.lock().await.status = None;
+                }
+                Err(e.into())
+            }
+        }
     }
 }
 
@@ -260,6 +407,39 @@ esac"#
 
     fn login(home: &Path, path: &str) -> LoginEnv {
         parse_env_output(&format!("HOME={}\0PATH={path}\0", home.display()))
+    }
+
+    /// Like `login`, with more `NAME=value` entries.
+    fn login_with(home: &Path, path: &str, extra: &[(&str, &str)]) -> LoginEnv {
+        let mut text = format!("HOME={}\0PATH={path}\0", home.display());
+        for (k, v) in extra {
+            text.push_str(&format!("{k}={v}\0"));
+        }
+        parse_env_output(&text)
+    }
+
+    /// A stand-in whose `status` answers (exit 0) only when `HERDR_APP_HOME` matches the glob
+    /// `answers` (`*` is any), and logs the value it was asked with. `do` records its argv and
+    /// environment in `calls.log` and exits 0.
+    fn picky(dir: &Path, answers: &str) -> PathBuf {
+        let body = format!(
+            r#"case "$1" in
+  --version) echo "herdr-app 0.1.13" ;;
+  status) echo "$HERDR_APP_HOME" >> "${{0%/*}}/status.log"
+    case "$HERDR_APP_HOME" in {answers}) exit 0 ;; esac
+    exit 2 ;;
+  *) {{ printf '%s\n' "$@"; echo ---; /usr/bin/env; echo ===; }} >> "${{0%/*}}/calls.log" ;;
+esac"#
+        );
+        script(dir, "herdr-app", &body)
+    }
+
+    fn status_asks(dir: &Path) -> Vec<String> {
+        std::fs::read_to_string(dir.join("status.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
     }
 
     fn client() -> CoreClient {
@@ -437,6 +617,9 @@ esac"#
             ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
             ("HERDR_APP_HOME".to_owned(), "/home/dev/scratch".to_owned()),
         ];
+        // A variable of this very process must not reach the child (`env_clear`).
+        // SAFETY: a name nothing else reads or writes, set before the child is spawned.
+        unsafe { std::env::set_var("HERDR_UI_TEST_SENTINEL_T19", "leaked") };
         open_in_herdr(&app, &env, &core, "buildbox", "buildbox/t7")
             .await
             .unwrap();
@@ -447,6 +630,7 @@ esac"#
         // Exactly the env it was given, nothing of the app's own.
         assert!(rest.contains("HERDR_APP_HOME=/home/dev/scratch\n"));
         assert!(!rest.contains("HC_"), "{rest}");
+        assert!(!rest.contains("HERDR_UI_TEST_SENTINEL_T19"), "{rest}");
 
         let log = core.command_log();
         assert_eq!(log.len(), 1);
@@ -482,7 +666,7 @@ esac"#
              HERDR_APP_HOME=/h\0XDG_CONFIG_HOME=/c\0XDG_RUNTIME_DIR=/r\0HC_SESSION=x\0\
              HC_SOCKET=/s\0HC_TERMINAL_SOCKET=/t\0HC_TERMINAL_ID=t1\0HC_SCOPE=t1\0",
         );
-        let env = crate::env::herdr_app_env(&login);
+        let env = crate::env::herdr_app_env(&login, &login);
         let names: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(
             names,
@@ -498,5 +682,158 @@ esac"#
             ]
         );
         assert!(env.contains(&("TERM".to_owned(), "xterm-256color".to_owned())));
+    }
+
+    #[test]
+    fn the_window_vars_come_from_the_process_first() {
+        let login = parse_env_output(
+            "PATH=/bin\0HOME=/home/dev\0HERDR_APP_HOME=/login-home\0XDG_CONFIG_HOME=/login-cfg\0",
+        );
+        let process = parse_env_output(
+            "PATH=/launchd\0HOME=/other\0HERDR_APP_HOME=/process-home\0HC_SOCKET=/s\0",
+        );
+        let env = crate::env::herdr_app_env(&login, &process);
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        // The base six stay the login shell's; the two window vars are the process's, and an
+        // unset one stays unset (no falling back to the shell's here).
+        assert_eq!(get("PATH"), Some("/bin"));
+        assert_eq!(get("HOME"), Some("/home/dev"));
+        assert_eq!(get("HERDR_APP_HOME"), Some("/process-home"));
+        assert_eq!(get("XDG_CONFIG_HOME"), None);
+        assert_eq!(get("HC_SOCKET"), None);
+    }
+
+    #[tokio::test]
+    async fn the_process_env_wins_when_both_answer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("bin");
+        picky(&dir, "*");
+        let login = login_with(
+            tmp.path(),
+            &dir.display().to_string(),
+            &[("HERDR_APP_HOME", "/from-login")],
+        );
+        let process = parse_env_output("HERDR_APP_HOME=/from-process\0");
+        let app = HerdrApp::with(Vec::new(), Duration::from_secs(60)).with_process_env(process);
+        assert!(app.is_open(&login).await);
+        // The process env answered, so the login one was never tried.
+        assert_eq!(status_asks(&dir), ["/from-process"]);
+        // And the click uses the same one.
+        app.open(&login, &client(), "local", "t7").await.unwrap();
+        let calls = std::fs::read_to_string(dir.join("calls.log")).unwrap();
+        assert!(calls.contains("HERDR_APP_HOME=/from-process\n"), "{calls}");
+        assert!(!calls.contains("/from-login"), "{calls}");
+    }
+
+    #[tokio::test]
+    async fn the_login_env_is_used_when_only_it_answers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("bin");
+        picky(&dir, "/from-login");
+        let login = login_with(
+            tmp.path(),
+            &dir.display().to_string(),
+            &[("HERDR_APP_HOME", "/from-login")],
+        );
+        let process = parse_env_output("HERDR_APP_HOME=/from-process\0");
+        let app = HerdrApp::with(Vec::new(), Duration::from_secs(60)).with_process_env(process);
+        assert!(app.is_open(&login).await);
+        assert_eq!(status_asks(&dir), ["/from-process", "/from-login"]);
+        // Cached together with the answer: no third ask, and the click goes to the login's.
+        app.open(&login, &client(), "local", "t7").await.unwrap();
+        assert_eq!(status_asks(&dir).len(), 2);
+        let calls = std::fs::read_to_string(dir.join("calls.log")).unwrap();
+        assert!(calls.contains("HERDR_APP_HOME=/from-login\n"), "{calls}");
+    }
+
+    #[tokio::test]
+    async fn hidden_when_neither_env_answers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("bin");
+        picky(&dir, "/somewhere-else");
+        let login = login_with(
+            tmp.path(),
+            &dir.display().to_string(),
+            &[("HERDR_APP_HOME", "/from-login")],
+        );
+        let process = parse_env_output("HERDR_APP_HOME=/from-process\0");
+        let app = HerdrApp::with(Vec::new(), STATUS_TTL).with_process_env(process);
+        assert!(!app.is_open(&login).await);
+        // Both were tried; a login env equal to the process's would be tried once.
+        assert_eq!(status_asks(&dir).len(), 2);
+        let same = HerdrApp::with(Vec::new(), STATUS_TTL)
+            .with_process_env(parse_env_output("HERDR_APP_HOME=/from-login\0"));
+        assert!(!same.is_open(&login).await);
+        assert_eq!(status_asks(&dir).len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_failed_peek_reads_the_reason_from_stdout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = script(
+            tmp.path(),
+            "herdr-app",
+            r#"echo '{ "error": "no such terminal: buildbox/t7" }'; exit 1"#,
+        );
+        let core = client();
+        let err = open_in_herdr(&app, &[], &core, "local", "buildbox/t7")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PeekError::Failed(_)), "{err:?}");
+        assert!(err.to_string().contains("no such terminal"), "{err}");
+        assert!(core.command_log().is_empty());
+        // An error object with a message works too.
+        let app = script(
+            tmp.path(),
+            "herdr-app2",
+            r#"echo '{"error":{"message":"window busy"}}'; exit 1"#,
+        );
+        let err = open_in_herdr(&app, &[], &core, "local", "t7")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("window busy"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_peek_timeout_may_have_been_applied() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = script(tmp.path(), "herdr-app", "exec /bin/sleep 5");
+        let core = client();
+        let err = open_in_herdr_within(&app, &[], &core, "local", "t7", Duration::from_millis(200))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PeekError::TimedOut { .. }), "{err:?}");
+        let action = ActionError::from(err);
+        assert!(
+            matches!(&action, ActionError::MaybeApplied { argv, .. } if argv[1..] == ["do", "terminal.peek", r#"{"terminal":"t7"}"#]),
+            "{action:?}"
+        );
+        assert!(core.command_log().is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_window_on_a_click_clears_the_cached_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("bin");
+        // `status` said open, but by the click the window is gone: `do` exits 2.
+        let body = r#"case "$1" in
+  --version) echo "herdr-app 0.1.13" ;;
+  status) echo x >> "${0%/*}/status.log"; exit 0 ;;
+  *) echo "herdr-app: no Herdr window at /x" >&2; exit 2 ;;
+esac"#;
+        script(&dir, "herdr-app", body);
+        let login = login(tmp.path(), &dir.display().to_string());
+        let app = HerdrApp::with(Vec::new(), Duration::from_secs(60));
+        assert!(app.is_open(&login).await);
+        assert!(app.is_open(&login).await);
+        assert_eq!(status_asks(&dir).len(), 1);
+        let err = app
+            .open(&login, &client(), "local", "t7")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no Herdr window"), "{err}");
+        // The cached true is gone: the next question goes to `herdr-app` again.
+        assert!(app.is_open(&login).await);
+        assert_eq!(status_asks(&dir).len(), 2);
     }
 }

@@ -26,7 +26,8 @@ export function PaneMenu({ row }: { row: Row }) {
   const [closing, setClosing] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const herdrApp = useHerdrApp(open);
+  // An ended terminal is never offered Open in Herdr, so it never asks whether Herdr is open.
+  const herdrApp = useHerdrApp(open && row.status !== "ended");
 
   useMenuBehavior(open, setOpen, {
     items: menuRef,

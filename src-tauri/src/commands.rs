@@ -17,7 +17,7 @@ use crate::actions::{
 };
 use crate::activity::ActivityV2;
 use crate::core::{CommandLogEntry, CoreClient};
-use crate::herdr_app::{self, HerdrApp};
+use crate::herdr_app::HerdrApp;
 use crate::notify::{self, Looking};
 use crate::preview::{self, PreviewManager};
 use crate::pty::TermSize;
@@ -689,19 +689,7 @@ pub async fn open_in_herdr(
         .get()
         .and_then(|s| s.full_address(&machine_id, &address))
         .ok_or_else(|| ActionError::invalid("That terminal is no longer listed."))?;
-    let login = locator.login();
-    let bin = app
-        .path(&login)
-        .await
-        .ok_or_else(|| ActionError::invalid("Herdr was not found on this computer."))?;
-    herdr_app::open_in_herdr(
-        &bin,
-        &crate::env::herdr_app_env(&login),
-        &core,
-        &machine_id,
-        &full,
-    )
-    .await
+    app.open(&locator.login(), &core, &machine_id, &full).await
 }
 
 /// Runs one of the few core commands that need a terminal (`machine login` asks for SSH

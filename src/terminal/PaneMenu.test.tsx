@@ -112,6 +112,14 @@ describe("PaneMenu", () => {
     });
   });
 
+  it("an_ended_terminal_never_asks_whether_herdr_is_open", async () => {
+    const user = userEvent.setup();
+    render(<PaneMenu row={{ ...row, status: "ended" }} />);
+    await user.click(more());
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("herdr_app_status");
+  });
+
   it("lists_the_full_set_in_order_for_a_working_pinned_kept_agent", async () => {
     const user = userEvent.setup();
     render(

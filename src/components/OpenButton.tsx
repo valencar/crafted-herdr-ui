@@ -55,7 +55,7 @@ export function OpenButton({
   // finished terminal can't be attached to, observed or not.
   const canWatch = row.status !== "ended";
   // After the open items, only while Herdr's window is open (and never for an ended row).
-  const herdrApp = useHerdrApp(open) && canWatch;
+  const herdrApp = useHerdrApp(open && canWatch);
   const watchBeside = row.status === "blocked";
   const shortcut = hasTab ? tabShortcut(row.key, tabs, machines) : null;
   const label = hasTab ? "Go to tab" : "Open";

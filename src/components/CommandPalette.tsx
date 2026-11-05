@@ -302,7 +302,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     frameRow !== undefined && tabs.some((t) => t.tabKey === frameRow.key);
 
   // Open in Herdr is offered in the frame only while Herdr's window is open.
-  const herdrApp = useHerdrApp(inFrame);
+  const herdrApp = useHerdrApp(inFrame && frameRow?.status !== "ended");
 
   const actions = useMemo(() => {
     if (!frameRow) return [];
@@ -327,6 +327,23 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         : undefined,
     [frameRow, hasTab, openTarget, terminalLabel],
   );
+
+  // The frame's list can change under the person (Herdr's answer inserts or removes Open in
+  // Herdr): the highlight stays on the same action, by id, so Enter runs what they picked. A new
+  // query is the person's own change and starts at the top as before.
+  const [seenActions, setSeenActions] = useState<{
+    list: AgentAction[];
+    query: string;
+  }>({ list: actions, query });
+  if (seenActions.list !== actions) {
+    const before =
+      seenActions.list[Math.min(active, seenActions.list.length - 1)];
+    setSeenActions({ list: actions, query });
+    if (inFrame && before && seenActions.query === query) {
+      const next = actions.findIndex((a) => a.id === before.id);
+      if (next >= 0 && next !== active) setActive(next);
+    }
+  }
 
   const results = useMemo(() => rankItems(items, query), [items, query]);
   const count = inFrame ? actions.length : results.length;

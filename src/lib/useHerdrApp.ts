@@ -28,6 +28,9 @@ export function useHerdrApp(active: boolean): boolean {
     return () => {
       alive = false;
       clearInterval(timer);
+      // The hook stays mounted between openings of a menu: an old "open" must not be there
+      // when it is asked for again, before the new answer is in.
+      setOpen(false);
     };
   }, [active]);
   return active && open;

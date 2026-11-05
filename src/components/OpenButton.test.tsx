@@ -153,6 +153,44 @@ describe("OpenButton Open in Herdr", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("a_reopened_menu_never_shows_a_stale_answer", async () => {
+    let status: boolean | Promise<boolean> = true;
+    invoke.mockImplementation(async (name: string) =>
+      name === "herdr_app_status" ? status : ATTACH,
+    );
+    const { user } = setup();
+    await user.click(chevron());
+    await screen.findByRole("menuitem", { name: "Open in Herdr" });
+    await user.click(chevron());
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // Herdr's window closes; the next answer is slow.
+    let answer: (open: boolean) => void = () => {};
+    status = new Promise<boolean>((resolve) => (answer = resolve));
+    await user.click(chevron());
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Herdr" }),
+    ).toBeNull();
+    await act(async () => answer(false));
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Herdr" }),
+    ).toBeNull();
+  });
+
+  it("an_ended_row_never_asks_whether_herdr_is_open", async () => {
+    app(true);
+    const { user } = setup({ row: { ...ROW, status: "ended" } });
+    await user.click(chevron());
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+        machineId: "buildbox",
+        address: "w1:p1",
+      }),
+    );
+    expect(invoke).not.toHaveBeenCalledWith("herdr_app_status");
+  });
+
   it("an_ended_row_never_offers_it", async () => {
     app(true);
     const { user } = setup({ row: { ...ROW, status: "ended" } });

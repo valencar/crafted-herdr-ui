@@ -84,7 +84,8 @@ pub fn parse_env_output(s: &str) -> LoginEnv {
     LoginEnv { vars }
 }
 
-fn process_env() -> LoginEnv {
+/// This process's own environment, as a `LoginEnv`.
+pub(crate) fn process_env() -> LoginEnv {
     LoginEnv {
         vars: std::env::vars().collect(),
     }
@@ -169,9 +170,15 @@ pub fn legacy_forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
     pick_env(login, &LEGACY_FORWARDED)
 }
 
-/// The variables a `herdr-app` spawn gets (see `HERDR_APP_FORWARDED`), with `TERM` defaulted.
-pub fn herdr_app_env(login: &LoginEnv) -> Vec<(String, String)> {
-    pick_env(login, &HERDR_APP_FORWARDED)
+/// The variables a `herdr-app` spawn gets (see `HERDR_APP_FORWARDED`): the base six from `login`
+/// (`TERM` defaulted) and the two that choose the window (`HERDR_APP_HOME`, `XDG_CONFIG_HOME`)
+/// from `socket_from`, which is not always the login shell (Ruling C103: a Herdr.app started
+/// from the Dock or Finder has the launch environment, not the shell's).
+pub fn herdr_app_env(login: &LoginEnv, socket_from: &LoginEnv) -> Vec<(String, String)> {
+    let (base, socket) = HERDR_APP_FORWARDED.split_at(6);
+    let mut env = pick_env(login, base);
+    env.extend(pick_env(socket_from, socket));
+    env
 }
 
 fn pick_env(login: &LoginEnv, names: &[&str]) -> Vec<(String, String)> {
