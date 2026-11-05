@@ -2,6 +2,12 @@ import type { MachineView } from "./bindings/MachineView";
 import { shortPath, STATUS_LABEL } from "./format";
 import { fuzzyMatch, fuzzyScore } from "./fuzzy";
 import { groupByProject, needsYou, type Row } from "./grouping";
+import {
+  isDangerItem,
+  PANE_MENU_LABEL,
+  paneMenuItems,
+  type PaneMenuItem,
+} from "./paneMenu";
 import { formatShortcut, type ShortcutId } from "./shortcuts";
 
 export type PaletteGroup =
@@ -182,14 +188,7 @@ export function labelPositions(item: PaletteItem, query: string): number[] {
   return fuzzyMatch(query.trim(), item.label)?.positions ?? [];
 }
 
-export type AgentActionId =
-  | "open"
-  | "open-alt"
-  | "reply"
-  | "copy-attach"
-  | "mark-seen"
-  | "show-in-all"
-  | "close-pane";
+export type AgentActionId = "open" | "open-alt" | "reply" | PaneMenuItem;
 
 /** One line of an agent's action frame (⇥ on an agent in the palette). */
 export type AgentAction = {
@@ -203,9 +202,10 @@ export type AgentAction = {
 };
 
 /**
- * What the palette can do with one agent, in order. "Reply…" is for an idle or done agent only,
- * the Inspector's rule (a blocked agent is never answered for the user); "Mark as seen" is for
- * a done one. Closing is last and asks first.
+ * What the palette can do with one agent, in order: the two ways to open it, "Reply…" (an idle
+ * or done agent only, the Inspector's rule: a blocked agent is never answered for the user), then
+ * exactly what the ⋯ menu lists (`paneMenuItems`, with its words). Closing or removing is last
+ * and asks first.
  */
 export function agentActions(
   row: Row,
@@ -248,13 +248,12 @@ export function agentActions(
   if (row.status === "idle" || row.status === "done") {
     actions.push({ id: "reply", label: "Reply…" });
   }
-  actions.push({ id: "copy-attach", label: "Copy attach command" });
-  if (row.status === "done") {
-    actions.push({ id: "mark-seen", label: "Mark as seen" });
+  for (const item of paneMenuItems(row)) {
+    actions.push({
+      id: item,
+      label: PANE_MENU_LABEL[item],
+      ...(isDangerItem(item) ? { danger: true } : {}),
+    });
   }
-  actions.push(
-    { id: "show-in-all", label: "Show in All agents" },
-    { id: "close-pane", label: "Close pane…", danger: true },
-  );
   return actions;
 }

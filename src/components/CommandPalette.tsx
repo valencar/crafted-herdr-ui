@@ -1,13 +1,12 @@
 import { Kbd } from "./Kbd";
 import { StatusDot } from "./StatusDot";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { copyAttach } from "../lib/copyAttach";
 import { fuzzyMatch } from "../lib/fuzzy";
 import { STATUS_LABEL, shortPath } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
 import { toRows, type Row } from "../lib/grouping";
 import { runMenuAction } from "../lib/menuActions";
-import { markSeen, openRow } from "../lib/openRow";
+import { openRow } from "../lib/openRow";
 import {
   agentActions,
   buildItems,
@@ -16,6 +15,7 @@ import {
   type AgentAction,
   type PaletteItem,
 } from "../lib/palette";
+import { runRowItem } from "../lib/rowActions";
 import { tabShortcutId } from "../lib/shortcuts";
 import {
   focusReplyBox,
@@ -102,7 +102,7 @@ type Frame =
  * The ⌘K command palette: type to jump to an agent, an open tab, a project, a workbox or a
  * command. ↑ and ↓ move, Enter runs the active item, ⌘Enter runs it the other way (an agent
  * opens in the other terminal), ⇥ on an agent lists what can be done with it (Reply…, Copy
- * attach command, Close pane…), Esc closes. It counts as an open modal, so the menu's shortcuts
+ * attach command, Close…), Esc closes. It counts as an open modal, so the menu's shortcuts
  * and Home's stand down while it is up, and it sits on the scrim, above the terminal panel.
  *
  * Focus stays in the input throughout (a combobox): the options are never focused, and nothing
@@ -167,8 +167,23 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const machines = state?.machines;
   const items = useMemo(() => {
     const store = useAppStore.getState();
+    const rows = state ? toRows(state) : [];
+    // One command per workbox that lists ended terminals (spec 7.3); it asks first.
+    const clearEndedCommands = (machines ?? [])
+      .filter((m) =>
+        rows.some((r) => r.machineId === m.id && r.status === "ended"),
+      )
+      .map((m) => ({
+        id: `clear-ended-${m.id}`,
+        label: `Clear ended on ${m.name}`,
+        run: () =>
+          store.setClearEnded(
+            m.id,
+            firstRestorable([previousFocus, menuTrigger]) ?? null,
+          ),
+      }));
     return buildItems({
-      rows: state ? toRows(state) : [],
+      rows,
       machines: machines ?? [],
       commands: [
         {
@@ -232,6 +247,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             window.setTimeout(() => runMenuAction("shortcuts"), 0);
           },
         },
+        ...clearEndedCommands,
         {
           id: "refresh",
           label: "Refresh",
@@ -266,7 +282,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       goToWorkbox: (machineId) => showHomeView({ kind: "workbox", machineId }),
       openTarget,
     });
-  }, [state, machines, openTarget, tabs, rowsByKey]);
+  }, [
+    state,
+    machines,
+    openTarget,
+    tabs,
+    rowsByKey,
+    previousFocus,
+    menuTrigger,
+  ]);
 
   // The agent whose actions are showing, as the state has it now (its status may have moved on).
   const frameRow =
@@ -344,17 +368,14 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       showHomeView({ kind: "all" });
       store.select(row.key);
       focusReplyBoxSoon();
-    } else if (id === "copy-attach") void copyAttach(row);
-    else if (id === "mark-seen") markSeen(row);
-    else if (id === "show-in-all") {
-      store.setQuery("");
-      store.select(row.key);
-      showHomeView({ kind: "all" });
-    } else if (id === "close-pane") {
-      // The confirmation outlives the palette, and focus goes back to where ⌘K was pressed.
-      store.setCloseRow(
-        row,
-        firstRestorable([previousFocus, menuTrigger]) ?? null,
+    } else {
+      // The rest is the ⋯ menu's list. Close… and Remove… hand the row to the store: the
+      // confirmation outlives the palette, and focus goes back to where ⌘K was pressed.
+      runRowItem(id, row, () =>
+        store.setCloseRow(
+          row,
+          firstRestorable([previousFocus, menuTrigger]) ?? null,
+        ),
       );
     }
     onClose();

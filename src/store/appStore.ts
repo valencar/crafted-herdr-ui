@@ -11,7 +11,7 @@ export type GroupBy = "project" | "workbox" | "status";
 export type Sheet = null | "new-session" | "add-workbox";
 /** What a "+ Session" button already knows: the project's workbox and folder. */
 export type SheetPrefill = { machineId?: string; folder?: string };
-/** A just-created pane to open in the terminal once the state lists it. */
+/** A just-created terminal to open in the terminal once the state lists it. */
 export type PendingOpen = { key: string; machineId: string; address: string };
 export type ToastTone = "info" | "error";
 /** What the Home tab shows: the Dashboard, the All agents list, or one workbox's screen. */
@@ -46,10 +46,12 @@ type AppStore = {
   /** The ⌘/ keyboard shortcuts sheet is showing. */
   shortcutsOpen: boolean;
   /**
-   * A pane the user asked to close from somewhere that unmounts as it asks (the palette). `App`
+   * A terminal the user asked to close from somewhere that unmounts as it asks (the palette). `App`
    * renders the confirmation for it (`ClosePaneHost`), so the dialog outlives the asker.
    */
   closeRow: Row | null;
+  /** The workbox whose "Clear ended" was asked for from the palette; `App` confirms it the same way. */
+  clearEndedId: string | null;
   /** Where focus goes when that confirmation ends: the control the asker was opened from. */
   closeReturn: HTMLElement | null;
   /**
@@ -88,6 +90,10 @@ type AppStore = {
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setCloseRow: (row: Row | null, returnTo?: HTMLElement | null) => void;
+  setClearEnded: (
+    machineId: string | null,
+    returnTo?: HTMLElement | null,
+  ) => void;
   dismissVersionBanner: (version: string) => void;
   /** Shows an action error. Every report restarts the auto-dismiss timer. */
   reportError: (e: unknown) => void;
@@ -146,6 +152,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   paletteOpen: false,
   shortcutsOpen: false,
   closeRow: null,
+  clearEndedId: null,
   closeReturn: null,
   dismissedVersion: null,
   toast: null,
@@ -171,6 +178,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setCloseRow: (closeRow, returnTo = null) =>
     set({ closeRow, closeReturn: closeRow ? returnTo : null }),
+  setClearEnded: (clearEndedId, returnTo = null) =>
+    set({ clearEndedId, closeReturn: clearEndedId ? returnTo : null }),
   dismissVersionBanner: (dismissedVersion) => set({ dismissedVersion }),
   reportError: (e) => {
     get().showToast(actionErrorMessage(toActionError(e)), "error");

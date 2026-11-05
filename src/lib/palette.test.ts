@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { MachineView } from "./bindings/MachineView";
 import { machineView, rowOf } from "../test/builders";
 import type { Row } from "./grouping";
+import { PANE_MENU_LABEL, paneMenuItems } from "./paneMenu";
 import { agentActions, buildItems, labelPositions, rankItems } from "./palette";
 
 function row(over: Partial<Row>): Row {
@@ -298,11 +299,43 @@ describe("agentActions", () => {
     for (const status of ["done", "idle", "working", "blocked"] as const) {
       const list = agentActions(row({ status }), ctx);
       expect(list[list.length - 1]).toMatchObject({
-        id: "close-pane",
-        label: "Close pane…",
+        id: "close",
+        label: "Close…",
         danger: true,
       });
       expect(list.slice(0, -1).some((a) => a.danger)).toBe(false);
+    }
+    // An ended terminal is removed, not closed.
+    const ended = agentActions(row({ status: "ended" }), ctx);
+    expect(ended[ended.length - 1]).toMatchObject({
+      id: "remove",
+      label: "Remove…",
+      danger: true,
+    });
+    expect(ended.map((a) => a.id)).not.toContain("close");
+    expect(ended.map((a) => a.id)).not.toContain("reply");
+  });
+
+  it("palette_actions_match_menu", () => {
+    // Everything after the two open actions (and Reply…) is the ⋯ menu's list, in its order,
+    // with the same words.
+    const cases: Partial<Row>[] = [
+      { status: "blocked" },
+      { status: "done", pinned: true },
+      { status: "idle", turn: 4, keep: true },
+      { status: "working" },
+      { status: "ended", exitCode: 1 },
+      { status: "shell" },
+    ];
+    for (const over of cases) {
+      const r = row(over);
+      const rest = agentActions(r, ctx).filter(
+        (a) => a.id !== "open" && a.id !== "open-alt" && a.id !== "reply",
+      );
+      expect(rest.map((a) => a.id)).toEqual(paneMenuItems(r));
+      expect(rest.map((a) => a.label)).toEqual(
+        paneMenuItems(r).map((item) => PANE_MENU_LABEL[item]),
+      );
     }
   });
 
@@ -355,9 +388,12 @@ describe("agentActions", () => {
       "open-alt",
       "reply",
       "copy-attach",
+      "copy-address",
       "mark-seen",
+      "pin",
+      "keep",
       "show-in-all",
-      "close-pane",
+      "close",
     ]);
   });
 });

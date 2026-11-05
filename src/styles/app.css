@@ -163,8 +163,7 @@ kbd {
 .preview-error {
   color: var(--danger);
 }
-.reply,
-.rename {
+.reply {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -206,10 +205,11 @@ kbd {
 }
 .inspector-secondary {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .inspector-secondary .btn {
-  flex: 1;
+  flex: 1 1 auto;
   justify-content: center;
 }
 .btn-wide {
@@ -2800,7 +2800,7 @@ select.field {
 .palette-option.is-danger .palette-label {
   color: var(--danger);
 }
-/* A divider above Close pane…: drawn, not an element, so the listbox keeps only its options. */
+/* A divider above Close…: drawn, not an element, so the listbox keeps only its options. */
 .palette-option.is-danger:not(:first-child) {
   position: relative;
   margin-top: 9px;

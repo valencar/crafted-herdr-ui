@@ -14,7 +14,12 @@ import type { Settings } from "../lib/bindings/Settings";
 import { toRows } from "../lib/grouping";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
-import { appState, buildboxTerms, machineView } from "../test/builders";
+import {
+  agentTerm,
+  appState,
+  buildboxTerms,
+  machineView,
+} from "../test/builders";
 import { Inspector } from "./Inspector";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -88,7 +93,7 @@ describe("Inspector details", () => {
     expect(grid).toHaveTextContent("Workboxbuildbox · Online");
     expect(grid).toHaveTextContent("Sessiondefault");
     expect(grid).toHaveTextContent("Folder~/projects/api-service");
-    expect(grid).toHaveTextContent("Panew1:p1");
+    expect(grid).toHaveTextContent("Terminalw1:p1");
   });
 
   it("labels_an_agent_with_no_kind_agent_and_a_shell_shell", () => {
@@ -398,6 +403,128 @@ describe("Inspector actions", () => {
     await waitFor(() =>
       expect(useAppStore.getState().toast).toBe("pane is gone"),
     );
+  });
+});
+
+describe("Inspector row actions", () => {
+  const stateWithWorkers = (n: number) => {
+    const workers = Array.from({ length: n }, (_, i) =>
+      agentTerm({
+        address: `w3:p${i + 1}`,
+        status: "working",
+        parent: "buildbox/w1:p1",
+      }),
+    );
+    return appState([
+      [
+        { id: "buildbox", target: "buildbox" },
+        [...buildboxTerms(), ...workers],
+      ],
+    ]);
+  };
+  afterEach(() => useAppStore.setState({ state: null }));
+
+  it("close_confirm_names_workers", async () => {
+    // No workers: the spec's sentence alone.
+    useAppStore.setState({ state: stateWithWorkers(0) });
+    const first = setup();
+    await first.user.click(screen.getByRole("button", { name: "Close" }));
+    let dialog = screen.getByRole("dialog", { name: "Close planner?" });
+    expect(dialog).toHaveTextContent(
+      "Ends its program and any workers it started. This can't be undone.",
+    );
+    expect(dialog).not.toHaveTextContent(/It has \d+ workers?\./);
+    first.unmount();
+
+    // Two workers: the count is named.
+    useAppStore.setState({ state: stateWithWorkers(2) });
+    const second = setup();
+    await second.user.click(screen.getByRole("button", { name: "Close" }));
+    dialog = screen.getByRole("dialog", { name: "Close planner?" });
+    expect(dialog).toHaveTextContent(
+      "Ends its program and any workers it started. This can't be undone. It has 2 workers.",
+    );
+    second.unmount();
+
+    // One worker: singular.
+    useAppStore.setState({ state: stateWithWorkers(1) });
+    const third = setup();
+    await third.user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("It has 1 worker.");
+  });
+
+  it("an_ended_terminal_is_removed_after_a_confirmation", async () => {
+    const ended = { ...SHELL, status: "ended" as const };
+    const { user } = setup(ended);
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove zsh?" });
+    expect(dialog).toHaveTextContent("This can't be undone.");
+    expect(invoke).not.toHaveBeenCalledWith(
+      "remove_terminal",
+      expect.anything(),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(invoke).not.toHaveBeenCalledWith(
+      "remove_terminal",
+      expect.anything(),
+    );
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await user.click(screen.getByRole("button", { name: "Remove terminal" }));
+    expect(invoke).toHaveBeenCalledWith("remove_terminal", {
+      machineId: "buildbox",
+      address: "w1:p3",
+    });
+  });
+
+  it("pin_and_keep_toggle_from_the_row", async () => {
+    const first = setup(WORKING);
+    await first.user.click(screen.getByRole("button", { name: "Pin" }));
+    expect(invoke).toHaveBeenCalledWith("set_pinned", {
+      machineId: "buildbox",
+      address: "w1:p2",
+      pinned: true,
+    });
+    await first.user.click(screen.getByRole("button", { name: "Keep" }));
+    expect(invoke).toHaveBeenCalledWith("set_keep", {
+      machineId: "buildbox",
+      address: "w1:p2",
+      keep: true,
+    });
+    first.unmount();
+    setup({ ...WORKING, pinned: true, keep: true });
+    expect(screen.getByRole("button", { name: "Unpin" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Don't keep" }),
+    ).toBeInTheDocument();
+  });
+
+  it("interrupt_and_mark_unread_follow_the_status", async () => {
+    const working = setup(WORKING);
+    invoke.mockImplementation(async (name: string) =>
+      name === "interrupt_terminal" ? "It stopped." : null,
+    );
+    await working.user.click(screen.getByRole("button", { name: "Interrupt" }));
+    expect(invoke).toHaveBeenCalledWith("interrupt_terminal", {
+      machineId: "buildbox",
+      address: "w1:p2",
+    });
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("It stopped."),
+    );
+    expect(screen.queryByRole("button", { name: "Mark unread" })).toBeNull();
+    working.unmount();
+
+    const idle = setup({ ...IDLE, turn: 2 });
+    expect(screen.queryByRole("button", { name: "Interrupt" })).toBeNull();
+    await idle.user.click(screen.getByRole("button", { name: "Mark unread" }));
+    expect(invoke).toHaveBeenCalledWith("mark_unread", {
+      machineId: "buildbox",
+      address: "w2:p2",
+    });
+    idle.unmount();
+    setup({ ...IDLE, turn: 0 });
+    expect(screen.queryByRole("button", { name: "Mark unread" })).toBeNull();
   });
 });
 

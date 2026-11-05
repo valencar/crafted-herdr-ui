@@ -23,6 +23,7 @@ const row: Row = rowOf({
   machineId: "buildbox",
   machineLabel: "buildbox",
   address: "w1:p1",
+  fullAddress: "buildbox/w1:p1",
   kind: "claude",
   name: "planner",
   title: "refactor auth",
@@ -77,9 +78,145 @@ describe("PaneMenu", () => {
     await user.click(more());
     expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
       "Copy attach command",
+      "Copy address",
+      "Pin",
+      "Keep",
       "Show in All agents",
-      "Close pane…",
+      "Close…",
     ]);
+  });
+
+  it("lists_the_full_set_in_order_for_a_working_pinned_kept_agent", async () => {
+    const user = userEvent.setup();
+    render(
+      <PaneMenu
+        row={{ ...row, status: "working", pinned: true, keep: true }}
+      />,
+    );
+    await user.click(more());
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
+      "Copy attach command",
+      "Copy address",
+      "Unpin",
+      "Interrupt",
+      "Don't keep",
+      "Show in All agents",
+      "Close…",
+    ]);
+  });
+
+  it("copy_address_copies_full_address", async () => {
+    const user = userEvent.setup();
+    render(<PaneMenu row={row} />);
+    await user.click(more());
+    await user.click(screen.getByRole("menuitem", { name: "Copy address" }));
+    await waitFor(() => expect(copy).toHaveBeenCalledWith("buildbox/w1:p1"));
+    // The address is built from the row; Rust is not asked for it.
+    expect(invoke).not.toHaveBeenCalledWith(
+      "copy_attach_command",
+      expect.anything(),
+    );
+    await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
+    expect(more()).toHaveFocus();
+  });
+
+  it("interrupt_toasts_result", async () => {
+    invoke.mockImplementation(async (name: string) =>
+      name === "interrupt_terminal" ? "It stopped working." : null,
+    );
+    const user = userEvent.setup();
+    render(<PaneMenu row={{ ...row, status: "working" }} />);
+    await user.click(more());
+    await user.click(screen.getByRole("menuitem", { name: "Interrupt" }));
+    expect(invoke).toHaveBeenCalledWith("interrupt_terminal", {
+      machineId: "buildbox",
+      address: "w1:p1",
+    });
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe("It stopped working."),
+    );
+    expect(useAppStore.getState().toastTone).toBe("info");
+  });
+
+  it("a_lost_interrupt_is_shown_as_maybe_applied", async () => {
+    invoke.mockImplementation(async (name: string) => {
+      if (name === "interrupt_terminal") {
+        throw { kind: "maybeApplied", message: "The connection dropped." };
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<PaneMenu row={{ ...row, status: "working" }} />);
+    await user.click(more());
+    await user.click(screen.getByRole("menuitem", { name: "Interrupt" }));
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toContain("The connection dropped."),
+    );
+    expect(useAppStore.getState().toastTone).toBe("error");
+  });
+
+  it("pin_keep_and_mark_unread_call_their_commands", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <PaneMenu row={{ ...row, status: "idle", turn: 2 }} />,
+    );
+    await user.click(more());
+    await user.click(screen.getByRole("menuitem", { name: "Mark as unread" }));
+    expect(invoke).toHaveBeenCalledWith("mark_unread", {
+      machineId: "buildbox",
+      address: "w1:p1",
+    });
+    await user.click(more());
+    await user.click(screen.getByRole("menuitem", { name: "Pin" }));
+    expect(invoke).toHaveBeenCalledWith("set_pinned", {
+      machineId: "buildbox",
+      address: "w1:p1",
+      pinned: true,
+    });
+    await user.click(more());
+    await user.click(screen.getByRole("menuitem", { name: "Keep" }));
+    expect(invoke).toHaveBeenCalledWith("set_keep", {
+      machineId: "buildbox",
+      address: "w1:p1",
+      keep: true,
+    });
+    rerender(
+      <PaneMenu row={{ ...row, status: "idle", pinned: true, keep: true }} />,
+    );
+    await user.click(more());
+    await user.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    expect(invoke).toHaveBeenCalledWith("set_pinned", {
+      machineId: "buildbox",
+      address: "w1:p1",
+      pinned: false,
+    });
+    await user.click(more());
+    await user.click(screen.getByRole("menuitem", { name: "Don't keep" }));
+    expect(invoke).toHaveBeenCalledWith("set_keep", {
+      machineId: "buildbox",
+      address: "w1:p1",
+      keep: false,
+    });
+  });
+
+  it("an_ended_terminal_offers_remove_with_a_confirmation", async () => {
+    const user = userEvent.setup();
+    render(<PaneMenu row={{ ...row, status: "ended", exitCode: 1 }} />);
+    await user.click(more());
+    expect(screen.queryByRole("menuitem", { name: "Close…" })).toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "Remove…" }));
+    expect(
+      screen.getByRole("dialog", { name: "Remove planner?" }),
+    ).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith(
+      "remove_terminal",
+      expect.anything(),
+    );
+    await user.click(screen.getByRole("button", { name: "Remove terminal" }));
+    expect(invoke).toHaveBeenCalledWith("remove_terminal", {
+      machineId: "buildbox",
+      address: "w1:p1",
+    });
   });
 
   it("show_in_all_selects_the_row", async () => {
@@ -106,11 +243,11 @@ describe("PaneMenu", () => {
     expect(useAppStore.getState().selectedKey).toBe(row.key);
   });
 
-  it("close_pane_confirms_first", async () => {
+  it("close_confirms_first", async () => {
     const user = userEvent.setup();
     render(<PaneMenu row={row} />);
     await user.click(more());
-    await user.click(screen.getByRole("menuitem", { name: "Close pane…" }));
+    await user.click(screen.getByRole("menuitem", { name: "Close…" }));
     expect(
       screen.getByRole("dialog", { name: "Close planner?" }),
     ).toBeInTheDocument();
@@ -147,7 +284,7 @@ describe("PaneMenu", () => {
     const menu = screen.getByRole("menu");
     expect(container.contains(menu)).toBe(false);
     expect(menu.parentElement).toBe(document.body);
-    const danger = screen.getByRole("menuitem", { name: "Close pane…" });
+    const danger = screen.getByRole("menuitem", { name: "Close…" });
     expect(danger).toHaveClass("is-danger");
     expect(danger.previousElementSibling).toHaveAttribute("role", "separator");
   });

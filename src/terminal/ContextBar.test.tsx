@@ -86,10 +86,10 @@ afterEach(() => {
 const terminalButton = () =>
   screen.findByRole("button", { name: "Open in Ghostty" });
 
-/** Close pane… lives in the ⋯ menu. */
+/** Close… lives in the ⋯ menu. */
 async function openClosePane(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "More actions" }));
-  await user.click(screen.getByRole("menuitem", { name: "Close pane…" }));
+  await user.click(screen.getByRole("menuitem", { name: "Close…" }));
 }
 
 describe("ContextBar", () => {
@@ -268,8 +268,8 @@ describe("ContextBar", () => {
       "Open in Ghostty",
       "More actions",
     ]);
-    // Close pane… is in the menu, not in the bar.
-    expect(screen.queryByRole("button", { name: "Close pane…" })).toBeNull();
+    // Close… is in the menu, not in the bar.
+    expect(screen.queryByRole("button", { name: "Close…" })).toBeNull();
   });
 
   it("open_in_terminal_is_outlined_and_find_and_detach_are_ghost", async () => {

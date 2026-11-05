@@ -2,20 +2,15 @@ import { Fragment, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { CloseConfirm } from "../components/CloseConfirm";
 import { Tooltip } from "../components/Tooltip";
-import { copyAttach } from "../lib/copyAttach";
 import type { Row } from "../lib/grouping";
-import { markSeen } from "../lib/openRow";
-import { paneMenuItems, type PaneMenuItem } from "../lib/paneMenu";
-import { showHomeView } from "../lib/uiHelpers";
+import {
+  isDangerItem,
+  PANE_MENU_LABEL,
+  paneMenuItems,
+  type PaneMenuItem,
+} from "../lib/paneMenu";
+import { runRowItem } from "../lib/rowActions";
 import { PINNED, useMenuBehavior } from "../lib/useMenuBehavior";
-import { useAppStore } from "../store/appStore";
-
-const LABEL: Record<PaneMenuItem, string> = {
-  "copy-attach": "Copy attach command",
-  "mark-seen": "Mark as seen",
-  "show-in-all": "Show in All agents",
-  "close-pane": "Close pane…",
-};
 
 /**
  * The context bar's ⋯ menu: the rarer things to do with the active tab's agent, so the bar keeps
@@ -30,7 +25,6 @@ export function PaneMenu({ row }: { row: Row }) {
   const [closing, setClosing] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const select = useAppStore((s) => s.select);
 
   useMenuBehavior(open, setOpen, {
     items: menuRef,
@@ -58,14 +52,7 @@ export function PaneMenu({ row }: { row: Row }) {
   const run = (item: PaneMenuItem) => {
     setOpen(false);
     buttonRef.current?.focus();
-    if (item === "copy-attach") void copyAttach(row);
-    else if (item === "mark-seen") markSeen(row);
-    else if (item === "show-in-all") {
-      // A saved search could filter the row out of the list it is about to be shown in.
-      useAppStore.getState().setQuery("");
-      select(row.key);
-      showHomeView({ kind: "all" });
-    } else setClosing(true);
+    runRowItem(item, row, () => setClosing(true));
   };
 
   return (
@@ -94,18 +81,18 @@ export function PaneMenu({ row }: { row: Row }) {
           >
             {paneMenuItems(row).map((item) => (
               <Fragment key={item}>
-                {item === "close-pane" && (
+                {isDangerItem(item) && (
                   <div className="menu-sep" role="separator" />
                 )}
                 <button
                   type="button"
                   role="menuitem"
                   className={
-                    "menu-item" + (item === "close-pane" ? " is-danger" : "")
+                    "menu-item" + (isDangerItem(item) ? " is-danger" : "")
                   }
                   onClick={() => run(item)}
                 >
-                  {LABEL[item]}
+                  {PANE_MENU_LABEL[item]}
                 </button>
               </Fragment>
             ))}

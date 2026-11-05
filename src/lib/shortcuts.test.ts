@@ -100,7 +100,7 @@ describe("sheetRows", () => {
     });
     expect(rows).toContainEqual({
       group: "list",
-      label: "Close pane (asks first)",
+      label: "Close or remove (asks first)",
       keys: "⌫",
     });
     expect(rows).toContainEqual({

@@ -26,7 +26,15 @@ export type CommandResults = {
   preview_new_session: string[];
   reply_to_agent: null;
   mark_seen: null;
+  /** The text the core observed after the stop key, for a toast. */
+  interrupt_terminal: string;
   close_terminal: null;
+  remove_terminal: null;
+  /** How many ended terminals were removed. */
+  clear_ended: number;
+  set_keep: null;
+  mark_unread: null;
+  set_pinned: null;
   machine_rename: null;
   machine_set_enabled: null;
   machine_remove: null;
@@ -82,7 +90,17 @@ export type CommandArgs = {
   preview_new_session: { req: NewSessionRequest };
   reply_to_agent: { machineId: string; address: string; text: string };
   mark_seen: { machineId: string; address: string };
+  interrupt_terminal: { machineId: string; address: string };
+  /** `terminal.kill`; the UI confirms first. */
   close_terminal: { machineId: string; address: string };
+  /** `terminal.rm` of an ended terminal; the UI confirms first. */
+  remove_terminal: { machineId: string; address: string };
+  /** Removes every ended terminal of one workbox; the UI confirms first. */
+  clear_ended: { machineId: string };
+  set_keep: { machineId: string; address: string; keep: boolean };
+  /** Goes back one turn; refused at turn 0. */
+  mark_unread: { machineId: string; address: string };
+  set_pinned: { machineId: string; address: string; pinned: boolean };
   machine_rename: { id: string; label: string };
   machine_set_enabled: { id: string; enabled: boolean };
   machine_remove: { id: string };

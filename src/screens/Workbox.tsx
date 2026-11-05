@@ -1,5 +1,6 @@
 import { Kbd } from "../components/Kbd";
 import { useEffect, useMemo, useState } from "react";
+import { ClearEndedConfirm } from "../components/CloseConfirm";
 import { PaneBox } from "../components/PaneBox";
 import {
   WorkboxDialogs,
@@ -28,6 +29,7 @@ export function Workbox({ machineId }: { machineId: string }) {
   const [checkedAtMs, setCheckedAtMs] = useState<number | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const machine = state?.machines.find((m) => m.id === machineId) ?? null;
   const online = machine?.health.kind === "online";
@@ -161,6 +163,11 @@ export function Workbox({ machineId }: { machineId: string }) {
     );
   }
 
+  // Spec 7.3: "Clear ended" is offered while this workbox lists ended terminals.
+  const endedCount = hidden
+    ? 0
+    : rows.filter((r) => r.status === "ended").length;
+
   const close = () => setDialog(null);
   const label = machine?.name ?? machineId;
 
@@ -176,6 +183,15 @@ export function Workbox({ machineId }: { machineId: string }) {
             <span className="crumb-current">{label}</span>
           </nav>
           <div className="workbox-heading-actions">
+            {endedCount > 0 && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setClearing(true)}
+              >
+                Clear ended
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-primary"
@@ -188,6 +204,14 @@ export function Workbox({ machineId }: { machineId: string }) {
         {content}
       </main>
 
+      {clearing && (
+        <ClearEndedConfirm
+          machineId={machineId}
+          machineName={label}
+          count={endedCount}
+          onDone={() => setClearing(false)}
+        />
+      )}
       <WorkboxDialogs
         dialog={dialog}
         machine={machine}

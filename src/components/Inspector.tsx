@@ -5,6 +5,13 @@ import { HEALTH_LABEL, shortPath } from "../lib/format";
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { markSeen } from "../lib/openRow";
+import { paneMenuItems } from "../lib/paneMenu";
+import {
+  interruptRow,
+  markUnread,
+  setKeep,
+  setPinned,
+} from "../lib/rowActions";
 import { REPLY_BOX_ID } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
 import { CommandBox, CopyButton } from "./CommandBox";
@@ -84,6 +91,7 @@ export function Inspector({
   };
 
   const [closing, setClosing] = useState(false);
+  const items = paneMenuItems(row);
 
   return (
     <aside className="inspector" aria-label="Selected agent">
@@ -119,7 +127,7 @@ export function Inspector({
           </div>
         )}
         <div>
-          <dt>Pane</dt>
+          <dt>Terminal</dt>
           <dd className="mono">{row.address}</dd>
         </div>
       </dl>
@@ -171,11 +179,47 @@ export function Inspector({
           wide
           kbd={formatShortcut("open-selected")}
         />
-        {row.status === "done" && (
-          <button type="button" className="btn" onClick={() => markSeen(row)}>
-            Mark seen
+        {/* The ⋯ menu's list (`paneMenuItems`), as buttons: what changes the row, apart from
+            the two that end it. */}
+        <div className="inspector-secondary">
+          {items.includes("mark-seen") && (
+            <button type="button" className="btn" onClick={() => markSeen(row)}>
+              Mark seen
+            </button>
+          )}
+          {items.includes("mark-unread") && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => markUnread(row)}
+            >
+              Mark unread
+            </button>
+          )}
+          {items.includes("interrupt") && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void interruptRow(row)}
+            >
+              Interrupt
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setPinned(row, !row.pinned)}
+          >
+            {row.pinned ? "Unpin" : "Pin"}
           </button>
-        )}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setKeep(row, !row.keep)}
+          >
+            {row.keep ? "Don't keep" : "Keep"}
+          </button>
+        </div>
         <div className="inspector-secondary">
           {refusal ? (
             <button
@@ -199,7 +243,7 @@ export function Inspector({
             className="btn btn-danger"
             onClick={() => setClosing(true)}
           >
-            Close
+            {items.includes("remove") ? "Remove" : "Close"}
           </button>
         </div>
       </div>

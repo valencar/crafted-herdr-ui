@@ -3,40 +3,88 @@ import { rowOf } from "../test/builders";
 import type { Row } from "./grouping";
 import { paneMenuItems } from "./paneMenu";
 
-const row = (status: Row["status"]): Row =>
+const row = (status: Row["status"], over: Partial<Row> = {}): Row =>
   rowOf({
-    key: "buildbox::w1:p1",
+    key: "buildbox::t1",
     machineId: "buildbox",
     machineLabel: "buildbox",
-    address: "w1:p1",
+    address: "t1",
     kind: "claude",
     name: "planner",
     title: "",
     status,
     folder: null,
     sinceMs: null,
+    ...over,
   });
 
 describe("paneMenuItems", () => {
-  it("items_by_status", () => {
+  it("menu_items_per_status", () => {
     expect(paneMenuItems(null)).toEqual([]);
+
     expect(paneMenuItems(row("blocked"))).toEqual([
       "copy-attach",
+      "copy-address",
+      "pin",
+      "keep",
       "show-in-all",
-      "close-pane",
+      "close",
     ]);
-    const done = paneMenuItems(row("done"));
-    expect(done[1]).toBe("mark-seen");
-    expect(done).toEqual([
+    // Done: Mark as seen, third.
+    expect(paneMenuItems(row("done"))).toEqual([
       "copy-attach",
+      "copy-address",
       "mark-seen",
+      "pin",
+      "keep",
       "show-in-all",
-      "close-pane",
+      "close",
     ]);
-    for (const s of ["working", "idle", "unknown", "shell"] as const) {
+    // Idle: Mark as unread only once a turn has finished.
+    expect(paneMenuItems(row("idle", { turn: 0 }))).not.toContain(
+      "mark-unread",
+    );
+    expect(paneMenuItems(row("idle", { turn: 3 }))).toEqual([
+      "copy-attach",
+      "copy-address",
+      "mark-unread",
+      "pin",
+      "keep",
+      "show-in-all",
+      "close",
+    ]);
+    // Working: Interrupt, between Pin and Keep.
+    expect(paneMenuItems(row("working"))).toEqual([
+      "copy-attach",
+      "copy-address",
+      "pin",
+      "interrupt",
+      "keep",
+      "show-in-all",
+      "close",
+    ]);
+    // The toggles follow the row.
+    expect(paneMenuItems(row("working", { pinned: true, keep: true }))).toEqual(
+      [
+        "copy-attach",
+        "copy-address",
+        "unpin",
+        "interrupt",
+        "unkeep",
+        "show-in-all",
+        "close",
+      ],
+    );
+    // Ended: Remove replaces Close, and it is still last.
+    const ended = paneMenuItems(row("ended"));
+    expect(ended.slice(-2)).toEqual(["show-in-all", "remove"]);
+    expect(ended).not.toContain("close");
+    for (const s of ["unknown", "shell"] as const) {
       const items = paneMenuItems(row(s));
-      expect(items).not.toContain("mark-seen");
-      expect(items.slice(-2)).toEqual(["show-in-all", "close-pane"]);
+      for (const only of ["mark-seen", "mark-unread", "interrupt"] as const) {
+        expect(items).not.toContain(only);
+      }
+      expect(items.slice(-2)).toEqual(["show-in-all", "close"]);
     }
   });
 });

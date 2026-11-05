@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/bindings/AppState";
@@ -711,6 +718,89 @@ describe("Workbox pane tails", () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
       expect(calls("read_tail").length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("ended terminals", () => {
+    const endedTerms = () =>
+      buildboxTerms({
+        "w1:p2": { status: "ended" },
+        "w2:p1": { status: "ended" },
+      });
+    const clear = () => screen.queryByRole("button", { name: "Clear ended" });
+
+    it("clear_ended_button_only_with_ended_rows", async () => {
+      // None ended: no button.
+      setup();
+      expect(clear()).toBeNull();
+      cleanup();
+
+      // Some ended: the button, which asks before it removes anything.
+      const user = setup(
+        appState(
+          machine("local"),
+          machine("buildbox", { terms: endedTerms() }),
+        ),
+      );
+      expect(clear()).toBeInTheDocument();
+      await user.click(clear()!);
+      const dialog = screen.getByRole("dialog", {
+        name: "Clear ended on buildbox?",
+      });
+      expect(dialog).toHaveTextContent("Removes 2 ended terminals");
+      expect(calls("clear_ended")).toEqual([]);
+
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(calls("clear_ended")).toEqual([]);
+
+      answers.clear_ended = () => 2;
+      await user.click(clear()!);
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", {
+          name: "Clear ended",
+        }),
+      );
+      expect(calls("clear_ended")).toEqual([{ machineId: "buildbox" }]);
+      await waitFor(() =>
+        expect(useAppStore.getState().toast).toBe("Removed 2 ended terminals."),
+      );
+    });
+
+    it("another_workboxs_ended_terminals_do_not_show_the_button", () => {
+      setup(
+        appState(
+          machine("local", { terms: endedTerms() }),
+          machine("buildbox"),
+        ),
+      );
+      expect(clear()).toBeNull();
+    });
+
+    it("a_partial_clear_is_shown_in_rusts_words", async () => {
+      answers.clear_ended = () => {
+        throw {
+          kind: "maybeApplied",
+          message:
+            "Removed 1 ended terminal, but 1 could not be removed: t4 is busy.",
+        };
+      };
+      const user = setup(
+        appState(
+          machine("local"),
+          machine("buildbox", { terms: endedTerms() }),
+        ),
+      );
+      await user.click(clear()!);
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", {
+          name: "Clear ended",
+        }),
+      );
+      await waitFor(() =>
+        expect(useAppStore.getState().toast).toBe(
+          "Removed 1 ended terminal, but 1 could not be removed: t4 is busy.",
+        ),
+      );
     });
   });
 });
