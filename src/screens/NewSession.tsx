@@ -29,6 +29,8 @@ type RunOption = {
   unavailable?: string;
   /** The agent kind, for the badge and for remembering the choice. */
   kind: string | null;
+  /** An agent or a template (an agent's mark, even with no kind); a shell and a command are not. */
+  isAgent: boolean;
 };
 
 const SHELL_ID = "shell";
@@ -100,6 +102,8 @@ export function NewSession({ terminalName }: Props) {
   const [loaded, setLoaded] = useState<{
     machineId: string;
     choices: RunChoices;
+    /** The call itself failed, so nothing was asked of the workbox. */
+    failed: boolean;
   } | null>(null);
   // `undefined` = the default (the saved Run choice, else a plain shell).
   const [runChoice, setRunChoice] = useState<string | undefined>();
@@ -119,9 +123,11 @@ export function NewSession({ terminalName }: Props) {
     forRequest: string;
   } | null>(null);
   // The name the core said is taken, with its words.
-  const [taken, setTaken] = useState<{ name: string; message: string } | null>(
-    null,
-  );
+  const [taken, setTaken] = useState<{
+    machineId: string;
+    name: string;
+    message: string;
+  } | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -152,20 +158,22 @@ export function NewSession({ terminalName }: Props) {
   const machineId = machine?.id ?? null;
 
   // `null` while the chosen workbox is being asked (an answer for another one doesn't count).
-  const choices = loaded?.machineId === machineId ? loaded.choices : null;
+  const current = loaded?.machineId === machineId ? loaded : null;
+  const choices = current?.choices ?? null;
   useEffect(() => {
     if (machineId === null) return;
     let cancelled = false;
     (async () => {
       try {
         const list = await invokeTyped("list_run_choices", { machineId });
-        if (!cancelled) setLoaded({ machineId, choices: list });
+        if (!cancelled) setLoaded({ machineId, choices: list, failed: false });
       } catch (e) {
         if (cancelled) return;
         reportError(e);
         setLoaded({
           machineId,
           choices: { kinds: [], templates: [], kindsChecked: false },
+          failed: true,
         });
       }
     })();
@@ -186,6 +194,7 @@ export function NewSession({ terminalName }: Props) {
         run: { type: "agent", kind: k.kind },
         takesTask: k.takesTask,
         kind: k.kind,
+        isAgent: true,
       }));
     const templates: RunOption[] = (choices?.templates ?? []).map((tpl) => ({
       id: `template:${tpl.name}`,
@@ -199,6 +208,7 @@ export function NewSession({ terminalName }: Props) {
           ? undefined
           : "It has no command.",
       kind: null,
+      isAgent: true,
     }));
     const shell: RunOption = {
       id: SHELL_ID,
@@ -206,6 +216,7 @@ export function NewSession({ terminalName }: Props) {
       run: { type: "shell" },
       takesTask: false,
       kind: null,
+      isAgent: false,
     };
     const command: RunOption = {
       id: COMMAND_ID,
@@ -213,6 +224,7 @@ export function NewSession({ terminalName }: Props) {
       run: { type: "command", line: "" },
       takesTask: false,
       kind: null,
+      isAgent: false,
     };
     const withShell =
       !hideShell || (agents.length === 0 && templates.length === 0);
@@ -240,9 +252,13 @@ export function NewSession({ terminalName }: Props) {
   const trimmedTask = task.trim();
   const isCommand = option?.id === COMMAND_ID;
   const nameHint = nameProblem(trimmedName);
-  const nameTaken = taken !== null && taken.name === trimmedName;
+  const nameTaken =
+    taken !== null &&
+    taken.machineId === machineId &&
+    taken.name === trimmedName;
   const canCreate =
     machineId !== null &&
+    choices !== null &&
     option !== undefined &&
     cwd !== "" &&
     !cwd.startsWith("-") &&
@@ -270,10 +286,22 @@ export function NewSession({ terminalName }: Props) {
   // Only ask Rust for the command once there is a folder to run it in (and, for a custom
   // command, the command).
   const previewJson =
-    cwd !== "" && choices !== null && (!isCommand || commandLine.trim() !== "")
+    cwd !== "" &&
+    choices !== null &&
+    nameHint === null &&
+    (!isCommand || commandLine.trim() !== "")
       ? requestJson
       : null;
   const debouncedPreview = useDebounced(previewJson, PREVIEW_DEBOUNCE_MS);
+  // Why there is no command line yet.
+  const previewHint =
+    cwd === ""
+      ? "Pick a folder to see the command."
+      : nameHint !== null
+        ? "Fix the name to see the command."
+        : isCommand && commandLine.trim() === ""
+          ? "Type the command to see it."
+          : "Waiting for this workbox to answer.";
 
   useEffect(() => {
     if (debouncedPreview === null) return;
@@ -337,7 +365,11 @@ export function NewSession({ terminalName }: Props) {
       }
       const takenWords = takenMessage(err);
       if (takenWords !== null) {
-        setTaken({ name: sent.name ?? "", message: takenWords });
+        setTaken({
+          machineId: sent.machineId,
+          name: sent.name ?? "",
+          message: takenWords,
+        });
         return;
       }
       setFailure({
@@ -507,7 +539,7 @@ export function NewSession({ terminalName }: Props) {
                       onChange={() => setRunChoice(o.id)}
                     />
                     <span aria-hidden="true">
-                      <KindBadge kind={o.kind} named />
+                      <KindBadge kind={o.kind} isAgent={o.isAgent} named />
                     </span>
                     <span className="opt-text">
                       <span className="opt-name">{o.label}</span>
@@ -521,11 +553,18 @@ export function NewSession({ terminalName }: Props) {
                 );
               })}
             </div>
-            {!choices.kindsChecked && (
+            {current?.failed ? (
               <p className="muted sheet-note">
-                Couldn’t check which agents are installed here, so every known
-                agent is listed.
+                Couldn’t load the agents for this workbox. Plain shell and
+                Custom command still work.
               </p>
+            ) : (
+              !choices.kindsChecked && (
+                <p className="muted sheet-note">
+                  Couldn’t check which agents are installed here, so every known
+                  agent is listed.
+                </p>
+              )
             )}
           </>
         )}
@@ -597,9 +636,7 @@ export function NewSession({ terminalName }: Props) {
       <div className="cmdbox" aria-live="polite">
         <div className="cmdbox-caption"># herdr-core will run</div>
         {previewJson === null ? (
-          <div className="cmdbox-caption">
-            Pick a folder to see the command.
-          </div>
+          <div className="cmdbox-caption">{previewHint}</div>
         ) : (
           preview.line !== "" && (
             <div>

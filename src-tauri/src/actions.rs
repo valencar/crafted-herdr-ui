@@ -10,6 +10,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use tokio::sync::OnceCell;
 use ts_rs::TS;
 
 use crate::activity::ActivityV2;
@@ -84,6 +85,17 @@ pub struct RunChoices {
     pub kinds_checked: bool,
 }
 
+impl RunChoices {
+    /// Every known kind and no templates, for a workbox that can't be asked.
+    pub fn unchecked() -> Self {
+        Self {
+            kinds: KNOWN_AGENTS.iter().map(kind_choice).collect(),
+            templates: Vec::new(),
+            kinds_checked: false,
+        }
+    }
+}
+
 /// Why an action did not (fully) happen. Serialized tagged by `kind`, like `HerdrError`.
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -153,6 +165,10 @@ pub fn run_params(req: &NewSessionRequest, machine_name: Option<&str>) -> Result
         return Err("Folder can’t start with “-”.".to_owned());
     }
     let task = req.task.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    // An agent would read it as an option.
+    if task.is_some_and(|t| t.starts_with('-')) {
+        return Err("Task can’t start with “-”.".to_owned());
+    }
     let mut p = Map::new();
     match &req.run {
         RunChoice::Agent { kind } => {
@@ -218,9 +234,16 @@ pub fn preview(
     ))
 }
 
-/// The installed programs found on each machine (by machine id), kept for the session.
+/// One installed-agents check, shared by every ask that overlaps it.
+type Check = Arc<OnceCell<Option<HashSet<String>>>>;
+
+/// The installed programs found on each machine (by machine id), kept for the session, and the
+/// checks in flight, so asks that overlap share one `machine.exec`.
 #[derive(Default)]
-pub struct KindsCache(Mutex<HashMap<String, HashSet<String>>>);
+pub struct KindsCache {
+    found: Mutex<HashMap<String, HashSet<String>>>,
+    inflight: Mutex<HashMap<String, Check>>,
+}
 
 /// The New session calls, through the one door.
 pub struct NewSessions<'a> {
@@ -278,15 +301,36 @@ impl<'a> NewSessions<'a> {
     }
 
     /// The programs on the machine, from the cache or one quiet `machine.exec`. `None` when the
-    /// check failed; a failure is not remembered.
+    /// check failed; a failure is not remembered. Asks that overlap share the one check.
     async fn installed(
         &self,
         machine_id: &str,
         machine_name: Option<&str>,
     ) -> Option<HashSet<String>> {
-        if let Some(found) = lock(&self.cache.0).get(machine_id) {
+        if let Some(found) = lock(&self.cache.found).get(machine_id) {
             return Some(found.clone());
         }
+        let cell = lock(&self.cache.inflight)
+            .entry(machine_id.to_owned())
+            .or_default()
+            .clone();
+        let result = cell
+            .get_or_init(|| self.check(machine_id, machine_name))
+            .await
+            .clone();
+        // The check is over: the next ask looks again (a success is in `found` by now).
+        let mut inflight = lock(&self.cache.inflight);
+        if inflight
+            .get(machine_id)
+            .is_some_and(|c| Arc::ptr_eq(c, &cell))
+        {
+            inflight.remove(machine_id);
+        }
+        result
+    }
+
+    /// One quiet `machine.exec`, remembered when it worked.
+    async fn check(&self, machine_id: &str, machine_name: Option<&str>) -> Option<HashSet<String>> {
         let mut params = json!({
             "argv": ["sh", "-lc", installed_check_script()],
             "timeout": 15,
@@ -300,13 +344,23 @@ impl<'a> NewSessions<'a> {
             .await
             .ok()?;
         let found = installed_programs(&result)?;
-        lock(&self.cache.0).insert(machine_id.to_owned(), found.clone());
+        lock(&self.cache.found).insert(machine_id.to_owned(), found.clone());
         Some(found)
     }
 
-    /// What the sheet offers on this machine. `machine_name` is `None` for Local.
-    pub async fn run_choices(&self, machine_id: &str, machine_name: Option<&str>) -> RunChoices {
-        let installed = self.installed(machine_id, machine_name).await;
+    /// What the sheet offers on this machine. `machine_name` is `None` for Local. A workbox that
+    /// isn't online gets no check (it could hold a slot for 20 s): every kind is listed, unchecked.
+    pub async fn run_choices(
+        &self,
+        machine_id: &str,
+        machine_name: Option<&str>,
+        online: bool,
+    ) -> RunChoices {
+        let installed = if online {
+            self.installed(machine_id, machine_name).await
+        } else {
+            None
+        };
         let kinds = KNOWN_AGENTS
             .iter()
             .filter(|a| installed.as_ref().is_none_or(|set| set.contains(a.program)))
@@ -1042,6 +1096,98 @@ mod tests {
             preview(&bad, None, "hc"),
             Err(ActionError::Invalid { .. })
         ));
+    }
+
+    #[test]
+    fn run_params_task_starting_with_a_dash_is_refused() {
+        // claude, codex and gemini would read it as an option.
+        let mut r = req(agent("claude"));
+        r.task = Some("  --dangerously-skip-permissions".into());
+        let e = run_params(&r, None).unwrap_err();
+        assert!(e.contains("Task") && e.contains('-'), "{e}");
+        let mut t = req(RunChoice::Template {
+            name: "reviewer".into(),
+        });
+        t.task = Some("-rf".into());
+        assert!(run_params(&t, None).is_err());
+        // A dash inside the task is fine.
+        t.task = Some("fix the a-b case".into());
+        assert!(run_params(&t, None).is_ok());
+    }
+
+    #[test]
+    fn unchecked_choices_list_every_known_kind_and_no_templates() {
+        let c = RunChoices::unchecked();
+        assert!(!c.kinds_checked && c.templates.is_empty());
+        assert_eq!(c.kinds.len(), KNOWN_AGENTS.len());
+        assert_eq!(c.kinds[0].kind, "claude");
+        assert!(c.kinds[0].takes_task);
+    }
+
+    /// A core that answers `hello` and then `terminal.run` with `run`.
+    fn core_running(run: fn() -> (u64, crate::core::testing::Reply)) -> CoreClient {
+        use crate::core::connection::{BoxFuture, Connection, Connector, Notification};
+        use crate::core::testing::{Reply, connect, hello_result};
+        struct Fake(fn() -> (u64, Reply));
+        type Opened = (
+            Connection,
+            tokio::sync::mpsc::UnboundedReceiver<Notification>,
+        );
+        impl Connector for Fake {
+            fn connect(&self) -> BoxFuture<'static, Result<Opened, CoreError>> {
+                let run = self.0;
+                let (conn, notes, core) = connect(move |req| match req["method"].as_str() {
+                    Some("hello") => (0, Reply::Result(hello_result())),
+                    _ => run(),
+                });
+                let opened = (conn.keep_alive(core), notes);
+                Box::pin(async move { Ok(opened) })
+            }
+        }
+        CoreClient::new(Arc::new(Fake(run)))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_run_that_times_out_may_have_been_applied() {
+        let core = core_running(|| (0, crate::core::testing::Reply::Silent));
+        let cache = KindsCache::default();
+        let err = NewSessions::new(&core, &cache)
+            .create(&req(RunChoice::Shell), None)
+            .await
+            .unwrap_err();
+        match err {
+            ActionError::MaybeApplied { message, argv } => {
+                assert!(message.contains("terminal.run"), "{message}");
+                assert!(message.contains("may have been applied"), "{message}");
+                assert_eq!(argv[0], "terminal.run");
+            }
+            other => panic!("expected MaybeApplied, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_run_reply_without_an_address_may_have_been_applied() {
+        use crate::core::testing::Reply;
+        let runs: [fn() -> (u64, Reply); 3] = [
+            || (0, Reply::Result(json!({}))),
+            || (0, Reply::Result(json!({"address": ""}))),
+            || (0, Reply::Result(json!({"address": 7}))),
+        ];
+        for run in runs {
+            let core = core_running(run);
+            let cache = KindsCache::default();
+            let err = NewSessions::new(&core, &cache)
+                .create(&req(RunChoice::Shell), Some("buildbox"))
+                .await
+                .unwrap_err();
+            match err {
+                ActionError::MaybeApplied { message, .. } => {
+                    assert!(message.contains("buildbox"), "{message}");
+                    assert!(message.contains("could not be read"), "{message}");
+                }
+                other => panic!("expected MaybeApplied, got {other:?}"),
+            }
+        }
     }
 
     #[test]

@@ -112,8 +112,14 @@ async fn kinds_filtered_by_exec_and_cached() {
         &exec_result("has:claude\nhas:opencode\nhas:not-an-agent\n", 0, false),
     );
 
-    let first = h.new_sessions().run_choices("m-1", Some("buildbox")).await;
-    let second = h.new_sessions().run_choices("m-1", Some("buildbox")).await;
+    let first = h
+        .new_sessions()
+        .run_choices("m-1", Some("buildbox"), true)
+        .await;
+    let second = h
+        .new_sessions()
+        .run_choices("m-1", Some("buildbox"), true)
+        .await;
 
     assert!(first.kinds_checked);
     assert_eq!(kind_names(&first), ["claude", "opencode"]);
@@ -135,10 +141,12 @@ async fn kinds_filtered_by_exec_and_cached() {
     }
     assert!(script.contains("command -v") && script.trim_end().ends_with("; true"));
     // Another machine is checked on its own.
-    h.new_sessions().run_choices("m-2", Some("gpubox")).await;
+    h.new_sessions()
+        .run_choices("m-2", Some("gpubox"), true)
+        .await;
     assert_eq!(h.requests("machine.exec").len(), 2);
     // Local has no `on`.
-    h.new_sessions().run_choices("local", None).await;
+    h.new_sessions().run_choices("local", None, true).await;
     let execs = h.requests("machine.exec");
     assert_eq!(execs.len(), 3);
     assert!(execs[2]["params"].get("on").is_none());
@@ -154,19 +162,28 @@ async fn kinds_fall_back_when_exec_fails() {
         "machine.exec.json",
         &hc_fixture("errors/machine_unknown.json"),
     );
-    let choices = h.new_sessions().run_choices("m-1", Some("buildbox")).await;
+    let choices = h
+        .new_sessions()
+        .run_choices("m-1", Some("buildbox"), true)
+        .await;
     assert!(!choices.kinds_checked);
     assert_eq!(kind_names(&choices), all);
 
     // A check that ran out of time.
     h.put("machine.exec.json", &exec_result("has:claude\n", 0, true));
-    let choices = h.new_sessions().run_choices("m-2", Some("buildbox")).await;
+    let choices = h
+        .new_sessions()
+        .run_choices("m-2", Some("buildbox"), true)
+        .await;
     assert!(!choices.kinds_checked);
     assert_eq!(kind_names(&choices), all);
 
     // A failed check is not remembered: the next ask tries again.
     h.put("machine.exec.json", &exec_result("has:claude\n", 0, false));
-    let choices = h.new_sessions().run_choices("m-2", Some("buildbox")).await;
+    let choices = h
+        .new_sessions()
+        .run_choices("m-2", Some("buildbox"), true)
+        .await;
     assert!(choices.kinds_checked);
     assert_eq!(kind_names(&choices), ["claude"]);
 }
@@ -175,13 +192,19 @@ async fn kinds_fall_back_when_exec_fails() {
 async fn nonzero_exec_exit_is_not_failure() {
     let h = Harness::new();
     h.put("machine.exec.json", &exec_result("has:codex\n", 127, false));
-    let choices = h.new_sessions().run_choices("m-1", Some("buildbox")).await;
+    let choices = h
+        .new_sessions()
+        .run_choices("m-1", Some("buildbox"), true)
+        .await;
     assert!(choices.kinds_checked);
     assert_eq!(kind_names(&choices), ["codex"]);
 
     // Nothing installed is an answer too, not a failure.
     h.put("machine.exec.json", &exec_result("", 1, false));
-    let none = h.new_sessions().run_choices("m-2", Some("gpubox")).await;
+    let none = h
+        .new_sessions()
+        .run_choices("m-2", Some("gpubox"), true)
+        .await;
     assert!(none.kinds_checked);
     assert!(none.kinds.is_empty());
 }
@@ -191,8 +214,11 @@ async fn templates_only_for_local() {
     let h = Harness::new();
     h.put("machine.exec.json", &exec_result("has:claude\n", 0, false));
 
-    let local = h.new_sessions().run_choices("local", None).await;
-    let remote = h.new_sessions().run_choices("m-1", Some("buildbox")).await;
+    let local = h.new_sessions().run_choices("local", None, true).await;
+    let remote = h
+        .new_sessions()
+        .run_choices("m-1", Some("buildbox"), true)
+        .await;
 
     let names: Vec<_> = local.templates.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(names, ["broken", "planner", "reviewer"]);
@@ -300,7 +326,9 @@ async fn a_template_run_gets_a_connection_of_its_own() {
     let h = Harness::new();
     h.put("machine.exec.json", &exec_result("has:claude\n", 0, false));
     // Warm the pool with one connection.
-    h.new_sessions().run_choices("m-1", Some("buildbox")).await;
+    h.new_sessions()
+        .run_choices("m-1", Some("buildbox"), true)
+        .await;
     assert_eq!(h.connections(), 1);
 
     // An ordinary run reuses it.
@@ -319,4 +347,68 @@ async fn a_template_run_gets_a_connection_of_its_own() {
     assert_eq!(h.connections(), 2);
     let runs = h.requests("terminal.run");
     assert_eq!(runs[1]["params"]["argv"], json!(["reviewer", "src/lib.rs"]));
+}
+
+#[tokio::test]
+async fn an_offline_workbox_is_not_asked() {
+    let h = Harness::new();
+    h.put("machine.exec.json", &exec_result("has:claude\n", 0, false));
+
+    let choices = h
+        .new_sessions()
+        .run_choices("m-1", Some("buildbox"), false)
+        .await;
+
+    assert!(!choices.kinds_checked);
+    assert_eq!(kind_names(&choices).len(), KNOWN_AGENTS.len());
+    assert!(h.requests("machine.exec").is_empty());
+    // It is back online: now it is asked, and that answer is the one remembered.
+    let choices = h
+        .new_sessions()
+        .run_choices("m-1", Some("buildbox"), true)
+        .await;
+    assert!(choices.kinds_checked);
+    assert_eq!(h.requests("machine.exec").len(), 1);
+}
+
+#[tokio::test]
+async fn overlapping_asks_share_one_check() {
+    let h = Harness::new();
+    h.put(
+        "machine.exec.json",
+        &json!({
+            "sleep_ms": 300,
+            "result": serde_json::from_str::<Value>(&exec_result("has:claude\n", 0, false)).unwrap(),
+        })
+        .to_string(),
+    );
+
+    let sessions = h.new_sessions();
+    let (a, b, c) = tokio::join!(
+        sessions.run_choices("m-1", Some("buildbox"), true),
+        sessions.run_choices("m-1", Some("buildbox"), true),
+        sessions.run_choices("m-1", Some("buildbox"), true),
+    );
+
+    assert_eq!(a, b);
+    assert_eq!(b, c);
+    assert_eq!(kind_names(&a), ["claude"]);
+    assert_eq!(h.requests("machine.exec").len(), 1);
+
+    // A failed check is shared too, and the next ask after it looks again.
+    h.put(
+        "machine.exec.json",
+        &hc_fixture("errors/machine_unknown.json"),
+    );
+    let sessions = h.new_sessions();
+    let (x, y) = tokio::join!(
+        sessions.run_choices("m-2", Some("gpubox"), true),
+        sessions.run_choices("m-2", Some("gpubox"), true),
+    );
+    assert!(!x.kinds_checked && !y.kinds_checked);
+    assert_eq!(h.requests("machine.exec").len(), 2);
+    h.new_sessions()
+        .run_choices("m-2", Some("gpubox"), true)
+        .await;
+    assert_eq!(h.requests("machine.exec").len(), 3);
 }

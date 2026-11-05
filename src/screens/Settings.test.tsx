@@ -633,7 +633,9 @@ describe("Settings › New session options", () => {
       const g = await group();
       expect(
         await within(g).findByText(
-          "No agent programs were found on this computer.",
+          result === "fail"
+            ? "Couldn’t read the list of agents."
+            : "No agent programs were found on this computer.",
         ),
       ).toBeInTheDocument();
       expect(boxes(g)).toEqual(["$_Plain shell"]);

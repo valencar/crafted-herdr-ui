@@ -30,7 +30,7 @@ use crate::settings::{
     self, CoreLocator, CoreStatus, Settings, SharedSettings, ShortcutState, ShortcutStatus, changes,
 };
 use crate::ssh_config;
-use crate::state::AppState;
+use crate::state::{AppState, Health};
 use crate::sync::SyncCell;
 use crate::terminal::open::{LaunchLog, launch_in_terminal};
 use crate::terminal::session::{TermEvent, TermId, TermSessions, TermSink};
@@ -90,6 +90,24 @@ fn machine_on(sync: &SyncCell, machine_id: &str) -> Result<Option<String>, Actio
         .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))
 }
 
+/// Tells the sync to look again after a create whose outcome is unknown.
+fn refresh_if_maybe_applied<T>(result: &Result<T, ActionError>, refresh: impl FnOnce()) {
+    if matches!(result, Err(ActionError::MaybeApplied { .. })) {
+        refresh();
+    }
+}
+
+/// Whether the core reports the workbox online (the installed-agents check is asked of those
+/// only).
+fn machine_online(sync: &SyncCell, machine_id: &str) -> bool {
+    sync.get().and_then(|s| s.state()).is_some_and(|state| {
+        state
+            .machines
+            .iter()
+            .any(|m| m.id == machine_id && matches!(m.health, Health::Online))
+    })
+}
+
 /// Starts a terminal (`terminal.run`). The address answered is local to its machine.
 #[tauri::command]
 pub async fn create_session(
@@ -102,11 +120,11 @@ pub async fn create_session(
     let result = NewSessions::new(&core, &kinds)
         .create(&req, on.as_deref())
         .await;
-    if matches!(result, Err(ActionError::MaybeApplied { .. }))
-        && let Some(sync) = sync.get()
-    {
-        sync.refresh_machines();
-    }
+    refresh_if_maybe_applied(&result, || {
+        if let Some(sync) = sync.get() {
+            sync.refresh_machines();
+        }
+    });
     result
 }
 
@@ -122,7 +140,9 @@ pub fn preview_new_session(
     preview(&req, on.as_deref(), &name)
 }
 
-/// The agent kinds (installed ones, when the check worked) and templates for one workbox.
+/// The agent kinds (installed ones, when the check worked) and templates for one workbox. A
+/// workbox the core doesn't list, or one that isn't online, is not asked: every known kind comes
+/// back, unchecked.
 #[tauri::command]
 pub async fn list_run_choices(
     core: State<'_, Arc<CoreClient>>,
@@ -130,9 +150,12 @@ pub async fn list_run_choices(
     kinds: State<'_, KindsCache>,
     machine_id: String,
 ) -> Result<RunChoices, ActionError> {
-    let on = machine_on(&sync, &machine_id)?;
+    let Ok(on) = machine_on(&sync, &machine_id) else {
+        return Ok(RunChoices::unchecked());
+    };
+    let online = machine_online(&sync, &machine_id);
     Ok(NewSessions::new(&core, &kinds)
-        .run_choices(&machine_id, on.as_deref())
+        .run_choices(&machine_id, on.as_deref(), online)
         .await)
 }
 
@@ -974,6 +997,28 @@ mod tests {
         assert_eq!(e.to_string(), NOT_YET);
         assert!(matches!(e, ActionError::Invalid { .. }));
         assert!(machine_status().is_err());
+    }
+
+    #[test]
+    fn only_an_unknown_outcome_refreshes_the_machines() {
+        let maybe: Result<(), ActionError> = Err(ActionError::MaybeApplied {
+            argv: vec![],
+            message: "m".into(),
+        });
+        let invalid: Result<(), ActionError> = Err(ActionError::invalid("no"));
+        let calls = std::cell::Cell::new(0);
+        refresh_if_maybe_applied(&maybe, || calls.set(calls.get() + 1));
+        assert_eq!(calls.get(), 1);
+        refresh_if_maybe_applied(&invalid, || calls.set(calls.get() + 1));
+        refresh_if_maybe_applied(&Ok(()), || calls.set(calls.get() + 1));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn no_sync_means_no_workbox_is_online() {
+        let cell = SyncCell::default();
+        assert!(!machine_online(&cell, LOCAL));
+        assert!(!machine_online(&cell, "m-1"));
     }
 
     #[test]

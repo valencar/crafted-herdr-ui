@@ -192,6 +192,8 @@ function NewSessionOptions({
   const stayId = useId();
   // `null` while loading; a failed or empty list means no agent kinds to choose from.
   const [kinds, setKinds] = useState<string[] | null>(null);
+  // The call itself failed, which is not the same as no agent being installed.
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
     invokeTyped("list_run_choices", { machineId: "local" })
@@ -205,7 +207,9 @@ function NewSessionOptions({
         }
       })
       .catch(() => {
-        if (!cancelled) setKinds([]);
+        if (cancelled) return;
+        setFailed(true);
+        setKinds([]);
       });
     return () => {
       cancelled = true;
@@ -293,7 +297,9 @@ function NewSessionOptions({
           </div>
           {noKinds && (
             <p className="muted settings-hint">
-              No agent programs were found on this computer.
+              {failed
+                ? "Couldn’t read the list of agents."
+                : "No agent programs were found on this computer."}
             </p>
           )}
           {lastOne && (

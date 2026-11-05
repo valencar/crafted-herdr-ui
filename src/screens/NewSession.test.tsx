@@ -332,6 +332,35 @@ describe("NewSession", () => {
     ).toBeNull();
   });
 
+  it("name_taken_belongs_to_the_workbox_it_was_found_on", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await radio("claude");
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await fillName(user, "planner");
+    createErrors.push({
+      kind: "core",
+      error: {
+        kind: "rpc",
+        code: "name_taken",
+        message: 'a live terminal is already named "planner"',
+        hint: null,
+      },
+    });
+    await user.click(createButton());
+    await screen.findByText('a live terminal is already named "planner"');
+    // The same name is free on another workbox.
+    await user.click(screen.getByRole("radio", { name: /gpubox/ }));
+    expect(
+      screen.queryByText('a live terminal is already named "planner"'),
+    ).toBeNull();
+    expect(screen.getByLabelText("Name")).not.toHaveAttribute("aria-invalid");
+    // Back on the first one it is still taken.
+    await user.click(screen.getByRole("radio", { name: /buildbox/ }));
+    expect(
+      screen.getByText('a live terminal is already named "planner"'),
+    ).toBeInTheDocument();
+  });
+
   it("task_field_only_when_supported", async () => {
     const user = setup(withLocal(), savedKind("claude"));
     await radio("claude");
@@ -470,6 +499,99 @@ describe("NewSession", () => {
         { machineId: "buildbox" },
       ]),
     );
+  });
+
+  it("create_does_nothing_until_the_choices_arrive", async () => {
+    // The saved choice is claude, which isn't known yet: Create must not start a shell instead.
+    let answer: (c: RunChoices) => void = () => {};
+    const base = invoke.getMockImplementation() as (
+      name: string,
+      args?: unknown,
+    ) => Promise<unknown>;
+    invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "list_run_choices") {
+        return new Promise((resolve) => {
+          answer = resolve;
+        });
+      }
+      return base(name, args);
+    });
+    const user = setup(undefined, savedKind("claude"));
+    await fillFolder(user, "/home/dev/projects/api-service");
+    expect(createButton()).toBeDisabled();
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await user.click(createButton());
+    expect(callsTo("create_session")).toHaveLength(0);
+    act(() => answer(REMOTE_CHOICES));
+    await vi.waitFor(() => expect(createButton()).toBeEnabled());
+    await user.click(screen.getByLabelText("Project folder"));
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await vi.waitFor(() => expect(callsTo("create_session")).toHaveLength(1));
+    expect(lastRequest("create_session").run).toEqual({
+      type: "agent",
+      kind: "claude",
+    });
+  });
+
+  it("create_waits_again_after_switching_workbox", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await radio("claude");
+    await fillFolder(user, "/home/dev/projects/api-service");
+    expect(createButton()).toBeEnabled();
+    let answer: (c: RunChoices) => void = () => {};
+    const base = invoke.getMockImplementation() as (
+      name: string,
+      args?: unknown,
+    ) => Promise<unknown>;
+    invoke.mockImplementation(async (name: string, args?: unknown) =>
+      name === "list_run_choices"
+        ? new Promise((resolve) => {
+            answer = resolve;
+          })
+        : base(name, args),
+    );
+    await user.click(screen.getByRole("radio", { name: /gpubox/ }));
+    expect(createButton()).toBeDisabled();
+    act(() => answer(REMOTE_CHOICES));
+    await vi.waitFor(() => expect(createButton()).toBeEnabled());
+  });
+
+  it("an_invalid_name_shows_its_error_once_and_asks_for_no_preview", async () => {
+    const user = setup(undefined, savedKind("claude"));
+    await radio("claude");
+    await fillFolder(user, "/home/dev/projects/api-service");
+    await vi.waitFor(() =>
+      expect(callsTo("preview_new_session")).toHaveLength(1),
+    );
+    invoke.mockClear();
+    await fillName(user, "Bad Name");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(callsTo("preview_new_session")).toHaveLength(0);
+    expect(screen.getAllByText(/Use 1 to 32 of a-z/)).toHaveLength(1);
+    expect(
+      screen.getByText("Fix the name to see the command."),
+    ).toBeInTheDocument();
+    // A good name brings the command back.
+    await user.clear(screen.getByLabelText("Name"));
+    await fillName(user, "planner");
+    await vi.waitFor(() =>
+      expect(callsTo("preview_new_session")).toHaveLength(1),
+    );
+  });
+
+  it("run_choices_draw_agent_marks_but_a_shell_and_a_command_keep_the_prompt", async () => {
+    setup(withLocal(), savedKind(null));
+    await radio("reviewer");
+    const badge = (name: string) =>
+      screen
+        .getByRole("radio", { name })
+        .closest("label")!
+        .querySelector("[aria-hidden='true']")!.textContent;
+    // A template has no kind, but it is an agent: the "AG" mark, never "$_".
+    expect(badge("reviewer")).toContain("AG");
+    expect(badge("broken")).toContain("AG");
+    expect(badge("Plain shell")).toContain("$_");
+    expect(badge("Custom command")).toContain("$_");
   });
 
   it("cmd_enter_submits", async () => {
@@ -856,6 +978,11 @@ describe("NewSession form", () => {
     await radio("Plain shell");
     expect(runRadios()).toEqual(["Plain shell", "Custom command"]);
     expect(useAppStore.getState().toast).toBe("Unknown workbox buildbox.");
+    // It says the agents couldn't be loaded, not that every agent is listed.
+    expect(
+      screen.getByText(/Couldn’t load the agents for this workbox/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/every known agent is listed/)).toBeNull();
   });
 });
 
