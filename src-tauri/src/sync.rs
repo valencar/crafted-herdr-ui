@@ -12,13 +12,14 @@
 //!   terminal, so it is a plain drop and the backoff covers it. A core that is missing (not
 //!   found) after the app had subscribed is retried the same way, since `hc update` may swap
 //!   the binary; before the first subscription it is reported at once.
-//!
-//! Background calls run only while the event connection is up (`online`): the layout reads,
-//! the `herdr.seen` writes, `machine.list`, and, through `CoreSync::is_online`, the preview and
-//! the New session sheet's checks. A call while it is down would start `hc connect`, which
-//! starts a stopped core, and fill the command log for nothing.
 //! - the **machine task** runs `machine.list` every 10 s (30 s while the window is hidden), and
 //!   on demand: after a `missed`, a machine action, or a terminal whose machine isn't known yet.
+//!
+//! Background calls run only while the event connection is up (`online`): the layout reads,
+//! the `herdr.seen` writes and `machine.list` here; the preview through `SyncCell::may_preview`;
+//! the New session sheet's check and templates through `machine_online` (no machine is Online
+//! while the connection is down). A call while it is down would start `hc connect`, which
+//! starts a stopped core, and fill the command log for nothing.
 //!
 //! `emit` is called when what the UI shows changes: at once for the first change, and for further
 //! changes within the next 100 ms, once at the end of that window. It runs under an internal lock
