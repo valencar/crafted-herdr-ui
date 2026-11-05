@@ -372,6 +372,26 @@ async fn an_offline_workbox_is_not_asked() {
 }
 
 #[tokio::test]
+async fn nothing_is_asked_of_a_core_that_is_not_connected() {
+    let h = Harness::new();
+    h.put("machine.exec.json", &exec_result("has:claude\n", 0, false));
+
+    // Local while the event connection is down: no check and no template list, so no
+    // `hc connect` (which would start a stopped core).
+    let choices = h.new_sessions().run_choices("local", None, false).await;
+
+    assert!(!choices.kinds_checked);
+    assert_eq!(kind_names(&choices).len(), KNOWN_AGENTS.len());
+    assert!(choices.templates.is_empty());
+    assert_eq!(h.connections(), 0);
+    assert!(h.requests("templates.list").is_empty());
+    // Connected again: both are asked.
+    let choices = h.new_sessions().run_choices("local", None, true).await;
+    assert!(!choices.templates.is_empty());
+    assert_eq!(h.requests("templates.list").len(), 1);
+}
+
+#[tokio::test]
 async fn overlapping_asks_share_one_check() {
     let h = Harness::new();
     h.put(

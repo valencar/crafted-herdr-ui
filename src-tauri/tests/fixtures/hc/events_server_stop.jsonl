@@ -1,0 +1,14 @@
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":null},"seq":29,"terminal":"t1","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":1767225999001,"reason":"server_stop","signal":1},"seq":30,"terminal":"t1","type":"finished"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":null},"seq":31,"terminal":"t2","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"state":null,"turn":1},"seq":32,"terminal":"t2","type":"turn"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":1767225999005,"reason":"server_stop","signal":1},"seq":33,"terminal":"t2","type":"finished"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":null},"seq":34,"terminal":"t3","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":1767225999009,"reason":"server_stop","signal":1},"seq":35,"terminal":"t3","type":"finished"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":null},"seq":36,"terminal":"t4","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":1767225999013,"reason":"server_stop","signal":1},"seq":37,"terminal":"t4","type":"finished"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"records":{},"reported":true,"status":null},"seq":38,"terminal":"t5","type":"status"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":1767225999017,"reason":"server_stop","signal":1},"seq":39,"terminal":"t5","type":"finished"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":null,"reason":"server_stop","signal":1},"seq":40,"terminal":"t6","type":"lost"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":1767225999025,"reason":"server_stop","signal":1},"seq":41,"terminal":"t7","type":"finished"}}
+{"jsonrpc":"2.0","method":"event","params":{"data":{"exit_code":null,"finished_ms":null,"reason":"server_stop","signal":null},"seq":42,"terminal":"t6","type":"lost"}}

@@ -3,7 +3,8 @@
 //! Both read `terminal.read {terminal, lines: 0}` through `CoreClient::call_quiet`, so a read
 //! is logged (quiet) and nothing else touches the core. `lines` is always 0: a history read
 //! (`lines > 0`) scrolls an idle full-screen program and holds the person's keys.
-//! `PreviewManager` reads one terminal every 2 s while the window is visible and emits a
+//! `PreviewManager` reads one terminal every 2 s while the window is visible and the event
+//! connection is up (a read while it is down would start a stopped core), and emits a
 //! `PreviewFrame` when the text changed.
 
 use std::sync::{Arc, Mutex as StdMutex};
@@ -36,7 +37,8 @@ pub struct PreviewFrame {
 }
 
 pub type PreviewEmit = Arc<dyn Fn(PreviewFrame) + Send + Sync>;
-pub type IsVisible = Arc<dyn Fn() -> bool + Send + Sync>;
+/// Whether a read may run now: the window is on screen and the event connection is up.
+pub type MayRead = Arc<dyn Fn() -> bool + Send + Sync>;
 /// (machine id, machine-local address) to the address the local core takes (`buildbox/t7`),
 /// looked up at every read so a renamed machine keeps working. `None` is an unknown machine.
 pub type FullAddress = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
@@ -122,13 +124,13 @@ struct Active {
 }
 
 /// The live preview: at most one terminal is read every 2 s, and only while the window is
-/// visible. Starting another terminal, or stopping, cancels the old read, and a frame for the
-/// old one is never emitted after `start` or `stop` has returned.
+/// visible and the event connection is up. Starting another terminal, or stopping, cancels the
+/// old read, and a frame for the old one is never emitted after `start` or `stop` has returned.
 #[derive(Clone)]
 pub struct PreviewManager {
     core: Arc<CoreClient>,
     full_address: FullAddress,
-    visible: IsVisible,
+    may_read: MayRead,
     emit: PreviewEmit,
     every: Duration,
     active: Arc<StdMutex<Active>>,
@@ -138,13 +140,13 @@ impl PreviewManager {
     pub fn new(
         core: Arc<CoreClient>,
         full_address: FullAddress,
-        visible: IsVisible,
+        may_read: MayRead,
         emit: PreviewEmit,
     ) -> Self {
         Self {
             core,
             full_address,
-            visible,
+            may_read,
             emit,
             every: PREVIEW_EVERY,
             active: Arc::new(StdMutex::new(Active {
@@ -224,7 +226,7 @@ impl PreviewManager {
         // An unchanged frame is not sent again: the UI would re-render for nothing.
         let mut last: Option<PreviewFrame> = None;
         loop {
-            if (self.visible)() {
+            if (self.may_read)() {
                 let frame = self.read_frame(&key, &machine, &address).await;
                 if last.as_ref() != Some(&frame) {
                     self.emit_current(generation, frame.clone());

@@ -5,7 +5,16 @@
 //!   machine list, then each notification applied to a `TerminalMap`, with the status and turn
 //!   events fed to `ActivityV2`. When the connection drops or goes silent for 40 s it
 //!   resubscribes, backing off 2 s·2^(n−1) (at most 60 s) for 2 minutes. After that only
-//!   `reconnect_now` (the Reconnect button) tries again, so a core the person stopped stays stopped.
+//!   `reconnect_now` (the Reconnect button) tries again. A stream that ends after the core
+//!   ended a local terminal with `server_stop` (`hc server stop`) goes to `Stopped` at once,
+//!   with no retry: `hc connect` starts a stopped core, so a core the person stopped stays
+//!   stopped until they click (rule 5). A restart (`hc server restart`, `hc update`) ends no
+//!   terminal, so it is a plain drop and the backoff covers it.
+//!
+//! Background calls run only while the event connection is up (`online`): the layout reads,
+//! the `herdr.seen` writes, `machine.list`, and, through `CoreSync::is_online`, the preview and
+//! the New session sheet's checks. A call while it is down would start `hc connect`, which
+//! starts a stopped core, and fill the command log for nothing.
 //! - the **machine task** runs `machine.list` every 10 s (30 s while the window is hidden), and
 //!   on demand: after a `missed`, a machine action, or a terminal whose machine isn't known yet.
 //!
@@ -14,9 +23,10 @@
 //! that keeps states in order, so it must not call `CoreSync` methods that emit (`refresh_view`,
 //! `set_core_path`). `state()` is safe.
 //!
-//! Lock order: the model lock, then the `ActivityV2` lock, never the other way. A caller must not
-//! call into `CoreSync` while it holds the `ActivityV2` lock (Mark as seen takes that lock to
-//! `mark_seen`, releases it, and only then calls `refresh_view`).
+//! Lock order: the model lock, then the `ActivityV2` lock, then `last_written_seen`, then
+//! `seen_in_flight`; never the other way. A caller must not call into `CoreSync` while it holds
+//! the `ActivityV2` lock (Mark as seen takes that lock to `mark_seen`, releases it, and only
+//! then calls `refresh_view`).
 //!
 //! Terminals arrive with addresses as the local core sees them (`t7`, `buildbox/t7`). They are
 //! split on the first `/`, the machine name is mapped to the machine id through `machine.list`,
@@ -95,6 +105,10 @@ const MACHINES_VISIBLE: Duration = Duration::from_secs(10);
 const MACHINES_HIDDEN: Duration = Duration::from_secs(30);
 /// An unreachable machine is "reconnecting" this long, then it needs the person.
 const UNREACHABLE_ATTENTION_MS: u64 = 120_000;
+/// Local's error once the app stops trying.
+const NOT_RUNNING: &str = "herdr-core isn't running.";
+/// Why, when the person stopped the core (`hc server stop`).
+const STOPPED_ON_PURPOSE: &str = "herdr-core was stopped.";
 
 /// Receives each new state (see the module doc for what it must not call).
 pub type Emit = Arc<dyn Fn(&AppState) + Send + Sync>;
@@ -164,6 +178,29 @@ fn describe(e: &CoreError) -> String {
         CoreError::Incompatible { reason, .. } => reason.clone(),
         CoreError::Protocol { .. } => "herdr-core sent something unexpected.".to_owned(),
     }
+}
+
+/// Whether a notification is a local terminal ended because the core is being stopped. In
+/// herdr-core 0.1.18 that reason comes only from `server.stop` (`Core::shutdown` ends every live
+/// terminal with it, as `finished`, or `lost` for a kept one); a restart (`server.restart`, which
+/// `hc update` sends) hands the programs over and ends none. A remote machine's own stop arrives
+/// under its name (`buildbox/t3`) and doesn't end this stream, so it doesn't count.
+fn is_server_stop(note: &Notification) -> bool {
+    matches!(
+        note,
+        Notification::Event { ty, terminal: Some(address), data, .. }
+            if (ty == "finished" || ty == "lost")
+                && split_address(address).0.is_none()
+                && data.get("reason").and_then(Value::as_str) == Some("server_stop")
+    )
+}
+
+/// How the event stream ended.
+struct StreamEnd {
+    /// Why, for the UI.
+    error: String,
+    /// The core ended a local terminal with `server_stop` on this stream: someone stopped it.
+    stopped: bool,
 }
 
 /// The event connection, as `Local`'s health sees it.
@@ -332,14 +369,15 @@ struct Inner {
     model: Mutex<Model>,
     visible: AtomicBool,
     /// The terminals the person is looking at (machine id, local address): what the UI draws in a
-    /// window that is in front. A leaf lock.
+    /// window that is in front. A leaf lock: nothing is taken while it is held.
     looking: Mutex<HashSet<(String, String)>>,
     /// The turn `herdr.seen` was last decided for, by terminal: a decision is made at most once
-    /// per turn, so nothing overrules a Mark as unread before the next turn. A leaf lock.
+    /// per turn, so nothing overrules a Mark as unread before the next turn. Taken after the
+    /// model and `ActivityV2` locks, and before `seen_in_flight`.
     last_written_seen: Mutex<HashMap<(String, String), u64>>,
     /// Terminals with a `herdr.seen` write on its way: at most one per terminal, so a write for
     /// turn N+1 is never sent while turn N's is still in flight (the core could apply them in
-    /// the other order and leave the label behind the turn). A leaf lock.
+    /// the other order and leave the label behind the turn). The last lock in the order.
     seen_in_flight: Mutex<HashSet<(String, String)>>,
     machine_wake: Notify,
     reconnect: Notify,
@@ -500,6 +538,11 @@ impl CoreSync {
     pub fn is_window_visible(&self) -> bool {
         self.inner.visible.load(Ordering::Relaxed)
     }
+
+    /// Whether the event connection is up. Background calls wait for it (see the module doc).
+    pub fn is_online(&self) -> bool {
+        self.inner.online()
+    }
 }
 
 /// Where Tauri state finds the `CoreSync`: it is started once the core is located, so commands
@@ -515,6 +558,13 @@ impl SyncCell {
     /// Keeps `sync` for the life of the app. A second call is ignored (and drops its argument).
     pub fn set(&self, sync: CoreSync) {
         let _ = self.0.set(sync);
+    }
+
+    /// Whether the live preview may read now: the main window is on screen and the event
+    /// connection is up. Never before the core is located.
+    pub fn may_preview(&self) -> bool {
+        self.get()
+            .is_some_and(|sync| sync.is_window_visible() && sync.is_online())
     }
 }
 
@@ -913,9 +963,10 @@ impl Inner {
     }
 
     /// Wants the layout of each machine read. One that already has a read in flight is marked
-    /// dirty instead, and read once more when that one ends.
+    /// dirty instead, and read once more when that one ends. Nothing while the connection is
+    /// down: every layout is read again after the next subscribe.
     fn read_layouts(self: &Arc<Self>, targets: Vec<String>) {
-        if self.closed.load(Ordering::SeqCst) {
+        if self.closed.load(Ordering::SeqCst) || !self.online() {
             return;
         }
         for id in targets {
@@ -956,10 +1007,12 @@ impl Inner {
                 let mut m = lock(&self.model);
                 let next_number = m.next_read + 1;
                 let next_on = Self::layout_on(&m, &id);
+                let online = m.link == Link::Online;
                 match m.layout_reads.get_mut(&id) {
                     // Overtaken: the machine left, and a read of its return has the entry now.
                     Some(read) if read.number == number => match next_on {
-                        Some(on) if read.dirty => {
+                        // The connection went down meanwhile: the next subscribe reads it.
+                        Some(on) if read.dirty && online => {
                             read.dirty = false;
                             read.number = next_number;
                             m.next_read = next_number;
@@ -1090,7 +1143,8 @@ impl Inner {
     /// and whose label is missing or lower. A terminal is decided once per turn, whether or not a
     /// write was needed, so later triggers at the same turn do nothing (Mark as unread stays).
     fn write_seen(self: &Arc<Self>) {
-        if self.closed.load(Ordering::SeqCst) {
+        // Not while the connection is down: the next subscribe decides again.
+        if self.closed.load(Ordering::SeqCst) || !self.online() {
             return;
         }
         let looking = lock(&self.looking).clone();
@@ -1224,7 +1278,21 @@ impl Inner {
             match self.connect(subscribed_before).await {
                 Ok((conn, mut notes)) => {
                     subscribed_before = true;
-                    last_error = self.stream(&conn, &mut notes).await;
+                    let end = self.stream(&conn, &mut notes).await;
+                    drop((conn, notes));
+                    if end.stopped {
+                        // Someone stopped the core (`hc server stop`). Connecting again would
+                        // start it, so only Reconnect does (rule 5).
+                        let stopped = CoreState::Stopped {
+                            error: STOPPED_ON_PURPOSE.to_owned(),
+                        };
+                        self.wait_for_reconnect(stopped, NOT_RUNNING.to_owned())
+                            .await;
+                        down_since = None;
+                        attempt = 0;
+                        continue;
+                    }
+                    last_error = end.error;
                     // Dropped: the window runs from here, and the first retry waits 2 s.
                     down_since = Some(Instant::now());
                     attempt = 0;
@@ -1252,7 +1320,7 @@ impl Inner {
                 let stopped = CoreState::Stopped {
                     error: last_error.clone(),
                 };
-                self.wait_for_reconnect(stopped, "herdr-core isn't running.".to_owned())
+                self.wait_for_reconnect(stopped, NOT_RUNNING.to_owned())
                     .await;
                 down_since = None;
                 attempt = 0;
@@ -1353,18 +1421,22 @@ impl Inner {
         Ok((conn, notes))
     }
 
-    /// Applies notifications until the connection ends or goes silent for 40 s. Returns why.
+    /// Applies notifications until the connection ends or goes silent for 40 s. Returns why, and
+    /// whether the core was being stopped.
     async fn stream(
         self: &Arc<Self>,
         _conn: &Connection,
         notes: &mut mpsc::UnboundedReceiver<Notification>,
-    ) -> String {
+    ) -> StreamEnd {
         let mut deadline = Instant::now() + WATCHDOG;
+        // Every program is ended before the core goes (up to about 15 s): the drop that
+        // follows is the stop's.
+        let mut stopped = false;
         loop {
             tokio::select! {
                 note = notes.recv() => {
                     let Some(first) = note else {
-                        return describe(&CoreError::Lost);
+                        return StreamEnd { error: describe(&CoreError::Lost), stopped };
                     };
                     deadline = Instant::now() + WATCHDOG;
                     // Everything that has arrived is one change, so a rename (removed, then
@@ -1373,10 +1445,12 @@ impl Inner {
                     while let Ok(next) = notes.try_recv() {
                         batch.push(next);
                     }
+                    stopped |= batch.iter().any(is_server_stop);
                     self.apply(&batch);
                 }
                 () = tokio::time::sleep_until(deadline) => {
-                    return "herdr-core stopped sending events.".to_owned();
+                    let error = "herdr-core stopped sending events.".to_owned();
+                    return StreamEnd { error, stopped };
                 }
             }
         }

@@ -85,7 +85,8 @@ pub struct MachineView {
 pub enum CoreState {
     Connecting,
     Ready,
-    /// The 2-minute reconnect window ran out; only Reconnect tries again.
+    /// The 2-minute reconnect window ran out, or the person stopped the core (`hc server stop`);
+    /// only Reconnect tries again.
     Stopped {
         error: String,
     },

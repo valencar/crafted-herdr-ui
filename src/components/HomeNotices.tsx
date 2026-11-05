@@ -90,7 +90,8 @@ export function MachineNotices({
 }) {
   // Local never gets the reconnect card below, so a core that isn't answering would be
   // invisible. Say so, with the one thing to do. The event connection is down when the core is
-  // `stopped` (after the 2-minute window), or `connecting` after having been up (the rows are
+  // `stopped` (after the 2-minute window, or at once after `hc server stop`, whose cause line
+  // reads "herdr-core was stopped."), or `connecting` after having been up (the rows are
   // kept, and Local's health then carries the last error; the first connect has none).
   const core = useAppStore((s) => s.state?.core_state);
   const local = machines.find((m) => m.is_local);

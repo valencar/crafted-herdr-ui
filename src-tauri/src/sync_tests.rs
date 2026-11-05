@@ -19,6 +19,7 @@ use crate::settings::Settings;
 const SUBSCRIBE: &str = include_str!("../tests/fixtures/hc/subscribe_local.json");
 const MACHINE_LIST: &str = include_str!("../tests/fixtures/hc/machine_list.json");
 const EVENTS_RENAME: &str = include_str!("../tests/fixtures/hc/events_rename.jsonl");
+const EVENTS_SERVER_STOP: &str = include_str!("../tests/fixtures/hc/events_server_stop.jsonl");
 const HELLO_OLD: &str = include_str!("../tests/fixtures/hc/hello_old.json");
 const UNSUPPORTED: &str = include_str!("../tests/fixtures/hc/errors/unsupported_generation.json");
 
@@ -871,6 +872,190 @@ async fn a_fast_restart_shows_connecting_then_ready() {
             CoreState::Ready
         ]
     );
+}
+
+/// `hc server stop` as the stream shows it: every local terminal ends with `server_stop`.
+fn server_stop_lines() -> Vec<String> {
+    EVENTS_SERVER_STOP
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The methods the app called so far.
+fn methods(h: &Harness) -> Vec<String> {
+    lock(&h.script.methods).clone()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_on_purpose_stays_stopped_until_reconnect() {
+    let h = Harness::new().up().await;
+    for line in server_stop_lines() {
+        h.send(&line);
+    }
+    settle().await;
+    h.drop_events();
+    settle().await;
+    let attempts = h.script.attempts.load(Ordering::SeqCst);
+    let calls = methods(&h).len();
+
+    // Straight to Stopped, saying why; no backoff in between.
+    let state = h.state();
+    assert!(
+        matches!(&state.core_state, CoreState::Stopped { error } if error == "herdr-core was stopped."),
+        "{:?}",
+        state.core_state
+    );
+    assert_eq!(
+        state.machines[0].health,
+        Health::Attention {
+            error: "herdr-core isn't running.".into()
+        }
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        core_states(&h),
+        [
+            CoreState::Connecting,
+            CoreState::Ready,
+            CoreState::Stopped {
+                error: "herdr-core was stopped.".into()
+            }
+        ]
+    );
+
+    // Long past the backoff and the window: nothing connects (that would start the core), and
+    // nothing is called, the person looking at a row included.
+    h.look(&["t6"]);
+    h.sync().refresh_machines();
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(h.script.attempts.load(Ordering::SeqCst), attempts);
+    assert_eq!(methods(&h).len(), calls, "{:?}", &methods(&h)[calls..]);
+
+    // Reconnect connects.
+    h.sync().reconnect_now();
+    settle().await;
+    assert_eq!(h.state().core_state, CoreState::Ready);
+    assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_remote_machine_stopping_is_not_a_stop_of_this_core() {
+    let h = Harness::new().up().await;
+    // buildbox's own core stops: its terminals end with `server_stop` under its name. Then this
+    // stream drops for another reason, and is retried as usual.
+    h.event(
+        29,
+        "finished",
+        "buildbox/t2",
+        json!({"reason": "server_stop", "exit_code": null, "signal": 1, "finished_ms": 1}),
+    );
+    settle().await;
+    h.drop_events();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(h.state().core_state, CoreState::Connecting);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 2);
+    assert_eq!(h.state().core_state, CoreState::Ready);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_seen_on_an_earlier_stream_does_not_count_later() {
+    let h = Harness::new().up().await;
+    // The stop ends this stream; the person clicks Reconnect and the core is back.
+    for line in server_stop_lines() {
+        h.send(&line);
+    }
+    settle().await;
+    h.drop_events();
+    settle().await;
+    h.sync().reconnect_now();
+    settle().await;
+    assert_eq!(h.state().core_state, CoreState::Ready);
+    // A plain drop of the new stream backs off and reconnects.
+    h.drop_events();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(h.state().core_state, CoreState::Connecting);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 3);
+    assert_eq!(h.state().core_state, CoreState::Ready);
+}
+
+#[test]
+fn only_a_local_terminal_ended_by_server_stop_is_a_stop() {
+    let event = |ty: &str, terminal: &str, reason: &str| Notification::Event {
+        seq: 1,
+        ty: ty.to_owned(),
+        terminal: Some(terminal.to_owned()),
+        machine: None,
+        data: json!({"reason": reason}),
+    };
+    assert!(is_server_stop(&event("finished", "t1", "server_stop")));
+    assert!(is_server_stop(&event("lost", "t6", "server_stop")));
+    assert!(!is_server_stop(&event(
+        "finished",
+        "buildbox/t2",
+        "server_stop"
+    )));
+    assert!(!is_server_stop(&event("finished", "t1", "exited")));
+    assert!(!is_server_stop(&event("lost", "t6", "signaled")));
+    assert!(!is_server_stop(&event("status", "t1", "server_stop")));
+    assert!(!is_server_stop(&Notification::Heartbeat { seq: 1 }));
+}
+
+#[tokio::test(start_paused = true)]
+async fn nothing_is_read_or_written_in_the_background_while_the_link_is_down() {
+    let h = Harness::new().doc("", json_of(DOC_HERDR_APP), 1).up().await;
+    // A layout read is on its way when the stream drops, and another was asked for meanwhile.
+    lock(&h.script.doc_delay_ms).insert(String::new(), 500);
+    h.doc_event(29, "herdr-app", "");
+    settle().await;
+    h.doc_event(30, "herdr-app", "");
+    settle().await;
+    h.script.refuse.store(true, Ordering::SeqCst);
+    h.drop_events();
+    settle().await;
+    assert!(!h.sync().is_online());
+    let calls = methods(&h).len();
+
+    // The read in flight ends; the one asked for meanwhile is not made. A row comes on screen:
+    // no `herdr.seen` write, and the app's own record doesn't move.
+    h.look(&["t6"]);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(h.seen_writes().is_empty());
+    assert_eq!(lock(&h.activity).peek("local", "t6"), Some(0));
+    assert_eq!(methods(&h).len(), calls, "{:?}", &methods(&h)[calls..]);
+
+    // Back online: the row on screen is written, and the layouts are read again.
+    h.script.refuse.store(false, Ordering::SeqCst);
+    h.sync().reconnect_now();
+    settle().await;
+    assert!(h.sync().is_online());
+    assert_eq!(h.seen_writes(), [write("t6", 0)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_preview_reads_only_with_the_window_on_screen_and_the_link_up() {
+    let h = Harness::new();
+    let cell = SyncCell::default();
+    assert!(!cell.may_preview(), "no core located yet");
+    cell.set(CoreSync::start(
+        h.client.clone(),
+        h.settings.clone(),
+        h.activity.clone(),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    ));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(cell.may_preview());
+    cell.get().unwrap().set_window_visible(false);
+    assert!(!cell.may_preview());
+    cell.get().unwrap().set_window_visible(true);
+    h.script.refuse.store(true, Ordering::SeqCst);
+    h.drop_events();
+    settle().await;
+    assert!(!cell.may_preview());
 }
 
 #[tokio::test(start_paused = true)]

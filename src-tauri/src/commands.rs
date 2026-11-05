@@ -85,8 +85,9 @@ fn refresh_if_maybe_applied<T>(result: &Result<T, ActionError>, refresh: impl Fn
     }
 }
 
-/// Whether the core reports the workbox online (the installed-agents check is asked of those
-/// only).
+/// Whether the core reports the workbox online (the installed-agents check, and Local's
+/// templates, are asked of those only). Every workbox is offline while the event connection is
+/// down.
 fn machine_online(sync: &SyncCell, machine_id: &str) -> bool {
     sync.get().and_then(|s| s.state()).is_some_and(|state| {
         state

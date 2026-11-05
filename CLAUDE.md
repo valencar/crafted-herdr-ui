@@ -22,7 +22,8 @@ An open-source macOS app (Tauri 2 + React/TypeScript) that gives the [herdr](htt
    - Never touch a herdr 0.9 server either: the app no longer runs `herdr`, except `herdr --version` to detect it (`find_legacy_herdr`).
 5. **The app never acts for the user on risky things.** It doesn't install herdr-core, stop or replace a core, or answer `blocked` agents without an explicit click. On herdr-core: never `terminal.send` with `force`; never `hc machine add --install`, `hc machine update` or `hc server stop|restart` without an explicit click.
    - **One stated exception:** on Unix, `hc connect` starts a stopped local core by itself. That's hc's own behavior; every `hc` command does it, `hc server status` included. So connecting at launch may start the core.
-   - After the event connection drops, the app retries with backoff for 2 minutes, which covers `hc update` and `server restart`. Then it stops retrying and shows "herdr-core isn't running" with a **Reconnect** button, so a core the person stopped on purpose stays stopped until they click.
+   - After the event connection drops, the app retries with backoff for 2 minutes, which covers `hc update` and `server restart` (a restart ends no terminal). Then it stops retrying and shows "herdr-core isn't running" with a **Reconnect** button. A drop that follows local terminals ending with `server_stop` (`hc server stop`) goes there at once, with no retry, so a core the person stopped on purpose stays stopped until they click.
+   - While the event connection is down, no background call runs (the preview, tails, templates, layout reads, `herdr.seen` writes, `machine.list`): each would run `hc connect`, which starts the core.
 6. **No pushing to `origin`** unless the maintainer asks. Work happens on feature branches; `main` is protected by convention.
 
 ## Commands
@@ -46,6 +47,7 @@ scripts/build-site.sh  # project site (site/) → _site/; deployed to GitHub Pag
   - A `status` event carries `{status, records, reported}` and no `status_ms`. Snapshots do carry it, and the core stamps it when the root state word changes. So the app stamps its own time on a root-state change.
   - Adding a machine, or a machine's line coming back, emits a local `missed` (after `created`/`removed` for what changed). Renaming a machine emits `removed` for every old `old/tN` address, then `created` for the new ones. The machine's `id` stays.
   - A kept terminal whose program dies by signal emits `status` (null), `lost {reason: "signaled", signal}`, then `restarted` (the whole record) and `foreground`.
+  - `hc server stop` ends every live local terminal before the stream drops: `finished {reason: "server_stop"}`, or `lost` with that reason for a kept one. Nothing else gives that reason. `hc server restart` (which `hc update` sends after swapping the binary) ends none: the programs are handed to the next core.
 - `Terminal` fields used: `address`, `name`, `argv`, `cwd`, `foreground {pid, name, argv, cwd}` (optional: absent on freshly created, restarted and finished records), `state` (`live`/`finished`), `status` (root 7501 record `{state, app, kind, msg, progress, title}`), `status_ms`, `reported`, `turn`, `labels`, `title`, `parent`, `keep`, `reason`, `exit_code`, `created_ms`, `finished_ms`. One that never reported has `status: null`.
 - `machine.list` returns `MachineView {name, id, host, target, session, version, state, why, since_ms, temporary, via}`.
   - `state` is `connecting`, `connected`, `needs_login`, `needs_update` (the remote hc is incompatible) or `unreachable`.

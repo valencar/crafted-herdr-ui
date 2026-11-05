@@ -348,6 +348,8 @@ impl<'a> NewSessions<'a> {
 
     /// What the sheet offers on this machine. `machine_name` is `None` for Local. A workbox that
     /// isn't online gets no check (it could hold a slot for 20 s): every kind is listed, unchecked.
+    /// Local is offline while the event connection is down: then its templates aren't read either,
+    /// since any call would start `hc connect`, which starts a stopped core.
     pub async fn run_choices(
         &self,
         machine_id: &str,
@@ -366,7 +368,7 @@ impl<'a> NewSessions<'a> {
             .collect();
         // The template list is Local's; a remote resolves template names itself. A list that
         // can't be read is an empty one (the call is in the Activity log either way).
-        let templates = if machine_id == LOCAL {
+        let templates = if machine_id == LOCAL && online {
             match self
                 .core
                 .call_quiet(LOCAL, "templates.list", json!({}))

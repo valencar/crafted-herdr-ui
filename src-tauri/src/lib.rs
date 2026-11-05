@@ -103,11 +103,9 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(PreviewManager::new(
         core.clone(),
         Arc::new(move |machine, address| address_cell.get()?.full_address(machine, address)),
-        Arc::new(move || {
-            visible_cell
-                .get()
-                .is_none_or(|sync| sync.is_window_visible())
-        }),
+        // Only with the window on screen and the event connection up: a read while it is down
+        // would start a stopped core.
+        Arc::new(move || visible_cell.may_preview()),
         Arc::new(move |frame| {
             let _ = preview_handle.emit(PREVIEW_EVENT, frame);
         }),
