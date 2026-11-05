@@ -54,7 +54,7 @@ export const AgentRow = memo(function AgentRow({
           <span className="mono row-name">{row.name}</span>
         )}
         {showMachine && <span className="chip">{row.machineLabel}</span>}
-        <span className="mono row-pane">{row.paneId}</span>
+        <span className="mono row-pane">{row.address}</span>
         <span className="row-age">{age}</span>
       </button>
       <OpenButton row={row} terminalName={terminalName} size="small" />

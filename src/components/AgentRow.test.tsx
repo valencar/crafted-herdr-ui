@@ -15,7 +15,7 @@ function row(over: Partial<Row> = {}): Row {
     key: "buildbox::t3",
     machineId: "buildbox",
     machineLabel: "buildbox",
-    paneId: "t3",
+    address: "t3",
     name: "planner",
     title: "claude: refactor auth",
     status: "ended",

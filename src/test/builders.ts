@@ -310,18 +310,17 @@ export function unanswered(view: MachineView): MachineView {
 
 /**
  * A `Row` for a test that builds one by hand instead of from a state: what it names, plus the
- * defaults of a plain terminal (`address` and `fullAddress` follow `paneId`).
+ * defaults of a plain terminal (`fullAddress` follows `address`).
  */
 export function rowOf(
   r: Pick<
     Row,
-    "key" | "machineId" | "machineLabel" | "paneId" | "name" | "status"
+    "key" | "machineId" | "machineLabel" | "address" | "name" | "status"
   > &
     Partial<Row>,
 ): Row {
   return {
-    address: r.paneId,
-    fullAddress: r.paneId,
+    fullAddress: r.address,
     kind: r.status === "shell" ? null : "claude",
     program: null,
     isAgent: r.status !== "shell",

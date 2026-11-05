@@ -9,11 +9,11 @@ import {
 
 type NewTab = Pick<TermTab, "tabKey" | "target" | "title" | "machineLabel">;
 
-function tab(paneId: string, machineId = "buildbox"): NewTab {
+function tab(address: string, machineId = "buildbox"): NewTab {
   return {
-    tabKey: `${machineId}::${paneId}`,
-    target: { kind: "terminal", machineId, address: paneId },
-    title: `agent ${paneId}`,
+    tabKey: `${machineId}::${address}`,
+    target: { kind: "terminal", machineId, address: address },
+    title: `agent ${address}`,
     machineLabel: machineId,
   };
 }

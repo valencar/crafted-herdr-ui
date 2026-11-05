@@ -27,7 +27,7 @@ const row: Row = rowOf({
   key: "buildbox::w1:p1",
   machineId: "buildbox",
   machineLabel: "buildbox",
-  paneId: "w1:p1",
+  address: "w1:p1",
   kind: "claude",
   name: "planner",
   title: "refactor auth",
@@ -201,7 +201,7 @@ describe("ContextBar", () => {
     const rowB: Row = {
       ...row,
       key: "buildbox::w1:p2",
-      paneId: "w1:p2",
+      address: "w1:p2",
       name: "reviewer",
     };
     const tabB: TermTab = {

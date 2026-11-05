@@ -22,16 +22,16 @@ function appState(patch: Parameters<typeof buildboxTerms>[0] = {}): AppState {
   ]);
 }
 
-function open(machineId: string, paneId: string, title: string) {
+function open(machineId: string, address: string, title: string) {
   useTerminalStore.getState().openTab({
-    tabKey: `${machineId}::${paneId}`,
-    target: { kind: "terminal", machineId, address: paneId },
+    tabKey: `${machineId}::${address}`,
+    target: { kind: "terminal", machineId, address: address },
     title,
     machineLabel: machineId,
   });
   useTerminalStore
     .getState()
-    .updateTab(`${machineId}::${paneId}`, { state: "live", termId: 1 });
+    .updateTab(`${machineId}::${address}`, { state: "live", termId: 1 });
 }
 
 const reset = () => {

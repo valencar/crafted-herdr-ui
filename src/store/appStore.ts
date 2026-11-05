@@ -12,7 +12,7 @@ export type Sheet = null | "new-session" | "add-workbox";
 /** What a "+ Session" button already knows: the project's workbox and folder. */
 export type SheetPrefill = { machineId?: string; folder?: string };
 /** A just-created pane to open in the terminal once the state lists it. */
-export type PendingOpen = { key: string; machineId: string; paneId: string };
+export type PendingOpen = { key: string; machineId: string; address: string };
 export type ToastTone = "info" | "error";
 /** What the Home tab shows: the Dashboard, the All agents list, or one workbox's screen. */
 export type View =
@@ -31,7 +31,7 @@ type AppStore = {
   state: AppState | null;
   /** The saved settings; `null` until they have been read (screens then use the defaults). */
   settings: Settings | null;
-  /** A row key, `${machineId}::${paneId}`. */
+  /** A row key, `${machineId}::${address}`. */
   selectedKey: string | null;
   groupBy: GroupBy;
   /** What the header's search box holds. Home filters its list by it; the box is the app's. */

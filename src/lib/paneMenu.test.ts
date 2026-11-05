@@ -8,7 +8,7 @@ const row = (status: Row["status"]): Row =>
     key: "buildbox::w1:p1",
     machineId: "buildbox",
     machineLabel: "buildbox",
-    paneId: "w1:p1",
+    address: "w1:p1",
     kind: "claude",
     name: "planner",
     title: "",

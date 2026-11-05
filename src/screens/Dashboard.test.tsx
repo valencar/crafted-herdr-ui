@@ -576,14 +576,14 @@ describe("Dashboard", () => {
     expect(tile("Terminal tabs")).toHaveTextContent("0 of 16");
     expect(within(tile("Terminal tabs")).getByText("None open")).toBeVisible();
     act(() => {
-      for (const [machineId, paneId] of [
+      for (const [machineId, address] of [
         ["buildbox", "w1:p1"],
         ["buildbox", "w1:p2"],
         ["gpubox", "w1:p1"],
       ]) {
         useTerminalStore.getState().openTab({
-          tabKey: `${machineId}::${paneId}`,
-          target: { kind: "terminal", machineId, address: paneId },
+          tabKey: `${machineId}::${address}`,
+          target: { kind: "terminal", machineId, address: address },
           title: "claude",
           machineLabel: machineId,
         });

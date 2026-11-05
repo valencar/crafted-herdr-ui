@@ -688,7 +688,7 @@ describe("NewSession after create", () => {
     expect(useAppStore.getState().pendingOpen).toEqual({
       key: "buildbox::w3:p1",
       machineId: "buildbox",
-      paneId: "w3:p1",
+      address: "w3:p1",
     });
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::w3:p1");
   });

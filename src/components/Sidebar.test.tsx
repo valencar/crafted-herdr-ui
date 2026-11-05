@@ -96,11 +96,11 @@ function withSnapshot(id: string): MachineView {
   return machineView({ id, target: id, lastOkMs: null }, buildboxTerms());
 }
 
-function openTab(paneId: string, title: string, machineId = "buildbox") {
+function openTab(address: string, title: string, machineId = "buildbox") {
   act(() =>
     useTerminalStore.getState().openTab({
-      tabKey: `${machineId}::${paneId}`,
-      target: { kind: "terminal", machineId, address: paneId },
+      tabKey: `${machineId}::${address}`,
+      target: { kind: "terminal", machineId, address: address },
       title,
       machineLabel: machineId,
     }),
@@ -367,7 +367,7 @@ describe("Sidebar", () => {
           key: `buildbox::${name}:${i}`,
           machineId: "buildbox",
           machineLabel: "buildbox",
-          paneId: `${name}:${i}`,
+          address: `${name}:${i}`,
           name,
           status,
         }),

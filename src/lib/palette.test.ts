@@ -9,7 +9,7 @@ function row(over: Partial<Row>): Row {
     key: "buildbox::w1:p1",
     machineId: "buildbox",
     machineLabel: "buildbox",
-    paneId: "w1:p1",
+    address: "w1:p1",
     kind: "claude",
     name: "planner",
     title: "",
@@ -23,13 +23,13 @@ function row(over: Partial<Row>): Row {
 const rows: Row[] = [
   row({
     key: "buildbox::w1:p1",
-    paneId: "w1:p1",
+    address: "w1:p1",
     name: "zeta",
     status: "idle",
   }),
   row({
     key: "buildbox::w1:p2",
-    paneId: "w1:p2",
+    address: "w1:p2",
     name: "alpha",
     status: "done",
     sinceMs: 2_000,
@@ -45,7 +45,7 @@ const rows: Row[] = [
   }),
   row({
     key: "buildbox::w1:p3",
-    paneId: "w1:p3",
+    address: "w1:p3",
     name: "builder",
     status: "working",
   }),

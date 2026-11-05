@@ -226,7 +226,7 @@ export function NewSession({ terminalName }: Props) {
         setPendingOpen({
           key,
           machineId: sent.machineId,
-          paneId: created.paneId,
+          address: created.paneId,
         });
       }
       // Remember the Run choice only now that it made a session.

@@ -27,11 +27,11 @@ function machine(id: string): MachineView {
 
 const machines = [machine("buildbox"), machine("gpubox")];
 
-function openTab(machineId: string, paneId: string, title: string) {
+function openTab(machineId: string, address: string, title: string) {
   act(() =>
     useTerminalStore.getState().openTab({
-      tabKey: `${machineId}::${paneId}`,
-      target: { kind: "terminal", machineId, address: paneId },
+      tabKey: `${machineId}::${address}`,
+      target: { kind: "terminal", machineId, address: address },
       title,
       machineLabel: machineId,
     }),

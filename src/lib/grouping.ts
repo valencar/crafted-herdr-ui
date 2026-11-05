@@ -12,11 +12,6 @@ export type Row = {
   address: string;
   /** The address as the local core takes it: `t7`, or `<machine name>/t7` on another machine. */
   fullAddress: string;
-  /**
-   * An alias of `address`, so the IPC callers keep compiling. Tasks 8-10 remove it as they
-   * rename the IPC arguments, and Task 10b deletes the alias.
-   */
-  paneId: string;
   /** The agent kind (`claude`, …); `null` for a plain shell. */
   kind: string | null;
   /** The foreground program's name. */
@@ -114,7 +109,6 @@ export function toRows(state: AppState): Row[] {
         machineLabel: m.name,
         address: t.address,
         fullAddress: m.is_local ? t.address : `${m.name}/${t.address}`,
-        paneId: t.address,
         kind: t.is_agent ? nonEmpty(t.kind) : null,
         program: nonEmpty(t.program),
         isAgent: t.is_agent,

@@ -33,7 +33,7 @@ export function PaneBox({ row, tail, onOpen }: Props) {
       <span id={tailId} className="mono pane-box-tail">
         {tail}
       </span>
-      <span className="mono pane-box-id">{row.paneId}</span>
+      <span className="mono pane-box-id">{row.address}</span>
     </button>
   );
 }

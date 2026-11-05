@@ -3,7 +3,7 @@ import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { invokeTyped } from "./ipc";
 
 /**
- * Tells Rust which pane's terminal tab is on screen (`${machineId}::${paneId}`), or `null`, so
+ * Tells Rust which pane's terminal tab is on screen (`${machineId}::${address}`), or `null`, so
  * it can skip the notification for a pane the user is looking at. A tab whose session is not
  * live (opening, detached or failed) shows no output, so it reports `null`. Mounted once, in
  * `App`. Rust also checks that the main window has focus when a notification is about to show.

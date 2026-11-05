@@ -18,21 +18,21 @@ function Probe() {
 }
 
 /** Opens (or focuses) a pane tab; its session is live unless a state is given. */
-function openPane(paneId: string, state: TabState = "live") {
+function openPane(address: string, state: TabState = "live") {
   act(() => {
     useTerminalStore.getState().openTab({
-      tabKey: `buildbox::${paneId}`,
-      target: { kind: "terminal", machineId: "buildbox", address: paneId },
+      tabKey: `buildbox::${address}`,
+      target: { kind: "terminal", machineId: "buildbox", address: address },
       title: "planner",
       machineLabel: "Build box",
     });
-    useTerminalStore.getState().updateTab(`buildbox::${paneId}`, { state });
+    useTerminalStore.getState().updateTab(`buildbox::${address}`, { state });
   });
 }
 
-function setTabState(paneId: string, state: TabState) {
+function setTabState(address: string, state: TabState) {
   act(() =>
-    useTerminalStore.getState().updateTab(`buildbox::${paneId}`, { state }),
+    useTerminalStore.getState().updateTab(`buildbox::${address}`, { state }),
   );
 }
 

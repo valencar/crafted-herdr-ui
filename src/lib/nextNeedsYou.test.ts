@@ -8,7 +8,7 @@ function row(overrides: Partial<Row>): Row {
     key: "m::w1:p1",
     machineId: "m",
     machineLabel: "m",
-    paneId: "w1:p1",
+    address: "w1:p1",
     kind: "claude",
     name: "n",
     title: "t",

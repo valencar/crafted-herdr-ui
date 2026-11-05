@@ -514,12 +514,12 @@ describe("menu events", () => {
   });
 });
 
-function openTabs(...paneIds: string[]) {
-  for (const paneId of paneIds) {
+function openTabs(...addresses: string[]) {
+  for (const address of addresses) {
     useTerminalStore.getState().openTab({
-      tabKey: `buildbox::${paneId}`,
-      target: { kind: "terminal", machineId: "buildbox", address: paneId },
-      title: `agent ${paneId}`,
+      tabKey: `buildbox::${address}`,
+      target: { kind: "terminal", machineId: "buildbox", address: address },
+      title: `agent ${address}`,
       machineLabel: "buildbox",
     });
   }
@@ -1612,7 +1612,7 @@ describe("the window chrome", () => {
 
   describe("a created session with Open when ready", () => {
     const KEY = "buildbox::w9:p9";
-    const target = { key: KEY, machineId: "buildbox", paneId: "w9:p9" };
+    const target = { key: KEY, machineId: "buildbox", address: "w9:p9" };
     /** The next poll: the fixture plus the new pane. */
     const withNewPane = (): AppState => {
       const m = box("buildbox", undefined, {

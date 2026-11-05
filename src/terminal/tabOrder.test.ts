@@ -8,11 +8,11 @@ function machine(id: string): MachineView {
   return machineView({ id, isLocal: id === "local", lastOkMs: null }, null);
 }
 
-function tab(machineId: string, paneId: string): TermTab {
+function tab(machineId: string, address: string): TermTab {
   return {
-    tabKey: `${machineId}::${paneId}`,
-    target: { kind: "terminal", machineId, address: paneId },
-    title: paneId,
+    tabKey: `${machineId}::${address}`,
+    target: { kind: "terminal", machineId, address: address },
+    title: address,
     machineLabel: machineId,
     state: "live",
     error: null,

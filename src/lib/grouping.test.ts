@@ -46,7 +46,7 @@ function row(overrides: Partial<Row>): Row {
     key: "m::w1:p1",
     machineId: "m",
     machineLabel: "m",
-    paneId: "w1:p1",
+    address: "w1:p1",
     kind: "claude",
     name: "n",
     title: "t",
@@ -64,7 +64,7 @@ describe("toRows", () => {
     const rows = buildbox();
     expect(rows).toHaveLength(6);
     expect(
-      rows.filter((r) => r.status === "shell").map((r) => r.paneId),
+      rows.filter((r) => r.status === "shell").map((r) => r.address),
     ).toEqual(["w1:p3", "w2:p3"]);
   });
 
@@ -78,7 +78,7 @@ describe("toRows", () => {
 
   it("describes an agent row from the agent and a shell row from the pane", () => {
     const rows = buildbox();
-    expect(rows.find((r) => r.paneId === "w1:p1")).toMatchObject({
+    expect(rows.find((r) => r.address === "w1:p1")).toMatchObject({
       machineId: "buildbox",
       machineLabel: "buildbox",
       kind: "claude",
@@ -87,7 +87,7 @@ describe("toRows", () => {
       status: "blocked",
       folder: "/home/dev/projects/api-service",
     });
-    expect(rows.find((r) => r.paneId === "w1:p3")).toMatchObject({
+    expect(rows.find((r) => r.address === "w1:p3")).toMatchObject({
       kind: null,
       status: "shell",
       title: "zsh",
@@ -103,8 +103,8 @@ describe("toRows", () => {
         }),
       ),
     );
-    expect(rows.find((r) => r.paneId === "w1:p1")?.sinceMs).toBe(500);
-    expect(rows.find((r) => r.paneId === "w1:p2")?.sinceMs).toBeNull();
+    expect(rows.find((r) => r.address === "w1:p1")?.sinceMs).toBe(500);
+    expect(rows.find((r) => r.address === "w1:p2")?.sinceMs).toBeNull();
   });
 
   it("gives no rows for a machine without terminals or a hidden one", () => {
@@ -166,7 +166,6 @@ describe("toRows", () => {
       machineId: "mb-2",
       machineLabel: "buildbox",
       address: "t1",
-      paneId: "t1",
       isWorker: false,
       parent: null,
     });
@@ -261,7 +260,7 @@ describe("toRows", () => {
       terms: buildboxTerms({ "w2:p2": { status: "unknown" } }),
     });
     const rows = toRows(appState(m));
-    const r = rows.find((x) => x.paneId === "w2:p2")!;
+    const r = rows.find((x) => x.address === "w2:p2")!;
     expect(r.status).toBe("unknown");
     expect(isNeedsYou(r)).toBe(false);
     expect(groupByStatus(rows).map((g) => g.name)).toContain("Unknown");
@@ -381,17 +380,17 @@ describe("isHomeLike", () => {
 describe("groupByProject", () => {
   it("project_groups_follow_foreground_cwd", () => {
     const groups = groupByProject(buildbox());
-    const g = groups.find((x) => x.rows.some((r) => r.paneId === "w1:p2"))!;
+    const g = groups.find((x) => x.rows.some((r) => r.address === "w1:p2"))!;
     expect(g.name).toBe("infra");
     expect(g.folder).toBe("/home/dev/projects/infra");
     expect(g.key).toBe("buildbox::/home/dev/projects/infra");
-    expect(g.rows.map((r) => r.paneId)).toEqual(["w1:p2"]);
+    expect(g.rows.map((r) => r.address)).toEqual(["w1:p2"]);
   });
 
   it("home_and_container_never_group", () => {
     const groups = groupByProject(buildbox());
     const loose = groups.find((g) => g.name === "Loose sessions")!;
-    expect(loose.rows.map((r) => r.paneId).sort()).toEqual(["w2:p2", "w2:p3"]);
+    expect(loose.rows.map((r) => r.address).sort()).toEqual(["w2:p2", "w2:p3"]);
     expect(loose.key).toBe("buildbox::__loose");
     expect(loose.folder).toBeNull();
     expect(loose.tier).toBe(3);
@@ -403,7 +402,7 @@ describe("groupByProject", () => {
   it("shell_joins_enclosing_agent_group", () => {
     const groups = groupByProject(buildbox());
     const g = groups.find((x) => x.name === "api-service")!;
-    expect(g.rows.map((r) => r.paneId).sort()).toEqual(["w1:p1", "w1:p3"]);
+    expect(g.rows.map((r) => r.address).sort()).toEqual(["w1:p1", "w1:p3"]);
   });
 
   it("shell_does_not_join_another_machine_or_a_sibling_prefix", () => {
@@ -428,13 +427,13 @@ describe("groupByProject", () => {
     const aApi = groups.find(
       (g) => g.key === "a::/home/dev/projects/api-service",
     )!;
-    expect(aApi.rows.map((r) => r.paneId)).toEqual(["w1:p1"]);
+    expect(aApi.rows.map((r) => r.address)).toEqual(["w1:p1"]);
     // b's shell has no api-service agent on b, so it stays loose on b.
     const bLoose = groups.find((g) => g.key === "b::__loose")!;
-    expect(bLoose.rows.map((r) => r.paneId)).toContain("w1:p3");
+    expect(bLoose.rows.map((r) => r.address)).toContain("w1:p3");
     // a's shell is in a sibling folder, not inside api-service.
     const aLoose = groups.find((g) => g.key === "a::__loose")!;
-    expect(aLoose.rows.map((r) => r.paneId)).toContain("w1:p3");
+    expect(aLoose.rows.map((r) => r.address)).toContain("w1:p3");
   });
 
   it("an agent does not join another agent's group by nesting", () => {
@@ -453,7 +452,7 @@ describe("groupByProject", () => {
     });
     const groups = groupByProject(toRows(appState(m)));
     const loose = groups.find((g) => g.tier === 3)!;
-    expect(loose.rows.map((r) => r.paneId)).toContain("w1:p2");
+    expect(loose.rows.map((r) => r.address)).toContain("w1:p2");
   });
 
   it("tier_order", () => {
@@ -553,20 +552,20 @@ describe("groupByStatus", () => {
 
 describe("ended rows", () => {
   const ended = (key: string, over: Partial<Row> = {}) =>
-    row({ key, paneId: key, status: "ended", sinceMs: 1, ...over });
+    row({ key, address: key, status: "ended", sinceMs: 1, ...over });
 
   it("ended_sorts_last_and_never_needs_you", () => {
     const rows = [
       ended("m::t1", { folder: "/home/dev/projects/api-service" }),
       row({
         key: "m::t2",
-        paneId: "t2",
+        address: "t2",
         status: "idle",
         folder: "/home/dev/projects/api-service",
       }),
       row({
         key: "m::t3",
-        paneId: "t3",
+        address: "t3",
         status: "working",
         folder: "/home/dev/projects/api-service",
       }),

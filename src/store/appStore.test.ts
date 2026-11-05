@@ -163,7 +163,7 @@ describe("appStore", () => {
     const target = {
       key: "buildbox::w3:p1",
       machineId: "buildbox",
-      paneId: "w3:p1",
+      address: "w3:p1",
     };
     setPendingOpen(target);
     expect(useAppStore.getState().pendingOpen).toEqual(target);
@@ -182,7 +182,7 @@ describe("appStore", () => {
     setPendingOpen({
       key: "buildbox::w3:p1",
       machineId: "buildbox",
-      paneId: "w3:p1",
+      address: "w3:p1",
     });
     setPendingOpen(null);
     vi.advanceTimersByTime(20_000);
@@ -195,7 +195,7 @@ describe("appStore", () => {
     setPendingOpen({
       key: "buildbox::w3:p1",
       machineId: "buildbox",
-      paneId: "w3:p1",
+      address: "w3:p1",
     });
     setPendingSelectKey(null);
     vi.advanceTimersByTime(10_000);

@@ -48,7 +48,7 @@ const ROW: Row = rowOf({
   key: "buildbox::w1:p1",
   machineId: "buildbox",
   machineLabel: "buildbox",
-  paneId: "w1:p1",
+  address: "w1:p1",
   kind: "claude",
   name: "api-service",
   title: "",
@@ -57,11 +57,11 @@ const ROW: Row = rowOf({
   sinceMs: null,
 });
 
-function tab(paneId: string): TermTab {
+function tab(address: string): TermTab {
   return {
-    tabKey: `buildbox::${paneId}`,
-    target: { kind: "terminal", machineId: "buildbox", address: paneId },
-    title: paneId,
+    tabKey: `buildbox::${address}`,
+    target: { kind: "terminal", machineId: "buildbox", address: address },
+    title: address,
     machineLabel: "buildbox",
     state: "live",
     error: null,
