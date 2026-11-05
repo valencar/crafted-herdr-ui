@@ -313,6 +313,7 @@ describe("PaneMenu", () => {
     expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
       machineId: "buildbox",
       address: "w1:p1",
+      observe: false,
     });
     await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
   });

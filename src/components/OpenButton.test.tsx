@@ -186,6 +186,7 @@ describe("OpenButton Open in Herdr", () => {
       expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
         machineId: "buildbox",
         address: "w1:p1",
+        observe: false,
       }),
     );
     expect(invoke).not.toHaveBeenCalledWith("herdr_app_status");
@@ -199,6 +200,7 @@ describe("OpenButton Open in Herdr", () => {
       expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
         machineId: "buildbox",
         address: "w1:p1",
+        observe: false,
       }),
     );
     expect(
@@ -376,6 +378,7 @@ describe("OpenButton", () => {
     expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
       machineId: "buildbox",
       address: "w1:p1",
+      observe: false,
     });
     await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
     expect(useAppStore.getState().toastTone).toBe("info");
@@ -388,7 +391,10 @@ describe("OpenButton", () => {
     expect(fetches()).toHaveLength(0);
     await user.click(chevron());
     expect(fetches()).toEqual([
-      ["copy_attach_command", { machineId: "buildbox", address: "w1:p1" }],
+      [
+        "copy_attach_command",
+        { machineId: "buildbox", address: "w1:p1", observe: false },
+      ],
     ]);
     await user.keyboard("{Escape}");
     await user.click(chevron());

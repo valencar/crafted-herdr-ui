@@ -570,19 +570,21 @@ pub async fn open_session(
 }
 
 /// The one-line command "Open" runs for a terminal (`hc attach buildbox/t7`), for the user to
-/// paste into any terminal. It names the binary by its file name.
+/// paste into any terminal. It names the binary by its file name. `observe` gives Watch's
+/// read-only one (`hc attach --observe buildbox/t7`), which a Watch tab hands out.
 #[tauri::command]
 pub fn copy_attach_command(
     locator: State<'_, CoreLocator>,
     sync: State<'_, SyncCell>,
     machine_id: String,
     address: String,
+    observe: bool,
 ) -> Result<String, ActionError> {
     let target = TermTarget::Terminal {
         machine_id,
         address,
     };
-    Ok(launch_for(&locator, &sync, &target, false)?.display)
+    Ok(launch_for(&locator, &sync, &target, observe)?.display)
 }
 
 /// Runs the target's command in the app's terminal panel and streams its output to `on_event`.

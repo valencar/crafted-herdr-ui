@@ -134,7 +134,8 @@ export type CommandArgs = {
   read_tail: { machineId: string; address: string };
   get_terminals: undefined;
   list_terminals: undefined;
-  copy_attach_command: { machineId: string; address: string };
+  /** `observe`: the read-only attach, for a Watch tab. */
+  copy_attach_command: { machineId: string; address: string; observe: boolean };
   start_preview: { machineId: string; address: string };
   stop_preview: undefined;
   get_settings: undefined;

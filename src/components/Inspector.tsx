@@ -60,7 +60,11 @@ export function Inspector({
     // A finished terminal can't be attached to: there is no command to fetch or show.
     if (!canAttach) return;
     let alive = true;
-    invokeTyped("copy_attach_command", { machineId, address: row.address })
+    invokeTyped("copy_attach_command", {
+      machineId,
+      address: row.address,
+      observe: false,
+    })
       .then(
         (c) =>
           alive &&

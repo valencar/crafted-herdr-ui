@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../lib/grouping";
@@ -62,6 +63,68 @@ function bar(r: Row | null, gone = false) {
   );
   return ref;
 }
+
+describe("TermBar on a Watch tab", () => {
+  it("copy_attach_and_open_in_terminal_stay_read_only", async () => {
+    const user = userEvent.setup();
+    const watch: TermTab = {
+      ...tab,
+      tabKey: "buildbox::t1::watch",
+      observe: true,
+    };
+    const ref = createRef<HTMLButtonElement>();
+    render(
+      <TermBar
+        tab={watch}
+        row={row("done")}
+        gone={false}
+        clicked="Reattach"
+        onReattach={() => {}}
+        onClose={() => {}}
+        buttonRef={ref}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Copy attach command" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+      machineId: "buildbox",
+      address: "t1",
+      observe: true,
+    });
+    await user.click(
+      await screen.findByRole("button", { name: "Open in Ghostty" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("open_session", {
+      machineId: "buildbox",
+      address: "t1",
+      observe: true,
+    });
+    // A Done row opened from a Watch tab is not marked seen.
+    expect(invoke).not.toHaveBeenCalledWith("mark_seen", expect.anything());
+  });
+
+  it("an_ordinary_tab_copies_and_opens_the_attach_that_types", async () => {
+    const user = userEvent.setup();
+    bar(row("idle"));
+    await user.click(
+      screen.getByRole("button", { name: "Copy attach command" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+      machineId: "buildbox",
+      address: "t1",
+      observe: false,
+    });
+    await user.click(
+      await screen.findByRole("button", { name: "Open in Ghostty" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("open_session", {
+      machineId: "buildbox",
+      address: "t1",
+      observe: false,
+    });
+  });
+});
 
 describe("TermBar", () => {
   it("a_command_tab_offers_only_close_tab_and_says_how_it_ended", () => {

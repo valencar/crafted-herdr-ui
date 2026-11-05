@@ -66,16 +66,18 @@ export async function copyAddress(row: Row): Promise<void> {
 /**
  * Runs one item of `paneMenuItems`, for the ⋯ menu and the palette's action frame alike. Close
  * and Remove are not run here: they end something, so `ask` shows the confirmation, which each
- * caller renders where it can outlive itself.
+ * caller renders where it can outlive itself. `opts.observe`: the menu is a Watch tab's, so Copy
+ * attach command copies the read-only attach.
  */
 export function runRowItem(
   item: PaneMenuItem,
   row: Row,
   ask: () => void,
+  opts?: { observe?: boolean },
 ): void {
   switch (item) {
     case "copy-attach":
-      void copyAttach(row);
+      void copyAttach(row, opts);
       break;
     case "copy-address":
       void copyAddress(row);

@@ -85,6 +85,7 @@ export function OpenButton({
     const fetching = invokeTyped("copy_attach_command", {
       machineId: row.machineId,
       address: row.address,
+      observe: false,
     });
     attach.current = fetching;
     // A failure surfaces only if the user asks to copy.

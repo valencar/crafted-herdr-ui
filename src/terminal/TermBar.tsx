@@ -50,6 +50,8 @@ export function TermBar({
   // A command tab (Log in, Update hc) has no terminal to attach to again: it ends, and Close tab
   // is the only way out, so running it again is a fresh click on the workbox.
   const command = tab.target.kind === "command";
+  // A Watch tab hands out only the read-only attach (`--observe`), which marks nothing seen.
+  const observe = tab.observe === true;
   const ended = row?.status === "ended";
   const closeOnly = command || gone || ended;
   const opening = tab.state === "opening";
@@ -107,7 +109,7 @@ export function TermBar({
             type="button"
             className="btn"
             disabled={opening}
-            onClick={() => void copyAttach(row)}
+            onClick={() => void copyAttach(row, { observe })}
           >
             Copy attach command
           </button>
@@ -117,7 +119,7 @@ export function TermBar({
             type="button"
             className="btn"
             disabled={opening}
-            onClick={() => void openRow(row, "external")}
+            onClick={() => void openRow(row, "external", { observe })}
           >
             Open in {terminalName(current)}
           </button>

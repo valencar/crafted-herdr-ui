@@ -127,6 +127,7 @@ describe("Inspector details", () => {
     expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
       machineId: "buildbox",
       address: "w1:p1",
+      observe: false,
     });
   });
 });

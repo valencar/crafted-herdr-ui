@@ -15,12 +15,18 @@ import { PINNED, useMenuBehavior } from "../lib/useMenuBehavior";
 
 /**
  * The context bar's ⋯ menu: the rarer things to do with the active tab's agent, so the bar keeps
- * one main action. The menu renders on the body, like every dialog: `.terminal-panel` is its own
+ * one main action. In a Watch tab (`observe`), Copy attach command copies the read-only attach. The menu renders on the body, like every dialog: `.terminal-panel` is its own
  * stacking context and the Dashboard column beside it would otherwise cover it. Its behavior is
  * `useMenuBehavior`'s, as `OpenButton`'s: an Escape typed in the terminal is never taken. The
  * tooltip on ⋯ stays away while the menu is open.
  */
-export function PaneMenu({ row }: { row: Row }) {
+export function PaneMenu({
+  row,
+  observe = false,
+}: {
+  row: Row;
+  observe?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<CSSProperties>(PINNED);
   const [closing, setClosing] = useState(false);
@@ -55,7 +61,7 @@ export function PaneMenu({ row }: { row: Row }) {
   const run = (item: PaneMenuItem) => {
     setOpen(false);
     buttonRef.current?.focus();
-    runRowItem(item, row, () => setClosing(true));
+    runRowItem(item, row, () => setClosing(true), { observe });
   };
 
   return (

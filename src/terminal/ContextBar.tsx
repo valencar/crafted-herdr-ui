@@ -18,14 +18,17 @@ type Props = {
   onFind: () => void;
 };
 
-/** The one main action: the pane in the user's own terminal. */
-function OpenInTerminal({ row }: { row: Row }) {
+/**
+ * The one main action: the pane in the user's own terminal. From a Watch tab (`observe`) it is
+ * the same read-only attach, and it marks nothing seen.
+ */
+function OpenInTerminal({ row, observe }: { row: Row; observe: boolean }) {
   const { current } = useTerminals();
   return (
     <button
       type="button"
       className="btn btn-small"
-      onClick={() => void openRow(row, "external")}
+      onClick={() => void openRow(row, "external", { observe })}
     >
       Open in {terminalName(current)}
     </button>
@@ -118,10 +121,14 @@ export function ContextBar({ tab, row, onFind }: Props) {
           </button>
         </Tooltip>
         {/* A finished terminal has nothing to open in the user's terminal either. */}
-        {row && row.status !== "ended" && <OpenInTerminal row={row} />}
+        {row && row.status !== "ended" && (
+          <OpenInTerminal row={row} observe={tab.observe === true} />
+        )}
         {/* Keyed by the pane, so a confirmation opened for one pane ends when another becomes
             active, instead of closing the new one. */}
-        {row && <PaneMenu key={row.key} row={row} />}
+        {row && (
+          <PaneMenu key={row.key} row={row} observe={tab.observe === true} />
+        )}
       </div>
     </div>
   );

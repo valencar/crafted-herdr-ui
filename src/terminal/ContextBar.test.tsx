@@ -110,6 +110,31 @@ describe("ContextBar on a Watch tab", () => {
     expect(screen.getByRole("button", { name: "Detach" })).toBeInTheDocument();
   });
 
+  it("open_in_terminal_and_copy_attach_stay_read_only", async () => {
+    const user = userEvent.setup();
+    invoke.mockImplementation(async (name: string) =>
+      name === "get_terminals"
+        ? { installed: ["ghostty"], default: "ghostty" }
+        : name === "copy_attach_command"
+          ? "hc attach --observe buildbox/w1:p1"
+          : null,
+    );
+    render(<ContextBar tab={watchTab} row={row} onFind={() => {}} />);
+    // Open in the user's terminal is the same watch (`--observe`), which marks nothing seen.
+    await user.click(await terminalButton());
+    expect(openRow).toHaveBeenCalledWith(row, "external", { observe: true });
+    // The ⋯ menu's Copy attach command copies the watching one too.
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(
+      screen.getByRole("menuitem", { name: "Copy attach command" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("copy_attach_command", {
+      machineId: "buildbox",
+      address: "w1:p1",
+      observe: true,
+    });
+  });
+
   it("an_ordinary_tab_does_not_say_watching", () => {
     const { container } = render(
       <ContextBar tab={paneTab} row={row} onFind={() => {}} />,
@@ -204,7 +229,7 @@ describe("ContextBar", () => {
     const user = userEvent.setup();
     render(<ContextBar tab={paneTab} row={row} onFind={() => {}} />);
     await user.click(await terminalButton());
-    expect(openRow).toHaveBeenCalledWith(row, "external");
+    expect(openRow).toHaveBeenCalledWith(row, "external", { observe: false });
   });
 
   it("detach_closes_the_tab_and_returns_home", async () => {
