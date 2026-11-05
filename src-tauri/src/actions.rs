@@ -17,6 +17,7 @@ use crate::agents::{DisplayStatus, KNOWN_AGENTS, KnownAgent, TaskArg, TerminalVi
 use crate::core::model::TemplateInfo;
 use crate::core::{CoreClient, CoreError};
 use crate::herdr::errors::HerdrError;
+use crate::terminal::{is_session, is_target, is_via};
 use crate::{LOCAL, lock};
 
 /// What a new session runs.
@@ -431,6 +432,130 @@ pub fn machine_command_args(verb: &str, name: &str) -> Result<Vec<String>, Strin
     Ok(["machine", verb, name].map(str::to_owned).to_vec())
 }
 
+/// What the Add workbox sheet sends. Exactly one of `target` (an SSH host or Host alias) and
+/// `via` (a custom connection command, which needs a `name`); `port` goes with a `target`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct AddMachineRequest {
+    pub target: Option<String>,
+    pub port: Option<u16>,
+    pub via: Option<String>,
+    /// What to call it here; the core derives one from the host when it is absent.
+    pub name: Option<String>,
+    /// The hc session on that machine.
+    pub session: Option<String>,
+    pub temporary: bool,
+}
+
+/// How the new machine is reached.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reach {
+    /// `host` or `host:port`, as the core takes it.
+    Target(String),
+    /// A custom connection command.
+    Via(String),
+}
+
+/// An `AddMachineRequest` that passed `check_add`: trimmed, joined and safe to send or to put in
+/// a command.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CheckedAdd {
+    pub reach: Reach,
+    pub name: Option<String>,
+    pub session: Option<String>,
+    pub temporary: bool,
+}
+
+const TARGET_HELP: &str =
+    "The SSH host may only use letters, digits and . _ @ : -, and can’t start with “-”.";
+const SESSION_HELP: &str = "The remote session may only use letters, digits and . _ - (up to 64), starting with a letter or digit.";
+const VIA_HELP: &str =
+    "The custom connection can’t start with “-”, or hold a backslash or a control character.";
+
+fn given(v: &Option<String>) -> Option<&str> {
+    v.as_deref().map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// Checks a request before anything is sent or run: one way in, the port joined onto the host, a
+/// name `validate_name` accepts, a session and a host that ssh and a shell read as plain words.
+/// The words are for the sheet to show.
+pub fn check_add(req: &AddMachineRequest) -> Result<CheckedAdd, String> {
+    let name = given(&req.name);
+    let reach = match (given(&req.target), given(&req.via)) {
+        (Some(_), Some(_)) => {
+            return Err("Use an SSH host or a custom connection, not both.".to_owned());
+        }
+        (None, None) => return Err("Enter an SSH host.".to_owned()),
+        (Some(target), None) => {
+            if !is_target(target) {
+                return Err(TARGET_HELP.to_owned());
+            }
+            match req.port {
+                None => Reach::Target(target.to_owned()),
+                Some(0) => return Err("The port must be between 1 and 65535.".to_owned()),
+                Some(_) if target.contains(':') => {
+                    return Err("The host already names a port.".to_owned());
+                }
+                Some(port) => Reach::Target(format!("{target}:{port}")),
+            }
+        }
+        (None, Some(via)) => {
+            if req.port.is_some() {
+                return Err("A port goes with an SSH host, not a custom connection.".to_owned());
+            }
+            if name.is_none() {
+                return Err("A custom connection needs a name.".to_owned());
+            }
+            if !is_via(via) {
+                return Err(VIA_HELP.to_owned());
+            }
+            Reach::Via(via.to_owned())
+        }
+    };
+    if let Some(name) = name {
+        validate_name(name)?;
+    }
+    let session = given(&req.session);
+    if session.is_some_and(|s| !is_session(s)) {
+        return Err(SESSION_HELP.to_owned());
+    }
+    Ok(CheckedAdd {
+        reach,
+        name: name.map(str::to_owned),
+        session: session.map(str::to_owned),
+        temporary: req.temporary,
+    })
+}
+
+/// The `machine.add` params for a checked request: the schema's own names, only the ones given
+/// (and `temporary`).
+pub fn add_params(add: &CheckedAdd) -> Value {
+    let mut p = Map::new();
+    match &add.reach {
+        Reach::Target(target) => p.insert("target".into(), json!(target)),
+        Reach::Via(via) => p.insert("via".into(), json!(via)),
+    };
+    if let Some(name) = &add.name {
+        p.insert("name".into(), json!(name));
+    }
+    if let Some(session) = &add.session {
+        p.insert("session".into(), json!(session));
+    }
+    p.insert("temporary".into(), json!(add.temporary));
+    Value::Object(p)
+}
+
+/// The `hc machine add …` line the request would run, built from the very params that run.
+pub fn preview_add(req: &AddMachineRequest, bin_name: &str) -> Result<String, ActionError> {
+    let add = check_add(req).map_err(ActionError::invalid)?;
+    Ok(crate::core::display::display(
+        "machine.add",
+        &add_params(&add),
+        bin_name,
+    ))
+}
+
 /// What the Workbox screen does to a saved machine, through the one door (`CoreClient`). Each
 /// runs only when the person clicked; the UI confirms `remove` first. A machine's state is not
 /// in the event stream (spec section 4.3), so every action, a failed one included, asks the sync
@@ -492,6 +617,46 @@ impl<'a> MachineActions<'a> {
             |name| json!({ "machine": name, "new_name": new_name }),
         )
         .await
+    }
+
+    /// `machine.add`: dials the machine over ssh (or the custom connection), checks that hc
+    /// answers there and keeps it under a name. It gets a connection of its own, because the
+    /// dial can take a while. The core's typed refusals (`hc_missing`, `needs_login`, …) come back
+    /// as `ActionError::Core` for the sheet to word; a timeout is `MaybeApplied` and is never
+    /// retried. Answers the new machine's id.
+    pub async fn add(&self, req: &AddMachineRequest) -> Result<String, ActionError> {
+        let add = check_add(req).map_err(ActionError::invalid)?;
+        let what = match &add.reach {
+            Reach::Target(target) => target.clone(),
+            Reach::Via(_) => add.name.clone().unwrap_or_default(),
+        };
+        let result = self
+            .core
+            .call_long(LOCAL, "machine.add", add_params(&add))
+            .await;
+        let reply = match result {
+            Ok(reply) => reply,
+            Err(e) => {
+                let failure = core_failure(e, "machine.add", &what);
+                if matches!(failure, ActionError::MaybeApplied { .. }) {
+                    self.sync.refresh_machines();
+                }
+                return Err(failure);
+            }
+        };
+        // The new machine should show up without waiting for the next tick.
+        self.sync.refresh_machines();
+        reply
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| ActionError::MaybeApplied {
+                message: format!(
+                    "herdr-core added {what}, but its reply could not be read; refreshing."
+                ),
+                argv: vec!["machine.add".to_owned()],
+            })
     }
 
     /// `machine.rm`: forgets the machine here; its terminals keep running there.
@@ -1186,6 +1351,140 @@ mod tests {
         );
         assert_eq!(interrupt_words(&json!({})), "Interrupt sent.");
     }
+    fn add_req() -> AddMachineRequest {
+        AddMachineRequest {
+            target: Some("dev@staging.example".into()),
+            ..AddMachineRequest::default()
+        }
+    }
+
+    #[test]
+    fn add_params_use_the_schemas_names_and_join_the_port() {
+        let mut req = add_req();
+        req.port = Some(2222);
+        req.name = Some(" staging ".into());
+        req.session = Some("qa".into());
+        req.temporary = true;
+        let params = add_params(&check_add(&req).unwrap());
+        assert_eq!(
+            params,
+            json!({
+                "target": "dev@staging.example:2222",
+                "name": "staging",
+                "session": "qa",
+                "temporary": true,
+            })
+        );
+        // Only what was given: the core fills in the rest.
+        let params = add_params(&check_add(&add_req()).unwrap());
+        assert_eq!(
+            params,
+            json!({"target": "dev@staging.example", "temporary": false})
+        );
+        // `display()` reads exactly these names.
+        assert_eq!(
+            crate::core::display::display("machine.add", &params, "hc"),
+            "hc machine add dev@staging.example"
+        );
+    }
+
+    #[test]
+    fn via_requires_name() {
+        let via = AddMachineRequest {
+            via: Some("ssh -p 2222 dev@host".into()),
+            ..AddMachineRequest::default()
+        };
+        assert_eq!(
+            check_add(&via).unwrap_err(),
+            "A custom connection needs a name."
+        );
+        let named = AddMachineRequest {
+            name: Some("gpubox".into()),
+            ..via.clone()
+        };
+        let params = add_params(&check_add(&named).unwrap());
+        assert_eq!(
+            params,
+            json!({"via": "ssh -p 2222 dev@host", "name": "gpubox", "temporary": false})
+        );
+        // A blank name is no name.
+        let blank = AddMachineRequest {
+            name: Some("  ".into()),
+            ..via
+        };
+        assert!(check_add(&blank).is_err());
+    }
+
+    #[test]
+    fn a_request_names_exactly_one_way_in() {
+        let mut both = add_req();
+        both.via = Some("ssh h".into());
+        both.name = Some("box".into());
+        assert!(check_add(&both).unwrap_err().contains("not both"));
+        assert!(
+            check_add(&AddMachineRequest::default())
+                .unwrap_err()
+                .contains("Enter")
+        );
+        let blank = AddMachineRequest {
+            target: Some("   ".into()),
+            via: Some("".into()),
+            ..AddMachineRequest::default()
+        };
+        assert!(check_add(&blank).is_err());
+    }
+
+    #[test]
+    fn add_refuses_what_ssh_or_a_shell_would_misread() {
+        for bad in ["-oProxyCommand=x", "bad target", "a;b", "$(id)", "a\\b"] {
+            let mut req = add_req();
+            req.target = Some(bad.into());
+            assert!(check_add(&req).is_err(), "target {bad:?}");
+        }
+        // The port is a number of its own, and the host may not carry one too.
+        let mut req = add_req();
+        req.port = Some(0);
+        assert!(check_add(&req).is_err());
+        req.port = Some(22);
+        req.target = Some("dev@staging.example:2222".into());
+        assert!(check_add(&req).is_err());
+        // A name is a machine name: `validate_name`, so an old herdr-style label is refused.
+        for bad in ["Build Box", "t7", "-x", "a b", &"x".repeat(33)] {
+            let mut req = add_req();
+            req.name = Some(bad.into());
+            assert!(check_add(&req).is_err(), "name {bad:?}");
+        }
+        // The session: [A-Za-z0-9][A-Za-z0-9._-]{0,63}.
+        for ok in ["work", "Work.2", "0", &"a".repeat(64)] {
+            let mut req = add_req();
+            req.session = Some(ok.into());
+            assert!(check_add(&req).is_ok(), "session {ok:?}");
+        }
+        for bad in ["-x", "a b", "a/b", "_x", ".x", "é", &"a".repeat(65)] {
+            let mut req = add_req();
+            req.session = Some(bad.into());
+            assert!(check_add(&req).is_err(), "session {bad:?}");
+        }
+        // A port does not go with a custom connection.
+        let via = AddMachineRequest {
+            via: Some("ssh h".into()),
+            name: Some("box".into()),
+            port: Some(22),
+            ..AddMachineRequest::default()
+        };
+        assert!(check_add(&via).is_err());
+        // A backslash (fish reads `\\` and `\'` inside single quotes differently), a control
+        // character, or a leading dash.
+        for bad in ["ssh a\\b", "ssh a\nb", "ssh a\tb", "-oX=y", "ssh a\\'b"] {
+            let req = AddMachineRequest {
+                via: Some(bad.into()),
+                name: Some("box".into()),
+                ..AddMachineRequest::default()
+            };
+            assert!(check_add(&req).is_err(), "via {bad:?}");
+        }
+    }
+
     #[test]
     fn login_and_update_args_pass_allowlist() {
         use crate::terminal::allowed_core_args;

@@ -18,7 +18,7 @@ use ts_rs::TS;
 
 pub use attach::{
     allowed_core_args, args_display, attach_argv, attach_display, bin_name, check_bin,
-    checked_core_argv, checked_machine_add_args,
+    checked_core_argv, is_session, is_target, is_via, machine_add_args,
 };
 pub use quote::{join_quoted, shell_quote};
 

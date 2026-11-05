@@ -1,129 +1,84 @@
-import {
-  useEffect,
-  useEffectEvent,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { SessionPicker } from "../components/SessionPicker";
 import { Sheet } from "../components/Sheet";
-import { SetupChecklist, type StepInfo } from "../components/SetupChecklist";
-import type { SetupEvent } from "../lib/bindings/SetupEvent";
-import type { SetupPrompt } from "../lib/bindings/SetupPrompt";
-import type { SetupStep } from "../lib/bindings/SetupStep";
+import {
+  addAdvice,
+  addProblems,
+  addPseudoId,
+  addRequest,
+  addTarget,
+  type AddAdvice,
+  type AddField,
+  type AddFields,
+} from "../lib/addWorkbox";
 import { actionErrorMessage } from "../lib/format";
-import { invokeTyped, onMachineSetup, toActionError } from "../lib/ipc";
-import { showHomeView, terminalName, useTerminals } from "../lib/uiHelpers";
+import { invokeTyped, toActionError } from "../lib/ipc";
+import { terminalName, useTerminals } from "../lib/uiHelpers";
 import { useAppStore } from "../store/appStore";
+import { openMachineAdd } from "../terminal/commandTabs";
 
-const POLL_MS = 2000;
-const GIVE_UP_MS = 10 * 60_000;
-const TIMEOUT_MESSAGE =
-  "Didn't see the new workbox yet. Finish setup in the terminal, then check the sidebar.";
-const APP_TIMEOUT_MESSAGE =
-  "herdr finished, but the new workbox hasn't shown up yet. Check the sidebar.";
-/** The most herdr output kept for the "Show herdr output" log. */
-const LOG_LIMIT = 100_000;
-
-// The characters `open_in_terminal` accepts (Rust `is_plain`); a value never starts with "-".
-const PLAIN = "A-Za-z0-9_@%+=:,./-";
-const VALUE = new RegExp(`^[${PLAIN}]+$`);
-// A label may also hold single spaces between words.
-const LABEL = new RegExp(`^[${PLAIN}]+( [${PLAIN}]+)*$`);
-
-function valueProblem(
-  what: string,
-  value: string,
-  pattern: RegExp,
-  /** Said between "digits" and the symbols, for a field with more freedom than the rest. */
-  also = "",
-): string | null {
-  if (value === "") return null;
-  if (value.startsWith("-")) return `${what} can’t start with “-”.`;
-  return pattern.test(value)
-    ? null
-    : `${what} may only use letters, digits${also} and _ @ % + = : , . / -`;
-}
-
-/** The target the sheet is after: it should show up as a profile it did not know before. */
-type Run = {
-  target: string;
-  /** What the success toast calls it. */
-  name: string;
-  knownIds: ReadonlySet<string>;
+const BLANK: AddFields = {
+  host: "",
+  port: "",
+  via: "",
+  name: "",
+  session: "",
+  temporary: false,
 };
 
-/** What the sheet is waiting for. `via` is who is doing the setup: the user's terminal, or the app. */
-type Waiting = Run & { via: "terminal" | "app" };
-
 /**
- * The Add workbox sheet. "Add workbox" runs `herdr machine add …` in a hidden terminal and turns
- * the prompts it knows (session picker, install consent, replace consent) into dialogs. Anything
- * else, or a run that goes quiet, is for "Continue in terminal", which hands the same command to
- * the user's own terminal (ssh may ask for a passphrase there). Either way the sheet is done when
- * the new profile shows up in the machine list.
+ * The Add workbox sheet. "Add workbox" asks herdr-core to add the machine (`machine.add`) and the
+ * core answers with a typed error when it can't, and each error has a next step: install hc
+ * there (an explicit click, then a confirm, then `hc machine add … --install` in a visible
+ * terminal tab), or open the same add in a terminal so the person can type a password, a code or
+ * a host key, or fix the name in place. Once a terminal is doing the add, the sheet closes (it
+ * would cover the terminal) and `AddWatcher` waits for the machine to show up.
  */
 export function AddWorkbox() {
   const state = useAppStore((s) => s.state);
   const setSheet = useAppStore((s) => s.setSheet);
-  const showToast = useAppStore((s) => s.showToast);
   const { current: terminal } = useTerminals();
   const terminalLabel = terminalName(terminal);
 
   const hostId = useId();
-  const labelId = useId();
+  const portId = useId();
+  const nameId = useId();
   const sessionId = useId();
+  const viaId = useId();
   const hostErrorId = useId();
-  const labelErrorId = useId();
+  const portErrorId = useId();
+  const nameErrorId = useId();
   const sessionErrorId = useId();
+  const viaErrorId = useId();
 
-  const [host, setHost] = useState("");
-  const [label, setLabel] = useState("");
-  const [session, setSession] = useState("");
+  const [fields, setFields] = useState<AddFields>(BLANK);
+  const [showVia, setShowVia] = useState(false);
   const [aliases, setAliases] = useState<string[]>([]);
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [waiting, setWaiting] = useState<Waiting | null>(null);
-  const [timedOut, setTimedOut] = useState<string | null>(null);
-  // The hidden `machine add` run.
-  const [run, setRun] = useState<Run | null>(null);
-  const [steps, setSteps] = useState<Partial<Record<SetupStep, StepInfo>>>({});
-  const [log, setLog] = useState("");
-  const [showLog, setShowLog] = useState(false);
-  const [prompt, setPrompt] = useState<SetupPrompt | null>(null);
-  const [stalled, setStalled] = useState(false);
-  const [runFailure, setRunFailure] = useState<string | null>(null);
-  const [started, setStarted] = useState(false);
-  // The host the last run or terminal hand-off was for; the checklist is about that one even if
-  // the field is edited afterwards.
-  const [setupTarget, setSetupTarget] = useState("");
-  // Events arrive while the callbacks below are mid-render, so they read the run from a ref.
-  const runRef = useRef<Run | null>(null);
+  const [advice, setAdvice] = useState<AddAdvice | null>(null);
+  const [confirmInstall, setConfirmInstall] = useState(false);
 
-  const target = host.trim();
-  const labelText = label.trim();
-  const sessionText = session.trim();
-  const hostProblem = valueProblem("The SSH host", target, VALUE);
-  const sessionProblem = valueProblem("The remote session", sessionText, VALUE);
-  const labelProblem = valueProblem(
-    "The label",
-    labelText,
-    LABEL,
-    ", single spaces between words,",
-  );
-  const valid =
-    target !== "" && !hostProblem && !sessionProblem && !labelProblem;
+  const req = useMemo(() => addRequest(fields), [fields]);
+  const problems = addProblems(fields);
+  const hasWay = req.target !== null || req.via !== null;
+  const valid = hasWay && Object.keys(problems).length === 0;
+  const target = fields.host.trim();
 
   const machines = useMemo(() => state?.machines ?? [], [state]);
-  // A profile is a duplicate only when the host and the session both match; an empty session
-  // field means `default`.
-  const wantedSession = sessionText || "default";
-  const existing = target
-    ? machines.find((m) => m.target === target && m.session === wantedSession)
-    : undefined;
+  // A machine is a duplicate only when the host and the session both match; an empty session
+  // field means the default one.
+  const existing =
+    req.target !== null
+      ? machines.find(
+          (m) =>
+            m.target === addTarget(req) &&
+            (m.session ?? "default") === (req.session ?? "default"),
+        )
+      : undefined;
+  const canAdd = valid && !existing && !busy;
+  const shown = req.target ?? req.name ?? "";
 
   useEffect(() => {
     let cancelled = false;
@@ -138,15 +93,11 @@ export function AddWorkbox() {
     };
   }, []);
 
-  // The command line comes from Rust, so it is exactly what the button runs.
+  // The command line comes from Rust, so it is exactly what the add runs.
   useEffect(() => {
     if (!valid) return;
     let cancelled = false;
-    invokeTyped("preview_machine_add", {
-      target,
-      label: labelText || null,
-      session: sessionText || null,
-    })
+    invokeTyped("preview_add_machine", { req })
       .then((line) => {
         if (!cancelled) setPreview(line);
       })
@@ -156,213 +107,84 @@ export function AddWorkbox() {
     return () => {
       cancelled = true;
     };
-  }, [valid, target, labelText, sessionText]);
+  }, [valid, req]);
 
-  // Ask for a fresh machine list every 2 s, for up to 10 minutes. Leaving the sheet (Cancel,
-  // Escape, success) unmounts this effect, which stops both timers.
-  const waitingTarget = waiting?.target;
-  const waitingVia = waiting?.via;
-  useEffect(() => {
-    if (!waitingTarget) return;
-    const poll = window.setInterval(() => {
-      // A failed refresh shows up in the next one; there is nothing to tell the user.
-      invokeTyped("refresh_now", {}).catch(() => {});
-    }, POLL_MS);
-    const giveUp = window.setTimeout(() => {
-      window.clearInterval(poll);
-      setWaiting(null);
-      setTimedOut(waitingVia === "app" ? APP_TIMEOUT_MESSAGE : TIMEOUT_MESSAGE);
-    }, GIVE_UP_MS);
-    return () => {
-      window.clearInterval(poll);
-      window.clearTimeout(giveUp);
-    };
-  }, [waitingTarget, waitingVia]);
-
-  // The new profile showed up in the state: done.
-  useEffect(() => {
-    if (!waiting) return;
-    const added = machines.find(
-      (m) => m.target === waiting.target && !waiting.knownIds.has(m.id),
-    );
-    if (!added) return;
-    setSheet(null);
-    showToast(`Added ${waiting.name}`, "info");
-    showHomeView({ kind: "workbox", machineId: added.id });
-  }, [waiting, machines, setSheet, showToast]);
-
-  const running = run !== null;
-  const waitingNow = waiting !== null;
-  const canContinue = valid && !existing && !busy && !waitingNow;
-  const canAdd = canContinue && !running;
-
+  // The call goes on in Rust if the sheet is closed meanwhile; its result still reaches the
+  // store, so the machine is still welcomed when it shows up.
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      // Leaving the sheet leaves nothing running in the background.
-      if (runRef.current) {
-        runRef.current = null;
-        invokeTyped("cancel_machine_setup").catch(() => {});
-      }
     };
   }, []);
 
   const close = () => setSheet(null);
 
-  function applyEvent(event: SetupEvent) {
-    const current = runRef.current;
-    // Events from a run the user already walked away from.
-    if (!current) return;
-    switch (event.kind) {
-      case "output":
-        setLog((text) => (text + event.data).slice(-LOG_LIMIT));
-        setStalled(false);
-        break;
-      case "step":
-        setSteps((all) => ({
-          ...all,
-          [event.data.step]: {
-            state: event.data.state,
-            meta: event.data.meta,
-          },
-        }));
-        break;
-      case "prompt":
-        setPrompt(event.data);
-        setStalled(false);
-        break;
-      case "stalled":
-        setStalled(true);
-        break;
-      case "finished":
-        runRef.current = null;
-        setRun(null);
-        setPrompt(null);
-        setStalled(false);
-        if (event.data.ok) {
-          // herdr says it saved the machine; the machine list says whether it did.
-          setWaiting({ ...current, via: "app" });
-        } else {
-          setRunFailure(
-            "herdr stopped before the workbox was added. See its output below, or continue in the terminal.",
-          );
-          setShowLog(true);
-        }
-        break;
-    }
-  }
-  const onSetupEvent = useEffectEvent(applyEvent);
-
-  useEffect(() => {
-    let off: (() => void) | undefined;
-    let gone = false;
-    onMachineSetup((event) => onSetupEvent(event))
-      .then((unlisten) => {
-        if (gone) unlisten();
-        else off = unlisten;
-      })
-      // Without events the run can't be followed; "Continue in terminal" still works.
-      .catch(() => {});
-    return () => {
-      gone = true;
-      off?.();
-    };
-  }, []);
-
-  function forgetRun() {
-    runRef.current = null;
-    setRun(null);
-    setPrompt(null);
-    setStalled(false);
+  function edit(patch: Partial<AddFields>) {
+    setFields((f) => ({ ...f, ...patch }));
+    // What the core said was about the old values.
+    setAdvice(null);
+    setFailure(null);
   }
 
-  /** Stops the hidden run, if there is one. */
-  async function stopRun() {
-    if (!runRef.current) return;
-    forgetRun();
-    await invokeTyped("cancel_machine_setup").catch(() => {});
+  /** Hands the wait to `AddWatcher` and gets out of the terminal's way. */
+  function handOver(tabMachineId: string | null, id: string | null) {
+    useAppStore.getState().setPendingAdd({
+      id,
+      target: addTarget(req),
+      knownIds: machines.map((m) => m.id),
+      tabMachineId,
+    });
+    if (mounted.current) setSheet(null);
   }
 
-  function newRun(): Run {
-    return {
-      target,
-      name: labelText || target,
-      knownIds: new Set(machines.map((m) => m.id)),
-    };
-  }
-
-  async function addHere() {
+  async function add() {
     if (!canAdd) return;
     setBusy(true);
     setFailure(null);
-    setRunFailure(null);
-    setTimedOut(null);
-    setSteps({});
-    setLog("");
-    setShowLog(false);
-    setStarted(true);
-    setSetupTarget(target);
-    const next = newRun();
-    // The first events come before the call returns.
-    runRef.current = next;
-    setRun(next);
+    setAdvice(null);
     try {
-      await invokeTyped("start_machine_add", {
-        target,
-        label: labelText || null,
-        session: sessionText || null,
-      });
+      const id = await invokeTyped("add_machine", { req });
+      handOver(null, id);
     } catch (e) {
-      forgetRun();
-      setStarted(false);
-      if (mounted.current) setFailure(actionErrorMessage(toActionError(e)));
+      if (!mounted.current) return;
+      const next = addAdvice(toActionError(e));
+      if (next.kind === "other") setFailure(next.text);
+      else setAdvice(next);
     } finally {
       if (mounted.current) setBusy(false);
     }
   }
 
-  async function answer(choice: string) {
-    const asked = prompt;
-    setPrompt(null);
-    setStalled(false);
-    try {
-      await invokeTyped("answer_machine_setup", { choice });
-    } catch (e) {
-      if (!mounted.current) return;
-      setFailure(actionErrorMessage(toActionError(e)));
-      // herdr never got the answer, so it is still asking. Ask again, unless the run is over
-      // or a newer question has come in.
-      if (runRef.current) setPrompt((current) => current ?? asked);
-    }
-  }
-
-  async function giveUpOnPrompt() {
-    await stopRun();
-    setStarted(false);
-  }
-
-  async function submit() {
-    if (!canContinue) return;
+  /** The same add in an in-app tab. `install` is true only after the person confirmed it. */
+  async function addInTab(install: boolean) {
     setBusy(true);
-    setFailure(null);
-    setRunFailure(null);
-    setTimedOut(null);
     try {
-      // The hidden run and the terminal must not both answer to the same host.
-      await stopRun();
-      setStarted(false);
-      setSetupTarget(target);
-      const fields = {
-        target,
-        label: labelText || null,
-        session: sessionText || null,
-      };
-      const args = await invokeTyped("machine_add_argv", fields);
+      if (await openMachineAdd(req, install)) {
+        handOver(addPseudoId(req), null);
+      }
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }
+
+  /** The same add in the person's own terminal app. */
+  async function addInTheirTerminal() {
+    setBusy(true);
+    try {
+      const args = await invokeTyped("machine_add_args", {
+        req,
+        install: false,
+      });
       await invokeTyped("open_in_terminal", { args });
-      if (!mounted.current) return;
-      setWaiting({ ...newRun(), via: "terminal" });
+      useAppStore
+        .getState()
+        .showToast(
+          `Finish adding ${shown} in ${terminalLabel}. It shows up here when it’s done.`,
+          "info",
+        );
+      handOver(null, null);
     } catch (e) {
       if (mounted.current) setFailure(actionErrorMessage(toActionError(e)));
     } finally {
@@ -370,8 +192,25 @@ export function AddWorkbox() {
     }
   }
 
-  const locked = waitingNow || running;
-  const promptTarget = run?.target ?? target;
+  const inlineText = (field: "name" | "host") =>
+    advice?.kind === "inline" && advice.field === field ? advice.text : null;
+  const problem = (field: AddField): string | null =>
+    problems[field] ??
+    (field === "name" || field === "host" ? inlineText(field) : null);
+  const errorProps = (field: AddField, errorId: string) =>
+    problem(field)
+      ? { "aria-invalid": true as const, "aria-describedby": errorId }
+      : {};
+  const errorLine = (field: AddField, errorId: string) => {
+    const text = problem(field);
+    return text ? (
+      <p id={errorId} className="field-error" role="alert">
+        {text}
+      </p>
+    ) : null;
+  };
+
+  const viaOpen = showVia || fields.via !== "";
 
   return (
     <>
@@ -382,7 +221,7 @@ export function AddWorkbox() {
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
             e.preventDefault();
-            void addHere();
+            void add();
           }
         }}
         footer={
@@ -395,19 +234,11 @@ export function AddWorkbox() {
             </button>
             <button
               type="button"
-              className="btn"
-              disabled={!canContinue}
-              onClick={() => void submit()}
-            >
-              Continue in {terminalLabel}
-            </button>
-            <button
-              type="button"
               className="btn btn-primary"
               disabled={!canAdd}
-              onClick={() => void addHere()}
+              onClick={() => void add()}
             >
-              Add workbox
+              {busy ? "Adding…" : "Add workbox"}
             </button>
           </>
         }
@@ -421,20 +252,15 @@ export function AddWorkbox() {
             data-autofocus
             className="field mono"
             type="text"
-            value={host}
+            value={fields.host}
             placeholder="buildbox or dev@build.example"
             spellCheck={false}
             autoCapitalize="off"
-            disabled={locked}
-            aria-invalid={hostProblem ? true : undefined}
-            aria-describedby={hostProblem ? hostErrorId : undefined}
-            onChange={(e) => setHost(e.target.value)}
+            disabled={busy}
+            {...errorProps("host", hostErrorId)}
+            onChange={(e) => edit({ host: e.target.value })}
           />
-          {hostProblem && (
-            <p id={hostErrorId} className="field-error" role="alert">
-              {hostProblem}
-            </p>
-          )}
+          {errorLine("host", hostErrorId)}
           {aliases.length > 0 && (
             <div className="sheet-line sheet-wrap">
               <span className="muted sheet-note">From ~/.ssh/config:</span>
@@ -444,42 +270,59 @@ export function AddWorkbox() {
                   type="button"
                   className={`btn btn-small mono${alias === target ? " chip-on" : ""}`}
                   aria-pressed={alias === target}
-                  disabled={locked}
-                  onClick={() => setHost(alias)}
+                  disabled={busy}
+                  onClick={() => edit({ host: alias })}
                 >
                   {alias}
                 </button>
               ))}
             </div>
           )}
-          {existing && !waitingNow && (
+          {existing && (
             <p className="muted sheet-note">Already added as {existing.name}</p>
           )}
         </div>
 
         <div className="sheet-pair">
           <div className="sheet-field">
-            <label htmlFor={labelId} className="sheet-label">
-              Label
+            <label htmlFor={portId} className="sheet-label">
+              Port
             </label>
             <input
-              id={labelId}
-              className="field"
+              id={portId}
+              className="field mono add-port"
               type="text"
-              value={label}
-              placeholder="optional"
+              inputMode="numeric"
+              value={fields.port}
+              placeholder="22"
               spellCheck={false}
-              disabled={locked}
-              aria-invalid={labelProblem ? true : undefined}
-              aria-describedby={labelProblem ? labelErrorId : undefined}
-              onChange={(e) => setLabel(e.target.value)}
+              disabled={busy}
+              {...errorProps("port", portErrorId)}
+              onChange={(e) => edit({ port: e.target.value })}
             />
-            {labelProblem && (
-              <p id={labelErrorId} className="field-error" role="alert">
-                {labelProblem}
-              </p>
-            )}
+            {errorLine("port", portErrorId)}
           </div>
+          <div className="sheet-field">
+            <label htmlFor={nameId} className="sheet-label">
+              Name
+            </label>
+            <input
+              id={nameId}
+              className="field mono"
+              type="text"
+              value={fields.name}
+              placeholder={fields.via ? "required" : "optional"}
+              spellCheck={false}
+              autoCapitalize="off"
+              disabled={busy}
+              {...errorProps("name", nameErrorId)}
+              onChange={(e) => edit({ name: e.target.value })}
+            />
+            {errorLine("name", nameErrorId)}
+          </div>
+        </div>
+
+        <div className="sheet-pair">
           <div className="sheet-field">
             <label htmlFor={sessionId} className="sheet-label">
               Remote session
@@ -488,27 +331,69 @@ export function AddWorkbox() {
               id={sessionId}
               className="field mono"
               type="text"
-              value={session}
+              value={fields.session}
               placeholder="default"
               spellCheck={false}
               autoCapitalize="off"
-              disabled={locked}
-              aria-invalid={sessionProblem ? true : undefined}
-              aria-describedby={sessionProblem ? sessionErrorId : undefined}
-              onChange={(e) => setSession(e.target.value)}
+              disabled={busy}
+              {...errorProps("session", sessionErrorId)}
+              onChange={(e) => edit({ session: e.target.value })}
             />
-            {sessionProblem && (
-              <p id={sessionErrorId} className="field-error" role="alert">
-                {sessionProblem}
-              </p>
-            )}
+            {errorLine("session", sessionErrorId)}
+          </div>
+          <div className="sheet-field">
+            <span className="sheet-label">Lifetime</span>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={fields.temporary}
+                disabled={busy}
+                onChange={(e) => edit({ temporary: e.target.checked })}
+              />
+              Temporary: short-lived, shown apart
+            </label>
           </div>
         </div>
 
+        <div className="sheet-field">
+          <button
+            type="button"
+            className="btn btn-small btn-ghost"
+            aria-expanded={viaOpen}
+            disabled={busy}
+            onClick={() => setShowVia((v) => !v)}
+          >
+            Custom connection
+          </button>
+          {viaOpen && (
+            <>
+              <label htmlFor={viaId} className="sheet-label">
+                Connection command
+              </label>
+              <input
+                id={viaId}
+                className="field mono"
+                type="text"
+                value={fields.via}
+                placeholder="fly ssh console -a app --pty=false -C"
+                spellCheck={false}
+                autoCapitalize="off"
+                disabled={busy}
+                {...errorProps("via", viaErrorId)}
+                onChange={(e) => edit({ via: e.target.value })}
+              />
+              {errorLine("via", viaErrorId)}
+              <p className="muted sheet-note">
+                Used instead of an SSH host. It gets a shell line to run there
+                as its last argument, like ssh, passes bytes both ways and asks
+                nothing. It needs a name.
+              </p>
+            </>
+          )}
+        </div>
+
         <div className="cmdbox" aria-live="polite">
-          <div className="cmdbox-caption">
-            # Opens in {terminalLabel}, using your herdr CLI
-          </div>
+          <div className="cmdbox-caption"># herdr-core will run</div>
           {valid && preview ? (
             <div>
               <code className="cmdbox-line">
@@ -522,56 +407,79 @@ export function AddWorkbox() {
           )}
         </div>
 
+        {busy && (
+          <p className="muted sheet-note" aria-live="polite">
+            Reaching {shown}. This can take up to a minute.
+          </p>
+        )}
+
         {failure && (
           <p className="field-error" role="alert">
             {failure}
           </p>
         )}
 
-        {(started || waiting || timedOut || runFailure) && (
-          <SetupChecklist
-            setupTarget={run?.target ?? waiting?.target ?? setupTarget}
-            target={promptTarget}
-            terminalLabel={terminalLabel}
-            steps={steps}
-            started={started}
-            waiting={waiting}
-            stalled={stalled}
-            runFailure={runFailure}
-            timedOut={timedOut}
-            log={log}
-            showLog={showLog}
-            onToggleLog={setShowLog}
-          />
+        {advice?.kind === "install" && (
+          <div className="add-advice" role="alert">
+            <p className="add-advice-lead">
+              {`hc isn’t installed on ${shown}, or it’s too old.`}
+            </p>
+            <p className="add-advice-why">{advice.why}</p>
+            <div className="add-advice-actions">
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setConfirmInstall(true)}
+              >
+                Install hc there…
+              </button>
+            </div>
+          </div>
+        )}
+
+        {advice?.kind === "terminal" && (
+          <div className="add-advice" role="alert">
+            <p className="add-advice-lead">
+              {advice.code === "needs_login"
+                ? `${shown} needs a login that you type.`
+                : `Couldn’t reach ${shown}.`}
+            </p>
+            <p className="add-advice-why">{advice.why}</p>
+            <div className="add-advice-actions">
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => void addInTab(false)}
+              >
+                Open in terminal
+              </button>
+              {terminal !== null && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={busy}
+                  onClick={() => void addInTheirTerminal()}
+                >
+                  Open in {terminalLabel}
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </Sheet>
-      {prompt?.kind === "pickSession" && (
-        <SessionPicker
-          target={promptTarget}
-          options={prompt.options}
-          onChoose={(index) => void answer(String(index))}
-          onCancel={() => void giveUpOnPrompt()}
-        />
-      )}
-      {prompt?.kind === "confirmInstall" && (
+      {confirmInstall && (
         <ConfirmDialog
-          title={`Install herdr on ${promptTarget}?`}
-          body={`${prompt.version ? `herdr ${prompt.version}` : "herdr"} needs to be installed on ${promptTarget}${prompt.path ? `, at ${prompt.path}` : ""}. Nothing is installed unless you say so.`}
-          detail={prompt.detail ?? undefined}
-          confirmLabel="Install herdr"
+          title={`Install hc on ${shown}?`}
+          body={`Copies this hc to ${shown} so it can run there. A terminal tab shows every step and any question. Nothing is installed unless you say so.`}
+          confirmLabel="Install hc there"
           danger={false}
-          onConfirm={() => void answer("yes")}
-          onCancel={() => void answer("no")}
-        />
-      )}
-      {prompt?.kind === "confirmReplace" && (
-        <ConfirmDialog
-          title={`Stop the herdr server on ${promptTarget}?`}
-          body={`This stops the running herdr server on ${promptTarget} and the agents in its panes.`}
-          detail={prompt.message}
-          confirmLabel="Stop server and continue"
-          onConfirm={() => void answer("yes")}
-          onCancel={() => void answer("no")}
+          onConfirm={() => {
+            setConfirmInstall(false);
+            void addInTab(true);
+          }}
+          onCancel={() => setConfirmInstall(false)}
         />
       )}
     </>

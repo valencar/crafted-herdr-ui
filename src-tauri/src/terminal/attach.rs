@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use super::quote::join_quoted;
+use crate::actions::{ActionError, AddMachineRequest, Reach, check_add};
 
 /// Refuses a core path that can't be quoted for every shell. The command line is parsed by POSIX
 /// `sh` and also by the user's login shell (Terminal.app, Warp), which may be fish, where `\\`
@@ -66,7 +67,7 @@ fn is_address(s: &str) -> bool {
 
 /// An SSH target for `machine add`: `^[A-Za-z0-9._@:-]+$`, never starting with `-`, so ssh can't
 /// read it as an option.
-fn is_target(s: &str) -> bool {
+pub fn is_target(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with('-')
         && s.chars()
@@ -74,16 +75,19 @@ fn is_target(s: &str) -> bool {
 }
 
 /// A session name for `machine add --session`.
-fn is_session(s: &str) -> bool {
+pub fn is_session(s: &str) -> bool {
     s.len() <= 64
         && s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
 }
 
-/// The `--via` command: anything without NUL or a newline, and not shaped like an option.
-fn is_via(s: &str) -> bool {
-    !s.is_empty() && !s.starts_with('-') && !s.contains(['\0', '\n', '\r'])
+/// The `--via` command: anything without a control character (NUL and newlines among them) or a
+/// backslash, and not shaped like an option. The command line is read by POSIX `sh` and by the
+/// user's login shell, which may be fish, where `\\` and `\'` mean something inside single
+/// quotes; refusing the backslash keeps what the person reads the same as what runs.
+pub fn is_via(s: &str) -> bool {
+    !s.is_empty() && !s.starts_with('-') && !s.chars().any(|c| c.is_control() || c == '\\')
 }
 
 /// Whether `args` (no binary) are a command the UI may hand to a terminal. Exactly:
@@ -129,7 +133,7 @@ fn allowed_machine_add(words: &[&str]) -> bool {
                 };
                 match flag {
                     "--via" => is_via(value) && once(&mut via),
-                    "--name" => is_name(value) && once(&mut name),
+                    "--name" => crate::actions::validate_name(value).is_ok() && once(&mut name),
                     _ => is_session(value) && once(&mut session),
                 }
             }
@@ -173,28 +177,38 @@ pub fn bin_name(core: &Path) -> String {
         .map_or_else(|| "hc".to_owned(), |n| n.to_string_lossy().into_owned())
 }
 
-/// What follows the binary in `machine add`, for the form's raw fields (trimmed; empty means not
-/// given), checked against `allowed_core_args`. The UI's preview and the call to
-/// `open_in_terminal` both come from here, so what the user reads is what runs.
-pub fn checked_machine_add_args(
-    target: &str,
-    name: Option<&str>,
-    session: Option<&str>,
-) -> Result<Vec<String>, String> {
-    fn given(v: Option<&str>) -> Option<&str> {
-        v.map(str::trim).filter(|v| !v.is_empty())
+/// What follows the binary in `machine add`, for the sheet's fields: a target (with its port) or
+/// `--via <cmd> --name N`, then `--name`, `--session`, `--temp` and, only when `install` is true,
+/// `--install`. The request is checked first (`check_add`), and the result against
+/// `allowed_core_args`, so what the person reads is what runs. `install` is true only after the
+/// person confirmed Install hc there….
+pub fn machine_add_args(
+    req: &AddMachineRequest,
+    install: bool,
+) -> Result<Vec<String>, ActionError> {
+    let add = check_add(req).map_err(ActionError::invalid)?;
+    let mut args: Vec<String> = ["machine", "add"].map(str::to_owned).into();
+    match add.reach {
+        Reach::Target(target) => args.push(target),
+        Reach::Via(via) => args.extend(["--via".to_owned(), via]),
     }
-    let mut args: Vec<String> = ["machine", "add", target.trim()].map(str::to_owned).into();
-    for (flag, value) in [("--name", given(name)), ("--session", given(session))] {
+    for (flag, value) in [("--name", add.name), ("--session", add.session)] {
         if let Some(value) = value {
-            args.push(flag.to_owned());
-            args.push(value.to_owned());
+            args.extend([flag.to_owned(), value]);
         }
+    }
+    if add.temporary {
+        args.push("--temp".to_owned());
+    }
+    if install {
+        args.push("--install".to_owned());
     }
     if allowed_core_args(&args) {
         Ok(args)
     } else {
-        Err("The app won't run that command in a terminal.".to_owned())
+        Err(ActionError::invalid(
+            "The app won't run that command in a terminal.",
+        ))
     }
 }
 
@@ -380,19 +394,147 @@ mod tests {
         assert!(check_bin("/Users/dev/My Tools/hc").is_ok());
     }
 
+    fn req(target: &str) -> AddMachineRequest {
+        AddMachineRequest {
+            target: Some(target.into()),
+            ..AddMachineRequest::default()
+        }
+    }
+
     #[test]
-    fn machine_add_args_are_checked() {
+    fn machine_add_args_are_arguments_only_and_pass_the_allowlist() {
+        let mut full = req(" buildbox ");
+        full.port = Some(2222);
+        full.name = Some(" box ".into());
+        full.session = Some("work".into());
+        full.temporary = true;
+        let args = machine_add_args(&full, false).unwrap();
         assert_eq!(
-            checked_machine_add_args(" buildbox ", Some(" box "), Some("  ")).unwrap(),
-            strs(&["machine", "add", "buildbox", "--name", "box"])
+            args,
+            strs(&[
+                "machine",
+                "add",
+                "buildbox:2222",
+                "--name",
+                "box",
+                "--session",
+                "work",
+                "--temp"
+            ])
         );
+        assert!(allowed_core_args(&args));
+        // Never the binary.
+        assert_eq!(args[0], "machine");
+
         assert_eq!(
-            checked_machine_add_args("buildbox", None, Some("work")).unwrap(),
-            strs(&["machine", "add", "buildbox", "--session", "work"])
+            machine_add_args(&req("buildbox"), false).unwrap(),
+            strs(&["machine", "add", "buildbox"])
         );
-        assert!(checked_machine_add_args("-oProxyCommand=x", None, None).is_err());
-        assert!(checked_machine_add_args("", None, None).is_err());
-        assert!(checked_machine_add_args("buildbox", Some("it's"), None).is_err());
+        let via = AddMachineRequest {
+            via: Some("ssh -p 2222 dev@host".into()),
+            name: Some("gpubox".into()),
+            ..AddMachineRequest::default()
+        };
+        let args = machine_add_args(&via, false).unwrap();
+        assert_eq!(
+            args,
+            strs(&[
+                "machine",
+                "add",
+                "--via",
+                "ssh -p 2222 dev@host",
+                "--name",
+                "gpubox"
+            ])
+        );
+        assert!(allowed_core_args(&args));
+    }
+
+    #[test]
+    fn install_flag_only_after_click() {
+        let mut full = req("buildbox");
+        full.name = Some("box".into());
+        // The flag is asked for with `install`, which the UI sets only after a confirm.
+        let plain = machine_add_args(&full, false).unwrap();
+        assert!(!plain.iter().any(|a| a == "--install"), "{plain:?}");
+        let installing = machine_add_args(&full, true).unwrap();
+        assert_eq!(installing.last().map(String::as_str), Some("--install"));
+        assert_eq!(installing.iter().filter(|a| *a == "--install").count(), 1);
+        assert!(allowed_core_args(&installing));
+    }
+
+    #[test]
+    fn via_requires_name() {
+        let via = AddMachineRequest {
+            via: Some("ssh dev@host".into()),
+            ..AddMachineRequest::default()
+        };
+        assert!(machine_add_args(&via, false).is_err());
+        // A target and a custom connection together are no command either.
+        let mut both = via.clone();
+        both.target = Some("buildbox".into());
+        both.name = Some("box".into());
+        assert!(machine_add_args(&both, false).is_err());
+    }
+
+    #[test]
+    fn hostile_values_never_become_arguments() {
+        for bad in ["-oProxyCommand=x", "", "buildbox;ls", "a b", "$(id)"] {
+            assert!(machine_add_args(&req(bad), false).is_err(), "{bad:?}");
+        }
+        let mut named = req("buildbox");
+        named.name = Some("Build box".into());
+        assert!(machine_add_args(&named, false).is_err());
+        named.name = Some("t7".into());
+        assert!(machine_add_args(&named, false).is_err());
+        let mut session = req("buildbox");
+        session.session = Some("-x".into());
+        assert!(machine_add_args(&session, false).is_err());
+    }
+
+    #[test]
+    fn via_refuses_a_backslash() {
+        // The login shell may be fish, where `\\` and `\'` mean something inside single quotes,
+        // so what the person reads would differ from what runs.
+        for bad in ["ssh a\\b", "ssh a\\'b", "ssh\\ host"] {
+            assert!(
+                !ok(&["machine", "add", "--name", "box", "--via", bad]),
+                "{bad:?}"
+            );
+            let via = AddMachineRequest {
+                via: Some(bad.into()),
+                name: Some("box".into()),
+                ..AddMachineRequest::default()
+            };
+            assert!(machine_add_args(&via, false).is_err(), "{bad:?}");
+        }
+        // Ordinary quoting is fine.
+        assert!(ok(&[
+            "machine",
+            "add",
+            "--name",
+            "box",
+            "--via",
+            "fly ssh console -a app --pty=false -C"
+        ]));
+    }
+
+    #[test]
+    fn the_name_flag_follows_validate_name() {
+        for bad in ["t7", "t1b", "Box", "a b", "-x", ""] {
+            assert!(
+                !ok(&["machine", "add", "buildbox", "--name", bad]),
+                "{bad:?}"
+            );
+        }
+        assert!(ok(&["machine", "add", "buildbox", "--name", "web_app.2"]));
+        for bad in ["-x", "a b", "a/b", "_x", "é", &"a".repeat(65)] {
+            assert!(
+                !ok(&["machine", "add", "buildbox", "--session", bad]),
+                "{bad:?}"
+            );
+        }
+        assert!(ok(&["machine", "add", "buildbox", "--session", "Work.2"]));
     }
 
     #[test]

@@ -12,13 +12,11 @@ use ts_rs::TS;
 
 use crate::LOCAL;
 use crate::actions::{
-    ActionError, CreatedSession, KindsCache, MachineActions, NewSessionRequest, NewSessions,
-    RowActions, RunChoices, machine_command_args, preview,
+    ActionError, AddMachineRequest, CreatedSession, KindsCache, MachineActions, NewSessionRequest,
+    NewSessions, RowActions, RunChoices, machine_command_args, preview, preview_add,
 };
 use crate::activity::ActivityV2;
 use crate::core::{CommandLogEntry, CoreClient};
-use crate::herdr::cli::HerdrCli;
-use crate::machine_setup::{Emit, ExitHook, MachineSetup, SETUP_EVENT, SetupEvent};
 use crate::notify::VisibleRow;
 use crate::preview::{self, PreviewManager};
 use crate::pty::TermSize;
@@ -32,7 +30,7 @@ use crate::terminal::open::{LaunchLog, launch_in_terminal};
 use crate::terminal::session::{TermEvent, TermId, TermSessions, TermSink};
 use crate::terminal::{
     self, InstalledCache, TerminalList, args_display, attach_argv, attach_display, bin_name,
-    checked_core_argv, checked_machine_add_args,
+    checked_core_argv,
 };
 use crate::tray;
 
@@ -701,99 +699,34 @@ pub async fn open_in_terminal(
     .await
 }
 
-/// What follows the binary in `machine add`, for the form's fields (the label is the
-/// machine's `--name`). The UI hands this to `open_in_terminal`, so the call and the preview
-/// below come from one builder.
+/// Add workbox (`machine.add`), for the sheet's fields. Answers the new machine's id; a refusal
+/// the core types (`hc_missing`, `needs_login`, …) comes back as `ActionError::Core` with its
+/// `code`, for the sheet to word.
 #[tauri::command]
-pub fn machine_add_argv(
-    target: String,
-    label: Option<String>,
-    session: Option<String>,
-) -> Result<Vec<String>, ActionError> {
-    checked_machine_add_args(&target, label.as_deref(), session.as_deref())
-        .map_err(ActionError::invalid)
-}
-
-/// Runs `machine add …` in a hidden terminal and streams `"machine-setup"` events. The args are
-/// the same allowlisted ones `open_in_terminal` takes, so only the form's three fields reach
-/// the core. A second call while one setup runs is refused. Task 13 replaces this with
-/// `machine.add`.
-#[tauri::command]
-pub fn start_machine_add(
-    app: AppHandle,
-    cli: State<'_, HerdrCli>,
-    setup: State<'_, MachineSetup>,
+pub async fn add_machine(
+    core: State<'_, Arc<CoreClient>>,
     sync: State<'_, SyncCell>,
-    target: String,
-    label: Option<String>,
-    session: Option<String>,
-) -> Result<(), ActionError> {
-    let logged = checked_machine_add_args(&target, label.as_deref(), session.as_deref())
-        .map_err(ActionError::invalid)?;
-    let mut argv = vec![cli.bin().to_string_lossy().into_owned()];
-    argv.extend(logged.iter().cloned());
-    let started_ms = crate::now_ms();
-    let (log_cli, sync) = (cli.inner().clone(), sync.inner().clone());
-    let on_exit: ExitHook = Arc::new(move |exit| {
-        let error = if exit.cancelled {
-            Some("cancelled".to_owned())
-        } else if exit.code != 0 {
-            Some(format!("herdr exited {}", exit.code))
-        } else {
-            None
-        };
-        log_cli.record(
-            None,
-            logged.clone(),
-            started_ms,
-            Some(exit.code),
-            error,
-            None,
-        );
-    });
-    let emit: Emit = Arc::new(move |event| {
-        if matches!(event, SetupEvent::Finished { ok: true }) {
-            // The new machine should show up without waiting for the next tick.
-            if let Some(sync) = sync.get() {
-                sync.refresh_machines();
-            }
-        }
-        // Nobody listening (the sheet closed) is fine.
-        let _ = app.emit(SETUP_EVENT, event);
-    });
-    setup
-        .start(&argv, cli.env(), emit, on_exit)
-        .map_err(ActionError::invalid)
-}
-
-/// Types the user's answer to the prompt the setup is showing: `"yes"` or `"no"` for a
-/// confirmation, the session's index for the picker.
-#[tauri::command]
-pub fn answer_machine_setup(
-    setup: State<'_, MachineSetup>,
-    choice: String,
-) -> Result<(), ActionError> {
-    setup.answer(&choice).map_err(ActionError::invalid)
-}
-
-/// Stops the running setup (the user chose the terminal instead, or closed the sheet).
-#[tauri::command]
-pub fn cancel_machine_setup(setup: State<'_, MachineSetup>) {
-    setup.cancel();
-}
-
-/// The `machine add` command line as the user would type it, for the Add workbox sheet.
-#[tauri::command]
-pub fn preview_machine_add(
-    locator: State<'_, CoreLocator>,
-    target: String,
-    label: Option<String>,
-    session: Option<String>,
+    req: AddMachineRequest,
 ) -> Result<String, ActionError> {
-    let args = checked_machine_add_args(&target, label.as_deref(), session.as_deref())
-        .map_err(ActionError::invalid)?;
+    machines!(core, sync).add(&req).await
+}
+
+/// What follows the core in `machine add …`, for the Install hc there… and Open in terminal
+/// tabs. `install` is true only after the person confirmed Install hc there…; the UI hands the
+/// arguments to `term_open`, which checks them again.
+#[tauri::command]
+pub fn machine_add_args(req: AddMachineRequest, install: bool) -> Result<Vec<String>, ActionError> {
+    terminal::machine_add_args(&req, install)
+}
+
+/// The `hc machine add …` line the Add workbox button would run, built in Rust.
+#[tauri::command]
+pub fn preview_add_machine(
+    locator: State<'_, CoreLocator>,
+    req: AddMachineRequest,
+) -> Result<String, ActionError> {
     let name = resolved_core(&locator).map_or_else(|_| "hc".to_owned(), |p| bin_name(&p));
-    Ok(args_display(&name, &args))
+    preview_add(&req, &name)
 }
 
 /// The `Host` aliases of `~/.ssh/config` (and its `Include`s, one level deep): names only.

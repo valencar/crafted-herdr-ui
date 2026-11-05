@@ -1,2 +1,0 @@
-Saved SSH machine buildbox. Remote server is ready.
-Open Herdr clients connect automatically.

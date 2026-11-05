@@ -8,7 +8,7 @@ export type TabState = "opening" | "live" | "detached" | "error";
 
 /**
  * What a tab runs: the attach to one terminal, or a core command that needs a person at the
- * keyboard (`machine login`, `machine update`; Task 13 adds install). A command tab belongs to a
+ * keyboard (`machine login`, `machine update`, `machine add`, with or without `--install`). A command tab belongs to a
  * workbox (`machineId`) but has no terminal row; `args` follow the core binary, and Rust checks
  * them again. The wire target (`TermTarget`) has no machine id, so `wireTarget` drops it.
  */
@@ -25,11 +25,14 @@ export function wireTarget(target: TabTarget): TermTarget {
 
 /**
  * The key of a command tab: `${machineId}::cmd:${verb words}`, for example
- * `buildbox::cmd:machine login`. One tab per workbox and command. It can't equal a row key: an
- * address never contains a colon followed by a space-separated verb.
+ * `buildbox::cmd:machine login`. One tab per workbox and command. A `machine add --install` is
+ * its own command, so it has its own key (a running plain add never stands in for it). It can't
+ * equal a row key: an address never contains a colon followed by a space-separated verb.
  */
 export function commandTabKey(machineId: string, args: string[]): string {
-  return `${machineId}::cmd:${args.slice(0, 2).join(" ")}`;
+  const verb = args.slice(0, 2).join(" ");
+  const install = args[1] === "add" && args.includes("--install");
+  return `${machineId}::cmd:${verb}${install ? " --install" : ""}`;
 }
 
 export type CoreKind = CoreState["kind"];

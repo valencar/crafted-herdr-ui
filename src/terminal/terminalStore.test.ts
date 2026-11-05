@@ -413,6 +413,19 @@ describe("terminalStore", () => {
     expect(commandTabKey("buildbox", ["machine", "update", "buildbox"])).toBe(
       "buildbox::cmd:machine update",
     );
+    // An install is a different command from a plain add, so a tab of one never stands in for
+    // the other.
+    expect(commandTabKey("add:buildbox", ["machine", "add", "buildbox"])).toBe(
+      "add:buildbox::cmd:machine add",
+    );
+    expect(
+      commandTabKey("add:buildbox", [
+        "machine",
+        "add",
+        "buildbox",
+        "--install",
+      ]),
+    ).toBe("add:buildbox::cmd:machine add --install");
     const command: NewTab = {
       tabKey: key,
       target: { kind: "command", machineId: "buildbox", args },

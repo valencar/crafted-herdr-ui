@@ -1676,39 +1676,6 @@ select.field {
 
 /* ---------- add workbox sheet ---------- */
 
-.checklist {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  padding: 14px 16px;
-}
-.checklist-title {
-  margin: 0;
-  font-size: var(--fs-meta);
-  font-weight: 500;
-  color: var(--text-3);
-}
-.checklist-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.checklist-icon {
-  width: 18px;
-  height: 18px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1.5px solid var(--st-needs);
-  color: var(--st-needs);
-  font-size: var(--fs-small);
-  font-weight: 700;
-}
 .sheet-foot-note {
   font-size: var(--fs-meta);
   color: var(--muted);
@@ -1717,76 +1684,33 @@ select.field {
   border-color: var(--text-4);
   color: var(--text);
 }
-
-.checklist-row-text {
+.add-advice {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.checklist-state {
-  margin-left: auto;
-  font-size: var(--fs-meta);
-  color: var(--muted);
-}
-.checklist-note {
-  font-size: var(--fs-meta);
-  color: var(--text-4);
-  overflow-wrap: anywhere;
-}
-.checklist-icon-done {
-  border-color: var(--online);
-  color: var(--online);
-}
-.checklist-icon-active {
-  border-color: var(--st-working);
-  color: var(--st-working);
-}
-.checklist-icon-failed {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-.checklist-icon-pending {
-  border-color: var(--border-strong);
-  color: var(--muted);
-}
-.setup-log {
-  font-size: var(--fs-meta);
-}
-.setup-log summary {
-  cursor: pointer;
-  color: var(--text-3);
-}
-.setup-log pre {
-  margin: 8px 0 0;
-  padding: 10px 12px;
-  max-height: 200px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  gap: 8px;
+  padding: 12px 14px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-l);
+}
+.add-advice-lead {
+  margin: 0;
+  color: var(--text);
+}
+.add-advice-why {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
   color: var(--text-3);
-  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
-.session-list {
+.add-advice-actions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 16px;
-  padding: 0;
-  border: 0;
 }
-.session-list legend {
-  padding: 0;
-  margin-bottom: 8px;
-}
-.session-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--font-mono);
+.add-port {
+  max-width: 120px;
 }
 
 /* ---------- focus ring inside the clipped group card ---------- */

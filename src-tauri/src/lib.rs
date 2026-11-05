@@ -5,7 +5,6 @@ pub mod commands;
 pub mod core;
 pub mod env;
 pub mod herdr;
-pub mod machine_setup;
 pub mod menu;
 pub mod notify;
 pub mod preview;
@@ -28,7 +27,6 @@ use tokio::sync::watch;
 use crate::core::{CommandLog, CoreClient, ProcessConnector};
 use activity::ActivityV2;
 use herdr::cli::HerdrCli;
-use machine_setup::MachineSetup;
 use preview::{PREVIEW_EVENT, PreviewManager};
 use pty::PortablePty;
 use settings::{CoreLocator, SharedSettings, ShortcutState, ShortcutStatus};
@@ -121,7 +119,6 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(core);
     app.manage(InstalledCache::default());
     app.manage(actions::KindsCache::default());
-    app.manage(MachineSetup::new(Arc::new(PortablePty)));
     // An `Arc`, so the blocking `term_*` work can move a handle into `spawn_blocking`.
     app.manage(Arc::new(TermSessions::new(Arc::new(PortablePty))));
     app.manage(cell);
@@ -274,11 +271,9 @@ pub fn run() {
             commands::open_session,
             commands::open_in_terminal,
             commands::list_ssh_hosts,
-            commands::machine_add_argv,
-            commands::preview_machine_add,
-            commands::start_machine_add,
-            commands::answer_machine_setup,
-            commands::cancel_machine_setup,
+            commands::add_machine,
+            commands::machine_add_args,
+            commands::preview_add_machine,
             commands::read_tail,
             commands::get_terminals,
             commands::list_terminals,

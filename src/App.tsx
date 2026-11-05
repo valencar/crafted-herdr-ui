@@ -20,6 +20,7 @@ import { useSettingsSync, useStateSync } from "./lib/useSync";
 import { useTheme } from "./lib/useTheme";
 import { useVisibleRowReport } from "./lib/useVisibleRowReport";
 import { useAutoPickColors } from "./lib/workboxColorsSave";
+import { AddWatcher } from "./components/AddWatcher";
 import { AddWorkbox } from "./screens/AddWorkbox";
 import { AllAgents } from "./screens/AllAgents";
 import { Dashboard } from "./screens/Dashboard";
@@ -171,6 +172,7 @@ function App() {
         <NewSession terminalName={terminalLabel(terminal)} />
       )}
       {sheet === "add-workbox" && <AddWorkbox />}
+      <AddWatcher />
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
       {shortcutsOpen && (
         <ShortcutsSheet onClose={() => setShortcutsOpen(false)} />

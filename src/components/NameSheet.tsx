@@ -105,7 +105,8 @@ export function NameSheet({
       <form id={formId} className="name-form" onSubmit={submit} noValidate>
         {fields.map((f, i) => {
           const inputId = `${formId}-${f.key}`;
-          const problem = problems[f.key] ?? live[f.key];
+          // What is wrong with the value as typed outranks what was wrong at the last submit.
+          const problem = live[f.key] ?? problems[f.key];
           return (
             <div key={f.key} className="sheet-field">
               <label htmlFor={inputId} className="sheet-label">
@@ -121,9 +122,15 @@ export function NameSheet({
                 aria-describedby={problem ? `${inputId}-error` : undefined}
                 autoComplete="off"
                 spellCheck={false}
-                onChange={(e) =>
-                  setValues((v) => ({ ...v, [f.key]: e.target.value }))
-                }
+                onChange={(e) => {
+                  setValues((v) => ({ ...v, [f.key]: e.target.value }));
+                  // The submit-time message was about the old value.
+                  setProblems((all) =>
+                    Object.fromEntries(
+                      Object.entries(all).filter(([key]) => key !== f.key),
+                    ),
+                  );
+                }}
               />
               {problem && (
                 <p id={`${inputId}-error`} className="field-error">

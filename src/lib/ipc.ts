@@ -2,8 +2,9 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { AppState } from "./bindings/AppState";
 import type { ActionError } from "./bindings/ActionError";
+import type { AddMachineRequest } from "./bindings/AddMachineRequest";
+import type { AppState } from "./bindings/AppState";
 import type { CommandLogEntry } from "./bindings/CommandLogEntry";
 import type { CreatedSession } from "./bindings/CreatedSession";
 import type { CoreStatus } from "./bindings/CoreStatus";
@@ -11,7 +12,6 @@ import type { MenuId } from "./bindings/MenuId";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
 import type { RunChoices } from "./bindings/RunChoices";
-import type { SetupEvent } from "./bindings/SetupEvent";
 import type { Settings } from "./bindings/Settings";
 import type { ShortcutStatus } from "./bindings/ShortcutStatus";
 import type { TermEvent } from "./bindings/TermEvent";
@@ -53,11 +53,12 @@ export type CommandResults = {
   open_session: null;
   open_in_terminal: null;
   list_ssh_hosts: string[];
-  machine_add_argv: string[];
-  preview_machine_add: string;
-  start_machine_add: null;
-  answer_machine_setup: null;
-  cancel_machine_setup: null;
+  /** `machine.add`: the new machine's id. */
+  add_machine: string;
+  /** What follows the core in `machine add …`, for a command tab. */
+  machine_add_args: string[];
+  /** The `hc machine add …` line, built in Rust. */
+  preview_add_machine: string;
   read_tail: string;
   get_terminals: TerminalList;
   list_terminals: TerminalList;
@@ -81,13 +82,6 @@ export type CommandResults = {
   set_visible_row: null;
 };
 export type CommandName = keyof CommandResults;
-
-/** The Add workbox form's fields; an empty or missing option is left out of the command. */
-export type MachineAddFields = {
-  target: string;
-  label?: string | null;
-  session?: string | null;
-};
 
 /** The arguments of each command. Keys are camelCase, which is what Tauri expects. */
 export type CommandArgs = {
@@ -127,15 +121,11 @@ export type CommandArgs = {
   /** What follows the herdr-core binary, which Rust takes from the resolved core; only a few shapes are allowed. */
   open_in_terminal: { args: string[] };
   list_ssh_hosts: undefined;
-  /** What follows the herdr-core binary in `machine add`: the args `open_in_terminal` expects. */
-  machine_add_argv: MachineAddFields;
-  /** The `machine add` command line, as text. */
-  preview_machine_add: MachineAddFields;
-  /** Runs `machine add` in a hidden terminal; progress arrives as `"machine-setup"` events. */
-  start_machine_add: MachineAddFields;
-  /** `"yes"` or `"no"` for a confirmation, the session's index (as text) for the picker. */
-  answer_machine_setup: { choice: string };
-  cancel_machine_setup: undefined;
+  /** `machine.add`. A refusal the core types (`hc_missing`, `needs_login`, …) arrives as a `core` error with its `code`. */
+  add_machine: { req: AddMachineRequest };
+  /** `install` is true only after the person confirmed Install hc there…. */
+  machine_add_args: { req: AddMachineRequest; install: boolean };
+  preview_add_machine: { req: AddMachineRequest };
   read_tail: { machineId: string; address: string };
   get_terminals: undefined;
   list_terminals: undefined;
@@ -255,13 +245,6 @@ export function onPreview(
   cb: (frame: PreviewFrame) => void,
 ): Promise<() => void> {
   return listen<PreviewFrame>("preview", (event) => cb(event.payload));
-}
-
-/** Subscribes to the `"machine-setup"` event (the hidden `machine add` run). */
-export function onMachineSetup(
-  cb: (event: SetupEvent) => void,
-): Promise<() => void> {
-  return listen<SetupEvent>("machine-setup", (event) => cb(event.payload));
 }
 
 /** The current settings, for a window that opened after the last change. */

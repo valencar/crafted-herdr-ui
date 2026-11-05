@@ -38,7 +38,6 @@ vi.mock("./terminal/TerminalView", () => ({
 const ipc = vi.hoisted(() => ({
   getState: vi.fn(),
   onState: vi.fn(),
-  onMachineSetup: vi.fn(),
   onPreview: vi.fn(),
   getSettings: vi.fn(),
   onSettings: vi.fn(),
@@ -60,7 +59,6 @@ beforeEach(() => {
   useAppStore.setState({ state: null });
   ipc.getState.mockReset().mockResolvedValue(state);
   ipc.onState.mockReset().mockResolvedValue(() => {});
-  ipc.onMachineSetup.mockReset().mockResolvedValue(() => {});
   ipc.onPreview.mockReset().mockResolvedValue(() => {});
   ipc.getSettings.mockReset().mockRejectedValue(new Error("no settings"));
   ipc.onSettings.mockReset().mockResolvedValue(() => {});
