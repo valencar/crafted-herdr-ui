@@ -226,7 +226,7 @@ export function OpenButton({
             className={
               "btn open-watch" + (size === "small" ? " btn-small" : "")
             }
-            aria-label={`Watch ${row.name}`}
+            aria-label={`Watch ${row.name} (read-only)`}
             onClick={(e) => {
               e.stopPropagation();
               watch();

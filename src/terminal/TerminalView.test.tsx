@@ -694,7 +694,7 @@ describe("TerminalView", () => {
       expect(open.mock.calls[0][4]).toBe(false);
     });
 
-    it("watch_tab_sends_no_keys_or_resizes", async () => {
+    it("watch_tab_sends_no_input_but_resizes_its_local_view", async () => {
       vi.useFakeTimers();
       render(<Harness tabKey={WATCH} />);
       await flush();
@@ -703,18 +703,24 @@ describe("TerminalView", () => {
       term().dataHandler?.("ls\r");
       term().dataHandler?.("\x1b[?1;2c");
       await flush();
-      // A refit to a new size, and a font change.
+      // OSC 52 query: never answered.
+      await act(async () => {
+        await h.osc.get(52)?.("c;?");
+      });
+      // A refit after a window resize. `term_resize` only sizes the local pty that
+      // `hc attach --observe` draws into (observe never resizes the remote), so it goes out.
       h.fitDims = { cols: 120, rows: 40 };
       act(() => h.observers.forEach((o) => o.cb()));
       await act(async () => {
         vi.advanceTimersByTime(200);
       });
-      // OSC 52 query: never answered.
-      await act(async () => {
-        await h.osc.get(52)?.("c;?");
+      expect(invoke).toHaveBeenCalledWith("term_resize", {
+        id: 7,
+        cols: 120,
+        rows: 40,
       });
+      // Input never does: no keys, no paste, no reply to a terminal query.
       expect(invoke).not.toHaveBeenCalledWith("term_write", expect.anything());
-      expect(invoke).not.toHaveBeenCalledWith("term_resize", expect.anything());
     });
 
     it("a_reattach_still_watches", async () => {

@@ -85,8 +85,10 @@ export function tabSubline(
 
 /** How many of the tabs show a blocked or errored agent (a done one is not counted). */
 export function countNeeds(tabs: TermTab[], rows: Map<string, Row>): number {
-  return tabs.filter((t) => {
-    const status = rows.get(rowKeyOf(t.tabKey))?.status;
+  // A row counts once, even with both an Open and a Watch tab.
+  const keys = new Set(tabs.map((t) => rowKeyOf(t.tabKey)));
+  return [...keys].filter((key) => {
+    const status = rows.get(key)?.status;
     return status === "blocked" || status === "error";
   }).length;
 }

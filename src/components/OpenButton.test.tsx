@@ -116,7 +116,9 @@ describe("OpenButton Watch", () => {
   it("needs_input_row_offers_watch", async () => {
     const { user } = setup();
     // Beside Open, for a blocked agent.
-    const watch = screen.getByRole("button", { name: "Watch api-service" });
+    const watch = screen.getByRole("button", {
+      name: "Watch api-service (read-only)",
+    });
     expect(watch).toHaveTextContent("Watch");
     await user.click(watch);
     expect(openRow).toHaveBeenLastCalledWith(ROW, "app", { observe: true });
@@ -126,7 +128,7 @@ describe("OpenButton Watch", () => {
     const { user } = setup({ row: { ...ROW, status: "working" } });
     // Not beside Open: only a Needs-input row gets the button.
     expect(
-      screen.queryByRole("button", { name: "Watch api-service" }),
+      screen.queryByRole("button", { name: "Watch api-service (read-only)" }),
     ).toBeNull();
     await user.click(chevron());
     await user.click(
@@ -146,7 +148,7 @@ describe("OpenButton Watch", () => {
       screen.getByRole("button", { name: /^Go to tab api-service/ }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Watch api-service" }),
+      screen.getByRole("button", { name: "Watch api-service (read-only)" }),
     ).toBeInTheDocument();
   });
 

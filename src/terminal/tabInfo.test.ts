@@ -101,6 +101,21 @@ describe("countNeeds", () => {
   });
 });
 
+describe("countNeeds with a Watch tab", () => {
+  it("count_needs_counts_a_row_once_when_it_has_an_open_and_a_watch_tab", () => {
+    const rows = new Map<string, Row>([
+      ["buildbox::w1:p1", row({ key: "buildbox::w1:p1", status: "blocked" })],
+    ]);
+    const tabs = [
+      tab({ tabKey: "buildbox::w1:p1" }),
+      tab({ tabKey: "buildbox::w1:p1::watch", observe: true }),
+    ];
+    expect(countNeeds(tabs, rows)).toBe(1);
+    // A Watch tab alone counts too.
+    expect(countNeeds(tabs.slice(1), rows)).toBe(1);
+  });
+});
+
 describe("tabDotStatus", () => {
   it("a_failed_tab_has_its_own_dot_value_apart_from_an_agent_error", () => {
     // A failed session is not an agent's Error: it must not draw the needs shape.

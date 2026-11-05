@@ -28,9 +28,10 @@ type Writer = { id: number; busy: boolean; pending: string };
  * Declare this hook after the effect that creates the terminal, so the terminal exists when the
  * session opens.
  *
- * A Watch tab (`observe`) opens the observe attach and sends nothing to it, ever: no keystroke,
- * no paste and no reply xterm makes to a terminal query (all of them arrive as `onData`), and no
- * resize. The remote terminal keeps the size its owner gave it.
+ * A Watch tab (`observe`) opens the observe attach and sends no input to it, ever: no keystroke,
+ * no paste and no reply xterm makes to a terminal query (all of them arrive as `onData`). Its size
+ * is not input: `term_resize` only sizes the local pty that `hc attach --observe` draws into, and
+ * observe never resizes the remote terminal, so a Watch tab fits its view like any other.
  */
 export function useTermSession(
   tab: Pick<TermTab, "tabKey" | "target" | "run" | "observe">,
@@ -53,17 +54,14 @@ export function useTermSession(
   const writer = useRef<Writer | null>(null);
 
   /** Tells the session the terminal's size; does nothing without a session or a change. */
-  const resize = useCallback(
-    (cols: number, rows: number) => {
-      const id = idRef.current;
-      const last = sentSize.current;
-      if (observe || id === null || cols < 1 || rows < 1) return;
-      if (last && last.cols === cols && last.rows === rows) return;
-      sentSize.current = { cols, rows };
-      invokeTyped("term_resize", { id, cols, rows }).catch(() => {});
-    },
-    [observe],
-  );
+  const resize = useCallback((cols: number, rows: number) => {
+    const id = idRef.current;
+    const last = sentSize.current;
+    if (id === null || cols < 1 || rows < 1) return;
+    if (last && last.cols === cols && last.rows === rows) return;
+    sentSize.current = { cols, rows };
+    invokeTyped("term_resize", { id, cols, rows }).catch(() => {});
+  }, []);
 
   const open = useCallback(async () => {
     const term = termRef.current;
@@ -141,7 +139,7 @@ export function useTermSession(
       }
       if (exited) return;
       idRef.current = id;
-      // A Watch tab never gets a writer, so nothing can be sent to it.
+      // A Watch tab never gets a writer, so no input can be sent to it.
       writer.current = observe ? null : { id, busy: false, pending: "" };
       // Keystrokes go through from here (an ssh prompt is output, so it is live by then anyway).
       useTerminalStore
