@@ -74,7 +74,8 @@ export function ContextBar({ tab, row, onFind }: Props) {
             Detach
           </button>
         </Tooltip>
-        {row && <OpenInTerminal row={row} />}
+        {/* A finished terminal has nothing to open in the user's terminal either. */}
+        {row && row.status !== "ended" && <OpenInTerminal row={row} />}
         {/* Keyed by the pane, so a confirmation opened for one pane ends when another becomes
             active, instead of closing the new one. */}
         {row && <PaneMenu key={row.key} row={row} />}

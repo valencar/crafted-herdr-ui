@@ -33,7 +33,8 @@ export function ClosePaneHost() {
   };
 
   if (asked) {
-    // The row as the state has it now, so the dialog asks about the call it will make.
+    // The row as the state has it now, for its name and worker count. Whether the dialog closes
+    // or removes was fixed when it opened (`CloseConfirm`), whatever the status does meanwhile.
     const row = (state ? toRows(state) : []).find((r) => r.key === asked.key);
     return <CloseConfirm row={row ?? asked} onDone={done} />;
   }

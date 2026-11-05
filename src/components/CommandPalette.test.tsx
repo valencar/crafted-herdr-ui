@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { groupByProject, toRows } from "../lib/grouping";
+import { formatShortcut } from "../lib/shortcuts";
 import { useHomeShortcuts } from "../lib/useHomeShortcuts";
 import type { AppState } from "../lib/bindings/AppState";
 import type { Settings } from "../lib/bindings/Settings";
@@ -1068,6 +1069,79 @@ describe("CommandPalette agent frame", () => {
     );
     expect(useAppStore.getState().view).toEqual({ kind: "all" });
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w2:p1");
+  });
+
+  describe("an ended agent", () => {
+    const endedState = () =>
+      appState(
+        [
+          [
+            { id: "buildbox", target: "buildbox" },
+            buildboxTerms({ "w2:p1": { status: "ended" } }),
+          ],
+        ],
+        { path: "/usr/local/bin/herdr" },
+      );
+    /** Anything that opens or marks the terminal; the palette's own reads are not counted. */
+    const opened = () =>
+      invoke.mock.calls.filter((c) =>
+        ["open_session", "mark_seen", "open_in_terminal"].includes(c[0]),
+      );
+    const hint = () => document.querySelector(".palette-hint")!;
+    const altKeys = formatShortcut("palette-open-alt");
+
+    it("enter_opens_its_actions_instead_of_attaching", async () => {
+      useAppStore.setState({ state: endedState() });
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      // The footer for the active row: Actions, and no second way to open.
+      expect(hint()).not.toHaveTextContent(altKeys);
+      expect(hint()).not.toHaveTextContent("Open in");
+      await user.keyboard("{Enter}");
+      expect(crumb()).toHaveTextContent("tester");
+      expect(labels()).toEqual([
+        "Copy address",
+        "Pin",
+        "Show in All agents",
+        "Remove…",
+      ]);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(useTerminalStore.getState().tabs).toEqual([]);
+      expect(opened()).toEqual([]);
+    });
+
+    it("command_enter_in_the_list_does_nothing", async () => {
+      useAppStore.setState({ state: endedState() });
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+      expect(opened()).toEqual([]);
+      expect(useTerminalStore.getState().tabs).toEqual([]);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("combobox")).toBeInTheDocument();
+    });
+
+    it("command_enter_in_its_frame_does_nothing_and_the_footer_has_no_segment_for_it", async () => {
+      useAppStore.setState({ state: endedState() });
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      await user.keyboard("{Tab}");
+      expect(crumb()).toHaveTextContent("tester");
+      expect(hint()).not.toHaveTextContent(altKeys);
+      expect(hint()).not.toHaveTextContent("Open in");
+      expect(hint()).toHaveTextContent("Back");
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+      expect(opened()).toEqual([]);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(crumb()).toHaveTextContent("tester");
+      expect(screen.getByRole("combobox")).toHaveFocus();
+    });
+
+    it("a_live_agents_footer_still_names_both_ways", async () => {
+      const user = open();
+      await user.type(screen.getByRole("combobox"), "tester");
+      expect(hint()).toHaveTextContent(altKeys);
+    });
   });
 
   it("command_enter_in_the_frame_opens_the_other_way", async () => {

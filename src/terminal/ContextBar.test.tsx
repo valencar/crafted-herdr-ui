@@ -120,6 +120,25 @@ describe("ContextBar", () => {
     ).toBeInTheDocument();
   });
 
+  it("an_ended_terminal_has_no_open_in_terminal", async () => {
+    const { unmount } = render(
+      <ContextBar
+        tab={paneTab}
+        row={{ ...row, status: "ended", exitCode: 1 }}
+        onFind={() => {}}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "More actions" }),
+    ).toBeInTheDocument();
+    // Give the terminal's name time to arrive: the button must still not appear.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("button", { name: /^Open in / })).toBeNull();
+    unmount();
+    render(<ContextBar tab={paneTab} row={row} onFind={() => {}} />);
+    expect(await terminalButton()).toBeInTheDocument();
+  });
+
   it("context_bar_shows_workbox_tile", () => {
     useAppStore.setState({
       state: { machines: [{ id: "buildbox" }] } as unknown as AppState,

@@ -26,6 +26,11 @@ export type PaletteItem = {
   shortcut?: ShortcutId;
   /** For an agent: where ⌘Enter opens it (the other way from Enter). */
   alt?: "app" | "external";
+  /**
+   * An ended agent: it has nothing to open (attaching to a finished terminal fails), so Enter
+   * opens its action frame and ⌘Enter does nothing. `run` does nothing.
+   */
+  framed?: boolean;
   /** `"default"` is Enter, `"alt"` is ⌘Enter. */
   run: (how: "default" | "alt") => void;
 };
@@ -74,6 +79,7 @@ export function buildItems(ctx: Context): PaletteItem[] {
   // is the terminal app; without one, Enter follows the "Open sessions" setting.
   const agent = (row: Row, group: PaletteGroup): PaletteItem => {
     const hasTab = tabKeys.has(row.key);
+    const ended = row.status === "ended";
     const alt: "app" | "external" =
       hasTab || ctx.openTarget === "app" ? "external" : "app";
     return {
@@ -89,9 +95,11 @@ export function buildItems(ctx: Context): PaletteItem[] {
         .join(" · "),
       keywords: [row.kind, row.title, row.address].filter(Boolean).join(" "),
       row,
-      alt,
-      run: (how) =>
-        ctx.open(row, how === "alt" ? alt : hasTab ? "app" : undefined),
+      ...(ended ? { framed: true } : { alt }),
+      run: (how) => {
+        if (ended) return;
+        ctx.open(row, how === "alt" ? alt : hasTab ? "app" : undefined);
+      },
     };
   };
 

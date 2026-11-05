@@ -325,6 +325,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const results = useMemo(() => rankItems(items, query), [items, query]);
   const count = inFrame ? actions.length : results.length;
   const at = Math.min(active, Math.max(0, count - 1));
+  // The active item is an ended agent: Enter shows its actions, and there is no second way to open.
+  const framedHere = !inFrame && results[at]?.framed === true;
   const optionId = (index: number) => `${listId}-${index}`;
 
   // The agent went away while its actions were showing: back to the list (React re-renders
@@ -390,6 +392,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 
   const run = (item: PaletteItem | undefined, how: "default" | "alt") => {
     if (!item) return;
+    if (item.framed) {
+      // Nothing to open: Enter shows what can be done with it, ⌘Enter does nothing.
+      if (how === "default") enterFrame(item);
+      return;
+    }
     item.run(how);
     onClose();
   };
@@ -560,8 +567,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     <span className="palette-detail mono">{item.detail}</span>
                     {index === at && (
                       <span className="palette-keys">
-                        <Kbd keys="↵" /> Open
-                        {item.row && (
+                        <Kbd keys="↵" /> {item.framed ? "Actions" : "Open"}
+                        {item.row && !item.framed && (
                           <>
                             {" "}
                             <Kbd keys="⇥" /> Actions
@@ -596,8 +603,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         </div>
         <p className="palette-hint">
           <Kbd keys="↑" /> <Kbd keys="↓" /> Move · <Kbd keys="↵" />{" "}
-          {inFrame ? "Run" : "Open"} ·{" "}
-          {(!inFrame || frameAltLabel !== undefined) && (
+          {inFrame ? "Run" : framedHere ? "Actions" : "Open"} ·{" "}
+          {(inFrame ? frameAltLabel !== undefined : !framedHere) && (
             <>
               <Kbd id="palette-open-alt" />{" "}
               {inFrame

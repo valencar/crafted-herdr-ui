@@ -106,4 +106,19 @@ describe("AgentRow", () => {
       screen.getByText("ssh failed · last updated 40s ago"),
     ).toBeInTheDocument();
   });
+
+  it("ended_row_has_no_open_button_but_a_live_one_has", () => {
+    const { unmount } = renderRow(row({ status: "ended", exitCode: 1 }));
+    expect(screen.queryByRole("button", { name: /^Open planner/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /^More ways to open/ }),
+    ).toBeNull();
+    // The row itself is still there to select.
+    expect(document.querySelector("button.row-main")).toBeInTheDocument();
+    unmount();
+    renderRow(row({ status: "idle" }));
+    expect(
+      screen.getByRole("button", { name: "Open planner" }),
+    ).toBeInTheDocument();
+  });
 });

@@ -57,7 +57,11 @@ export const AgentRow = memo(function AgentRow({
         <span className="mono row-pane">{row.address}</span>
         <span className="row-age">{age}</span>
       </button>
-      <OpenButton row={row} terminalName={terminalName} size="small" />
+      {/* A finished terminal has nothing to open (attaching fails); select the row for its
+          Inspector. */}
+      {row.status !== "ended" && (
+        <OpenButton row={row} terminalName={terminalName} size="small" />
+      )}
     </li>
   );
 });

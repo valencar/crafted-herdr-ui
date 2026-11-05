@@ -514,6 +514,30 @@ describe("AllAgents", () => {
     expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
   });
 
+  it("cmd_enter_does_nothing_on_an_ended_row", async () => {
+    const state = appState(
+      machine(
+        "buildbox",
+        { kind: "online" },
+        {
+          terms: buildboxTerms({ "w1:p2": { status: "ended" } }),
+        },
+      ),
+    );
+    const user = setup(state);
+    useAppStore.setState({ selectedKey: "buildbox::w1:p2" });
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(invoke).not.toHaveBeenCalledWith("open_session", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("mark_seen", expect.anything());
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+    // And the row has no Open button to click.
+    expect(
+      within(rowItem("buildbox::w1:p2")).queryByRole("button", {
+        name: /^Open /,
+      }),
+    ).toBeNull();
+  });
+
   it("cmd_enter_opens_the_selection", async () => {
     const user = setup();
     useAppStore.setState({ selectedKey: "gpubox::w2:p1" });
