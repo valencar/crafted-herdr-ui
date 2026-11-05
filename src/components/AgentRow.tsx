@@ -47,8 +47,9 @@ export const AgentRow = memo(function AgentRow({
         <StatusPill status={row.status} />
         <KindBadge kind={row.kind} isAgent={row.isAgent} />
         <span className="row-text">
-          <span className="row-title">
-            {title}
+          {/* The pin sits beside the title, not in it: a long title ellipsizes. */}
+          <span className="row-head">
+            <span className="row-title">{title}</span>
             {row.pinned && <PinGlyph />}
           </span>
           {ended && <span className="row-sub">{ended}</span>}

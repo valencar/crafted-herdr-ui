@@ -53,6 +53,11 @@ pub fn should_skip(main_focused: bool, looking: &HashSet<String>, row_key: &str)
     main_focused && looking.contains(row_key)
 }
 
+/// Whether the main window is in front of the person: focused, on screen and not minimized.
+pub fn in_front(focused: bool, visible: bool, minimized: bool) -> bool {
+    focused && visible && !minimized
+}
+
 /// Gives the sync what the person is really looking at: what the UI reported, but nothing while
 /// the main window is unfocused, minimized or hidden (an empty room clears nobody's "done").
 /// `focused` is the new focus state when a focus event is the caller, since the window may not
@@ -64,14 +69,16 @@ pub fn apply_looking<R: Runtime>(app: &AppHandle<R>, focused: Option<bool>) {
     let Some(sync) = cell.get() else {
         return;
     };
-    let in_front = app
+    let front = app
         .get_webview_window(crate::tray::MAIN_WINDOW)
         .is_some_and(|w| {
-            focused.unwrap_or_else(|| w.is_focused().unwrap_or(false))
-                && w.is_visible().unwrap_or(false)
-                && !w.is_minimized().unwrap_or(false)
+            in_front(
+                focused.unwrap_or_else(|| w.is_focused().unwrap_or(false)),
+                w.is_visible().unwrap_or(false),
+                w.is_minimized().unwrap_or(false),
+            )
         });
-    let keys = if in_front {
+    let keys = if front {
         app.try_state::<Looking>().map(|l| l.keys())
     } else {
         None
@@ -451,6 +458,15 @@ mod tests {
         assert!(!should_skip(true, &looking, "m::t2"));
         // Nothing is drawn (Home, or the window is away): nothing is skipped.
         assert!(!should_skip(true, &HashSet::new(), "m::t1"));
+    }
+
+    #[test]
+    fn only_a_focused_visible_unminimized_window_is_in_front() {
+        assert!(in_front(true, true, false));
+        assert!(!in_front(false, true, false), "unfocused");
+        assert!(!in_front(true, false, false), "hidden");
+        assert!(!in_front(true, true, true), "minimized");
+        assert!(!in_front(false, false, true));
     }
 
     #[test]

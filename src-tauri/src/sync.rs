@@ -292,6 +292,10 @@ struct Inner {
     /// The turn `herdr.seen` was last decided for, by terminal: a decision is made at most once
     /// per turn, so nothing overrules a Mark as unread before the next turn. A leaf lock.
     last_written_seen: Mutex<HashMap<(String, String), u64>>,
+    /// Terminals with a `herdr.seen` write on its way: at most one per terminal, so a write for
+    /// turn N+1 is never sent while turn N's is still in flight (the core could apply them in
+    /// the other order and leave the label behind the turn). A leaf lock.
+    seen_in_flight: Mutex<HashSet<(String, String)>>,
     machine_wake: Notify,
     reconnect: Notify,
     throttle: Mutex<Throttle>,
@@ -349,6 +353,7 @@ impl CoreSync {
             visible: AtomicBool::new(true),
             looking: Mutex::default(),
             last_written_seen: Mutex::default(),
+            seen_in_flight: Mutex::default(),
             machine_wake: Notify::new(),
             reconnect: Notify::new(),
             throttle: Mutex::default(),
@@ -577,6 +582,11 @@ impl Inner {
                     }
                     activity.retain(id, |address| {
                         views.contains_key(&(id.to_owned(), address.to_owned()))
+                    });
+                    // A terminal that is gone leaves no decision behind: its address can be
+                    // reused by a new one, whose first write must not wait for a later turn.
+                    lock(&self.last_written_seen).retain(|(machine, address), _| {
+                        machine != id || views.contains_key(&(machine.clone(), address.clone()))
                     });
                 }
             }
@@ -867,10 +877,15 @@ impl Inner {
             // Lock order: the model first; `last_written_seen` is a leaf.
             let m = lock(&self.model);
             let mut decided = lock(&self.last_written_seen);
+            let mut in_flight = lock(&self.seen_in_flight);
             for key in &looking {
                 let Some(view) = m.views.get(key) else {
                     continue;
                 };
+                // A write is on its way; the turn is decided when it returns.
+                if in_flight.contains(key) {
+                    continue;
+                }
                 // Nothing runs there to look at.
                 if view.status == DisplayStatus::Ended {
                     continue;
@@ -887,6 +902,7 @@ impl Inner {
                 };
                 decided.insert(key.clone(), view.turn);
                 if view.seen_turn.is_none_or(|seen| seen < view.turn) {
+                    in_flight.insert(key.clone());
                     writes.push((key.0.clone(), key.1.clone(), full, view.turn));
                 }
             }
@@ -913,13 +929,23 @@ impl Inner {
                     .client
                     .call_quiet(&machine_id, "terminal.label", params)
                     .await;
+                let key = (machine_id, address);
                 if written.is_err() {
                     // Not written: the next trigger at this turn may try again.
                     let mut decided = lock(&me.last_written_seen);
-                    let key = (machine_id, address);
                     if decided.get(&key) == Some(&turn) {
                         decided.remove(&key);
                     }
+                }
+                lock(&me.seen_in_flight).remove(&key);
+                // The turn moved on while the write was on its way (and was skipped): decide it
+                // now. Not at the same turn, or a failing core would be asked again and again.
+                let moved = lock(&me.model)
+                    .views
+                    .get(&key)
+                    .is_some_and(|view| view.turn > turn);
+                if moved {
+                    me.write_seen();
                 }
             });
         }

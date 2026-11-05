@@ -54,6 +54,8 @@ struct Script {
     labels: Mutex<Vec<Value>>,
     /// `terminal.label` answers with an error (after recording the request).
     label_fails: AtomicBool,
+    /// How long `terminal.label` takes to answer, in milliseconds.
+    label_delay_ms: AtomicU64,
 }
 
 fn nth(list: &Mutex<Vec<Value>>, n: usize) -> Value {
@@ -112,7 +114,10 @@ impl Connector for TestConnector {
                         let error = json!({"code": "internal", "message": "nope"});
                         return (0, Reply::Error(error));
                     }
-                    (0, Reply::Result(json!({"ok": true})))
+                    (
+                        s.label_delay_ms.load(Ordering::SeqCst),
+                        Reply::Result(json!({"ok": true})),
+                    )
                 }
                 _ => (0, Reply::Result(json!({"ok": true}))),
             });
@@ -1301,9 +1306,10 @@ async fn writes_seen_once_per_turn_while_looking() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn no_write_when_window_unfocused() {
+async fn no_write_while_nothing_is_looked_at() {
     let h = Harness::new().up().await;
-    // The window is away: nothing is looked at, whatever the turns do.
+    // Nothing is looked at (the window is away, so the UI and Rust both report none): no turn
+    // writes anything. The gate itself is `notify::in_front`, tested there.
     h.look(&[]);
     h.turn_ends(30, "t2", 2);
     settle().await;
@@ -1311,7 +1317,6 @@ async fn no_write_when_window_unfocused() {
     // A terminal that is not the one on screen is not written either.
     h.look(&["t6"]);
     settle().await;
-    h.seen_writes();
     h.turn_ends(40, "t2", 3);
     settle().await;
     assert!(h.seen_writes().iter().all(|w| w.0 != "t2"));
@@ -1665,4 +1670,95 @@ fn row_keys_split_on_the_first_double_colon() {
     assert_eq!(parse_row_key("t7"), None);
     assert_eq!(parse_row_key("::t7"), None);
     assert_eq!(parse_row_key("local::"), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_turn_waits_for_the_write_of_the_turn_before() {
+    let h = Harness::new().up().await;
+    h.script.label_delay_ms.store(500, Ordering::SeqCst);
+    h.look(&["t2"]);
+    h.turn_ends(30, "t2", 2);
+    settle().await;
+    // Turn 3 ends while turn 2's write is still on its way: it is not sent yet, or the core
+    // could apply the two the other way round and leave the label at 2.
+    h.turn_ends(32, "t2", 3);
+    settle().await;
+    assert_eq!(h.seen_for("t2"), [write("t2", 2)]);
+    // When the first returns, the newer turn goes out, once.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(h.seen_for("t2"), [write("t2", 2), write("t2", 3)]);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(h.seen_for("t2"), [write("t2", 2), write("t2", 3)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reused_address_is_written_on_its_own_first_look() {
+    let h = Harness::new().up().await;
+    h.look(&["t6"]);
+    settle().await;
+    assert_eq!(h.seen_for("t6"), [write("t6", 0)]);
+    // The terminal goes away, and a new one takes its address (turn 0, no label).
+    h.event(30, "removed", "t6", json!({}));
+    settle().await;
+    h.event(31, "created", "t6", terminal_record("t6", "again"));
+    settle().await;
+    h.look(&[]);
+    h.look(&["t6"]);
+    settle().await;
+    assert_eq!(h.seen_for("t6"), [write("t6", 0), write("t6", 0)]);
+}
+
+/// The fixture's snapshot with `t2` at turn 2 (its `herdr.seen` label stays at 1).
+fn subscribe_with_t2_turn_2(seq: u64) -> Value {
+    let mut snapshot = json_of(SUBSCRIBE);
+    snapshot["seq"] = json!(seq);
+    for t in snapshot["terminals"].as_array_mut().unwrap() {
+        if t["address"] == "t2" {
+            t["turn"] = json!(2);
+        }
+    }
+    snapshot
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_looked_at_done_row_clears_after_a_reconnect() {
+    let h = Harness::new();
+    // A turn ends while the connection is down: the new snapshot has t2 at turn 2.
+    *lock(&h.script.subscribe) = vec![json_of(SUBSCRIBE), subscribe_with_t2_turn_2(500)];
+    let h = h.up().await;
+    h.look(&["t2"]);
+    settle().await;
+    assert!(h.seen_for("t2").is_empty());
+    h.drop_events();
+    tokio::time::sleep(Duration::from_millis(2100)).await;
+    assert_eq!(h.script.subscribes.load(Ordering::SeqCst), 2);
+    assert_eq!(h.seen_for("t2"), [write("t2", 2)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_looked_at_done_row_clears_after_missed() {
+    let h = Harness::new().up().await;
+    h.look(&["t2"]);
+    settle().await;
+    assert!(h.seen_for("t2").is_empty());
+    // The core dropped events; the new baseline has t2 at turn 2.
+    let snapshot = subscribe_with_t2_turn_2(40);
+    h.send(
+        &json!({"jsonrpc": "2.0", "method": "missed",
+            "params": {"seq": 40, "terminals": snapshot["terminals"]}})
+        .to_string(),
+    );
+    settle().await;
+    settle().await;
+    assert_eq!(h.seen_for("t2"), [write("t2", 2)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_remote_terminal_is_written_by_its_full_address() {
+    // buildbox/t2: turn 0, no `herdr.seen` label.
+    let h = Harness::new().up().await;
+    h.sync()
+        .set_looking([(BUILDBOX.to_owned(), "t2".to_owned())]);
+    settle().await;
+    assert_eq!(h.seen_writes(), [write("buildbox/t2", 0)]);
 }

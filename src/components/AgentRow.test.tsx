@@ -41,6 +41,16 @@ function renderRow(r: Row, note: string | null = null) {
 }
 
 describe("AgentRow", () => {
+  it("pin_glyph_is_not_inside_the_ellipsized_title", () => {
+    renderRow(
+      row({ pinned: true, status: "idle", title: "a long title ".repeat(20) }),
+    );
+    const glyph = screen.getByRole("img", { name: "Pinned" });
+    // `.row-title` clips what overflows it, so a glyph inside would vanish with a long title.
+    expect(glyph.closest(".row-title")).toBeNull();
+    expect(glyph.previousElementSibling).toHaveClass("row-title");
+  });
+
   it("pin_glyph_has_label", () => {
     const { rerender } = renderRow(row({ pinned: true, status: "idle" }));
     // Beside the name, and named for a screen reader.
