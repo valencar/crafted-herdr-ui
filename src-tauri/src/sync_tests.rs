@@ -1719,6 +1719,56 @@ async fn a_missing_core_is_not_retried() {
     assert_eq!(h.script.attempts.load(Ordering::SeqCst), 1);
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_core_missing_after_subscribing_is_retried_in_the_window() {
+    let h = Harness::new().up().await;
+    // `hc update` swaps the binary, and for a moment there is none.
+    h.script.not_found.store(true, Ordering::SeqCst);
+    h.drop_events();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let state = h.state();
+    assert_eq!(state.core_state, CoreState::Connecting);
+    assert!(
+        matches!(&state.machines[0].health, Health::Reconnecting { error, .. } if error == "herdr-core was not found."),
+        "{:?}",
+        state.machines[0].health
+    );
+    // It is back for the next try (6 s on): the window never went to onboarding.
+    h.script.not_found.store(false, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert_eq!(h.state().core_state, CoreState::Ready);
+    assert!(!core_states(&h).contains(&CoreState::NotFound));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_core_still_missing_after_the_window_is_not_found() {
+    let h = Harness::new().up().await;
+    h.script.not_found.store(true, Ordering::SeqCst);
+    h.drop_events();
+    tokio::time::sleep(Duration::from_secs(130)).await;
+    assert_eq!(h.state().core_state, CoreState::NotFound);
+    let attempts = h.script.attempts.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(h.script.attempts.load(Ordering::SeqCst), attempts);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_incompatible_core_after_subscribing_is_not_retried() {
+    let h = Harness::new().up().await;
+    // The core was replaced by one the app can't speak to.
+    *lock(&h.script.hello) = Some(json_of(HELLO_OLD));
+    h.drop_events();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(
+        matches!(h.state().core_state, CoreState::Incompatible { .. }),
+        "{:?}",
+        h.state().core_state
+    );
+    let attempts = h.script.attempts.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(h.script.attempts.load(Ordering::SeqCst), attempts);
+}
+
 // ---- health_of ----
 
 fn machine_in(state: &str, since_ms: Option<u64>, why: Option<&str>) -> CoreMachine {

@@ -9,7 +9,9 @@
 //!   ended a local terminal with `server_stop` (`hc server stop`) goes to `Stopped` at once,
 //!   with no retry: `hc connect` starts a stopped core, so a core the person stopped stays
 //!   stopped until they click (rule 5). A restart (`hc server restart`, `hc update`) ends no
-//!   terminal, so it is a plain drop and the backoff covers it.
+//!   terminal, so it is a plain drop and the backoff covers it. A core that is missing (not
+//!   found) after the app had subscribed is retried the same way, since `hc update` may swap
+//!   the binary; before the first subscription it is reported at once.
 //!
 //! Background calls run only while the event connection is up (`online`): the layout reads,
 //! the `herdr.seen` writes, `machine.list`, and, through `CoreSync::is_online`, the preview and
@@ -1274,6 +1276,8 @@ impl Inner {
         let mut attempt: u32 = 0;
         let mut subscribed_before = false;
         let mut last_error: String;
+        // The last attempt found no core binary.
+        let mut missing: bool;
         loop {
             match self.connect(subscribed_before).await {
                 Ok((conn, mut notes)) => {
@@ -1293,35 +1297,51 @@ impl Inner {
                         continue;
                     }
                     last_error = end.error;
+                    missing = false;
                     // Dropped: the window runs from here, and the first retry waits 2 s.
                     down_since = Some(Instant::now());
                     attempt = 0;
                 }
-                Err(e @ (CoreError::NotFound | CoreError::Incompatible { .. })) => {
-                    let core_state = match &e {
-                        CoreError::Incompatible { reason, newer } => CoreState::Incompatible {
-                            reason: reason.clone(),
-                            newer: *newer,
-                        },
-                        _ => CoreState::NotFound,
+                Err(e) => {
+                    // An incompatible or missing core doesn't get better by itself, except a
+                    // core missing once the app has had one: `hc update` can swap the binary,
+                    // so that one is retried like a drop.
+                    let final_now = match &e {
+                        CoreError::Incompatible { reason, newer } => {
+                            Some(CoreState::Incompatible {
+                                reason: reason.clone(),
+                                newer: *newer,
+                            })
+                        }
+                        CoreError::NotFound if !subscribed_before => Some(CoreState::NotFound),
+                        _ => None,
                     };
-                    self.wait_for_reconnect(core_state, describe(&e)).await;
-                    down_since = None;
-                    attempt = 0;
-                    continue;
+                    if let Some(core_state) = final_now {
+                        self.wait_for_reconnect(core_state, describe(&e)).await;
+                        down_since = None;
+                        attempt = 0;
+                        continue;
+                    }
+                    missing = e == CoreError::NotFound;
+                    last_error = describe(&e);
                 }
-                Err(e) => last_error = describe(&e),
             }
 
             attempt += 1;
             let since = *down_since.get_or_insert_with(Instant::now);
             let elapsed = since.elapsed();
             if elapsed >= RECONNECT_WINDOW {
-                let stopped = CoreState::Stopped {
-                    error: last_error.clone(),
+                // A core still missing at the end of the window is gone: the person is told
+                // how to install one.
+                let (core_state, error) = if missing {
+                    (CoreState::NotFound, describe(&CoreError::NotFound))
+                } else {
+                    let stopped = CoreState::Stopped {
+                        error: last_error.clone(),
+                    };
+                    (stopped, NOT_RUNNING.to_owned())
                 };
-                self.wait_for_reconnect(stopped, NOT_RUNNING.to_owned())
-                    .await;
+                self.wait_for_reconnect(core_state, error).await;
                 down_since = None;
                 attempt = 0;
                 continue;
