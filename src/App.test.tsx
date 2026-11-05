@@ -1012,7 +1012,7 @@ describe("next-needs-you, split and sidebar menu ids", () => {
     await waitFor(() =>
       expect(ipc.invokeTyped).toHaveBeenCalledWith("mark_seen", {
         machineId: "buildbox",
-        paneId: "w2:p1",
+        address: "w2:p1",
       }),
     );
     // And round again.

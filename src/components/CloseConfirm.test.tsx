@@ -16,7 +16,7 @@ const row = {
   key: "buildbox::w1:p3",
   machineId: "buildbox",
   machineLabel: "buildbox",
-  paneId: "w1:p3",
+  address: "w1:p3",
   name: "shell",
 } as Row;
 
@@ -31,9 +31,9 @@ it("asks first, closes the pane on confirm and says it is done", async () => {
   expect(screen.getByRole("dialog", { name: "Close shell?" })).toBeVisible();
   expect(invoke).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "Close session" }));
-  expect(invoke).toHaveBeenCalledWith("close_pane", {
+  expect(invoke).toHaveBeenCalledWith("close_terminal", {
     machineId: "buildbox",
-    paneId: "w1:p3",
+    address: "w1:p3",
   });
   expect(onDone).toHaveBeenCalled();
 });

@@ -438,7 +438,7 @@ describe("AllAgents", () => {
     await user.click(within(done).getByRole("button", { name: "Mark seen" }));
     expect(invoke).toHaveBeenCalledWith("mark_seen", {
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
   });
 
@@ -527,7 +527,7 @@ describe("AllAgents", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "gpubox",
-        paneId: "w2:p1",
+        address: "w2:p1",
       }),
     );
   });
@@ -542,7 +542,7 @@ describe("AllAgents", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "buildbox",
-        paneId: "w2:p1",
+        address: "w2:p1",
       }),
     );
     expect(invoke.mock.calls.filter(([n]) => n === "mark_seen")).toHaveLength(
@@ -555,16 +555,22 @@ describe("AllAgents", () => {
     useAppStore.setState({ selectedKey: "buildbox::w1:p3" });
     await user.keyboard("{Backspace}");
     const dialog = screen.getByRole("dialog");
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
 
     await user.keyboard("{Backspace}");
     await user.click(screen.getByRole("button", { name: "Close session" }));
-    expect(invoke).toHaveBeenCalledWith("close_pane", {
+    expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
-      paneId: "w1:p3",
+      address: "w1:p3",
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
@@ -592,7 +598,10 @@ describe("AllAgents", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(useAppStore.getState().dialogOpen).toBe(0);
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
   });
 
   it("focusing_a_row_shows_it_even_when_the_saved_search_filtered_it_out", async () => {
@@ -797,7 +806,9 @@ describe("AllAgents", () => {
         address: "w1:p1",
       }),
     );
-    expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy command" }),
+    ).toBeInTheDocument();
   });
 
   it("backspace_and_cmd_enter_ignore_a_selection_hidden_by_search", async () => {

@@ -20,12 +20,12 @@ export function CloseConfirm({
   return (
     <ConfirmDialog
       title={`Close ${row.name}?`}
-      body={`This closes pane ${row.paneId} on ${row.machineLabel} and ends whatever is running in it.`}
+      body={`This ends whatever is running in ${row.address} on ${row.machineLabel}. This can’t be undone.`}
       confirmLabel="Close session"
       onConfirm={() => {
-        invokeTyped("close_pane", {
+        invokeTyped("close_terminal", {
           machineId: row.machineId,
-          paneId: row.paneId,
+          address: row.address,
         }).catch(reportError);
         onDone();
       }}

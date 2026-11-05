@@ -6,7 +6,7 @@
 //! named next to each one replaces them with a herdr-core call.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 use tauri::ipc::Channel;
@@ -14,7 +14,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use ts_rs::TS;
 
 use crate::LOCAL;
-use crate::actions::{ActionError, CreatedSession};
+use crate::actions::{ActionError, CreatedSession, RowActions};
+use crate::activity::ActivityV2;
 use crate::core::{CommandLogEntry, CoreClient};
 use crate::herdr::cli::HerdrCli;
 use crate::herdr::model::MachineStatusEntry;
@@ -92,64 +93,143 @@ pub fn list_agent_kinds() -> Result<Vec<String>, ActionError> {
     Err(not_yet())
 }
 
-/// Task 10a.
-#[tauri::command]
-pub fn rename_session() -> Result<(), ActionError> {
-    Err(not_yet())
+// ---- Row actions (Task 10a): the people's clicks on a terminal's row ----
+
+/// The row actions' parts, or why there is no core to act on yet.
+macro_rules! rows {
+    ($core:expr, $sync:expr, $activity:expr) => {
+        RowActions::new(
+            &$core,
+            $sync
+                .get()
+                .ok_or_else(|| ActionError::invalid("herdr-core is not connected yet."))?,
+            &$activity,
+        )
+    };
 }
 
-/// Task 10a.
+/// Types a reply to an idle or done agent. Never forced; can take minutes.
 #[tauri::command]
-pub fn close_pane() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn reply_to_agent(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    activity: State<'_, Arc<Mutex<ActivityV2>>>,
+    machine_id: String,
+    address: String,
+    text: String,
+) -> Result<(), ActionError> {
+    rows!(core, sync, activity)
+        .reply_to_agent(&machine_id, &address, &text)
+        .await
 }
 
-/// Task 10a.
+/// Presses the stop key once; answers what the core saw, in words for a toast.
 #[tauri::command]
-pub fn create_tab() -> Result<CreatedSession, ActionError> {
-    Err(not_yet())
+pub async fn interrupt_terminal(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    activity: State<'_, Arc<Mutex<ActivityV2>>>,
+    machine_id: String,
+    address: String,
+) -> Result<String, ActionError> {
+    rows!(core, sync, activity)
+        .interrupt_terminal(&machine_id, &address)
+        .await
 }
 
-/// Task 10a.
+/// Ends the terminal's program (`terminal.kill`). The UI confirms first.
 #[tauri::command]
-pub fn rename_tab() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn close_terminal(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    activity: State<'_, Arc<Mutex<ActivityV2>>>,
+    machine_id: String,
+    address: String,
+) -> Result<(), ActionError> {
+    rows!(core, sync, activity)
+        .close_terminal(&machine_id, &address)
+        .await
 }
 
-/// Task 10a.
+/// Removes an ended terminal (`terminal.rm`). The UI confirms first.
 #[tauri::command]
-pub fn close_tab() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn remove_terminal(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    activity: State<'_, Arc<Mutex<ActivityV2>>>,
+    machine_id: String,
+    address: String,
+) -> Result<(), ActionError> {
+    rows!(core, sync, activity)
+        .remove_terminal(&machine_id, &address)
+        .await
 }
 
-/// Task 10a.
+/// Removes every ended terminal of one workbox; answers how many.
 #[tauri::command]
-pub fn create_workspace() -> Result<CreatedSession, ActionError> {
-    Err(not_yet())
+pub async fn clear_ended(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    activity: State<'_, Arc<Mutex<ActivityV2>>>,
+    machine_id: String,
+) -> Result<u32, ActionError> {
+    rows!(core, sync, activity).clear_ended(&machine_id).await
 }
 
-/// Task 10a.
 #[tauri::command]
-pub fn rename_workspace() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn set_keep(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    activity: State<'_, Arc<Mutex<ActivityV2>>>,
+    machine_id: String,
+    address: String,
+    keep: bool,
+) -> Result<(), ActionError> {
+    rows!(core, sync, activity)
+        .set_keep(&machine_id, &address, keep)
+        .await
 }
 
-/// Task 10a.
+/// Marks the terminal's current turn as seen (`herdr.seen` and the app's own record).
 #[tauri::command]
-pub fn close_workspace() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn mark_seen(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    activity: State<'_, Arc<Mutex<ActivityV2>>>,
+    machine_id: String,
+    address: String,
+) -> Result<(), ActionError> {
+    rows!(core, sync, activity)
+        .mark_seen(&machine_id, &address)
+        .await
 }
 
-/// Task 10a.
+/// Goes back one turn (`herdr.seen` = turn - 1); refused at turn 0.
 #[tauri::command]
-pub fn reply_to_agent() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn mark_unread(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    activity: State<'_, Arc<Mutex<ActivityV2>>>,
+    machine_id: String,
+    address: String,
+) -> Result<(), ActionError> {
+    rows!(core, sync, activity)
+        .mark_unread(&machine_id, &address)
+        .await
 }
 
-/// Task 10a.
 #[tauri::command]
-pub fn mark_seen() -> Result<(), ActionError> {
-    Err(not_yet())
+pub async fn set_pinned(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    activity: State<'_, Arc<Mutex<ActivityV2>>>,
+    machine_id: String,
+    address: String,
+    pinned: bool,
+) -> Result<(), ActionError> {
+    rows!(core, sync, activity)
+        .set_pinned(&machine_id, &address, pinned)
+        .await
 }
 
 /// Task 12.

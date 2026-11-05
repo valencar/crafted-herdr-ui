@@ -1,16 +1,18 @@
 //! What the UI can ask herdr to do: pure argv builders for the new-session flow (also shown to
-//! the user as the command preview) and the `Actions` runner that executes them.
+//! the user as the command preview) and the `Actions` runner that executes them, plus
+//! `RowActions`, what the row menus do to a terminal through herdr-core.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use ts_rs::TS;
 
-use crate::agents::DisplayStatus;
-use crate::core::CoreError;
-use crate::herdr::cli::{HerdrCli, T_AGENT_START, T_CREATE, T_DEFAULT, T_PROMPT};
+use crate::activity::ActivityV2;
+use crate::agents::{DisplayStatus, TerminalView};
+use crate::core::{CoreClient, CoreError};
+use crate::herdr::cli::{HerdrCli, T_AGENT_START, T_CREATE, T_DEFAULT};
 use crate::herdr::errors::HerdrError;
 use crate::herdr::model::{MachineStatusEntry, parse_created_pane};
 use crate::terminal::shell_quote;
@@ -259,7 +261,6 @@ pub struct Timeouts {
     pub default: Duration,
     pub create: Duration,
     pub agent_start: Duration,
-    pub prompt: Duration,
 }
 
 impl Default for Timeouts {
@@ -268,7 +269,6 @@ impl Default for Timeouts {
             default: T_DEFAULT,
             create: T_CREATE,
             agent_start: T_AGENT_START,
-            prompt: T_PROMPT,
         }
     }
 }
@@ -414,210 +414,6 @@ impl Actions {
         }
     }
 
-    pub async fn rename_session(
-        &self,
-        machine: &str,
-        pane_id: &str,
-        is_agent: bool,
-        name: &str,
-    ) -> Result<(), ActionError> {
-        check_arg("Pane", pane_id)?;
-        if is_agent {
-            validate_name(name).map_err(ActionError::invalid)?;
-        } else {
-            check_arg("Name", name)?;
-        }
-        let group = if is_agent { "agent" } else { "pane" };
-        self.mutate(
-            machine,
-            argv(&[group, "rename", pane_id, name]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn close_pane(&self, machine: &str, pane_id: &str) -> Result<(), ActionError> {
-        check_arg("Pane", pane_id)?;
-        self.mutate(
-            machine,
-            argv(&["pane", "close", pane_id]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn rename_tab(
-        &self,
-        machine: &str,
-        tab_id: &str,
-        label: &str,
-    ) -> Result<(), ActionError> {
-        check_arg("Tab", tab_id)?;
-        check_arg("Name", label)?;
-        self.mutate(
-            machine,
-            argv(&["tab", "rename", tab_id, label]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn close_tab(&self, machine: &str, tab_id: &str) -> Result<(), ActionError> {
-        check_arg("Tab", tab_id)?;
-        self.mutate(
-            machine,
-            argv(&["tab", "close", tab_id]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn rename_workspace(
-        &self,
-        machine: &str,
-        workspace_id: &str,
-        label: &str,
-    ) -> Result<(), ActionError> {
-        check_arg("Workspace", workspace_id)?;
-        check_arg("Name", label)?;
-        self.mutate(
-            machine,
-            argv(&["workspace", "rename", workspace_id, label]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    /// Plain `workspace close`. If herdr answers `workspace_group_close_required`, the error
-    /// comes back unchanged and the UI decides what to offer (spec section 7).
-    pub async fn close_workspace(
-        &self,
-        machine: &str,
-        workspace_id: &str,
-    ) -> Result<(), ActionError> {
-        check_arg("Workspace", workspace_id)?;
-        self.mutate(
-            machine,
-            argv(&["workspace", "close", workspace_id]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub async fn create_tab(
-        &self,
-        machine: &str,
-        workspace_id: &str,
-        label: &str,
-    ) -> Result<CreatedSession, ActionError> {
-        check_arg("Workspace", workspace_id)?;
-        check_arg("Name", label)?;
-        let args = argv(&[
-            "tab",
-            "create",
-            "--workspace",
-            workspace_id,
-            "--label",
-            label,
-            "--no-focus",
-        ]);
-        self.created(machine, args).await
-    }
-
-    pub async fn create_workspace(
-        &self,
-        machine: &str,
-        cwd: &str,
-        label: &str,
-    ) -> Result<CreatedSession, ActionError> {
-        check_arg("Folder", cwd)?;
-        check_arg("Name", label)?;
-        let args = argv(&[
-            "workspace",
-            "create",
-            "--cwd",
-            cwd,
-            "--label",
-            label,
-            "--no-focus",
-        ]);
-        self.created(machine, args).await
-    }
-
-    async fn created(
-        &self,
-        machine: &str,
-        args: Vec<String>,
-    ) -> Result<CreatedSession, ActionError> {
-        let v = self
-            .mutate(machine, args.clone(), self.timeouts.create)
-            .await?;
-        Ok(CreatedSession {
-            pane_id: created_pane(&v, args)?,
-            terminal_id: created_terminal_id(&v),
-        })
-    }
-
-    /// Sends `text` to an agent. `cached_status` is what the app last saw for it: only an
-    /// idle or done agent is replied to; any other known status is refused here without calling
-    /// herdr (a blocked agent is never answered: the app doesn't approve things for the user).
-    /// With no cached status herdr decides (it rejects a blocked agent with `agent_blocked`).
-    pub async fn reply_to_agent(
-        &self,
-        machine: &str,
-        pane_id: &str,
-        text: &str,
-        cached_status: Option<DisplayStatus>,
-    ) -> Result<(), ActionError> {
-        check_arg("Pane", pane_id)?;
-        if text.trim().is_empty() {
-            return Err(ActionError::invalid("Reply can't be empty."));
-        }
-        match cached_status {
-            None | Some(DisplayStatus::Idle | DisplayStatus::Done) => {}
-            Some(DisplayStatus::Blocked | DisplayStatus::Error) => {
-                return Err(ActionError::invalid(
-                    "This agent is waiting for approval. Open it to answer there.",
-                ));
-            }
-            Some(
-                DisplayStatus::Working
-                | DisplayStatus::Unknown
-                | DisplayStatus::Ended
-                | DisplayStatus::Shell,
-            ) => {
-                return Err(ActionError::invalid("Reply when the agent is idle."));
-            }
-        }
-        let mut args = argv(&["agent", "prompt", pane_id]);
-        if text.starts_with('-') {
-            // Otherwise herdr would read the text as a flag.
-            args.push("--".into());
-        }
-        args.push(text.to_owned());
-        self.mutate(machine, args, self.timeouts.prompt)
-            .await
-            .map(drop)
-    }
-
-    /// `agent focus`, which herdr treats as "seen" (spec section 7 caveat).
-    pub async fn mark_seen(&self, machine: &str, pane_id: &str) -> Result<(), ActionError> {
-        check_arg("Pane", pane_id)?;
-        self.mutate(
-            machine,
-            argv(&["agent", "focus", pane_id]),
-            self.timeouts.default,
-        )
-        .await
-        .map(drop)
-    }
-
     /// Saved-machine changes are local configuration, so they never carry `--machine`. These
     /// commands print plain text rather than JSON, so they go through `run_text`.
     async fn machine_config(&self, args: Vec<String>) -> Result<(), ActionError> {
@@ -667,6 +463,319 @@ impl Actions {
                 message: format!("machine status: {e}"),
             },
         })
+    }
+}
+
+// ---- Row actions on herdr-core (v0.9) ----
+
+/// The label `herdr-app` and this app share: the last turn the person has seen. A string.
+const SEEN_LABEL: &str = "herdr.seen";
+/// The label for a pinned agent: `"1"` pins, `""` unpins.
+const PINNED_LABEL: &str = "herdr.pinned";
+
+/// A core call failed. A timeout on a mutation may have been applied, so it is `MaybeApplied`;
+/// the exception is the pool connection's own `hello`, which times out before the request was
+/// ever sent. `terminal` is the full address the call was about.
+fn core_failure(error: CoreError, method: &str, terminal: &str) -> ActionError {
+    match error {
+        CoreError::Timeout { method: timed } if timed != "hello" => ActionError::MaybeApplied {
+            message: format!(
+                "herdr-core did not answer in time. `{method}` on {terminal} may have been applied; refreshing."
+            ),
+            argv: vec![method.to_owned(), terminal.to_owned()],
+        },
+        error => ActionError::Core { error },
+    }
+}
+
+/// Why a reply to a terminal in this status is refused here, without a call. `None` for idle
+/// and done, the only statuses a reply goes to.
+fn reply_refusal(status: DisplayStatus) -> Option<&'static str> {
+    match status {
+        DisplayStatus::Idle | DisplayStatus::Done => None,
+        DisplayStatus::Blocked => {
+            Some("This agent is waiting for approval. Open it to answer there.")
+        }
+        DisplayStatus::Error => Some("This agent hit an error. Open it to see what happened."),
+        DisplayStatus::Working => Some("This agent is working. Reply when it is idle."),
+        DisplayStatus::Ended => Some("This terminal has ended, so there is nobody to reply to."),
+        DisplayStatus::Unknown => Some(
+            "This agent doesn't report its status, so the app can't tell it is ready. Open it to type there.",
+        ),
+        DisplayStatus::Shell => Some("This is a shell, not an agent. Open it to type there."),
+    }
+}
+
+/// What `terminal.interrupt` found, in words for a toast.
+fn interrupt_words(reply: &Value) -> String {
+    let key = reply.get("key").and_then(Value::as_str);
+    let outcome = match reply.get("outcome").and_then(Value::as_str) {
+        Some("stopped") => Some("it stopped"),
+        Some("exited") => Some("it exited"),
+        Some("still_working") => Some("it is still working"),
+        Some("unknown") => Some("it doesn't report its status"),
+        _ => None,
+    };
+    match (key, outcome) {
+        (Some(key), Some(outcome)) => format!("Pressed {key}: {outcome}."),
+        (None, Some(outcome)) => format!("Interrupted: {outcome}."),
+        (Some(key), None) => format!("Pressed {key}."),
+        (None, None) => "Interrupt sent.".to_owned(),
+    }
+}
+
+/// What the row menus do to a terminal, through the one door (`CoreClient`). A mutation is never
+/// retried: a timeout is `ActionError::MaybeApplied` and the sync reads the machines again. The
+/// destructive ones (close, remove) run only when the person clicked; the UI confirms first.
+pub struct RowActions<'a> {
+    core: &'a CoreClient,
+    sync: &'a crate::sync::CoreSync,
+    activity: &'a Mutex<ActivityV2>,
+}
+
+impl<'a> RowActions<'a> {
+    pub fn new(
+        core: &'a CoreClient,
+        sync: &'a crate::sync::CoreSync,
+        activity: &'a Mutex<ActivityV2>,
+    ) -> Self {
+        Self {
+            core,
+            sync,
+            activity,
+        }
+    }
+
+    /// The address as the local core knows it, or why there is none.
+    fn full(&self, machine_id: &str, address: &str) -> Result<String, ActionError> {
+        if address.trim().is_empty() {
+            return Err(ActionError::invalid("Terminal can't be empty."));
+        }
+        self.sync
+            .full_address(machine_id, address)
+            .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))
+    }
+
+    /// The cached terminal, for the checks that are refused without a call.
+    fn cached(&self, machine_id: &str, address: &str) -> Result<TerminalView, ActionError> {
+        self.sync
+            .terminal(machine_id, address)
+            .ok_or_else(|| ActionError::invalid("That terminal is no longer listed."))
+    }
+
+    /// One mutating call. A timeout asks the sync to look again.
+    async fn mutate(
+        &self,
+        machine_id: &str,
+        method: &str,
+        terminal: &str,
+        params: Value,
+        long: bool,
+    ) -> Result<Value, ActionError> {
+        let result = if long {
+            self.core.call_long(machine_id, method, params).await
+        } else {
+            self.core.call(machine_id, method, params).await
+        };
+        result.map_err(|error| {
+            let failure = core_failure(error, method, terminal);
+            if matches!(failure, ActionError::MaybeApplied { .. }) {
+                self.sync.refresh_machines();
+            }
+            failure
+        })
+    }
+
+    async fn label(
+        &self,
+        machine_id: &str,
+        full: &str,
+        name: &str,
+        value: String,
+    ) -> Result<(), ActionError> {
+        self.mutate(
+            machine_id,
+            "terminal.label",
+            full,
+            json!({"terminal": full, "labels": { name: value }}),
+            false,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Types `text` and presses Enter, for an idle or done agent only. Never forced: a blocked
+    /// program is refused by the core, and the app never answers a dialog for the person. The
+    /// call can take minutes (the core waits for the person's own draft), so it has a
+    /// connection of its own.
+    pub async fn reply_to_agent(
+        &self,
+        machine_id: &str,
+        address: &str,
+        text: &str,
+    ) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        if text.trim().is_empty() {
+            return Err(ActionError::invalid("Reply can't be empty."));
+        }
+        let view = self.cached(machine_id, address)?;
+        if let Some(refusal) = reply_refusal(view.status) {
+            return Err(ActionError::invalid(refusal));
+        }
+        self.mutate(
+            machine_id,
+            "terminal.send",
+            &full,
+            json!({"terminal": full, "text": text}),
+            true,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Presses the stop key once. The words say what the core saw happen.
+    pub async fn interrupt_terminal(
+        &self,
+        machine_id: &str,
+        address: &str,
+    ) -> Result<String, ActionError> {
+        let full = self.full(machine_id, address)?;
+        let reply = self
+            .mutate(
+                machine_id,
+                "terminal.interrupt",
+                &full,
+                json!({"terminal": full}),
+                true,
+            )
+            .await?;
+        Ok(interrupt_words(&reply))
+    }
+
+    /// Ends the program (`terminal.kill`). The UI asks first.
+    pub async fn close_terminal(&self, machine_id: &str, address: &str) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        self.mutate(
+            machine_id,
+            "terminal.kill",
+            &full,
+            json!({"terminal": full}),
+            false,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Removes a finished terminal (`terminal.rm`); a live one is refused here.
+    pub async fn remove_terminal(
+        &self,
+        machine_id: &str,
+        address: &str,
+    ) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        let view = self.cached(machine_id, address)?;
+        if view.status != DisplayStatus::Ended {
+            return Err(ActionError::invalid(
+                "Only an ended terminal can be removed. Close it first.",
+            ));
+        }
+        self.mutate(
+            machine_id,
+            "terminal.rm",
+            &full,
+            json!({"terminal": full}),
+            false,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Removes every ended terminal of one workbox, and says how many went. One already gone
+    /// (`not_found`) is skipped; any other failure stops the sweep.
+    pub async fn clear_ended(&self, machine_id: &str) -> Result<u32, ActionError> {
+        let state = self
+            .sync
+            .state()
+            .ok_or_else(|| ActionError::invalid("herdr-core is not connected yet."))?;
+        let machine = state
+            .machines
+            .iter()
+            .find(|m| m.id == machine_id)
+            .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))?;
+        let ended: Vec<String> = machine
+            .terminals
+            .iter()
+            .filter(|t| t.status == DisplayStatus::Ended)
+            .map(|t| t.address.clone())
+            .collect();
+        let mut removed = 0;
+        for address in ended {
+            match self.remove_terminal(machine_id, &address).await {
+                Ok(()) => removed += 1,
+                Err(ActionError::Core {
+                    error: CoreError::Rpc { code, .. },
+                }) if code == "not_found" => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Keeps a live terminal after its shell is lost, or stops keeping it.
+    pub async fn set_keep(
+        &self,
+        machine_id: &str,
+        address: &str,
+        keep: bool,
+    ) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        self.mutate(
+            machine_id,
+            "terminal.keep",
+            &full,
+            json!({"terminal": full, "keep": keep}),
+            false,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Marks the terminal's current turn as seen. The shared label is written only to raise it
+    /// (or when it is missing); the app's own record moves either way. The cache is read before
+    /// the activity lock is taken, never while holding it.
+    pub async fn mark_seen(&self, machine_id: &str, address: &str) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        let view = self.cached(machine_id, address)?;
+        if view.seen_turn.is_none_or(|seen| seen < view.turn) {
+            self.label(machine_id, &full, SEEN_LABEL, view.turn.to_string())
+                .await?;
+        }
+        crate::lock(self.activity).mark_seen(machine_id, address, view.turn);
+        self.sync.refresh_view();
+        Ok(())
+    }
+
+    /// The one write that lowers the shared label: the seen turn goes back by one.
+    pub async fn mark_unread(&self, machine_id: &str, address: &str) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        let view = self.cached(machine_id, address)?;
+        let Some(before) = view.turn.checked_sub(1) else {
+            return Err(ActionError::invalid("Nothing to mark unread yet."));
+        };
+        self.label(machine_id, &full, SEEN_LABEL, before.to_string())
+            .await
+    }
+
+    pub async fn set_pinned(
+        &self,
+        machine_id: &str,
+        address: &str,
+        pinned: bool,
+    ) -> Result<(), ActionError> {
+        let full = self.full(machine_id, address)?;
+        let value = if pinned { "1" } else { "" };
+        self.label(machine_id, &full, PINNED_LABEL, value.to_owned())
+            .await
     }
 }
 
@@ -871,5 +980,41 @@ mod tests {
         );
         split.name = String::new();
         assert!(validate_request(&split).is_ok());
+    }
+
+    #[test]
+    fn a_timed_out_mutation_may_have_been_applied_but_a_hello_timeout_did_not() {
+        let timeout = |method: &str| CoreError::Timeout {
+            method: method.to_owned(),
+        };
+        assert!(matches!(
+            core_failure(timeout("terminal.kill"), "terminal.kill", "t7"),
+            ActionError::MaybeApplied { .. }
+        ));
+        assert_eq!(
+            core_failure(timeout("hello"), "terminal.kill", "t7"),
+            ActionError::Core {
+                error: timeout("hello")
+            }
+        );
+        assert_eq!(
+            core_failure(CoreError::Lost, "terminal.kill", "t7"),
+            ActionError::Core {
+                error: CoreError::Lost
+            }
+        );
+    }
+
+    #[test]
+    fn interrupt_says_what_the_core_saw() {
+        assert_eq!(
+            interrupt_words(&json!({"outcome": "stopped", "key": "esc"})),
+            "Pressed esc: it stopped."
+        );
+        assert_eq!(
+            interrupt_words(&json!({"outcome": "still_working", "key": "ctrl+c"})),
+            "Pressed ctrl+c: it is still working."
+        );
+        assert_eq!(interrupt_words(&json!({})), "Interrupt sent.");
     }
 }

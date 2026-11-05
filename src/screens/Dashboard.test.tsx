@@ -241,7 +241,7 @@ describe("Dashboard", () => {
     expect(calls("mark_seen")).toHaveLength(1);
     expect(calls("mark_seen")[0][1]).toEqual({
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
     // It marks seen only: nothing was opened.
     expect(calls("open_session")).toHaveLength(0);

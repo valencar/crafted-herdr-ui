@@ -40,7 +40,7 @@ export async function openRow(row: Row, how?: OpenHow): Promise<void> {
     if (row.status === "done") {
       await invokeTyped("mark_seen", {
         machineId: row.machineId,
-        paneId: row.paneId,
+        address: row.address,
       });
     }
   } catch (e) {
@@ -52,7 +52,7 @@ export async function openRow(row: Row, how?: OpenHow): Promise<void> {
 export function markSeen(row: Row): void {
   invokeTyped("mark_seen", {
     machineId: row.machineId,
-    paneId: row.paneId,
+    address: row.address,
   }).catch(useAppStore.getState().reportError);
 }
 

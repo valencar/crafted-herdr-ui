@@ -2,16 +2,28 @@
 //! recorded instead of reaching the sync.
 //!
 //! fake-herdr names its files after the joined argv, so the folders used here have no `/`.
+//!
+//! The last section runs the row actions (`RowActions`) against `scripts/fake-hc` with a real
+//! `CoreSync`, so the cached statuses they check come from a real snapshot.
+
+mod common;
 
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crafted_herdr_ui_lib::actions::{ActionError, Actions, NewSessionRequest, Placement, Timeouts};
-use crafted_herdr_ui_lib::agents::DisplayStatus;
+use crafted_herdr_ui_lib::actions::{
+    ActionError, Actions, NewSessionRequest, Placement, RowActions, Timeouts,
+};
+use crafted_herdr_ui_lib::activity::ActivityV2;
+use crafted_herdr_ui_lib::core::{CoreClient, CoreError, ProcessConnector};
 use crafted_herdr_ui_lib::herdr::cli::HerdrCli;
 use crafted_herdr_ui_lib::herdr::errors::HerdrError;
+use crafted_herdr_ui_lib::settings::{Settings, SharedSettings};
+use crafted_herdr_ui_lib::state::CoreState;
+use crafted_herdr_ui_lib::sync::CoreSync;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 fn fixture(name: &str) -> String {
@@ -165,186 +177,28 @@ async fn agent_start_failure_reports_created_pane() {
 #[tokio::test]
 async fn timeout_triggers_refresh_without_retry() {
     let h = Harness::new();
-    let call = "tab_create_--workspace_w1_--label_scratch_--no-focus";
-    h.put(&format!("{call}.json"), &fixture("tab_create.json"));
+    let call = "workspace_create_--cwd_proj_--label_scratch_--no-focus";
+    h.put(&format!("{call}.json"), &fixture("workspace_create.json"));
     h.put(&format!("{call}.sleep"), "3");
+    let req = NewSessionRequest {
+        machine_id: "local".into(),
+        cwd: "proj".into(),
+        kind: None,
+        name: "scratch".into(),
+        placement: Placement::NewWorkspace,
+        agent_args: vec![],
+    };
 
-    let err = h
-        .actions
-        .create_tab("local", "w1", "scratch")
-        .await
-        .unwrap_err();
+    let err = h.actions.create_session(&req).await.unwrap_err();
 
     assert!(matches!(err, ActionError::MaybeApplied { .. }), "{err:?}");
     let creates: Vec<_> = h
         .calls()
         .into_iter()
-        .filter(|c| c.starts_with("tab create"))
+        .filter(|c| c.starts_with("workspace create"))
         .collect();
     assert_eq!(creates.len(), 1, "{creates:?}");
     assert_eq!(h.refreshed(), [Some("local".to_string())]);
-}
-
-#[tokio::test]
-async fn reply_refused_unless_the_agent_is_idle_or_done() {
-    let h = Harness::new();
-
-    for status in [
-        DisplayStatus::Blocked,
-        DisplayStatus::Working,
-        DisplayStatus::Unknown,
-    ] {
-        let err = h
-            .actions
-            .reply_to_agent("buildbox", "w1:p2", "yes", Some(status))
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(err, ActionError::Invalid { .. }),
-            "{status:?}: {err:?}"
-        );
-    }
-
-    assert!(h.calls().is_empty());
-    assert!(h.refreshed().is_empty());
-}
-
-#[tokio::test]
-async fn reply_goes_through_for_idle_or_done_agents_and_lets_herdr_decide_when_uncached() {
-    let h = Harness::new();
-    h.put("agent_prompt_w1:p2_hello.json", "{}");
-    h.put("agent_prompt_w1:p2_again.json", "{}");
-    h.put("agent_prompt_w1:p2_--_-x.json", "{}");
-
-    h.actions
-        .reply_to_agent("local", "w1:p2", "hello", Some(DisplayStatus::Idle))
-        .await
-        .unwrap();
-    h.actions
-        .reply_to_agent("local", "w1:p2", "again", Some(DisplayStatus::Done))
-        .await
-        .unwrap();
-    h.actions
-        .reply_to_agent("local", "w1:p2", "-x", None)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        h.calls(),
-        [
-            "agent prompt w1:p2 hello",
-            "agent prompt w1:p2 again",
-            "agent prompt w1:p2 -- -x"
-        ]
-    );
-}
-
-#[tokio::test]
-async fn close_workspace_passes_group_close_error_through() {
-    let h = Harness::new();
-    let call = "workspace_close_w2";
-    let stderr = r#"{"error":{"code":"workspace_group_close_required","message":"close linked worktrees first"}}"#;
-    h.put(&format!("{call}.stderr"), stderr);
-    h.put(&format!("{call}.exit"), "1");
-
-    let err = h
-        .actions
-        .close_workspace("buildbox", "w2")
-        .await
-        .unwrap_err();
-
-    assert_eq!(
-        err,
-        ActionError::Herdr {
-            error: HerdrError::Server {
-                code: "workspace_group_close_required".into(),
-                message: "close linked worktrees first".into(),
-            }
-        }
-    );
-    assert!(h.refreshed().is_empty());
-}
-
-#[tokio::test]
-async fn renames_pick_agent_or_pane_and_other_mutations_build_their_argv() {
-    let h = Harness::new();
-    for call in [
-        "agent_rename_w1:p2_reviewer",
-        "pane_rename_w1:p3_notes",
-        "pane_close_w1:p3",
-        "tab_rename_w1:t1_build",
-        "tab_close_w1:t1",
-        "workspace_rename_w1_api",
-        "agent_focus_w1:p2",
-    ] {
-        h.put(&format!("{call}.json"), "{}");
-    }
-
-    h.actions
-        .rename_session("local", "w1:p2", true, "reviewer")
-        .await
-        .unwrap();
-    h.actions
-        .rename_session("local", "w1:p3", false, "notes")
-        .await
-        .unwrap();
-    h.actions.close_pane("local", "w1:p3").await.unwrap();
-    h.actions
-        .rename_tab("local", "w1:t1", "build")
-        .await
-        .unwrap();
-    h.actions.close_tab("local", "w1:t1").await.unwrap();
-    h.actions
-        .rename_workspace("local", "w1", "api")
-        .await
-        .unwrap();
-    h.actions.mark_seen("local", "w1:p2").await.unwrap();
-
-    assert_eq!(
-        h.calls(),
-        [
-            "agent rename w1:p2 reviewer",
-            "pane rename w1:p3 notes",
-            "pane close w1:p3",
-            "tab rename w1:t1 build",
-            "tab close w1:t1",
-            "workspace rename w1 api",
-            "agent focus w1:p2",
-        ]
-    );
-}
-
-#[tokio::test]
-async fn invalid_input_never_reaches_herdr() {
-    let h = Harness::new();
-
-    for result in [
-        h.actions
-            .rename_session("local", "w1:p2", true, "Bad Name")
-            .await,
-        h.actions.rename_tab("local", "w1:t1", "--help").await,
-        h.actions.close_pane("local", "").await,
-    ] {
-        assert!(matches!(result, Err(ActionError::Invalid { .. })));
-    }
-    assert!(h.calls().is_empty());
-}
-
-#[tokio::test]
-async fn create_workspace_returns_the_root_pane() {
-    let h = Harness::new();
-    h.put(
-        "workspace_create_--cwd_proj_--label_api_--no-focus.json",
-        &fixture("workspace_create.json"),
-    );
-
-    let created = h
-        .actions
-        .create_workspace("local", "proj", "api")
-        .await
-        .unwrap();
-
-    assert_eq!(created.pane_id, "w3:p1");
 }
 
 #[tokio::test]
@@ -426,24 +280,6 @@ async fn machine_command_errors_are_not_swallowed() {
         }
     ));
     assert!(h.refreshed().is_empty());
-}
-
-#[tokio::test]
-async fn unreadable_success_output_is_maybe_applied_and_refreshes() {
-    let h = Harness::new();
-    h.put("pane_close_w1:p3.json", "closed, thanks");
-
-    let err = h.actions.close_pane("buildbox", "w1:p3").await.unwrap_err();
-
-    match err {
-        ActionError::MaybeApplied { argv, message } => {
-            assert_eq!(argv, ["pane", "close", "w1:p3"]);
-            assert!(message.contains("could not be read"), "{message}");
-        }
-        other => panic!("expected MaybeApplied, got {other:?}"),
-    }
-    assert_eq!(h.calls().len(), 1);
-    assert_eq!(h.refreshed(), [Some("buildbox".to_string())]);
 }
 
 #[tokio::test]
@@ -575,4 +411,389 @@ async fn agent_start_timeout_says_the_agent_may_have_started() {
         other => panic!("expected MaybeApplied, got {other:?}"),
     }
     assert_eq!(h.calls().len(), 2);
+}
+
+// ---- Row actions on herdr-core ----
+
+const HC_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/hc");
+
+fn hc_fixture(name: &str) -> String {
+    fs::read_to_string(Path::new(HC_FIXTURES).join(name)).unwrap()
+}
+
+/// A fake-hc folder with the real `hello`, an empty machine list, and the local snapshot after
+/// `tweak` changed it. In the snapshot, `t1` works, `t2` is idle (turn 1, seen 1), `t3` is
+/// blocked, `t4` errored, `t6` is idle with no seen label, `t7` has no status and `t8` is ended.
+fn fake_core(tweak: impl FnOnce(&mut Value)) -> TempDir {
+    let dir = TempDir::new().unwrap();
+    let mut snapshot: Value = serde_json::from_str(&hc_fixture("subscribe_local.json")).unwrap();
+    tweak(&mut snapshot);
+    fs::write(
+        dir.path().join("events.subscribe.json"),
+        snapshot.to_string(),
+    )
+    .unwrap();
+    fs::write(dir.path().join("hello.json"), hc_fixture("hello.json")).unwrap();
+    fs::write(dir.path().join("machine.list.json"), r#"{"machines":[]}"#).unwrap();
+    for (method, result) in [
+        (
+            "terminal.send",
+            json!({"turn": 1, "started": null, "status": null}),
+        ),
+        (
+            "terminal.interrupt",
+            json!({"outcome": "stopped", "key": "esc"}),
+        ),
+        ("terminal.kill", json!({"ok": true})),
+        ("terminal.rm", json!({"ok": true})),
+        ("terminal.keep", json!({"ok": true})),
+        ("terminal.label", json!({"address": "t1"})),
+    ] {
+        fs::write(
+            dir.path().join(format!("{method}.json")),
+            result.to_string(),
+        )
+        .unwrap();
+    }
+    dir
+}
+
+struct CoreHarness {
+    dir: TempDir,
+    core: Arc<CoreClient>,
+    sync: CoreSync,
+    activity: Arc<Mutex<ActivityV2>>,
+}
+
+impl CoreHarness {
+    async fn start(dir: TempDir) -> Self {
+        let core = Arc::new(CoreClient::new(Arc::new(ProcessConnector {
+            bin: common::fake_hc_bin(),
+            env: common::fake_hc_env(dir.path()),
+        })));
+        let activity = Arc::new(Mutex::new(ActivityV2::new(None)));
+        let sync = CoreSync::start(
+            core.clone(),
+            SharedSettings::new(Settings::default()),
+            activity.clone(),
+            Arc::new(|_| {}),
+            Arc::new(|_| {}),
+        );
+        let started = std::time::Instant::now();
+        loop {
+            let state = sync.state().unwrap();
+            if state.core_state == CoreState::Ready && sync.terminal("local", "t8").is_some() {
+                break;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(15),
+                "the sync never became ready"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        Self {
+            dir,
+            core,
+            sync,
+            activity,
+        }
+    }
+
+    async fn new() -> Self {
+        Self::start(fake_core(|_| {})).await
+    }
+
+    fn rows(&self) -> RowActions<'_> {
+        RowActions::new(&self.core, &self.sync, &self.activity)
+    }
+
+    /// Every request line the core received for `method`, parsed.
+    fn requests(&self, method: &str) -> Vec<Value> {
+        fs::read_to_string(self.dir.path().join("calls.log"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.starts_with('{'))
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|v| v["method"] == method)
+            .collect()
+    }
+
+    fn all_requests(&self) -> String {
+        fs::read_to_string(self.dir.path().join("calls.log")).unwrap_or_default()
+    }
+
+    fn put(&self, file: &str, contents: &str) {
+        fs::write(self.dir.path().join(file), contents).unwrap();
+    }
+}
+
+fn invalid_message(result: Result<impl std::fmt::Debug, ActionError>) -> String {
+    match result {
+        Err(ActionError::Invalid { message }) => message,
+        other => panic!("expected Invalid, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn reply_refused_unless_idle_or_done() {
+    let h = CoreHarness::new().await;
+    let rows = h.rows();
+
+    // Working, blocked, errored, unreported, ended and not listed: refused without a call.
+    let mut messages = Vec::new();
+    for address in ["t1", "t3", "t4", "t7", "t8", "t99"] {
+        messages.push(invalid_message(
+            rows.reply_to_agent("local", address, "yes").await,
+        ));
+    }
+    assert!(h.requests("terminal.send").is_empty());
+    // Each refusal has its own words.
+    let mut unique = messages.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), messages.len(), "{messages:?}");
+    assert_eq!(
+        messages[1],
+        "This agent is waiting for approval. Open it to answer there."
+    );
+    assert_eq!(
+        messages[2],
+        "This agent hit an error. Open it to see what happened."
+    );
+    assert!(!messages[2].contains("approval"));
+    assert_eq!(
+        invalid_message(rows.reply_to_agent("local", "t6", "  ").await),
+        "Reply can't be empty."
+    );
+    assert_eq!(
+        invalid_message(rows.reply_to_agent("nowhere", "t6", "yes").await),
+        "Unknown workbox nowhere."
+    );
+
+    // Idle goes through.
+    rows.reply_to_agent("local", "t6", "go on").await.unwrap();
+    assert_eq!(h.requests("terminal.send").len(), 1);
+
+    // And so does Done: t2's turn moved past what was seen.
+    let h = CoreHarness::start(fake_core(|snap| {
+        snap["terminals"][1]["turn"] = json!(3);
+    }))
+    .await;
+    h.rows()
+        .reply_to_agent("local", "t2", "ship it")
+        .await
+        .unwrap();
+    assert_eq!(h.requests("terminal.send").len(), 1);
+}
+
+#[tokio::test]
+async fn reply_never_forced() {
+    let h = CoreHarness::new().await;
+
+    h.rows()
+        .reply_to_agent("local", "t6", "force it, please")
+        .await
+        .unwrap();
+
+    let sends = h.requests("terminal.send");
+    assert_eq!(sends.len(), 1);
+    assert_eq!(
+        sends[0]["params"],
+        json!({"terminal": "t6", "text": "force it, please"})
+    );
+    // The word in the text is the user's own; no param carries it.
+    assert!(
+        !h.all_requests().contains("\"force\""),
+        "{}",
+        h.all_requests()
+    );
+    assert!(sends[0]["params"].get("force").is_none());
+}
+
+#[tokio::test]
+async fn reply_maps_blocked_error() {
+    let h = CoreHarness::new().await;
+
+    // The cache says idle, but the core knows better.
+    h.put("terminal.send.json", &hc_fixture("errors/blocked.json"));
+    let err = h
+        .rows()
+        .reply_to_agent("local", "t6", "yes")
+        .await
+        .unwrap_err();
+    match err {
+        ActionError::Core {
+            error: CoreError::Rpc { code, .. },
+        } => assert_eq!(code, "blocked"),
+        other => panic!("expected a blocked core error, got {other:?}"),
+    }
+
+    h.put(
+        "terminal.send.json",
+        &hc_fixture("errors/status_mismatch.json"),
+    );
+    let err = h
+        .rows()
+        .reply_to_agent("local", "t6", "yes")
+        .await
+        .unwrap_err();
+    match err {
+        ActionError::Core {
+            error: CoreError::Rpc { code, .. },
+        } => assert_eq!(code, "status_mismatch"),
+        other => panic!("expected a status_mismatch core error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn mark_seen_only_raises_and_writes_string() {
+    // t2 is Done here: turn 3, seen label "1".
+    let h = CoreHarness::start(fake_core(|snap| {
+        snap["terminals"][1]["turn"] = json!(3);
+    }))
+    .await;
+
+    h.rows().mark_seen("local", "t2").await.unwrap();
+    let labels = h.requests("terminal.label");
+    assert_eq!(labels.len(), 1);
+    assert_eq!(
+        labels[0]["params"],
+        json!({"terminal": "t2", "labels": {"herdr.seen": "3"}}),
+        "the value is a string"
+    );
+    assert_eq!(h.activity.lock().unwrap().peek("local", "t2"), Some(3));
+
+    // A terminal with no seen label gets one, even at turn 0.
+    h.rows().mark_seen("local", "t6").await.unwrap();
+    let labels = h.requests("terminal.label");
+    assert_eq!(labels.len(), 2);
+    assert_eq!(
+        labels[1]["params"],
+        json!({"terminal": "t6", "labels": {"herdr.seen": "0"}})
+    );
+
+    // Already seen up to the turn: no write, but the app's own record still moves.
+    let h = CoreHarness::new().await;
+    h.rows().mark_seen("local", "t2").await.unwrap();
+    assert!(h.requests("terminal.label").is_empty());
+    assert_eq!(h.activity.lock().unwrap().peek("local", "t2"), Some(1));
+
+    // A terminal that isn't listed is refused.
+    assert_eq!(
+        invalid_message(h.rows().mark_seen("local", "t99").await),
+        "That terminal is no longer listed."
+    );
+}
+
+#[tokio::test]
+async fn mark_unread_writes_turn_minus_one() {
+    let h = CoreHarness::new().await;
+
+    // t2 is at turn 1.
+    h.rows().mark_unread("local", "t2").await.unwrap();
+    let labels = h.requests("terminal.label");
+    assert_eq!(labels.len(), 1);
+    assert_eq!(
+        labels[0]["params"],
+        json!({"terminal": "t2", "labels": {"herdr.seen": "0"}})
+    );
+
+    // t1 is at turn 0: nothing to mark.
+    invalid_message(h.rows().mark_unread("local", "t1").await);
+    assert_eq!(h.requests("terminal.label").len(), 1);
+}
+
+#[tokio::test]
+async fn pin_and_unpin_labels() {
+    let h = CoreHarness::new().await;
+
+    h.rows().set_pinned("local", "t3", true).await.unwrap();
+    h.rows().set_pinned("local", "t3", false).await.unwrap();
+
+    let labels = h.requests("terminal.label");
+    assert_eq!(labels.len(), 2);
+    assert_eq!(
+        labels[0]["params"],
+        json!({"terminal": "t3", "labels": {"herdr.pinned": "1"}})
+    );
+    assert_eq!(
+        labels[1]["params"],
+        json!({"terminal": "t3", "labels": {"herdr.pinned": ""}})
+    );
+}
+
+#[tokio::test]
+async fn clear_ended_removes_only_ended() {
+    // A second ended terminal beside t8.
+    let h = CoreHarness::start(fake_core(|snap| {
+        let mut second = snap["terminals"][7].clone();
+        second["address"] = json!("t9");
+        snap["terminals"].as_array_mut().unwrap().push(second);
+    }))
+    .await;
+
+    let removed = h.rows().clear_ended("local").await.unwrap();
+
+    assert_eq!(removed, 2);
+    let rms: Vec<_> = h
+        .requests("terminal.rm")
+        .iter()
+        .map(|r| r["params"]["terminal"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(rms, ["t8", "t9"]);
+    assert!(h.requests("terminal.kill").is_empty());
+
+    // A terminal that is already gone doesn't stop the sweep and isn't counted.
+    let h = CoreHarness::new().await;
+    h.put("terminal.rm.json", &hc_fixture("errors/not_found.json"));
+    assert_eq!(h.rows().clear_ended("local").await.unwrap(), 0);
+    assert_eq!(
+        invalid_message(h.rows().clear_ended("nowhere").await),
+        "Unknown workbox nowhere."
+    );
+}
+
+#[tokio::test]
+async fn remove_refused_unless_ended() {
+    let h = CoreHarness::new().await;
+
+    for address in ["t1", "t6", "t99"] {
+        invalid_message(h.rows().remove_terminal("local", address).await);
+    }
+    assert!(h.requests("terminal.rm").is_empty());
+
+    h.rows().remove_terminal("local", "t8").await.unwrap();
+    let rms = h.requests("terminal.rm");
+    assert_eq!(rms.len(), 1);
+    assert_eq!(rms[0]["params"], json!({"terminal": "t8"}));
+}
+
+#[tokio::test]
+async fn close_keep_and_interrupt_call_the_core() {
+    let h = CoreHarness::new().await;
+
+    h.rows().close_terminal("local", "t1").await.unwrap();
+    h.rows().set_keep("local", "t1", true).await.unwrap();
+    h.rows().set_keep("local", "t1", false).await.unwrap();
+    let said = h.rows().interrupt_terminal("local", "t1").await.unwrap();
+
+    assert_eq!(
+        h.requests("terminal.kill")[0]["params"],
+        json!({"terminal": "t1"})
+    );
+    let keeps = h.requests("terminal.keep");
+    assert_eq!(keeps[0]["params"], json!({"terminal": "t1", "keep": true}));
+    assert_eq!(keeps[1]["params"], json!({"terminal": "t1", "keep": false}));
+    assert_eq!(
+        h.requests("terminal.interrupt")[0]["params"],
+        json!({"terminal": "t1"})
+    );
+    assert_eq!(said, "Pressed esc: it stopped.");
+
+    // A core error comes back unchanged.
+    h.put("terminal.kill.json", &hc_fixture("errors/finished.json"));
+    assert!(matches!(
+        h.rows().close_terminal("local", "t8").await,
+        Err(ActionError::Core { .. })
+    ));
 }

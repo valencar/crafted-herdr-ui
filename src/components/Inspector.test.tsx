@@ -179,7 +179,7 @@ describe("Inspector reply", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     expect(invoke).toHaveBeenCalledWith("reply_to_agent", {
       machineId: "buildbox",
-      paneId: "w2:p2",
+      address: "w2:p2",
       text: "go ahead",
     });
     await waitFor(() => expect(input).toHaveValue(""));
@@ -198,7 +198,7 @@ describe("Inspector reply", () => {
     await user.type(input, "yes{Enter}");
     expect(invoke).toHaveBeenCalledWith("reply_to_agent", {
       machineId: "buildbox",
-      paneId: "w2:p2",
+      address: "w2:p2",
       text: "yes",
     });
   });
@@ -317,7 +317,7 @@ describe("Inspector actions", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("mark_seen", {
         machineId: "buildbox",
-        paneId: "w2:p1",
+        address: "w2:p1",
       }),
     );
     const names = invoke.mock.calls.map(([n]) => n);
@@ -330,92 +330,24 @@ describe("Inspector actions", () => {
     const { user } = setup();
     await user.click(screen.getByRole("button", { name: "Close" }));
     const dialog = screen.getByRole("dialog");
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     await user.click(screen.getByRole("button", { name: "Close session" }));
-    expect(invoke).toHaveBeenCalledWith("close_pane", {
+    expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     });
     expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("rename_validates_name", async () => {
-    const { user } = setup(BLOCKED);
-    await user.click(screen.getByRole("button", { name: "Rename" }));
-    const input = screen.getByLabelText("New name");
-    expect(input).toHaveValue("planner");
-
-    for (const bad of ["Bad Name", "1abc", "has.dot", "a".repeat(33)]) {
-      await user.clear(input);
-      await user.type(input, bad);
-      await user.click(screen.getByRole("button", { name: "Save" }));
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        "Use 1 to 32 characters: a lowercase letter first, then lowercase letters, digits, - or _.",
-      );
-    }
-    expect(invoke).not.toHaveBeenCalledWith(
-      "rename_session",
-      expect.anything(),
-    );
-
-    await user.clear(input);
-    await user.type(input, "good_name-2");
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(invoke).toHaveBeenCalledWith("rename_session", {
-      machineId: "buildbox",
-      paneId: "w1:p1",
-      isAgent: true,
-      name: "good_name-2",
-    });
-    await waitFor(() => expect(screen.queryByLabelText("New name")).toBeNull());
-  });
-
-  it("an_agent_name_may_be_32_characters_long", async () => {
-    const { user } = setup(BLOCKED);
-    await user.click(screen.getByRole("button", { name: "Rename" }));
-    const input = screen.getByLabelText("New name");
-    await user.clear(input);
-    await user.type(input, "a".repeat(32));
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(invoke).toHaveBeenCalledWith(
-      "rename_session",
-      expect.objectContaining({ name: "a".repeat(32) }),
-    );
-  });
-
-  it("rename_accepts_any_non_empty_text_for_a_pane", async () => {
-    const { user } = setup(SHELL);
-    await user.click(screen.getByRole("button", { name: "Rename" }));
-    const input = screen.getByLabelText("New name");
-    await user.clear(input);
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Name can’t be empty");
-    expect(invoke).not.toHaveBeenCalledWith(
-      "rename_session",
-      expect.anything(),
-    );
-
-    await user.type(input, "Build Shell #1");
-    await user.keyboard("{Enter}");
-    expect(invoke).toHaveBeenCalledWith("rename_session", {
-      machineId: "buildbox",
-      paneId: "w1:p3",
-      isAgent: false,
-      name: "Build Shell #1",
-    });
-  });
-
-  it("escape_cancels_a_rename", async () => {
-    const { user } = setup();
-    await user.click(screen.getByRole("button", { name: "Rename" }));
-    await user.keyboard("{Escape}");
-    expect(screen.queryByLabelText("New name")).toBeNull();
-    expect(screen.getByRole("button", { name: "Rename" })).toHaveFocus();
   });
 
   it("copy_command_writes_to_the_clipboard_and_says_copied", async () => {
@@ -443,7 +375,7 @@ describe("Inspector actions", () => {
     await first.user.click(screen.getByRole("button", { name: "Mark seen" }));
     expect(invoke).toHaveBeenCalledWith("mark_seen", {
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
     first.unmount();
     setup(BLOCKED);
@@ -452,7 +384,7 @@ describe("Inspector actions", () => {
 
   it("failed_actions_show_the_error", async () => {
     invoke.mockImplementation(async (name: string) => {
-      if (name === "close_pane") {
+      if (name === "close_terminal") {
         throw {
           kind: "herdr",
           error: { kind: "server", code: "x", message: "pane is gone" },

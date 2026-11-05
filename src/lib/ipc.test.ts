@@ -51,9 +51,11 @@ describe("copyText", () => {
 describe("invokeTyped", () => {
   it("passes the command and args through and returns the result", async () => {
     invoke.mockResolvedValue({ ok: 1 });
-    const args = { machineId: "buildbox", paneId: "w1:p1" };
-    await expect(invokeTyped("close_pane", args)).resolves.toEqual({ ok: 1 });
-    expect(invoke).toHaveBeenCalledWith("close_pane", args);
+    const args = { machineId: "buildbox", address: "t1" };
+    await expect(invokeTyped("close_terminal", args)).resolves.toEqual({
+      ok: 1,
+    });
+    expect(invoke).toHaveBeenCalledWith("close_terminal", args);
   });
 
   it("rethrows a tagged ActionError unchanged", async () => {
@@ -79,9 +81,9 @@ describe("invokeTyped types", () => {
     invoke.mockResolvedValue(null);
     // These only need to compile; the calls are never awaited for a result.
     // @ts-expect-error close_pane needs machineId and paneId
-    void invokeTyped("close_pane");
+    void invokeTyped("close_terminal");
     // @ts-expect-error argument keys are camelCase
-    void invokeTyped("close_pane", { machine_id: "a", pane_id: "b" });
+    void invokeTyped("close_terminal", { machine_id: "a", address: "b" });
     void invokeTyped("refresh_now", {});
     void invokeTyped("list_agent_kinds");
   });

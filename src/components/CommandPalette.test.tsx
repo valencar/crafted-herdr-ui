@@ -848,11 +848,14 @@ describe("CommandPalette agent frame", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
     // The palette is gone, and the confirmation is still there.
     expect(screen.getByText("Close tester?")).toBeInTheDocument();
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
     await user.click(screen.getByRole("button", { name: "Close session" }));
-    expect(invoke).toHaveBeenCalledWith("close_pane", {
+    expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
     expect(useAppStore.getState().closeRow).toBeNull();
   });
@@ -938,7 +941,7 @@ describe("CommandPalette agent frame", () => {
     await user.click(screen.getByRole("option", { name: /Mark as seen/ }));
     expect(invoke).toHaveBeenCalledWith("mark_seen", {
       machineId: "buildbox",
-      paneId: "w2:p1",
+      address: "w2:p1",
     });
     cleanup();
 

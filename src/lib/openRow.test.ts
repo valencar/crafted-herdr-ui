@@ -28,7 +28,7 @@ function row(status: Row["status"]): Row {
     sinceMs: null,
   });
 }
-const target = { machineId: "buildbox", paneId: "w1:p1" };
+const target = { machineId: "buildbox", address: "w1:p1" };
 /** What `open_session` takes: the machine-local address, and Watch off. */
 const opened = { machineId: "buildbox", address: "w1:p1", observe: false };
 

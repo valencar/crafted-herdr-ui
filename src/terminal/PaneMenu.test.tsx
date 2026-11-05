@@ -65,7 +65,7 @@ describe("PaneMenu", () => {
     await user.click(screen.getByRole("menuitem", { name: "Mark as seen" }));
     expect(invoke).toHaveBeenCalledWith("mark_seen", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(more()).toHaveFocus();
@@ -114,11 +114,14 @@ describe("PaneMenu", () => {
     expect(
       screen.getByRole("dialog", { name: "Close planner?" }),
     ).toBeInTheDocument();
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
     await user.click(screen.getByRole("button", { name: "Close session" }));
-    expect(invoke).toHaveBeenCalledWith("close_pane", {
+    expect(invoke).toHaveBeenCalledWith("close_terminal", {
       machineId: "buildbox",
-      paneId: "w1:p1",
+      address: "w1:p1",
     });
   });
 

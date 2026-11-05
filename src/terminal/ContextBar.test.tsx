@@ -170,7 +170,10 @@ describe("ContextBar", () => {
     ]);
     expect(useTerminalStore.getState().activeKey).toBe(HOME);
     // Detaching ends only our attach client: no herdr command.
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
   });
 
   it("close_pane_opens_the_confirm_dialog", async () => {
@@ -180,7 +183,10 @@ describe("ContextBar", () => {
     await openClosePane(user);
     const dialog = screen.getByRole("dialog", { name: "Close planner?" });
     expect(dialog).toBeInTheDocument();
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -216,7 +222,10 @@ describe("ContextBar", () => {
     rerender(<ContextBar tab={tabB} row={rowB} onFind={() => {}} />);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(useAppStore.getState().dialogOpen).toBe(0);
-    expect(invoke).not.toHaveBeenCalledWith("close_pane", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "close_terminal",
+      expect.anything(),
+    );
   });
 
   it("the_close_pane_dialog_is_outside_the_terminal_panel", async () => {
