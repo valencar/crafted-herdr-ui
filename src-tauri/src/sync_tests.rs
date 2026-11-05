@@ -1090,6 +1090,91 @@ async fn a_server_stop_ending_with_the_stream_open_20_s_later_is_no_stop() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_clients_background_gate_follows_the_link_and_the_stop() {
+    let h = Harness::new();
+    assert!(
+        h.client.background_allowed(),
+        "no sync yet: nothing to hold"
+    );
+    let h = h.up().await;
+    assert!(h.client.background_allowed());
+    // From the first local `server_stop` ending, before the stream ends (Ruling C121).
+    for line in server_stop_lines() {
+        h.send(&line);
+    }
+    settle().await;
+    assert!(!h.client.background_allowed());
+    h.drop_events();
+    settle().await;
+    assert!(!h.client.background_allowed());
+    h.sync().reconnect_now();
+    settle().await;
+    assert!(h.client.background_allowed());
+    // A core that turns out to be alive opens it again (Ruling C118).
+    unkeep_ending(&h, 29);
+    settle().await;
+    assert!(!h.client.background_allowed());
+    h.event(
+        30,
+        "created",
+        "t9",
+        json!({"address": "t9", "state": "live", "reported": false, "turn": 0,
+            "argv": ["sh"], "cwd": "/home/dev/infra"}),
+    );
+    settle().await;
+    assert!(h.client.background_allowed());
+    // A plain drop holds them while it backs off.
+    h.script.refuse.store(true, Ordering::SeqCst);
+    h.drop_events();
+    settle().await;
+    assert!(!h.client.background_allowed());
+}
+
+#[tokio::test(start_paused = true)]
+async fn tail_reads_are_refused_while_stopping_and_while_down() {
+    use crate::commands::read_tail_with;
+    let h = Harness::new();
+    let cell = SyncCell::default();
+    let reads = || methods(&h).iter().filter(|m| *m == "terminal.read").count();
+    // No core located yet.
+    assert!(
+        read_tail_with(&h.client, &cell, "local", "t1")
+            .await
+            .is_err()
+    );
+    cell.set(CoreSync::start(
+        h.client.clone(),
+        h.settings.clone(),
+        h.activity.clone(),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    ));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    // Connected: the read goes out.
+    let _ = read_tail_with(&h.client, &cell, "local", "t1").await;
+    assert_eq!(reads(), 1);
+    // The core is being stopped: refused, though the UI still shows Local online.
+    for line in server_stop_lines() {
+        h.send(&line);
+    }
+    settle().await;
+    assert!(
+        read_tail_with(&h.client, &cell, "local", "t1")
+            .await
+            .is_err()
+    );
+    // And after the stream ended.
+    h.drop_events();
+    settle().await;
+    assert!(
+        read_tail_with(&h.client, &cell, "local", "t1")
+            .await
+            .is_err()
+    );
+    assert_eq!(reads(), 1);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_remote_machine_stopping_is_not_a_stop_of_this_core() {
     let h = Harness::new().up().await;
     // buildbox's own core stops: its terminals end with `server_stop` under its name. Then this
@@ -1188,7 +1273,7 @@ async fn nothing_is_read_or_written_in_the_background_while_the_link_is_down() {
 async fn the_preview_reads_only_with_the_window_on_screen_and_the_link_up() {
     let h = Harness::new();
     let cell = SyncCell::default();
-    assert!(!cell.may_preview(), "no core located yet");
+    assert!(!cell.may_read_screens(), "no core located yet");
     cell.set(CoreSync::start(
         h.client.clone(),
         h.settings.clone(),
@@ -1197,14 +1282,14 @@ async fn the_preview_reads_only_with_the_window_on_screen_and_the_link_up() {
         Arc::new(|_| {}),
     ));
     tokio::time::sleep(Duration::from_millis(150)).await;
-    assert!(cell.may_preview());
+    assert!(cell.may_read_screens());
     cell.get().unwrap().set_window_visible(false);
-    assert!(!cell.may_preview());
+    assert!(!cell.may_read_screens());
     cell.get().unwrap().set_window_visible(true);
     h.script.refuse.store(true, Ordering::SeqCst);
     h.drop_events();
     settle().await;
-    assert!(!cell.may_preview());
+    assert!(!cell.may_read_screens());
 }
 
 #[tokio::test(start_paused = true)]

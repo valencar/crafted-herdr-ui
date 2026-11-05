@@ -16,10 +16,12 @@
 //!   on demand: after a `missed`, a machine action, or a terminal whose machine isn't known yet.
 //!
 //! Background calls run only while the event connection is up (`online`): the layout reads,
-//! the `herdr.seen` writes and `machine.list` here; the preview through `SyncCell::may_preview`;
-//! the New session sheet's check and templates through `CoreSync::machine_online`. A call while
-//! it is down would start `hc connect`, which starts a stopped core, and fill the command log
-//! for nothing. They also stop as soon as the stream shows a local `server_stop` ending, before
+//! the `herdr.seen` writes and `machine.list` here; the preview and the tails through
+//! `SyncCell::may_read_screens`; the New session sheet's check and templates through
+//! `CoreSync::machine_online`. The client holds them too (`CoreClient::set_background`, set
+//! under the model lock wherever the link or `stopping` changes), so a call already queued for
+//! a slot is refused before it opens a connection (Ruling C121). A call while it is down would
+//! start `hc connect`, which starts a stopped core, and fill the command log for nothing. They also stop as soon as the stream shows a local `server_stop` ending, before
 //! the stream ends (the core removes its socket before it exits; the UI sees the stop only when
 //! the stream ends). That lasts until the core shows it is alive after all, by starting a local
 //! terminal (`created`, `restarted`) or by keeping the stream open `STOP_GRACE` longer: an
@@ -483,6 +485,8 @@ impl CoreSync {
             throttle: Mutex::default(),
             emit_lock: Mutex::new(()),
         });
+        // Not connected yet: the client holds background calls until the link is up.
+        inner.allow_background(&lock(&inner.model));
         inner.commit(None, false);
         let tasks = vec![
             tokio::spawn(inner.clone().run_events()),
@@ -615,9 +619,10 @@ impl SyncCell {
         let _ = self.0.set(sync);
     }
 
-    /// Whether the live preview may read now: the main window is on screen and the event
-    /// connection is up. Never before the core is located.
-    pub fn may_preview(&self) -> bool {
+    /// Whether the live preview and the tails may read a screen now: the main window is on
+    /// screen and the event connection is up (`is_online`, so not while the core is stopping).
+    /// Never before the core is located.
+    pub fn may_read_screens(&self) -> bool {
         self.get()
             .is_some_and(|sync| sync.is_window_visible() && sync.is_online())
     }
@@ -945,6 +950,7 @@ impl Inner {
                 // Nothing will answer a hold now; never keep the UI from seeing that.
                 m.hold = None;
             }
+            self.allow_background(&m);
             m.reconnect_asks
         };
         self.commit(None, false);
@@ -959,6 +965,13 @@ impl Inner {
 
     fn online_in(m: &Model) -> bool {
         m.link == Link::Online && !m.stopping
+    }
+
+    /// Tells the client whether its background calls may run, from the model as it is now.
+    /// Called under the model lock wherever the link or `stopping` changes, so the client's
+    /// flag and `online` never disagree for long (Ruling C121). The client takes no lock of ours.
+    fn allow_background(&self, m: &Model) {
+        self.client.set_background(Self::online_in(m));
     }
 
     /// Takes a new machine list. A machine whose name changed keeps its seen records and its
@@ -1178,21 +1191,28 @@ impl Inner {
         });
     }
 
-    /// Reads `machine.list` (quiet). Its id says when it started, for the hold.
-    async fn list_machines(&self) -> (u64, Result<Vec<CoreMachine>, CoreError>) {
+    /// Reads `machine.list` (quiet). Its id says when it started, for the hold. `connecting`: the
+    /// event task's own read while it connects, which runs while background calls are held.
+    async fn list_machines(&self, connecting: bool) -> (u64, Result<Vec<CoreMachine>, CoreError>) {
         let id = {
             let mut m = lock(&self.model);
             m.lists_started += 1;
             m.lists_started
         };
-        (id, self.fetch_machines().await)
+        (id, self.fetch_machines(connecting).await)
     }
 
-    async fn fetch_machines(&self) -> Result<Vec<CoreMachine>, CoreError> {
-        let result = self
-            .client
-            .call_quiet(LOCAL, "machine.list", json!({}))
-            .await?;
+    async fn fetch_machines(&self, connecting: bool) -> Result<Vec<CoreMachine>, CoreError> {
+        let params = json!({});
+        let result = if connecting {
+            self.client
+                .call_quiet_connecting(LOCAL, "machine.list", params)
+                .await?
+        } else {
+            self.client
+                .call_quiet(LOCAL, "machine.list", params)
+                .await?
+        };
         Ok(result
             .get("machines")
             .and_then(Value::as_array)
@@ -1318,7 +1338,7 @@ impl Inner {
             }
             // A failed read keeps the old list; either way it answers for the hold, if it started
             // after the hold did.
-            let (id, answer) = self.list_machines().await;
+            let (id, answer) = self.list_machines(false).await;
             let good = answer.is_ok();
             let mut newly_connected = Vec::new();
             if let Ok(machines) = answer {
@@ -1492,7 +1512,7 @@ impl Inner {
             m.asked.clear();
         }
         // Events that arrive meanwhile wait in `notes`; those the snapshot has are dropped.
-        let (list_id, list) = self.list_machines().await;
+        let (list_id, list) = self.list_machines(true).await;
         {
             let mut m = lock(&self.model);
             if let Ok(machines) = list {
@@ -1502,6 +1522,7 @@ impl Inner {
             m.link = Link::Online;
             m.stopping = false;
             m.core_state = CoreState::Ready;
+            self.allow_background(&m);
         }
         // The baseline: no transition comes out of what changed while we weren't looking.
         self.commit(Some(list_id), false);
@@ -1556,7 +1577,9 @@ impl Inner {
                     if stop_seen.is_some() != was_stopping {
                         // Background calls stop now, this batch's own included, or resume; what
                         // the UI shows changes only when the stream ends.
-                        lock(&self.model).stopping = stop_seen.is_some();
+                        let mut m = lock(&self.model);
+                        m.stopping = stop_seen.is_some();
+                        self.allow_background(&m);
                     }
                     self.apply(&batch);
                 }

@@ -105,7 +105,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(move |machine, address| address_cell.get()?.full_address(machine, address)),
         // Only with the window on screen and the event connection up: a read while it is down
         // would start a stopped core.
-        Arc::new(move || visible_cell.may_preview()),
+        Arc::new(move || visible_cell.may_read_screens()),
         Arc::new(move |frame| {
             let _ = preview_handle.emit(PREVIEW_EVENT, frame);
         }),

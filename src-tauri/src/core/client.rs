@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -200,6 +201,10 @@ pub struct CoreClient {
     slots: Arc<Semaphore>,
     /// One permit per quiet call in flight (`QUIET_SLOTS`), taken before a pool slot.
     quiet_slots: Arc<Semaphore>,
+    /// Whether background calls (`call_quiet`) may run: `CoreSync` sets it, under the lock
+    /// that changes its link, whenever the event connection goes up or down or the core is seen
+    /// stopping. True for a client no sync drives (tests, the startup probe).
+    background: AtomicBool,
     log: Arc<CommandLog>,
 }
 
@@ -212,7 +217,13 @@ struct Pool {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Route {
+    /// Through the pool: a call the person asked for.
     Pool,
+    /// Through the pool, quiet, and held while background calls are (`set_background`).
+    Background,
+    /// Through the pool and quiet, but never held: the event task's own call while it connects.
+    Connecting,
+    /// A connection of its own.
     OneShot,
 }
 
@@ -231,6 +242,7 @@ impl CoreClient {
             }),
             slots: Arc::new(Semaphore::new(POOL_SIZE)),
             quiet_slots: Arc::new(Semaphore::new(QUIET_SLOTS)),
+            background: AtomicBool::new(true),
             log,
         }
     }
@@ -254,19 +266,46 @@ impl CoreClient {
         method: &str,
         params: Value,
     ) -> Result<Value, CoreError> {
-        self.run(machine_id, method, params, Route::Pool, false)
-            .await
+        self.run(machine_id, method, params, Route::Pool).await
     }
 
-    /// Like `call`, logged with `quiet: true`: a timed read the Activity drawer hides.
+    /// A call the app makes on its own (a read of the preview or a tail, a layout, the machine
+    /// list, a seen write, the New session sheet's checks), logged with `quiet: true`, which the
+    /// Activity drawer hides. While background calls are held (`set_background(false)`) it is
+    /// refused with `CoreError::Lost`, unlogged, before it opens or reuses a connection: also
+    /// when it was already waiting for a slot, so one queued before the core began stopping
+    /// can't run `hc connect` after (Ruling C121). Never use it for a person's click.
     pub async fn call_quiet(
         &self,
         machine_id: &str,
         method: &str,
         params: Value,
     ) -> Result<Value, CoreError> {
-        self.run(machine_id, method, params, Route::Pool, true)
+        self.run(machine_id, method, params, Route::Background)
             .await
+    }
+
+    /// Like `call_quiet`, but never held: only for the event task's own call while it connects
+    /// (the machine list right after subscribing), which is what background calls wait for.
+    pub async fn call_quiet_connecting(
+        &self,
+        machine_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, CoreError> {
+        self.run(machine_id, method, params, Route::Connecting)
+            .await
+    }
+
+    /// Lets background calls run, or holds them. An atomic store, so the caller may hold its
+    /// own locks (`CoreSync` calls it under its model lock): the client takes none of them.
+    pub fn set_background(&self, allowed: bool) {
+        self.background.store(allowed, Ordering::SeqCst);
+    }
+
+    /// Whether background calls may run now.
+    pub fn background_allowed(&self) -> bool {
+        self.background.load(Ordering::SeqCst)
     }
 
     /// A call on a connection of its own, outside the pool, for calls that can take minutes
@@ -277,8 +316,7 @@ impl CoreClient {
         method: &str,
         params: Value,
     ) -> Result<Value, CoreError> {
-        self.run(machine_id, method, params, Route::OneShot, false)
-            .await
+        self.run(machine_id, method, params, Route::OneShot).await
     }
 
     /// A fresh connection that has said `hello`, for the event subscription. Not logged.
@@ -357,8 +395,13 @@ impl CoreClient {
         method: &str,
         params: Value,
         route: Route,
-        quiet: bool,
     ) -> Result<Value, CoreError> {
+        let quiet = matches!(route, Route::Background | Route::Connecting);
+        let held = || route == Route::Background && !self.background_allowed();
+        // Refused, not run: it is no call, so it isn't logged.
+        if held() {
+            return Err(CoreError::Lost);
+        }
         let bin_name = lock(&self.pool).connector.bin_name();
         let shown = display(method, &params, &bin_name);
         let at_ms = now_ms();
@@ -366,7 +409,7 @@ impl CoreClient {
         let timeout = timeout_for(method);
 
         let result = match route {
-            Route::Pool => {
+            Route::Pool | Route::Background | Route::Connecting => {
                 // Held until the call ends; taken before the pool slot, never the other way.
                 let _quiet = if quiet {
                     Some(
@@ -379,6 +422,18 @@ impl CoreClient {
                 } else {
                     None
                 };
+                // Waiting for a slot does not count against the timeout.
+                let _slot = self
+                    .slots
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| CoreError::Lost)?;
+                // Asked again with the slots in hand, just before a connection is opened or
+                // reused: the wait may have outlasted the core (Ruling C121).
+                if held() {
+                    return Err(CoreError::Lost);
+                }
                 self.pooled(method, params, timeout).await
             }
             Route::OneShot => self.one_shot(method, params, timeout).await,
@@ -399,19 +454,13 @@ impl CoreClient {
         result
     }
 
+    /// The call on a pooled connection; the caller holds a pool slot.
     async fn pooled(
         &self,
         method: &str,
         params: Value,
         timeout: Duration,
     ) -> Result<Value, CoreError> {
-        // Waiting for a slot does not count against the timeout.
-        let _slot = self
-            .slots
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| CoreError::Lost)?;
         let (conn, generation) = self.checkout().await?;
         let result = conn.call(method, params, timeout).await;
         self.checkin(conn, generation, &result);
@@ -841,6 +890,96 @@ mod tests {
             call.await.unwrap().unwrap();
         }
         assert!(peak.load(Ordering::SeqCst) <= 3);
+    }
+
+    /// A client whose `terminal.read` takes 300 ms, counting the connections it opens and the
+    /// `terminal.read` requests that reach a core.
+    fn slow_reads() -> (Arc<CoreClient>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let opened = Arc::new(AtomicUsize::new(0));
+        let reads = Arc::new(AtomicUsize::new(0));
+        let (o, r) = (opened.clone(), reads.clone());
+        let client = Arc::new(CoreClient::new(Arc::new(FnConnector(move || {
+            o.fetch_add(1, Ordering::SeqCst);
+            let r = r.clone();
+            let (conn, notes, core) = connect(move |req| match req["method"].as_str() {
+                Some("hello") => (0, Reply::Result(hello_result())),
+                Some("terminal.read") => {
+                    r.fetch_add(1, Ordering::SeqCst);
+                    (300, Reply::Result(json!({"text": ""})))
+                }
+                _ => (0, Reply::Result(json!({"ok": true}))),
+            });
+            Ok((conn.keep_alive(core), notes))
+        }))));
+        (client, opened, reads)
+    }
+
+    #[tokio::test]
+    async fn a_background_call_queued_before_the_gate_closes_never_runs() {
+        let (client, opened, reads) = slow_reads();
+        let read = |i: usize| {
+            let client = client.clone();
+            tokio::spawn(async move {
+                client
+                    .call_quiet(
+                        "local",
+                        "terminal.read",
+                        json!({"terminal": format!("t{i}")}),
+                    )
+                    .await
+            })
+        };
+        // Two reads hold both quiet slots; a third waits behind them.
+        let (a, b) = (read(1), read(2));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let queued = read(3);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+        // The core is being stopped: background calls are held from now on.
+        client.set_background(false);
+        assert!(a.await.unwrap().is_ok());
+        assert!(b.await.unwrap().is_ok());
+        // The queued read got its slot after that: it is refused, never sent, and opens nothing.
+        assert!(queued.await.unwrap().is_err());
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+        assert_eq!(opened.load(Ordering::SeqCst), 2);
+        // A refusal is not a call: nothing for it in the log.
+        assert_eq!(client.command_log().len(), 2);
+        // A new one is refused at once.
+        assert!(
+            client
+                .call_quiet("local", "terminal.read", json!({"terminal": "t4"}))
+                .await
+                .is_err()
+        );
+        assert_eq!(opened.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn person_initiated_calls_run_while_background_calls_are_held() {
+        let (client, opened, _) = slow_reads();
+        client.set_background(false);
+        assert!(!client.background_allowed());
+        client
+            .call("local", "terminal.kill", json!({"terminal": "t9"}))
+            .await
+            .unwrap();
+        client
+            .call_long("local", "terminal.interrupt", json!({"terminal": "t9"}))
+            .await
+            .unwrap();
+        // The event task's own list while it connects runs too.
+        client
+            .call_quiet_connecting("local", "machine.list", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(opened.load(Ordering::SeqCst), 2);
+        // Allowed again: background calls run.
+        client.set_background(true);
+        client
+            .call_quiet("local", "terminal.read", json!({"terminal": "t1"}))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

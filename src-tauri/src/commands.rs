@@ -385,7 +385,8 @@ fn machine_args(verb: &str, sync: &SyncCell, machine_id: &str) -> Result<Vec<Str
 }
 
 /// The last non-empty line a terminal's screen shows, for its box in the Workbox screen.
-/// A quiet `terminal.read` with `lines: 0`.
+/// A quiet `terminal.read` with `lines: 0`, only while the preview could read too
+/// (`SyncCell::may_read_screens`); otherwise refused, and the box keeps its last line.
 #[tauri::command]
 pub async fn read_tail(
     core: State<'_, Arc<CoreClient>>,
@@ -393,14 +394,31 @@ pub async fn read_tail(
     machine_id: String,
     address: String,
 ) -> Result<String, ActionError> {
-    if !preview::readable(&machine_id, &address) {
+    read_tail_with(&core, &sync, &machine_id, &address).await
+}
+
+/// `read_tail` without Tauri's state. An automatic read: refused while background reads are
+/// held (the event connection down, or the core stopping, which the UI still shows as Online
+/// until the stream ends; Ruling C121).
+pub(crate) async fn read_tail_with(
+    core: &CoreClient,
+    sync: &SyncCell,
+    machine_id: &str,
+    address: &str,
+) -> Result<String, ActionError> {
+    if !preview::readable(machine_id, address) {
         return Err(ActionError::invalid("Pick a terminal to read."));
+    }
+    if !sync.may_read_screens() {
+        return Err(ActionError::invalid(
+            "herdr-core isn't connected right now.",
+        ));
     }
     let full = sync
         .get()
-        .and_then(|s| s.full_address(&machine_id, &address))
+        .and_then(|s| s.full_address(machine_id, address))
         .ok_or_else(|| ActionError::invalid(format!("Unknown workbox {machine_id}.")))?;
-    preview::read_tail(&core, &machine_id, &full)
+    preview::read_tail(core, machine_id, &full)
         .await
         .map_err(|error| ActionError::Core { error })
 }
