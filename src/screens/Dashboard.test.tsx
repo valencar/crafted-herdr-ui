@@ -176,7 +176,7 @@ describe("Dashboard", () => {
     setup(null);
     const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;
     expect(busy).not.toBeNull();
-    expect(busy).toHaveTextContent("Connecting to herdr…");
+    expect(busy).toHaveTextContent("Connecting to herdr-core…");
     expect(busy.querySelector(".skel")).not.toBeNull();
   });
 
@@ -277,7 +277,7 @@ describe("Dashboard", () => {
 
   it("says_it_is_connecting_before_the_first_state", () => {
     setup(null);
-    expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
+    expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { level: 1, name: "Dashboard" }),
     ).toBeInTheDocument();

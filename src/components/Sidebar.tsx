@@ -396,7 +396,7 @@ export function Sidebar({
 
       <div className="sidebar-foot">
         <span className="mono muted">
-          {corePath ?? "herdr not found"}
+          {corePath ?? "herdr-core not found"}
           {coreVersion ? ` · ${coreVersion}` : ""}
         </span>
         <button

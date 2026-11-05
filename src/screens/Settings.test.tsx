@@ -48,8 +48,8 @@ const DEFAULTS: SettingsData = {
 };
 
 const HERDR: CoreStatus = {
-  path: "/home/dev/.local/bin/herdr",
-  version: "0.9.4",
+  path: "/home/dev/.local/bin/hc",
+  version: "0.1.18",
   saved_missing: false,
   legacy_herdr: null,
 };
@@ -358,43 +358,63 @@ describe("Settings", () => {
     });
   });
 
-  it("shows the herdr binary, and picks another one with the file dialog", async () => {
-    const user = await setup({}, "herdr CLI");
+  it("settings_herdr_core_section", async () => {
+    const user = await setup({}, "herdr-core");
+    // The section is herdr-core now; the old "herdr CLI" is gone.
+    expect(screen.queryByRole("button", { name: "herdr CLI" })).toBeNull();
     expect(
-      await screen.findByText("/home/dev/.local/bin/herdr"),
+      screen.getByRole("heading", { name: "herdr-core" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/0\.9\.4/)).toBeInTheDocument();
-    expect(screen.queryByText(/Saved herdr binary not found/)).toBeNull();
+    expect(
+      await screen.findByText("/home/dev/.local/bin/hc"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("0.1.18")).toBeInTheDocument();
+    expect(screen.queryByText(/The saved path is missing/)).toBeNull();
 
-    chooseFile.mockResolvedValue("/opt/mine/herdr");
+    chooseFile.mockResolvedValue("/opt/mine/hc");
     herdr = {
-      path: "/opt/mine/herdr",
-      version: "0.9.5",
+      path: "/opt/mine/hc",
+      version: "0.1.19",
       saved_missing: false,
       legacy_herdr: null,
     };
-    await user.click(screen.getByRole("button", { name: "Choose binary…" }));
+    await user.click(screen.getByRole("button", { name: "Choose…" }));
     expect(invoke).toHaveBeenCalledWith("set_settings", {
-      patch: { core_path: "/opt/mine/herdr" },
+      patch: { core_path: "/opt/mine/hc" },
     });
-    expect(
-      (await screen.findAllByText("/opt/mine/herdr")).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getByText("0.9.5")).toBeInTheDocument();
+    expect((await screen.findAllByText("/opt/mine/hc")).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getByText("0.1.19")).toBeInTheDocument();
 
     // Cancelling the dialog changes nothing.
     invoke.mockClear();
     chooseFile.mockResolvedValue(null);
-    await user.click(screen.getByRole("button", { name: "Choose binary…" }));
+    await user.click(screen.getByRole("button", { name: "Choose…" }));
     expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
   });
 
-  it("says when the saved herdr binary is gone and what is used instead", async () => {
+  it("says_when_the_saved_path_is_gone_or_is_not_herdr_core", async () => {
     herdr = { ...HERDR, saved_missing: true };
-    await setup({ core_path: "/gone/herdr" }, "herdr CLI");
+    await setup({ core_path: "/gone/hc" }, "herdr-core");
+    expect(
+      await screen.findByText("The saved path is missing or isn't herdr-core."),
+    ).toBeInTheDocument();
+    // What is used instead is still shown.
+    expect(screen.getByText("/home/dev/.local/bin/hc")).toBeInTheDocument();
+  });
+
+  it("says_when_no_core_is_found", async () => {
+    herdr = {
+      path: null,
+      version: null,
+      saved_missing: false,
+      legacy_herdr: null,
+    };
+    await setup({}, "herdr-core");
     expect(
       await screen.findByText(
-        "Saved herdr binary not found; using /home/dev/.local/bin/herdr",
+        "herdr-core was not found. Install it, or choose the binary.",
       ),
     ).toBeInTheDocument();
   });

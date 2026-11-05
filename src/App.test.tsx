@@ -1123,7 +1123,9 @@ it("onboarding_when_no_herdr", async () => {
   ipc.getState.mockResolvedValue(appState([], { path: null, version: null }));
   render(<App />);
   expect(
-    await screen.findByRole("heading", { name: "herdr wasn’t found" }),
+    await screen.findByRole("heading", {
+      name: "Crafted Herdr needs herdr-core (hc).",
+    }),
   ).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: "Choose binary…" }),
@@ -1140,10 +1142,34 @@ it("onboarding_when_no_herdr", async () => {
   expect(await screen.findByRole("searchbox")).toBeInTheDocument();
 });
 
+it("onboarding_when_the_core_is_incompatible", async () => {
+  useAppStore.setState({ view: { kind: "all" } });
+  ipc.getState.mockResolvedValue({
+    ...appState([]),
+    core_state: {
+      kind: "incompatible",
+      reason: "no such method",
+      newer: false,
+    },
+  });
+  render(<App />);
+  expect(
+    await screen.findByRole("heading", {
+      name: "This herdr-core is too old for Crafted Herdr.",
+    }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("searchbox")).toBeNull();
+
+  // Once the core is usable, the push swaps the screen for Home.
+  const push = ipc.onState.mock.calls[0][0] as (s: AppState) => void;
+  act(() => push(state));
+  expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+});
+
 it("shows_nothing_but_the_connecting_state_before_the_first_state", () => {
   render(<App />);
-  expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
-  expect(screen.queryByText("herdr wasn’t found")).toBeNull();
+  expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();
+  expect(screen.queryByText(/needs herdr-core/)).toBeNull();
 });
 
 describe("the Activity drawer", () => {
@@ -1313,7 +1339,7 @@ describe("the window chrome", () => {
   it("header_shows_version_and_terminal_picker_label", async () => {
     listBoxes();
     render(<App />);
-    expect(await screen.findByText("for herdr 0.9.4")).toBeInTheDocument();
+    expect(await screen.findByText("for herdr-core 0.9.4")).toBeInTheDocument();
     expect(await screen.findByText("Opens in Ghostty")).toBeInTheDocument();
   });
 
@@ -1752,23 +1778,23 @@ describe("the window chrome", () => {
 
   describe("the version banner", () => {
     it("unsupported_version_banner_is_shown_once_and_can_be_dismissed", async () => {
-      listBoxes("0.8.9");
+      listBoxes("0.1.16");
       const user = userEvent.setup();
       render(<App />);
       const banner = await screen.findByRole("status");
       expect(banner).toHaveTextContent(
-        "herdr 0.8.9 is older than this app supports (0.9.0+). Some actions may fail.",
+        "herdr-core 0.1.16 is older than this app supports (0.1.17+). Some actions may fail.",
       );
       await user.click(within(banner).getByRole("button", { name: "Dismiss" }));
       expect(screen.queryByText(/is older than this app supports/)).toBeNull();
     });
 
     it("stays_dismissed_across_screens_and_returns_for_another_version", async () => {
-      listBoxes("0.8.9");
+      listBoxes("0.1.16");
       const user = userEvent.setup();
       render(<App />);
       await user.click(await screen.findByRole("button", { name: "Dismiss" }));
-      expect(useAppStore.getState().dismissedVersion).toBe("0.8.9");
+      expect(useAppStore.getState().dismissedVersion).toBe("0.1.16");
       act(() =>
         useAppStore.setState({
           view: { kind: "workbox", machineId: "gpubox" },
@@ -1777,13 +1803,13 @@ describe("the window chrome", () => {
       expect(screen.queryByRole("status")).toBeNull();
       act(() =>
         useAppStore.setState({
-          state: appState([], { version: "0.8.8" }),
+          state: appState([], { version: "0.1.15" }),
         }),
       );
-      expect(screen.getByRole("status")).toHaveTextContent("herdr 0.8.8");
+      expect(screen.getByRole("status")).toHaveTextContent("herdr-core 0.1.15");
     });
 
-    it.each(["0.9.0", "0.9.4", "0.10.0", "1.0.0"])(
+    it.each(["0.1.17", "0.1.18", "0.2.0-beta.1", "1.0.0"])(
       "shows_no_banner_for_%s",
       async (version) => {
         listBoxes(version);
@@ -1796,7 +1822,7 @@ describe("the window chrome", () => {
       },
     );
 
-    it("an_unreadable_version_gets_the_banner_too", async () => {
+    it("no_reported_version_gets_no_banner", async () => {
       listBoxes();
       render(<App />);
       await screen.findByRole("region", { name: "Needs you" });
@@ -1805,18 +1831,16 @@ describe("the window chrome", () => {
           state: { ...useAppStore.getState().state!, core_version: null },
         }),
       );
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "herdr (unknown version) is older than this app supports (0.9.0+). Some actions may fail.",
-      );
+      expect(screen.queryByRole("status")).toBeNull();
     });
 
-    it.each(["not-a-version", "0.8"])(
+    it.each(["not-a-version", "0.1"])(
       "an_unrecognised_version_%s_gets_the_banner",
       async (version) => {
         listBoxes(version);
         render(<App />);
         expect(await screen.findByRole("status")).toHaveTextContent(
-          `herdr ${version} is older than this app supports`,
+          `herdr-core ${version} is older than this app supports`,
         );
       },
     );

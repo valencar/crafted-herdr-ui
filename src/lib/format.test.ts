@@ -203,13 +203,22 @@ describe("versions", () => {
     expect(parseVersion("")).toBeNull();
   });
 
-  it("supports 0.9.0 and up, and nothing that does not parse", () => {
-    expect(isSupportedVersion("0.9.0")).toBe(true);
-    expect(isSupportedVersion("0.10.1")).toBe(true);
+  it("supports 0.1.17 and up, and nothing that does not parse", () => {
+    expect(isSupportedVersion("0.1.17")).toBe(true);
+    expect(isSupportedVersion("0.1.18")).toBe(true);
+    expect(isSupportedVersion("0.2.0")).toBe(true);
     expect(isSupportedVersion("1.0.0")).toBe(true);
-    expect(isSupportedVersion("0.8.9")).toBe(false);
-    expect(isSupportedVersion("0.9")).toBe(false);
+    expect(isSupportedVersion("0.1.16")).toBe(false);
+    expect(isSupportedVersion("0.0.99")).toBe(false);
+    expect(isSupportedVersion("0.1")).toBe(false);
     expect(isSupportedVersion(null)).toBe(false);
+  });
+
+  it("compares only the numeric part, so a pre-release of a good version is supported", () => {
+    expect(isSupportedVersion("0.2.0-beta.1")).toBe(true);
+    expect(isSupportedVersion("0.1.17-rc.2")).toBe(true);
+    expect(isSupportedVersion("0.1.17+build5")).toBe(true);
+    expect(isSupportedVersion("0.1.16-rc.9")).toBe(false);
   });
 });
 

@@ -95,7 +95,7 @@ export function Workbox({ machineId }: { machineId: string }) {
 
   let content;
   if (state === null) {
-    content = <p className="empty">Connecting to herdr…</p>;
+    content = <p className="empty">Connecting to herdr-core…</p>;
   } else if (machine === null) {
     content = (
       <div className="empty">

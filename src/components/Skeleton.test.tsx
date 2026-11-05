@@ -18,7 +18,7 @@ describe("Skeleton", () => {
     const { container } = render(<SkeletonList rows={4} />);
     const list = container.querySelector('[aria-busy="true"]') as HTMLElement;
     expect(list).toBeInTheDocument();
-    const label = screen.getByText("Connecting to herdr…");
+    const label = screen.getByText("Connecting to herdr-core…");
     expect(label).toHaveClass("sr-only");
     expect(list).toContainElement(label);
     expect(list.querySelectorAll(".skel-row")).toHaveLength(4);

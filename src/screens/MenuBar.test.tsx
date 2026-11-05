@@ -206,6 +206,6 @@ describe("MenuBar", () => {
 
   it("shows_a_waiting_line_before_the_first_state", () => {
     setup(null);
-    expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
+    expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();
   });
 });

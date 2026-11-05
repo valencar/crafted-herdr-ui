@@ -17,7 +17,7 @@ export function Skeleton({ width, height, radius }: BlockProps) {
  */
 export function SkeletonList({
   rows = 3,
-  label = "Connecting to herdr…",
+  label = "Connecting to herdr-core…",
 }: {
   rows?: number;
   label?: string;

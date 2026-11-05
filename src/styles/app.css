@@ -1809,6 +1809,22 @@ select.field {
 .onboarding-url {
   color: var(--text);
 }
+.onboarding-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+}
+.onboarding-command {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: var(--fs-small);
+}
 .onboarding-actions {
   display: flex;
   gap: 8px;

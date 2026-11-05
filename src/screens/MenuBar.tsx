@@ -121,7 +121,7 @@ export function MenuBar() {
 
       <div className="pop-body">
         {state === null ? (
-          <p className="empty pop-pad">Connecting to herdr…</p>
+          <p className="empty pop-pad">Connecting to herdr-core…</p>
         ) : (
           <>
             <section aria-labelledby="pop-needs">

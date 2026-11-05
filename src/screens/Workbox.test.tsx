@@ -702,7 +702,7 @@ describe("Workbox", () => {
 
   it("waits_for_the_first_state", () => {
     setup(null);
-    expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
+    expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();
   });
 });
 

@@ -181,7 +181,7 @@ describe("AllAgents", () => {
     setup(null);
     const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;
     expect(busy).not.toBeNull();
-    expect(busy).toHaveTextContent("Connecting to herdr…");
+    expect(busy).toHaveTextContent("Connecting to herdr-core…");
     expect(busy.querySelector(".skel")).not.toBeNull();
   });
 
@@ -739,7 +739,7 @@ describe("AllAgents", () => {
 
   it("shows_a_connecting_state_before_the_first_state", () => {
     setup(null);
-    expect(screen.getByText("Connecting to herdr…")).toBeInTheDocument();
+    expect(screen.getByText("Connecting to herdr-core…")).toBeInTheDocument();
   });
 
   it("selected_needs_you_card_shows_the_last_three_preview_lines", async () => {
@@ -1006,7 +1006,7 @@ describe("Home states", () => {
         }),
       );
 
-    it("gets_a_card_with_the_error_the_hint_and_a_retry_button", async () => {
+    it("gets_a_card_with_the_error_and_a_reconnect_button", async () => {
       const user = setup(
         down({
           kind: "reconnecting",
@@ -1018,11 +1018,12 @@ describe("Home states", () => {
         name: "Local isn’t answering",
       });
       expect(card).toHaveTextContent("could not start herdr: no such file");
-      expect(card).toHaveTextContent(
-        "Start herdr with herdr in a terminal, then retry.",
-      );
-      await user.click(within(card).getByRole("button", { name: "Retry now" }));
-      expect(invoke).toHaveBeenCalledWith("refresh_now", {
+      // Connecting starts the core, so the card never sends anyone to a terminal.
+      expect(card).not.toHaveTextContent("hc server status");
+      expect(card).not.toHaveTextContent("in a terminal");
+      await user.click(within(card).getByRole("button", { name: "Reconnect" }));
+      expect(invoke).toHaveBeenCalledWith("reconnect_core");
+      expect(invoke).not.toHaveBeenCalledWith("refresh_now", {
         machineId: "local",
       });
     });
@@ -1031,7 +1032,7 @@ describe("Home states", () => {
       setup(down({ kind: "attention", error: "  " }));
       expect(
         screen.getByRole("region", { name: "Local isn’t answering" }),
-      ).toHaveTextContent("herdr isn’t answering yet");
+      ).toHaveTextContent("herdr-core isn’t answering yet");
     });
 
     it("is_absent_before_the_first_poll_has_answered", () => {

@@ -139,11 +139,11 @@ export function lastLines(text: string | null, count: number): string[] {
     .slice(-count);
 }
 
-/** The first herdr version the app is built against. The only place the floor lives. */
-const MIN_VERSION: [number, number, number] = [0, 9, 0];
+/** The first herdr-core version the app is built against (advisory). The only place the floor lives. */
+export const MIN_VERSION: [number, number, number] = [0, 1, 17];
 
 /**
- * `[major, minor, patch]` from `herdr --version` text (`0.9.4`, `herdr v1.2.3+build5`). A
+ * `[major, minor, patch]` from `--version` text (`0.9.4`, `herdr v1.2.3+build5`). A
  * pre-release or build suffix is ignored; anything else is `null`. Mirrors Rust `parse_version`.
  */
 export function parseVersion(text: string): [number, number, number] | null {
@@ -157,7 +157,10 @@ export function parseVersion(text: string): [number, number, number] | null {
   return parts.map(Number) as [number, number, number];
 }
 
-/** True when the version parses and is 0.9.0 or newer. */
+/**
+ * True when the version parses and is at least `MIN_VERSION`. Only the numeric X.Y.Z part is
+ * compared: a pre-release or build suffix (`0.2.0-beta.1`) is ignored, as `parseVersion` does.
+ */
 export function isSupportedVersion(version: string | null): boolean {
   const parsed = version === null ? null : parseVersion(version);
   if (!parsed) return false;

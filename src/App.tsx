@@ -48,11 +48,13 @@ function App() {
   const herdrVersion = useAppStore((s) => s.state?.core_version ?? null);
   const compact = useAppStore((s) => s.settings?.row_density === "compact");
   const { current: terminal, installed } = useTerminals();
-  // herdr-core was not found; before the first state there is nothing to say yet. The state
-  // names the core only after it has been located, so `core_path` alone would flash this.
+  // herdr-core was not found, or the one found can't be used (too old, or newer than this
+  // app); before the first state there is nothing to say yet. The state names these only
+  // after the core has been located, so `core_path` alone would flash this.
   const herdrMissing = useAppStore(
     (s) =>
-      s.state?.core_path === null && s.state.core_state.kind === "notFound",
+      s.state?.core_state.kind === "notFound" ||
+      s.state?.core_state.kind === "incompatible",
   );
 
   useStateSync();
@@ -133,7 +135,14 @@ function App() {
     };
   }, []);
 
-  if (herdrMissing) return <Onboarding />;
+  if (herdrMissing) {
+    return (
+      <>
+        <Onboarding />
+        <StoreToast />
+      </>
+    );
+  }
 
   return (
     <>

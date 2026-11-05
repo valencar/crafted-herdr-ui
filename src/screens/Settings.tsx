@@ -47,7 +47,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "workboxes", label: "Workboxes" },
   { id: "notifications", label: "Notifications" },
-  { id: "herdr", label: "herdr CLI" },
+  { id: "herdr", label: "herdr-core" },
   { id: "shortcuts", label: "Shortcuts" },
 ];
 
@@ -74,8 +74,8 @@ const TITLES: Record<SectionId, { title: string; blurb: string }> = {
     blurb: "A notification names the agent, its project and its workbox.",
   },
   herdr: {
-    title: "herdr CLI",
-    blurb: "Everything the app does goes through the herdr command line.",
+    title: "herdr-core",
+    blurb: "Everything the app does goes through herdr-core (hc).",
   },
   shortcuts: {
     title: "Shortcuts",
@@ -658,7 +658,7 @@ function Workboxes({
 }) {
   const state = useAppStore((s) => s.state);
   const toggle = (id: string, hidden: boolean) => void hide(id, hidden);
-  if (state === null) return <p className="empty">Connecting to herdr…</p>;
+  if (state === null) return <p className="empty">Connecting to herdr-core…</p>;
   return (
     <div className="settings-stack">
       <ul className="settings-list">
@@ -730,7 +730,7 @@ function Notifications({
   );
 }
 
-function HerdrCli({
+function HerdrCore({
   settings,
   update,
 }: {
@@ -773,21 +773,21 @@ function HerdrCli({
           </span>
         </span>
         {status === null ? (
-          <span className="muted">Looking for herdr…</span>
+          <span className="muted">Looking for herdr-core…</span>
         ) : status.path ? (
           <span className="mono">
             <span>{status.path}</span> ·{" "}
             <span>{status.version ?? "version unknown"}</span>
           </span>
         ) : (
-          <span>herdr was not found. Install it, or choose the binary.</span>
+          <span>
+            herdr-core was not found. Install it, or choose the binary.
+          </span>
         )}
       </div>
       {status?.saved_missing && (
         <p className="settings-warn" role="status">
-          {status.path
-            ? `Saved herdr binary not found; using ${status.path}`
-            : "Saved herdr binary not found, and herdr was not found on this computer."}
+          The saved path is missing or isn't herdr-core.
         </p>
       )}
       {settings.core_path && (
@@ -797,7 +797,7 @@ function HerdrCli({
       )}
       <div className="settings-actions">
         <button type="button" className="btn" onClick={() => void choose()}>
-          Choose binary…
+          Choose…
         </button>
         {settings.core_path && (
           <button
@@ -928,7 +928,7 @@ export function Settings() {
         ) : section === "notifications" ? (
           <Notifications settings={settings} update={update} />
         ) : section === "herdr" ? (
-          <HerdrCli settings={settings} update={update} />
+          <HerdrCore settings={settings} update={update} />
         ) : (
           <Shortcuts settings={settings} update={update} />
         )}
