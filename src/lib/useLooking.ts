@@ -8,6 +8,16 @@ import {
 } from "../terminal/terminalStore";
 import { invokeTyped } from "./ipc";
 
+/**
+ * With no input in the main window for this long, nobody counts as looking (Ruling C111): a
+ * locked screen or a sleeping display can leave the window focused, and an empty room must not
+ * clear a shared "done" (spec section 1).
+ */
+export const IDLE_AFTER_MS = 5 * 60 * 1000;
+
+/** What counts as the person being at the window (with the window's `focus`). */
+const INPUT_EVENTS = ["keydown", "pointermove", "pointerdown", "wheel"];
+
 /** What decides which rows are on screen. */
 export type LookingInput = {
   /** `HOME` or the active tab's key. */
@@ -15,7 +25,7 @@ export type LookingInput = {
   tabs: readonly Pick<TermTab, "tabKey" | "target" | "state">[];
   view: View;
   selectedKey: string | null;
-  /** The window is unfocused, minimized or hidden. */
+  /** The window is unfocused, minimized or hidden, or nobody has touched it lately. */
   away: boolean;
 };
 
@@ -48,9 +58,11 @@ export function lookingKeys(input: LookingInput): string[] {
 /**
  * Tells Rust which rows are drawn right now (`set_looking`), so it skips their notifications and
  * writes `herdr.seen` for them (once per turn). Mounted once, in `App`. Only a changed list is
- * sent. The window counts as away while the page is hidden or after a `blur` until the next
- * `focus`; Rust also checks the window itself (focused, visible, not minimized) before it acts,
- * so a missed event can only make the list too long, never write for an empty room.
+ * sent. The window counts as away while the page is hidden, after a `blur` until the next
+ * `focus`, and while there has been no input in it (`INPUT_EVENTS` or `focus`) for
+ * `IDLE_AFTER_MS`, from the mount on: the next input reports the rows again at once. Rust also
+ * checks the window itself (focused, visible, not minimized) before it acts, so a missed event
+ * can only make the list too long, never write for an empty room.
  */
 export function useLooking(): void {
   const activeKey = useTerminalStore((s) => s.activeKey);
@@ -61,6 +73,30 @@ export function useLooking(): void {
     () => document.visibilityState === "hidden",
   );
   const [blurred, setBlurred] = useState(false);
+  // Nobody has touched the window yet, or not for `IDLE_AFTER_MS`.
+  const [idle, setIdle] = useState(true);
+
+  useEffect(() => {
+    let timer: number | undefined;
+    const onInput = () => {
+      setIdle(false);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setIdle(true), IDLE_AFTER_MS);
+    };
+    // Capture, so an input a handler stops (the terminal's keys) still counts.
+    const options = { capture: true, passive: true };
+    for (const type of INPUT_EVENTS) {
+      window.addEventListener(type, onInput, options);
+    }
+    window.addEventListener("focus", onInput);
+    return () => {
+      window.clearTimeout(timer);
+      for (const type of INPUT_EVENTS) {
+        window.removeEventListener(type, onInput, options);
+      }
+      window.removeEventListener("focus", onInput);
+    };
+  }, []);
 
   useEffect(() => {
     const onVisibility = () => setHidden(document.visibilityState === "hidden");
@@ -82,7 +118,7 @@ export function useLooking(): void {
     tabs,
     view,
     selectedKey,
-    away: hidden || blurred,
+    away: hidden || blurred || idle,
   }).join("\n");
   useEffect(() => {
     // The report is not remembered across the hook's life: a remount (or a reloaded page, whose
