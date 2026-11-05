@@ -14,8 +14,12 @@ export function defaultOpenHow(): OpenHow {
 
 /**
  * Opens a row in a terminal tab here, or in the user's terminal; `how` defaults to the
- * "Open sessions" setting. Opening a "done" agent also marks it seen (spec section 7), but only
- * once it really opened. Errors go to the toast.
+ * "Open sessions" setting. Opening a "done" agent in the user's terminal marks it seen once
+ * `open_session` has answered (spec section 8.1: the app can't see that window, so the open
+ * counts as looking). An in-app tab marks nothing here: it only starts "opening", and its attach
+ * can still fail (all sessions in use, an attach error); once it is live and active,
+ * `useLooking` reports it and the core's `herdr.seen` is written then (Ruling C122). Errors go
+ * to the toast.
  *
  * `opts.observe` is Watch (spec 8.4): the same attach with `--observe`, which only shows the
  * terminal. It is its own tab (`watchTabKey`) next to an Open tab of the row, it goes to a tab
@@ -34,7 +38,8 @@ export async function openRow(
     return;
   }
   try {
-    if ((how ?? (observe ? "app" : defaultOpenHow())) === "app") {
+    const inApp = (how ?? (observe ? "app" : defaultOpenHow())) === "app";
+    if (inApp) {
       useTerminalStore.getState().openTab({
         tabKey: observe ? watchTabKey(row.key) : row.key,
         target: {
@@ -53,7 +58,7 @@ export async function openRow(
         observe,
       });
     }
-    if (row.status === "done" && !observe) {
+    if (row.status === "done" && !observe && !inApp) {
       await invokeTyped("mark_seen", {
         machineId: row.machineId,
         address: row.address,

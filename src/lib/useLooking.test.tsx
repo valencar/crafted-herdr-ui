@@ -310,6 +310,31 @@ describe("useLooking and an idle window (Ruling C111)", () => {
   });
 });
 
+describe("an in-app Open of a Done row (Ruling C122)", () => {
+  it("is_reported_once_its_tab_is_live_the_click_counting_as_input", () => {
+    render(<Probe />);
+    // The click on Open is the person's input (Ruling C111).
+    touch("pointerdown");
+    openPane("t1", "opening");
+    expect(invoke).toHaveBeenLastCalledWith("set_looking", looking([]));
+    setTabState("t1", "live");
+    expect(invoke).toHaveBeenLastCalledWith(
+      "set_looking",
+      looking(["buildbox::t1"]),
+    );
+  });
+
+  it("is_never_reported_when_its_attach_fails", () => {
+    renderProbe();
+    openPane("t1", "opening");
+    setTabState("t1", "error");
+    expect(invoke).not.toHaveBeenCalledWith(
+      "set_looking",
+      looking(["buildbox::t1"]),
+    );
+  });
+});
+
 describe("lookingKeys", () => {
   it("is_empty_when_away", () => {
     expect(

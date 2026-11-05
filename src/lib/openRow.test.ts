@@ -109,7 +109,9 @@ describe("Watch (openRow with observe)", () => {
 });
 
 describe("openRow", () => {
-  it("app target opens a tab and marks done rows seen", async () => {
+  it("app target opens a tab and marks nothing seen yet", async () => {
+    // The tab is only "opening": its attach may still fail (Ruling C122). Done clears once the
+    // tab is live and active, through `useLooking`.
     openSessionsIn("app");
     await openRow({ ...row("done"), name: "planner" });
     const store = useTerminalStore.getState();
@@ -119,10 +121,11 @@ describe("openRow", () => {
         target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
         title: "planner",
         machineLabel: "buildbox",
+        state: "opening",
       },
     ]);
     expect(store.activeKey).toBe("buildbox::w1:p1");
-    expect(invoke.mock.calls).toEqual([["mark_seen", target]]);
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("app target does not mark a row that is not done", async () => {

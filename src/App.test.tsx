@@ -1005,15 +1005,14 @@ describe("next-needs-you, split and sidebar menu ids", () => {
     await menu("next-needs-you");
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w1:p1");
     expect(activeKey()).toBe("buildbox::w1:p1");
-    // Then the done one, which is marked seen once opened.
+    // Then the done one. Its tab is only opening: nothing is marked seen until it is live and
+    // in front, which `useLooking` reports (Ruling C122).
     await menu("next-needs-you");
     expect(useAppStore.getState().selectedKey).toBe("buildbox::w2:p1");
     expect(activeKey()).toBe("buildbox::w2:p1");
-    await waitFor(() =>
-      expect(ipc.invokeTyped).toHaveBeenCalledWith("mark_seen", {
-        machineId: "buildbox",
-        address: "w2:p1",
-      }),
+    expect(ipc.invokeTyped).not.toHaveBeenCalledWith(
+      "mark_seen",
+      expect.anything(),
     );
     // And round again.
     await menu("next-needs-you");

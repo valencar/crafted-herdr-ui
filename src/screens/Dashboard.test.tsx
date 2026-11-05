@@ -401,7 +401,7 @@ describe("Dashboard", () => {
     expect(useAppStore.getState().selectedKey).toBeNull();
   });
 
-  it("go_to_tab_on_a_done_row_activates_the_tab_and_marks_it_seen", async () => {
+  it("go_to_tab_on_a_done_row_activates_the_tab_and_leaves_seen_to_looking", async () => {
     useTerminalStore.setState({
       tabs: [
         {
@@ -423,7 +423,8 @@ describe("Dashboard", () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: /^Go to tab tester/ }));
     expect(useTerminalStore.getState().activeKey).toBe("buildbox::w2:p1");
-    expect(calls("mark_seen")).toHaveLength(1);
+    // In-app, the live tab now in front is what clears Done (`useLooking`, Ruling C122).
+    expect(calls("mark_seen")).toHaveLength(0);
     expect(useAppStore.getState().view).toEqual({ kind: "dashboard" });
   });
 
