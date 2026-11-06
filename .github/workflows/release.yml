@@ -17,7 +17,7 @@ jobs:
   # scripts), so it is read-only and keeps no credentials in the checkout.
   build:
     needs: check
-    runs-on: macos-15
+    runs-on: macos-15-intel # like ci.yml: the arm64 pool can leave a job unstarted
     timeout-minutes: 60
     permissions:
       contents: read

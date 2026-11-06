@@ -15,7 +15,9 @@ permissions:
 
 jobs:
   check:
-    runs-on: macos-15
+    # Intel: GitHub's arm64 macOS pool can go 15 minutes without a free runner, and a job that waits
+    # that long is cancelled. The app is universal, so either kind builds and tests it.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,7 +83,7 @@ jobs:
   preview:
     needs: check
     if: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 60
     permissions:
       contents: read
