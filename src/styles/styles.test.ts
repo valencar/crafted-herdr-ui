@@ -1194,6 +1194,17 @@ describe("new tab menu", () => {
   });
 
   it("holds_the_menu_to_the_width_the_placement_assumes", () => {
-    expect(rule(".new-tab-menu")).toMatch(/max-width:\s*260px/);
+    // Compound, so it also beats `.menu` in windows.css, which loads later.
+    expect(rule(".menu.new-tab-menu")).toMatch(/min-width:\s*220px/);
+    expect(rule(".menu.new-tab-menu")).toMatch(/max-width:\s*260px/);
+  });
+
+  it("makes_the_disabled_lines_look_inert_over_the_base_menu_item_rules", () => {
+    const note = rule(".menu-item.menu-note");
+    expect(note).toMatch(/cursor:\s*default/);
+    expect(note).toMatch(/font-size:\s*var\(--fs-small\)/);
+    expect(rule(".menu-item.menu-note:hover")).toMatch(
+      /background:\s*transparent/,
+    );
   });
 });

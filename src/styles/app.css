@@ -2633,7 +2633,9 @@ select.field {
 }
 /* The session row's "New on {workbox}" menu (`terminal/NewTabMenu.tsx`): a body-rendered menu
    whose items end in a shortcut chip, and whose agent list may say it is loading or failed. */
-.new-tab-menu {
+/* Compound selectors: `windows.css` loads after this file and its `.menu` and `.menu-item` rules
+   weigh the same as a single class, so the later file would win a plain `.new-tab-menu`. */
+.menu.new-tab-menu {
   min-width: 220px;
   max-width: 260px;
 }
@@ -2658,12 +2660,14 @@ select.field {
   margin-left: auto;
   padding-left: 16px;
 }
-.menu-note {
+/* A line of the menu that says something and does nothing (`aria-disabled`): it must not look
+   clickable (compound, to beat `.menu-item` in `windows.css`). */
+.menu-item.menu-note {
   color: var(--text-3);
   font-size: var(--fs-small);
   cursor: default;
 }
-.menu-note:hover {
+.menu-item.menu-note:hover {
   background: transparent;
 }
 .menu-tab-title {
