@@ -14,13 +14,13 @@ export const PINNED: CSSProperties = {
 };
 
 type Options = {
-  /** The element holding the `role="menuitem"` (or `menuitemradio`) buttons; the arrow keys move within it. */
+  /** The element holding the `role="menuitem"` (or `menuitemradio`) buttons; the arrow keys move within it, skipping an item with `aria-disabled="true"`. */
   items: RefObject<HTMLElement | null>;
   /** True for a node that belongs to the menu: its items and the button that opened it. */
   contains: (target: Node) => boolean;
   /** Where focus goes when Escape closes the menu: the button that opened it. */
   returnFocus: () => void;
-  /** A fixed menu would stay behind if the page moved under it, so it closes on resize or scroll. */
+  /** A fixed menu would stay behind if the page moved under it, so it closes on resize or scroll (not a scroll inside the menu itself). */
   closeOnMove?: boolean;
   /** The item that takes focus on open; the first one by default. */
   initialFocus?: (items: HTMLElement[]) => HTMLElement | undefined;
@@ -51,12 +51,16 @@ export function useMenuBehavior(
     if (!open) return;
     const items = () => [
       ...(latest.current.items.current?.querySelectorAll<HTMLElement>(
-        '[role="menuitem"], [role="menuitemradio"]',
+        '[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemradio"]:not([aria-disabled="true"])',
       ) ?? []),
     ];
     const inside = (target: EventTarget | null) =>
       target instanceof Node && latest.current.contains(target);
     const shut = () => close.current(false);
+    // A scroll inside the menu (a list it scrolls itself) is not the page moving under it.
+    const onScroll = (e: Event) => {
+      if (!inside(e.target)) shut();
+    };
     const first = items();
     (latest.current.initialFocus?.(first) ?? first[0])?.focus();
     const onDown = (e: MouseEvent) => {
@@ -96,7 +100,7 @@ export function useMenuBehavior(
     const closeOnMove = latest.current.closeOnMove === true;
     if (closeOnMove) {
       window.addEventListener("resize", shut);
-      window.addEventListener("scroll", shut, true);
+      window.addEventListener("scroll", onScroll, true);
     }
     return () => {
       document.removeEventListener("mousedown", onDown);
@@ -104,7 +108,7 @@ export function useMenuBehavior(
       document.removeEventListener("focusin", onFocusIn);
       if (closeOnMove) {
         window.removeEventListener("resize", shut);
-        window.removeEventListener("scroll", shut, true);
+        window.removeEventListener("scroll", onScroll, true);
       }
     };
   }, [open]);

@@ -2631,6 +2631,45 @@ select.field {
   color: var(--text-4);
   font-size: var(--fs-small);
 }
+/* The session row's "New on {workbox}" menu (`terminal/NewTabMenu.tsx`): a body-rendered menu
+   whose items end in a shortcut chip, and whose agent list may say it is loading or failed. */
+/* Compound selectors: `windows.css` loads after this file and its `.menu` and `.menu-item` rules
+   weigh the same as a single class, so the later file would win a plain `.new-tab-menu`. */
+.menu.new-tab-menu {
+  min-width: 220px;
+  max-width: 260px;
+}
+/* Every known agent is listed when a workbox can't say which are installed (17 kinds), more than
+   a short window shows: the list scrolls and Terminal and New session… stay in view. Positioned,
+   like every scroll container (the page never scrolls). */
+.new-tab-agents {
+  position: relative;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.new-tab-menu .menu-item > .kind {
+  flex: none;
+}
+.menu-hint {
+  margin-left: auto;
+  padding-left: 16px;
+}
+/* A line of the menu that says something and does nothing (`aria-disabled`): it must not look
+   clickable (compound, to beat `.menu-item` in `windows.css`). */
+.menu-item.menu-note {
+  color: var(--text-3);
+  font-size: var(--fs-small);
+  cursor: default;
+}
+.menu-item.menu-note:hover {
+  background: transparent;
+}
 .menu-tab-title {
   min-width: 0;
   overflow: hidden;

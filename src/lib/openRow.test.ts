@@ -225,13 +225,13 @@ describe("useOpenWhenListed", () => {
     // across machines: another workbox's `t7` is not this session.
     useAppStore.setState({
       pendingSelectKey: "gpubox::t7",
-      pendingOpen: { key: "gpubox::t7", machineId: "gpubox", address: "t7" },
+      pendingOpens: [{ key: "gpubox::t7", machineId: "gpubox", address: "t7" }],
     });
     const { rerender } = renderHook(({ rows }) => useOpenWhenListed(rows), {
       initialProps: { rows: [listed("buildbox", "t7")] },
     });
     expect(invoke).not.toHaveBeenCalled();
-    expect(useAppStore.getState().pendingOpen).not.toBeNull();
+    expect(useAppStore.getState().pendingOpens).not.toEqual([]);
 
     rerender({ rows: [listed("buildbox", "t7"), listed("gpubox", "t7")] });
 
@@ -243,6 +243,150 @@ describe("useOpenWhenListed", () => {
       }),
     );
     expect(useAppStore.getState().selectedKey).toBe("gpubox::t7");
-    expect(useAppStore.getState().pendingOpen).toBeNull();
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
+  });
+
+  it("a_pending_open_that_names_how_overrides_the_setting", async () => {
+    // A quick tab (⌘T, the "+" menu) is a new tab here, whatever "Open sessions" says.
+    useAppStore.setState({
+      pendingOpens: [
+        {
+          key: "buildbox::t7",
+          machineId: "buildbox",
+          address: "t7",
+          how: "app",
+        },
+      ],
+    });
+    renderHook(() => useOpenWhenListed([listed("buildbox", "t7")]));
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe("buildbox::t7"),
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+      "buildbox::t7",
+    ]);
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
+  });
+
+  it("a_pending_open_without_how_follows_the_setting", async () => {
+    useAppStore.setState({
+      pendingOpens: [
+        { key: "buildbox::t7", machineId: "buildbox", address: "t7" },
+      ],
+    });
+    renderHook(() => useOpenWhenListed([listed("buildbox", "t7")]));
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_session", {
+        machineId: "buildbox",
+        address: "t7",
+        observe: false,
+      }),
+    );
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+  });
+
+  it("opens_every_pending_entry_whose_row_is_listed_the_last_one_active", async () => {
+    // Two quick tabs started before either row was listed: both get their tab.
+    const { addPendingOpen } = useAppStore.getState();
+    addPendingOpen({
+      key: "buildbox::t7",
+      machineId: "buildbox",
+      address: "t7",
+      how: "app",
+    });
+    addPendingOpen({
+      key: "buildbox::t8",
+      machineId: "buildbox",
+      address: "t8",
+      how: "app",
+    });
+    renderHook(() =>
+      useOpenWhenListed([listed("buildbox", "t7"), listed("buildbox", "t8")]),
+    );
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+        "buildbox::t7",
+        "buildbox::t8",
+      ]),
+    );
+    expect(useTerminalStore.getState().activeKey).toBe("buildbox::t8");
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
+  });
+
+  it("an_entry_that_is_not_listed_yet_stays_while_a_listed_one_opens_with_its_own_how", async () => {
+    const { addPendingOpen } = useAppStore.getState();
+    addPendingOpen({
+      key: "buildbox::t7",
+      machineId: "buildbox",
+      address: "t7",
+      how: "app",
+    });
+    addPendingOpen({ key: "gpubox::t7", machineId: "gpubox", address: "t7" });
+    renderHook(() => useOpenWhenListed([listed("gpubox", "t7")]));
+    // The setting is `external` and this entry names nothing: it goes through open_session.
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_session", {
+        machineId: "gpubox",
+        address: "t7",
+        observe: false,
+      }),
+    );
+    expect(useAppStore.getState().pendingOpens.map((p) => p.key)).toEqual([
+      "buildbox::t7",
+    ]);
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+  });
+
+  it("an_older_entry_listed_after_a_newer_one_opened_goes_in_behind", async () => {
+    const { addPendingOpen } = useAppStore.getState();
+    const entry = (address: string) => ({
+      key: `buildbox::${address}`,
+      machineId: "buildbox",
+      address,
+      how: "app" as const,
+    });
+    addPendingOpen(entry("t7")); // older
+    addPendingOpen(entry("t8")); // newer
+    const { rerender } = renderHook(({ rows }) => useOpenWhenListed(rows), {
+      initialProps: { rows: [listed("buildbox", "t8")] },
+    });
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe("buildbox::t8"),
+    );
+    rerender({ rows: [listed("buildbox", "t8"), listed("buildbox", "t7")] });
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+        "buildbox::t8",
+        "buildbox::t7",
+      ]),
+    );
+    // The late one doesn't take the focus.
+    expect(useTerminalStore.getState().activeKey).toBe("buildbox::t8");
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
+  });
+
+  it("a_later_entry_still_takes_the_focus_after_a_late_one", async () => {
+    const { addPendingOpen } = useAppStore.getState();
+    const entry = (address: string) => ({
+      key: `buildbox::${address}`,
+      machineId: "buildbox",
+      address,
+      how: "app" as const,
+    });
+    addPendingOpen(entry("t7"));
+    addPendingOpen(entry("t8"));
+    const { rerender } = renderHook(({ rows }) => useOpenWhenListed(rows), {
+      initialProps: { rows: [listed("buildbox", "t7")] },
+    });
+    // The older one opens first and is in front...
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe("buildbox::t7"),
+    );
+    // ...and the newer one, listed later, is opened in front of it.
+    rerender({ rows: [listed("buildbox", "t7"), listed("buildbox", "t8")] });
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe("buildbox::t8"),
+    );
   });
 });

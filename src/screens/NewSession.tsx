@@ -79,7 +79,7 @@ export function NewSession({ terminalName }: Props) {
   const setSheet = useAppStore((s) => s.setSheet);
   const reportError = useAppStore((s) => s.reportError);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
-  const setPendingOpen = useAppStore((s) => s.setPendingOpen);
+  const addPendingOpen = useAppStore((s) => s.addPendingOpen);
   const openTarget = useAppStore((s) => s.settings?.open_target ?? "app");
   const savedKind = useAppStore((s) => s.settings?.new_session_kind ?? null);
   const hiddenKinds = useAppStore((s) => s.settings?.new_session_hidden_kinds);
@@ -342,7 +342,7 @@ export function NewSession({ terminalName }: Props) {
       if (openAfter) {
         // `open_session` needs the terminal in the state, which the event stream brings; Home
         // opens it then. There is nothing to mark seen for a new session.
-        setPendingOpen({
+        addPendingOpen({
           key,
           machineId: sent.machineId,
           address: created.address,

@@ -9,12 +9,20 @@ import {
   buildboxTerms,
   appState as buildState,
   machine,
+  withoutSeq,
 } from "../test/builders";
 import { useRowsByKey } from "./tabInfo";
 import { groupTabs } from "./tabOrder";
 import { HOME, useTerminalStore } from "./terminalStore";
 
 import { SessionRow } from "./SessionRow";
+
+vi.mock("../lib/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/ipc")>()),
+  invokeTyped: vi.fn(),
+}));
+import { invokeTyped } from "../lib/ipc";
+const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
 function appState(patch: Parameters<typeof buildboxTerms>[0] = {}): AppState {
   return buildState([
@@ -306,20 +314,436 @@ describe("SessionRow", () => {
     ).toBeInTheDocument();
   });
 
-  it("new_on_workbox_opens_the_sheet_prefilled", async () => {
-    const user = userEvent.setup();
-    open("buildbox", "w1:p1", "planner");
-    render(<Harness machineId="buildbox" />);
-    const button = screen.getByRole("button", {
-      name: "New session on buildbox",
+  describe("New on {workbox} menu", () => {
+    const choices = (kinds: string[], kindsChecked = true) => ({
+      kinds: kinds.map((kind) => ({ kind, takesTask: true })),
+      templates: [],
+      kindsChecked,
     });
-    expect(button).toHaveClass("session-new");
-    expect(button).toHaveTextContent("New on buildbox");
-    expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
-    await user.click(button);
-    expect(useAppStore.getState().sheet).toBe("new-session");
-    expect(useAppStore.getState().sheetPrefill).toEqual({
-      machineId: "buildbox",
+    /** `list_run_choices` answers `kinds`; `create_session` answers the address `t7`. */
+    function answer(kinds: string[] = ["claude", "codex", "copilot"]) {
+      invoke.mockImplementation(async (cmd: string) =>
+        cmd === "list_run_choices" ? choices(kinds) : { address: "t7" },
+      );
+    }
+    const button = () =>
+      screen.getByRole("button", { name: "New session on buildbox" });
+    const scrollerOfRow = () =>
+      nav().querySelector<HTMLElement>(".session-row-scroll") as HTMLElement;
+    const menu = () => screen.getByRole("menu", { name: "New on buildbox" });
+    const items = () => within(menu()).getAllByRole("menuitem");
+    /** Each item as "label|hint": the badge and the chip are drawn beside the words. */
+    const names = () =>
+      items().map(
+        (i) =>
+          `${i.querySelector(":scope > span:not(.kind):not(.menu-hint)")?.textContent}|${
+            i.querySelector(".menu-hint")?.textContent ?? ""
+          }`,
+      );
+    /** The folder of the `w1:p1` agent in the fixture. */
+    const FOLDER = "/home/dev/projects/api-service";
+    const created = (run: unknown, cwd = FOLDER) => [
+      "create_session",
+      {
+        req: {
+          machineId: "buildbox",
+          cwd,
+          run,
+          name: null,
+          task: null,
+          keep: false,
+        },
+      },
+    ];
+
+    beforeEach(() => {
+      invoke.mockReset();
+      answer();
+      useAppStore.setState({
+        pendingSelectKey: null,
+        pendingOpens: [],
+        toast: null,
+        settings: { new_session_hidden_kinds: [] } as never,
+      });
+      open("buildbox", "w1:p1", "planner");
+    });
+    afterEach(() => {
+      useAppStore.getState().clearPendingOpens();
+      useAppStore.getState().setPendingSelectKey(null);
+      useAppStore.setState({ settings: null });
+    });
+
+    it("is_a_menu_button_that_keeps_its_place_and_label", () => {
+      render(<Harness machineId="buildbox" />);
+      const b = button();
+      expect(b).toHaveClass("session-new");
+      expect(b).toHaveTextContent("New on buildbox");
+      expect(b).toHaveAttribute("aria-haspopup", "menu");
+      expect(b).toHaveAttribute("aria-expanded", "false");
+      expect(b.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+      // Still inside the scrolling row, after the tabs.
+      expect(b.parentElement).toHaveClass("session-row-scroll");
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    it("opens_with_terminal_the_agents_and_new_session_and_focuses_the_first", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      expect(button()).toHaveAttribute("aria-expanded", "true");
+      await screen.findByRole("menuitem", { name: "claude" });
+      expect(names()).toEqual([
+        "Terminal|⌘T",
+        "claude|1",
+        "codex|2",
+        "copilot|3",
+        "New session…|⌘N",
+      ]);
+      expect(items()[0]).toHaveFocus();
+      expect(within(menu()).getByText("Start an agent")).toBeInTheDocument();
+      expect(invoke).toHaveBeenCalledWith("list_run_choices", {
+        machineId: "buildbox",
+      });
+      // It renders on the body, so the row's clip and scroll can't cut it off.
+      expect(nav()).not.toContainElement(menu());
+      expect(menu().parentElement).toBe(document.body);
+    });
+
+    it("shows_checking_while_the_agents_load_and_the_other_items_work", async () => {
+      const user = userEvent.setup();
+      invoke.mockImplementation(
+        () => new Promise(() => undefined), // never answers
+      );
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      expect(
+        within(menu()).getByText("Checking installed agents…"),
+      ).toBeInTheDocument();
+      expect(names()).toEqual([
+        "Terminal|⌘T",
+        "Checking installed agents…|",
+        "New session…|⌘N",
+      ]);
+      // A disabled line, not a live region, and the arrow keys skip it.
+      expect(items()[1]).toHaveAttribute("aria-disabled", "true");
+      expect(menu().querySelector('[role="status"]')).toBeNull();
+      expect(items()[0]).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(items()[2]).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(items()[0]).toHaveFocus();
+      await user.keyboard("{ArrowUp}");
+      expect(items()[2]).toHaveFocus();
+    });
+
+    it("says_it_could_not_load_the_agents_and_terminal_still_works", async () => {
+      const user = userEvent.setup();
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "list_run_choices") throw { kind: "invalid", message: "x" };
+        return { address: "t7" };
+      });
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      expect(
+        await within(menu()).findByText("Couldn’t load agents"),
+      ).toBeInTheDocument();
+      expect(names()).toEqual([
+        "Terminal|⌘T",
+        "Couldn’t load agents|",
+        "New session…|⌘N",
+      ]);
+      expect(items()[1]).toHaveAttribute("aria-disabled", "true");
+      // No toast for it: the menu says so itself.
+      expect(useAppStore.getState().toast).toBeNull();
+      await user.click(items()[0]);
+      expect(invoke).toHaveBeenCalledWith(...created({ type: "shell" }));
+    });
+
+    it("leaves_out_the_kinds_the_person_hid", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({
+        settings: { new_session_hidden_kinds: ["codex"] } as never,
+      });
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      expect(names()).toEqual([
+        "Terminal|⌘T",
+        "claude|1",
+        "copilot|2",
+        "New session…|⌘N",
+      ]);
+    });
+
+    it("only_the_first_nine_agents_have_digit_hints", async () => {
+      const user = userEvent.setup();
+      answer(["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10"]);
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "a10" });
+      expect(names()[10]).toBe("a10|");
+      expect(names()[9]).toBe("a9|9");
+    });
+
+    it("reopening_shows_checking_again_not_the_last_openings_agents", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("menu")).toBeNull();
+
+      invoke.mockImplementation(() => new Promise(() => undefined));
+      await user.click(button());
+      expect(
+        within(menu()).getByText("Checking installed agents…"),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "claude" })).toBeNull();
+    });
+
+    it("the_agent_list_scrolls_inside_the_menu_and_the_rest_stays_fixed", async () => {
+      const user = userEvent.setup();
+      answer(["a1", "a2", "a3"]);
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "a1" });
+      const list = menu().querySelector<HTMLElement>(".new-tab-agents");
+      expect(list).not.toBeNull();
+      const inList = within(list as HTMLElement)
+        .getAllByRole("menuitem")
+        .map((i) => i.textContent?.replace(/\d$/, ""));
+      expect(inList.some((t) => t?.includes("a1"))).toBe(true);
+      expect(inList.some((t) => t?.includes("a3"))).toBe(true);
+      expect(inList.some((t) => t?.includes("Terminal"))).toBe(false);
+      expect(inList.some((t) => t?.includes("New session"))).toBe(false);
+    });
+
+    it("scrolling_the_agent_list_keeps_the_menu_open_but_other_scrolls_close_it", async () => {
+      const user = userEvent.setup();
+      answer(["a1", "a2", "a3"]);
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "a1" });
+      const list = menu().querySelector<HTMLElement>(".new-tab-agents");
+      fireEvent.scroll(list as HTMLElement);
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      // The row beneath moving would leave a fixed menu behind: that closes it.
+      fireEvent.scroll(scrollerOfRow());
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    it("says_when_the_installed_agents_could_not_be_checked_and_keeps_the_list", async () => {
+      const user = userEvent.setup();
+      invoke.mockImplementation(async (cmd: string) =>
+        cmd === "list_run_choices"
+          ? choices(["claude", "codex"], false)
+          : { address: "t7" },
+      );
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      expect(names()).toEqual([
+        "Terminal|⌘T",
+        "Couldn’t check which agents are installed here.|",
+        "claude|1",
+        "codex|2",
+        "New session…|⌘N",
+      ]);
+      const note = within(menu()).getByRole("menuitem", {
+        name: "Couldn’t check which agents are installed here.",
+      });
+      expect(note).toHaveAttribute("aria-disabled", "true");
+      expect(note).toHaveClass("menu-note");
+      // The arrow keys skip it, and the digits still pick from the list.
+      await user.keyboard("{ArrowDown}");
+      expect(screen.getByRole("menuitem", { name: "claude" })).toHaveFocus();
+      await user.keyboard("2");
+      expect(invoke).toHaveBeenCalledWith(
+        ...created({ type: "agent", kind: "codex" }),
+      );
+    });
+
+    it("says_nothing_about_checking_when_the_agents_were_checked", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      expect(
+        within(menu()).queryByText(/Couldn’t check which agents/),
+      ).toBeNull();
+    });
+
+    it("cmd_n_in_the_menu_opens_the_full_sheet_with_the_workbox_and_folder", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      await user.keyboard("{Meta>}n{/Meta}");
+      expect(useAppStore.getState().sheet).toBe("new-session");
+      expect(useAppStore.getState().sheetPrefill).toEqual({
+        machineId: "buildbox",
+        folder: FOLDER,
+      });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(invoke).not.toHaveBeenCalledWith(
+        "create_session",
+        expect.anything(),
+      );
+    });
+
+    it("a_plain_n_or_another_modifier_does_not_open_the_sheet", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      await user.keyboard("n");
+      await user.keyboard("{Control>}n{/Control}");
+      await user.keyboard("{Meta>}{Shift>}n{/Shift}{/Meta}");
+      expect(useAppStore.getState().sheet).toBeNull();
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+    });
+
+    it("terminal_starts_a_shell_in_the_active_terminals_folder_and_returns_focus", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await user.click(screen.getByRole("menuitem", { name: /^Terminal/ }));
+      expect(invoke).toHaveBeenCalledWith(...created({ type: "shell" }));
+      await vi.waitFor(() =>
+        expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
+          {
+            key: "buildbox::t7",
+            machineId: "buildbox",
+            address: "t7",
+            how: "app",
+          },
+        ]),
+      );
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(button()).toHaveFocus();
+      expect(useAppStore.getState().sheet).toBeNull();
+    });
+
+    it("an_agent_starts_in_the_same_folder", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await user.click(await screen.findByRole("menuitem", { name: /codex/ }));
+      expect(invoke).toHaveBeenCalledWith(
+        ...created({ type: "agent", kind: "codex" }),
+      );
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    it("a_digit_starts_that_agent", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      await user.keyboard("2");
+      expect(invoke).toHaveBeenCalledWith(
+        ...created({ type: "agent", kind: "codex" }),
+      );
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(button()).toHaveFocus();
+    });
+
+    it("a_digit_with_no_agent_behind_it_or_before_they_load_does_nothing", async () => {
+      const user = userEvent.setup();
+      let release: (v: unknown) => void = () => undefined;
+      invoke.mockImplementation(
+        () => new Promise((resolve) => (release = resolve)),
+      );
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await user.keyboard("1");
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      await act(async () => release(choices(["claude"])));
+      await screen.findByRole("menuitem", { name: "claude" });
+      await user.keyboard("2");
+      await user.keyboard("0");
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      expect(invoke).not.toHaveBeenCalledWith(
+        "create_session",
+        expect.anything(),
+      );
+    });
+
+    it("new_session_opens_the_sheet_with_the_workbox_and_folder", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await user.click(screen.getByRole("menuitem", { name: /^New session…/ }));
+      expect(useAppStore.getState().sheet).toBe("new-session");
+      expect(useAppStore.getState().sheetPrefill).toEqual({
+        machineId: "buildbox",
+        folder: FOLDER,
+      });
+      expect(invoke).not.toHaveBeenCalledWith(
+        "create_session",
+        expect.anything(),
+      );
+    });
+
+    it("with_no_folder_to_take_terminal_and_agents_open_the_sheet_for_the_workbox", async () => {
+      const user = userEvent.setup();
+      // A tab whose row isn't in the state has no folder.
+      open("buildbox", "w9:p9", "ghost");
+      render(<Harness machineId="buildbox" />);
+
+      await user.click(button());
+      await user.click(screen.getByRole("menuitem", { name: /^Terminal/ }));
+      expect(useAppStore.getState().sheetPrefill).toEqual({
+        machineId: "buildbox",
+      });
+      act(() => useAppStore.getState().setSheet(null));
+
+      await user.click(button());
+      await user.click(await screen.findByRole("menuitem", { name: /claude/ }));
+      expect(useAppStore.getState().sheet).toBe("new-session");
+      expect(useAppStore.getState().sheetPrefill).toEqual({
+        machineId: "buildbox",
+      });
+      act(() => useAppStore.getState().setSheet(null));
+
+      await user.click(button());
+      await user.click(screen.getByRole("menuitem", { name: /^New session…/ }));
+      expect(useAppStore.getState().sheetPrefill).toEqual({
+        machineId: "buildbox",
+      });
+      expect(invoke).not.toHaveBeenCalledWith(
+        "create_session",
+        expect.anything(),
+      );
+    });
+
+    it("arrows_move_escape_and_an_outside_press_close_and_focus_returns_to_the_button", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      await user.keyboard("{ArrowDown}");
+      expect(items()[1]).toHaveFocus();
+      await user.keyboard("{ArrowUp}{ArrowUp}");
+      expect(items()[items().length - 1]).toHaveFocus();
+
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(button()).toHaveFocus();
+
+      await user.click(button());
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      await user.click(document.body);
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    it("a_second_click_on_the_button_closes_it", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      await user.click(button());
+      expect(screen.queryByRole("menu")).toBeNull();
     });
   });
 
