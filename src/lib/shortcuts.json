@@ -74,7 +74,7 @@
   "new-in-workbox": {
     "mac": "CmdOrCtrl+T",
     "windows": null,
-    "label": "New session in workbox",
+    "label": "New tab",
     "group": "sessions"
   },
   "close-tab": {

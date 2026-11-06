@@ -122,7 +122,7 @@ pub fn items() -> Vec<(MenuId, &'static str, String)> {
         (FontReset, "Reset Font"),
         (Activity, "Activity"),
         (Shortcuts, "Keyboard Shortcuts"),
-        (NewInWorkbox, "New Session in Workbox"),
+        (NewInWorkbox, "New Tab"),
         (CloseTab, "Close Tab"),
         (NextTab, "Next Tab"),
         (PrevTab, "Previous Tab"),
@@ -249,11 +249,7 @@ mod tests {
         (MenuId::FontReset, "Reset Font", "CmdOrCtrl+0"),
         (MenuId::Activity, "Activity", "CmdOrCtrl+Shift+A"),
         (MenuId::Shortcuts, "Keyboard Shortcuts", "CmdOrCtrl+Slash"),
-        (
-            MenuId::NewInWorkbox,
-            "New Session in Workbox",
-            "CmdOrCtrl+T",
-        ),
+        (MenuId::NewInWorkbox, "New Tab", "CmdOrCtrl+T"),
         (MenuId::CloseTab, "Close Tab", "CmdOrCtrl+W"),
         (MenuId::NextTab, "Next Tab", "Ctrl+Tab"),
         (MenuId::PrevTab, "Previous Tab", "Ctrl+Shift+Tab"),
@@ -359,11 +355,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             all[at],
-            (
-                MenuId::NewInWorkbox,
-                "New Session in Workbox",
-                "CmdOrCtrl+T".to_string()
-            )
+            (MenuId::NewInWorkbox, "New Tab", "CmdOrCtrl+T".to_string())
         );
         assert_eq!(all[at + 1].0, MenuId::CloseTab);
         assert!(

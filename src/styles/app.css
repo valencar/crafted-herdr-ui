@@ -2631,6 +2631,23 @@ select.field {
   color: var(--text-4);
   font-size: var(--fs-small);
 }
+/* The session row's "New on {workbox}" menu (`terminal/NewTabMenu.tsx`): a body-rendered menu
+   whose items end in a shortcut chip, and whose agent list may say it is loading or failed. */
+.new-tab-menu {
+  min-width: 220px;
+}
+.new-tab-menu .menu-item > .kind {
+  flex: none;
+}
+.menu-hint {
+  margin-left: auto;
+  padding-left: 16px;
+}
+.menu-note {
+  padding: 6px 8px;
+  color: var(--text-3);
+  font-size: var(--fs-small);
+}
 .menu-tab-title {
   min-width: 0;
   overflow: hidden;

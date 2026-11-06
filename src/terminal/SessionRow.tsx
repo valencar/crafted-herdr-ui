@@ -14,6 +14,7 @@ import { canOpenNewSession } from "../lib/newSessionTarget";
 import { useWorkboxColor } from "../lib/workboxColors";
 import { useAppStore } from "../store/appStore";
 import { AllTabsMenu } from "./AllTabsMenu";
+import { NewTabMenu } from "./NewTabMenu";
 import {
   countNeeds,
   tabDotStatus,
@@ -29,8 +30,8 @@ const NO_MACHINES: never[] = [];
 
 /**
  * The second row: the tabs of one workbox, each with its title and a second line, then
- * "New on {workbox}". When the tabs outgrow the row it scrolls, keeps the active tab in view,
- * and offers an "All tabs" menu across every workbox.
+ * "New on {workbox}" (a menu: a shell, an agent, the sheet). When the tabs outgrow the row it
+ * scrolls, keeps the active tab in view, and offers an "All tabs" menu across every workbox.
  */
 export function SessionRow({
   group,
@@ -47,7 +48,6 @@ export function SessionRow({
   const closeTab = useTerminalStore((s) => s.closeTab);
   const moveTab = useTerminalStore((s) => s.moveTab);
   const machines = useAppStore((s) => s.state?.machines ?? NO_MACHINES);
-  const openNewSession = useAppStore((s) => s.openNewSession);
 
   const color = useWorkboxColor(group.machine ? group.machineId : null);
   const projects = useMemo(() => projectNames([...rows.values()]), [rows]);
@@ -184,27 +184,7 @@ export function SessionRow({
         {/* The sheet lists only machines that are present and not disabled, so a stray or
             disabled workbox would silently get another one. */}
         {canOpenNewSession(group.machine) && (
-          <button
-            type="button"
-            className="session-new"
-            aria-label={`New session on ${group.label}`}
-            onClick={() => openNewSession({ machineId: group.machineId })}
-          >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M8 3v10M3 8h10" />
-            </svg>
-            New on <span className="mono">{group.label}</span>
-          </button>
+          <NewTabMenu machineId={group.machineId} label={group.label} />
         )}
       </div>
       {overflowing && (

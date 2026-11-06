@@ -12,6 +12,7 @@ import { toRows } from "./grouping";
 import { nextNeedsYou } from "./nextNeedsYou";
 import { canOpenNewSession, newSessionTarget } from "./newSessionTarget";
 import { defaultOpenHow, openRow } from "./openRow";
+import { activeQuickTarget, startQuickTab } from "./quickTab";
 import {
   focusSearch,
   saveSettings,
@@ -77,8 +78,15 @@ export function runMenuAction(id: MenuId): void {
         }
       }
       break;
-    // Opens the New session sheet for the workbox in front (the sheet itself creates nothing).
+    // New Tab (⌘T): on a terminal tab, a shell right away in that terminal's folder, opened as a
+    // tab here. With no folder to take (Home, a command tab, a gone row), the New session sheet
+    // for the workbox in front (the sheet itself creates nothing).
     case "new-in-workbox": {
+      const quick = activeQuickTarget();
+      if (quick !== null) {
+        void startQuickTab(quick, { type: "shell" });
+        break;
+      }
       const {
         state: current,
         view,

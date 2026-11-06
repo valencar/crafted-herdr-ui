@@ -80,7 +80,8 @@ export function markSeen(row: Row): void {
 /**
  * A session was just created: selects its row, and with "Open when ready" opens it, once the
  * row is in `rows` (`open_session` reads the terminal from the state, so it can't run before then).
- * It follows the "Open sessions" setting like any other Open. Mounted once, by `App`, so it
+ * It follows the "Open sessions" setting like any other Open, unless the pending open names
+ * where (`how`: a quick tab always opens in the app). Mounted once, by `App`, so it
  * works whichever screen the Home tab shows, and while a terminal tab is active.
  */
 export function useOpenWhenListed(rows: Row[]): void {
@@ -99,6 +100,6 @@ export function useOpenWhenListed(rows: Row[]): void {
     const row = pendingOpen && rows.find((r) => r.key === pendingOpen.key);
     if (!row) return;
     setPendingOpen(null);
-    void openRow(row);
+    void openRow(row, pendingOpen.how);
   }, [pendingOpen, rows, setPendingOpen]);
 }

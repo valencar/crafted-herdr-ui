@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import type { AppState } from "../lib/bindings/AppState";
+import type { OpenTarget } from "../lib/bindings/OpenTarget";
 import type { PreviewFrame } from "../lib/bindings/PreviewFrame";
 import type { Settings } from "../lib/bindings/Settings";
 import { actionErrorMessage } from "../lib/format";
@@ -11,8 +12,16 @@ export type GroupBy = "project" | "workbox" | "status" | "space";
 export type Sheet = null | "new-session" | "add-workbox";
 /** What a "+ Session" button already knows: the project's workbox and folder. */
 export type SheetPrefill = { machineId?: string; folder?: string };
-/** A just-created terminal to open in the terminal once the state lists it. */
-export type PendingOpen = { key: string; machineId: string; address: string };
+/**
+ * A just-created terminal to open once the state lists it. `how` says where; without it the
+ * "Open sessions" setting does (the New session sheet's way).
+ */
+export type PendingOpen = {
+  key: string;
+  machineId: string;
+  address: string;
+  how?: OpenTarget;
+};
 /**
  * An add the app is waiting to see in the machine list: either it knows the new machine's `id`
  * (the core said so), or it knows the `target` the machine will have (a terminal is adding it)

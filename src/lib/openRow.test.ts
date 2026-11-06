@@ -245,4 +245,44 @@ describe("useOpenWhenListed", () => {
     expect(useAppStore.getState().selectedKey).toBe("gpubox::t7");
     expect(useAppStore.getState().pendingOpen).toBeNull();
   });
+
+  it("a_pending_open_that_names_how_overrides_the_setting", async () => {
+    // A quick tab (⌘T, the "+" menu) is a new tab here, whatever "Open sessions" says.
+    useAppStore.setState({
+      pendingOpen: {
+        key: "buildbox::t7",
+        machineId: "buildbox",
+        address: "t7",
+        how: "app",
+      },
+    });
+    renderHook(() => useOpenWhenListed([listed("buildbox", "t7")]));
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe("buildbox::t7"),
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+      "buildbox::t7",
+    ]);
+    expect(useAppStore.getState().pendingOpen).toBeNull();
+  });
+
+  it("a_pending_open_without_how_follows_the_setting", async () => {
+    useAppStore.setState({
+      pendingOpen: {
+        key: "buildbox::t7",
+        machineId: "buildbox",
+        address: "t7",
+      },
+    });
+    renderHook(() => useOpenWhenListed([listed("buildbox", "t7")]));
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_session", {
+        machineId: "buildbox",
+        address: "t7",
+        observe: false,
+      }),
+    );
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+  });
 });
