@@ -327,6 +327,8 @@ describe("SessionRow", () => {
     }
     const button = () =>
       screen.getByRole("button", { name: "New session on buildbox" });
+    const scrollerOfRow = () =>
+      nav().querySelector<HTMLElement>(".session-row-scroll") as HTMLElement;
     const menu = () => screen.getByRole("menu", { name: "New on buildbox" });
     const items = () => within(menu()).getAllByRole("menuitem");
     /** Each item as "label|hint": the badge and the chip are drawn beside the words. */
@@ -358,14 +360,14 @@ describe("SessionRow", () => {
       answer();
       useAppStore.setState({
         pendingSelectKey: null,
-        pendingOpen: null,
+        pendingOpens: [],
         toast: null,
         settings: { new_session_hidden_kinds: [] } as never,
       });
       open("buildbox", "w1:p1", "planner");
     });
     afterEach(() => {
-      useAppStore.getState().setPendingOpen(null);
+      useAppStore.getState().clearPendingOpens();
       useAppStore.getState().setPendingSelectKey(null);
       useAppStore.setState({ settings: null });
     });
@@ -416,7 +418,21 @@ describe("SessionRow", () => {
       expect(
         within(menu()).getByText("Checking installed agents…"),
       ).toBeInTheDocument();
-      expect(names()).toEqual(["Terminal|⌘T", "New session…|⌘N"]);
+      expect(names()).toEqual([
+        "Terminal|⌘T",
+        "Checking installed agents…|",
+        "New session…|⌘N",
+      ]);
+      // A disabled line, not a live region, and the arrow keys skip it.
+      expect(items()[1]).toHaveAttribute("aria-disabled", "true");
+      expect(menu().querySelector('[role="status"]')).toBeNull();
+      expect(items()[0]).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(items()[2]).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(items()[0]).toHaveFocus();
+      await user.keyboard("{ArrowUp}");
+      expect(items()[2]).toHaveFocus();
     });
 
     it("says_it_could_not_load_the_agents_and_terminal_still_works", async () => {
@@ -430,7 +446,12 @@ describe("SessionRow", () => {
       expect(
         await within(menu()).findByText("Couldn’t load agents"),
       ).toBeInTheDocument();
-      expect(names()).toEqual(["Terminal|⌘T", "New session…|⌘N"]);
+      expect(names()).toEqual([
+        "Terminal|⌘T",
+        "Couldn’t load agents|",
+        "New session…|⌘N",
+      ]);
+      expect(items()[1]).toHaveAttribute("aria-disabled", "true");
       // No toast for it: the menu says so itself.
       expect(useAppStore.getState().toast).toBeNull();
       await user.click(items()[0]);
@@ -463,6 +484,53 @@ describe("SessionRow", () => {
       expect(names()[9]).toBe("a9|9");
     });
 
+    it("reopening_shows_checking_again_not_the_last_openings_agents", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("menu")).toBeNull();
+
+      invoke.mockImplementation(() => new Promise(() => undefined));
+      await user.click(button());
+      expect(
+        within(menu()).getByText("Checking installed agents…"),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "claude" })).toBeNull();
+    });
+
+    it("the_agent_list_scrolls_inside_the_menu_and_the_rest_stays_fixed", async () => {
+      const user = userEvent.setup();
+      answer(["a1", "a2", "a3"]);
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "a1" });
+      const list = menu().querySelector<HTMLElement>(".new-tab-agents");
+      expect(list).not.toBeNull();
+      const inList = within(list as HTMLElement)
+        .getAllByRole("menuitem")
+        .map((i) => i.textContent?.replace(/\d$/, ""));
+      expect(inList.some((t) => t?.includes("a1"))).toBe(true);
+      expect(inList.some((t) => t?.includes("a3"))).toBe(true);
+      expect(inList.some((t) => t?.includes("Terminal"))).toBe(false);
+      expect(inList.some((t) => t?.includes("New session"))).toBe(false);
+    });
+
+    it("scrolling_the_agent_list_keeps_the_menu_open_but_other_scrolls_close_it", async () => {
+      const user = userEvent.setup();
+      answer(["a1", "a2", "a3"]);
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "a1" });
+      const list = menu().querySelector<HTMLElement>(".new-tab-agents");
+      fireEvent.scroll(list as HTMLElement);
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      // The row beneath moving would leave a fixed menu behind: that closes it.
+      fireEvent.scroll(scrollerOfRow());
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
     it("terminal_starts_a_shell_in_the_active_terminals_folder_and_returns_focus", async () => {
       const user = userEvent.setup();
       render(<Harness machineId="buildbox" />);
@@ -470,12 +538,14 @@ describe("SessionRow", () => {
       await user.click(screen.getByRole("menuitem", { name: /^Terminal/ }));
       expect(invoke).toHaveBeenCalledWith(...created({ type: "shell" }));
       await vi.waitFor(() =>
-        expect(useAppStore.getState().pendingOpen).toEqual({
-          key: "buildbox::t7",
-          machineId: "buildbox",
-          address: "t7",
-          how: "app",
-        }),
+        expect(useAppStore.getState().pendingOpens).toEqual([
+          {
+            key: "buildbox::t7",
+            machineId: "buildbox",
+            address: "t7",
+            how: "app",
+          },
+        ]),
       );
       expect(screen.queryByRole("menu")).toBeNull();
       expect(button()).toHaveFocus();

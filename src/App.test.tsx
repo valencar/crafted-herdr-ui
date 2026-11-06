@@ -1734,14 +1734,14 @@ describe("the window chrome", () => {
     beforeEach(() => {
       useAppStore.setState({
         settings: { open_target: "app" } as unknown as Settings,
-        pendingOpen: null,
+        pendingOpens: [],
         pendingSelectKey: null,
       });
     });
     afterEach(() => {
       useAppStore.setState({
         settings: null,
-        pendingOpen: null,
+        pendingOpens: [],
         pendingSelectKey: null,
       });
     });
@@ -1758,11 +1758,11 @@ describe("the window chrome", () => {
       render(<App />);
       await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
       act(() => useAppStore.getState().setPendingSelectKey(KEY));
-      act(() => useAppStore.getState().setPendingOpen(target));
+      act(() => useAppStore.getState().addPendingOpen(target));
       expect(tabKeys()).toEqual([]);
       act(() => useAppStore.getState().setState(withNewPane()));
       expect(tabKeys()).toEqual([KEY]);
-      expect(useAppStore.getState().pendingOpen).toBeNull();
+      expect(useAppStore.getState().pendingOpens).toEqual([]);
       expect(useAppStore.getState().pendingSelectKey).toBeNull();
       expect(useAppStore.getState().selectedKey).toBe(KEY);
       expect(useAppStore.getState().toast).toBeNull();
@@ -1775,7 +1775,7 @@ describe("the window chrome", () => {
       await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
       act(() => openTabs("w1:p1"));
       expect(activeKey()).toBe("buildbox::w1:p1");
-      act(() => useAppStore.getState().setPendingOpen(target));
+      act(() => useAppStore.getState().addPendingOpen(target));
       act(() => useAppStore.getState().setState(withNewPane()));
       expect(tabKeys()).toEqual(["buildbox::w1:p1", KEY]);
       expect(activeKey()).toBe(KEY);
@@ -1792,7 +1792,7 @@ describe("the window chrome", () => {
       });
       render(<App />);
       await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
-      act(() => useAppStore.getState().setPendingOpen(target));
+      act(() => useAppStore.getState().addPendingOpen(target));
       act(() => useAppStore.getState().setState(withNewPane()));
       act(() => useAppStore.getState().setState(withNewPane()));
       expect(
@@ -1822,7 +1822,7 @@ describe("the window chrome", () => {
       });
       render(<App />);
       await waitFor(() => expect(useAppStore.getState().state).not.toBeNull());
-      act(() => useAppStore.getState().setPendingOpen(target));
+      act(() => useAppStore.getState().addPendingOpen(target));
       act(() => useAppStore.getState().setState(withNewPane()));
       await waitFor(() =>
         expect(useAppStore.getState().toast).toBe("no terminal"),
@@ -1837,7 +1837,7 @@ describe("the window chrome", () => {
         await act(async () => {
           await vi.advanceTimersByTimeAsync(0);
         });
-        act(() => useAppStore.getState().setPendingOpen(target));
+        act(() => useAppStore.getState().addPendingOpen(target));
         act(() => {
           vi.advanceTimersByTime(10_000);
         });

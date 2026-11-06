@@ -161,7 +161,7 @@ function setup(
     toast: null,
     dialogOpen: 0,
     pendingSelectKey: null,
-    pendingOpen: null,
+    pendingOpens: [],
     sheetPrefill: null,
     ...store,
   });
@@ -1035,11 +1035,13 @@ describe("NewSession after create", () => {
     // The terminal is not in the state yet, so open_session must wait for Home.
     expect(callsTo("open_session")).toHaveLength(0);
     expect(callsTo("mark_seen")).toHaveLength(0);
-    expect(useAppStore.getState().pendingOpen).toEqual({
-      key: "buildbox::t7",
-      machineId: "buildbox",
-      address: "t7",
-    });
+    expect(useAppStore.getState().pendingOpens).toEqual([
+      {
+        key: "buildbox::t7",
+        machineId: "buildbox",
+        address: "t7",
+      },
+    ]);
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::t7");
   });
 
@@ -1067,7 +1069,7 @@ describe("NewSession after create", () => {
     await user.click(screen.getByLabelText("Open here when ready"));
     await createValid(user);
     await vi.waitFor(() => expect(useAppStore.getState().sheet).toBeNull());
-    expect(useAppStore.getState().pendingOpen).toBeNull();
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::t7");
   });
 

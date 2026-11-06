@@ -1140,7 +1140,8 @@ describe("page scroll", () => {
   };
   const normalize = (selector: string) => selector.replace(/\s+/g, " ").trim();
   const OVERFLOW = /(?:^|[\s;])overflow(?:-x|-y)?:\s*(?:auto|scroll)\b/;
-  const POSITIONED = /(?:^|[\s;])position:\s*(?:relative|absolute|fixed|sticky)\b/;
+  const POSITIONED =
+    /(?:^|[\s;])position:\s*(?:relative|absolute|fixed|sticky)\b/;
 
   it("positions_every_scroll_container_so_hidden_text_cannot_stretch_the_page", () => {
     // An absolutely positioned child (`.sr-only`) with no positioned ancestor escapes its
@@ -1181,5 +1182,18 @@ describe("page scroll", () => {
     expect(match, "no `html, body` rule in global.css").toBeDefined();
     expect(match?.[2]).toMatch(/overflow:\s*hidden/);
     expect(match?.[2]).toMatch(/overscroll-behavior:\s*none/);
+  });
+});
+
+describe("new tab menu", () => {
+  it("caps_the_agent_list_and_scrolls_it_inside_a_positioned_box", () => {
+    const body = rule(".new-tab-agents");
+    expect(body).toMatch(/max-height:\s*\S+/);
+    expect(body).toMatch(/overflow-y:\s*auto/);
+    expect(body).toMatch(/position:\s*relative/);
+  });
+
+  it("holds_the_menu_to_the_width_the_placement_assumes", () => {
+    expect(rule(".new-tab-menu")).toMatch(/max-width:\s*260px/);
   });
 });

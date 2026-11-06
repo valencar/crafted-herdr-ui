@@ -24,7 +24,7 @@ describe("new-in-workbox (⌘T, New Tab)", () => {
       view: { kind: "dashboard" },
       selectedKey: null,
       pendingSelectKey: null,
-      pendingOpen: null,
+      pendingOpens: [],
       state: appState([
         [
           machine({ id: "buildbox", health: { kind: "online" } }),
@@ -40,7 +40,7 @@ describe("new-in-workbox (⌘T, New Tab)", () => {
   });
   afterEach(() => {
     useTerminalStore.setState({ tabs: [], activeKey: HOME });
-    useAppStore.getState().setPendingOpen(null);
+    useAppStore.getState().clearPendingOpens();
     useAppStore.getState().setPendingSelectKey(null);
   });
 
@@ -68,12 +68,14 @@ describe("new-in-workbox (⌘T, New Tab)", () => {
       },
     });
     await vi.waitFor(() =>
-      expect(useAppStore.getState().pendingOpen).toEqual({
-        key: "buildbox::t7",
-        machineId: "buildbox",
-        address: "t7",
-        how: "app",
-      }),
+      expect(useAppStore.getState().pendingOpens).toEqual([
+        {
+          key: "buildbox::t7",
+          machineId: "buildbox",
+          address: "t7",
+          how: "app",
+        },
+      ]),
     );
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::t7");
   });
@@ -89,12 +91,27 @@ describe("new-in-workbox (⌘T, New Tab)", () => {
       expect(useAppStore.getState().toast).toBe("no such folder"),
     );
     expect(openNewSession).not.toHaveBeenCalled();
-    expect(useAppStore.getState().pendingOpen).toBeNull();
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
+  });
+
+  it("opens_the_sheet_on_a_tab_whose_row_is_gone", () => {
+    // The row `w1:p9` is not in the state.
+    openTab("buildbox", "w1:p9");
+    runMenuAction("new-in-workbox");
+    expect(invoke).not.toHaveBeenCalled();
+    expect(openNewSession).toHaveBeenCalledWith({ machineId: "buildbox" });
   });
 
   it("opens_the_sheet_on_a_tab_whose_row_has_no_folder", () => {
-    // The row `w1:p9` is not in the state.
-    openTab("buildbox", "w1:p9");
+    useAppStore.setState({
+      state: appState([
+        [
+          machine({ id: "buildbox", health: { kind: "online" } }),
+          buildboxTerms({ "w1:p3": { folder: null } }),
+        ],
+      ]),
+    });
+    openTab("buildbox", "w1:p3");
     runMenuAction("new-in-workbox");
     expect(invoke).not.toHaveBeenCalled();
     expect(openNewSession).toHaveBeenCalledWith({ machineId: "buildbox" });

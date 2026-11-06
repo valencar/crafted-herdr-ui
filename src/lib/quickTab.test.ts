@@ -113,13 +113,13 @@ describe("startQuickTab", () => {
     invoke.mockReset().mockResolvedValue({ address: "t7" });
     useAppStore.setState({
       pendingSelectKey: null,
-      pendingOpen: null,
+      pendingOpens: [],
       toast: null,
       settings: { open_target: "external" } as never,
     });
   });
   afterEach(() => {
-    useAppStore.getState().setPendingOpen(null);
+    useAppStore.getState().clearPendingOpens();
     useAppStore.getState().setPendingSelectKey(null);
     useAppStore.setState({ settings: null, toast: null });
   });
@@ -137,12 +137,14 @@ describe("startQuickTab", () => {
       },
     });
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::t7");
-    expect(useAppStore.getState().pendingOpen).toEqual({
-      key: "buildbox::t7",
-      machineId: "buildbox",
-      address: "t7",
-      how: "app",
-    });
+    expect(useAppStore.getState().pendingOpens).toEqual([
+      {
+        key: "buildbox::t7",
+        machineId: "buildbox",
+        address: "t7",
+        how: "app",
+      },
+    ]);
   });
 
   it("starts_an_agent_the_same_way", async () => {
@@ -170,16 +172,26 @@ describe("startQuickTab", () => {
     await startQuickTab(target, { type: "shell" });
     expect(useAppStore.getState().toast).toBe("no such folder");
     expect(useAppStore.getState().pendingSelectKey).toBeNull();
-    expect(useAppStore.getState().pendingOpen).toBeNull();
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("pressed_twice_makes_two_sessions", async () => {
+  it("pressed_twice_makes_two_sessions_and_keeps_both_pending_opens", async () => {
+    invoke
+      .mockReset()
+      .mockResolvedValueOnce({ address: "t7" })
+      .mockResolvedValueOnce({ address: "t8" });
     await Promise.all([
       startQuickTab(target, { type: "shell" }),
       startQuickTab(target, { type: "shell" }),
     ]);
     expect(invoke).toHaveBeenCalledTimes(2);
+    expect(useAppStore.getState().pendingOpens).toEqual([
+      { key: "buildbox::t7", machineId: "buildbox", address: "t7", how: "app" },
+      { key: "buildbox::t8", machineId: "buildbox", address: "t8", how: "app" },
+    ]);
+    // The last one started is the one selected.
+    expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::t8");
   });
 });
 

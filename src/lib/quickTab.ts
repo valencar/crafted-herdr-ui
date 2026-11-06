@@ -54,7 +54,7 @@ export async function startQuickTab(
   target: QuickTarget,
   run: RunChoice,
 ): Promise<void> {
-  const { reportError, setPendingSelectKey, setPendingOpen } =
+  const { reportError, setPendingSelectKey, addPendingOpen } =
     useAppStore.getState();
   try {
     const created = await invokeTyped("create_session", {
@@ -70,7 +70,7 @@ export async function startQuickTab(
     // The address is local to its machine, like every row key.
     const key = `${target.machineId}::${created.address}`;
     setPendingSelectKey(key);
-    setPendingOpen({
+    addPendingOpen({
       key,
       machineId: target.machineId,
       address: created.address,

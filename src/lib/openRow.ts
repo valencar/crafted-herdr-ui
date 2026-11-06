@@ -78,15 +78,15 @@ export function markSeen(row: Row): void {
 }
 
 /**
- * A session was just created: selects its row, and with "Open when ready" opens it, once the
- * row is in `rows` (`open_session` reads the terminal from the state, so it can't run before then).
+ * Sessions were just created: selects the last one's row, and with "Open when ready" opens each one,
+ * once its row is in `rows` (`open_session` reads the terminal from the state, so it can't run before then).
  * It follows the "Open sessions" setting like any other Open, unless the pending open names
  * where (`how`: a quick tab always opens in the app). Mounted once, by `App`, so it
  * works whichever screen the Home tab shows, and while a terminal tab is active.
  */
 export function useOpenWhenListed(rows: Row[]): void {
-  const pendingOpen = useAppStore((s) => s.pendingOpen);
-  const setPendingOpen = useAppStore((s) => s.setPendingOpen);
+  const pendingOpens = useAppStore((s) => s.pendingOpens);
+  const removePendingOpen = useAppStore((s) => s.removePendingOpen);
   const pendingSelectKey = useAppStore((s) => s.pendingSelectKey);
   const setPendingSelectKey = useAppStore((s) => s.setPendingSelectKey);
   const select = useAppStore((s) => s.select);
@@ -96,10 +96,14 @@ export function useOpenWhenListed(rows: Row[]): void {
       setPendingSelectKey(null);
     }
   }, [pendingSelectKey, rows, select, setPendingSelectKey]);
+  // Every entry whose row is listed opens, in the order they were added (so the last one added
+  // ends up in front); the others wait for their own rows.
   useEffect(() => {
-    const row = pendingOpen && rows.find((r) => r.key === pendingOpen.key);
-    if (!row) return;
-    setPendingOpen(null);
-    void openRow(row, pendingOpen.how);
-  }, [pendingOpen, rows, setPendingOpen]);
+    for (const pending of pendingOpens) {
+      const row = rows.find((r) => r.key === pending.key);
+      if (!row) continue;
+      removePendingOpen(pending.key);
+      void openRow(row, pending.how);
+    }
+  }, [pendingOpens, rows, removePendingOpen]);
 }

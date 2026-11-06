@@ -48,7 +48,10 @@ const PENDING_MS = 10_000;
 const PENDING_OPEN_TIMEOUT =
   "The new session hasn't appeared yet; open it from the list when it does.";
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
-let pendingTimer: ReturnType<typeof setTimeout> | undefined;
+/** The selection's window. */
+let pendingSelectTimer: ReturnType<typeof setTimeout> | undefined;
+/** One window per pending open, by key: each expires on its own, 10 s after it was added. */
+const pendingOpenTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 type AppStore = {
   state: AppState | null;
@@ -96,7 +99,11 @@ type AppStore = {
    * A pane to open in the terminal once its row shows up. Shares the 10 s window of
    * `pendingSelectKey`; if the row never shows up, the user gets an error toast.
    */
-  pendingOpen: PendingOpen | null;
+  /**
+   * Created terminals to open once the state lists them, in the order they were added: several
+   * can wait at once (⌘T pressed twice), and each opens when its own row is listed.
+   */
+  pendingOpens: PendingOpen[];
   /** The latest live-preview frame for the selected row. */
   preview: PreviewFrame | null;
   /** The add `AddWatcher` is waiting for; it outlives the Add workbox sheet. */
@@ -129,7 +136,10 @@ type AppStore = {
   openDialog: () => void;
   closeDialog: () => void;
   setPendingSelectKey: (key: string | null) => void;
-  setPendingOpen: (open: PendingOpen | null) => void;
+  /** Adds one (a second entry for the same key replaces the first) and starts its 10 s window. */
+  addPendingOpen: (open: PendingOpen) => void;
+  removePendingOpen: (key: string) => void;
+  clearPendingOpens: () => void;
   setPendingAdd: (add: PendingAdd | null) => void;
 };
 
@@ -146,23 +156,26 @@ export function useModalOpen(): void {
 type Get = () => AppStore;
 type Set = (partial: Partial<AppStore>) => void;
 
-/** (Re)starts the shared window: when it ends, whatever is still pending is dropped. */
-function armPending(get: Get, set: Set) {
-  clearTimeout(pendingTimer);
-  pendingTimer = setTimeout(() => {
-    const unopened = get().pendingOpen !== null;
-    set({ pendingSelectKey: null, pendingOpen: null });
-    if (unopened) {
-      get().reportError({ kind: "invalid", message: PENDING_OPEN_TIMEOUT });
-    }
+/** (Re)starts the selection's window: when it ends, the selection is dropped. */
+function armSelect(set: Set) {
+  clearTimeout(pendingSelectTimer);
+  pendingSelectTimer = setTimeout(() => {
+    set({ pendingSelectKey: null });
   }, PENDING_MS);
 }
 
-/** Stops the window once nothing is pending any more. */
-function settlePending(get: Get) {
-  if (get().pendingSelectKey === null && get().pendingOpen === null) {
-    clearTimeout(pendingTimer);
-  }
+/** Starts one pending open's window: if it is still waiting when it ends, it is dropped and reported. */
+function armOpen(key: string, get: Get, set: Set) {
+  clearTimeout(pendingOpenTimers.get(key));
+  pendingOpenTimers.set(
+    key,
+    setTimeout(() => {
+      pendingOpenTimers.delete(key);
+      if (!get().pendingOpens.some((p) => p.key === key)) return;
+      set({ pendingOpens: get().pendingOpens.filter((p) => p.key !== key) });
+      get().reportError({ kind: "invalid", message: PENDING_OPEN_TIMEOUT });
+    }, PENDING_MS),
+  );
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -186,7 +199,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   preview: null,
   dialogOpen: 0,
   pendingSelectKey: null,
-  pendingOpen: null,
+  pendingOpens: [],
   pendingAdd: null,
   setState: (state) => set({ state }),
   setSettings: (settings) => set({ settings }),
@@ -226,13 +239,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => ({ dialogOpen: Math.max(0, s.dialogOpen - 1) })),
   setPendingSelectKey: (pendingSelectKey) => {
     set({ pendingSelectKey });
-    if (pendingSelectKey !== null) armPending(get, set);
-    else settlePending(get);
+    if (pendingSelectKey !== null) armSelect(set);
+    else clearTimeout(pendingSelectTimer);
   },
-  setPendingOpen: (pendingOpen) => {
-    set({ pendingOpen });
-    if (pendingOpen !== null) armPending(get, set);
-    else settlePending(get);
+  addPendingOpen: (open) => {
+    set({
+      pendingOpens: [
+        ...get().pendingOpens.filter((p) => p.key !== open.key),
+        open,
+      ],
+    });
+    armOpen(open.key, get, set);
+  },
+  removePendingOpen: (key) => {
+    clearTimeout(pendingOpenTimers.get(key));
+    pendingOpenTimers.delete(key);
+    set({ pendingOpens: get().pendingOpens.filter((p) => p.key !== key) });
+  },
+  clearPendingOpens: () => {
+    for (const t of pendingOpenTimers.values()) clearTimeout(t);
+    pendingOpenTimers.clear();
+    set({ pendingOpens: [] });
   },
   setPendingAdd: (pendingAdd) => set({ pendingAdd }),
 }));

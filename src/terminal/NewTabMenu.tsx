@@ -14,7 +14,7 @@ import { activeQuickTarget, startQuickTab } from "../lib/quickTab";
 import { PINNED, useMenuBehavior } from "../lib/useMenuBehavior";
 import { useAppStore } from "../store/appStore";
 
-/** The widest the menu gets, so a button near the right edge keeps it on screen. */
+/** The widest the menu gets (`.new-tab-menu`'s `max-width` in app.css says the same), so a button near the right edge keeps it on screen. */
 const MENU_WIDTH = 260;
 
 /** The agents of one open of the menu: the kinds, or `null` when the call failed. */
@@ -173,33 +173,44 @@ export function NewTabMenu({
               <div className="menu-heading" aria-hidden="true">
                 Start an agent
               </div>
-              {answer === null && (
-                <div className="menu-note" role="status">
-                  Checking installed agents…
-                </div>
-              )}
-              {answer?.kinds === null && (
-                <div className="menu-note" role="status">
-                  Couldn’t load agents
-                </div>
-              )}
-              {agents.map((kind, i) => (
-                <button
-                  key={kind}
-                  type="button"
-                  role="menuitem"
-                  className="menu-item"
-                  onClick={() => start({ type: "agent", kind })}
-                >
-                  <KindBadge kind={kind} isAgent named />
-                  <span>{kind}</span>
-                  {i < 9 && (
-                    <span className="menu-hint" aria-hidden="true">
-                      <Kbd keys={String(i + 1)} />
-                    </span>
-                  )}
-                </button>
-              ))}
+              {/* The agents scroll inside the menu; Terminal and New session… stay put. */}
+              <div className="new-tab-agents">
+                {answer === null && (
+                  <div
+                    role="menuitem"
+                    aria-disabled="true"
+                    className="menu-item menu-note"
+                  >
+                    <span>Checking installed agents…</span>
+                  </div>
+                )}
+                {answer?.kinds === null && (
+                  <div
+                    role="menuitem"
+                    aria-disabled="true"
+                    className="menu-item menu-note"
+                  >
+                    <span>Couldn’t load agents</span>
+                  </div>
+                )}
+                {agents.map((kind, i) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => start({ type: "agent", kind })}
+                  >
+                    <KindBadge kind={kind} isAgent named />
+                    <span className="menu-label">{kind}</span>
+                    {i < 9 && (
+                      <span className="menu-hint" aria-hidden="true">
+                        <Kbd keys={String(i + 1)} />
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="menu-sep" role="separator" />
             <button

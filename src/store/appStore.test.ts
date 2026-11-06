@@ -158,48 +158,85 @@ describe("appStore", () => {
     expect(useAppStore.getState().pendingSelectKey).toBeNull();
   });
 
-  it("holds a pending open on the same 10 s window and reports it if the row never appears", () => {
-    const { setPendingOpen } = useAppStore.getState();
-    const target = {
-      key: "buildbox::w3:p1",
-      machineId: "buildbox",
-      address: "w3:p1",
-    };
-    setPendingOpen(target);
-    expect(useAppStore.getState().pendingOpen).toEqual(target);
+  const entry = (address: string) => ({
+    key: `buildbox::${address}`,
+    machineId: "buildbox",
+    address,
+  });
+  const EXPIRED =
+    "The new session hasn't appeared yet; open it from the list when it does.";
+
+  it("holds a pending open for 10 s and reports it if the row never appears", () => {
+    const { addPendingOpen } = useAppStore.getState();
+    addPendingOpen(entry("w3:p1"));
+    expect(useAppStore.getState().pendingOpens).toEqual([entry("w3:p1")]);
     vi.advanceTimersByTime(9_999);
-    expect(useAppStore.getState().pendingOpen).toEqual(target);
+    expect(useAppStore.getState().pendingOpens).toEqual([entry("w3:p1")]);
     expect(useAppStore.getState().toast).toBeNull();
     vi.advanceTimersByTime(1);
-    expect(useAppStore.getState().pendingOpen).toBeNull();
-    expect(useAppStore.getState().toast).toBe(
-      "The new session hasn't appeared yet; open it from the list when it does.",
-    );
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
+    expect(useAppStore.getState().toast).toBe(EXPIRED);
   });
 
-  it("does not report a pending open that was cleared in time", () => {
-    const { setPendingOpen } = useAppStore.getState();
-    setPendingOpen({
-      key: "buildbox::w3:p1",
-      machineId: "buildbox",
-      address: "w3:p1",
-    });
-    setPendingOpen(null);
+  it("does not report a pending open that was removed in time", () => {
+    const { addPendingOpen, removePendingOpen } = useAppStore.getState();
+    addPendingOpen(entry("w3:p1"));
+    removePendingOpen("buildbox::w3:p1");
     vi.advanceTimersByTime(20_000);
     expect(useAppStore.getState().toast).toBeNull();
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
   });
 
-  it("keeps the window running for a pending open when only the selection is applied", () => {
-    const { setPendingOpen, setPendingSelectKey } = useAppStore.getState();
+  it("keeps several pending opens, each expiring 10 s after it was added", () => {
+    const report = vi.fn();
+    useAppStore.setState({ reportError: report });
+    const { addPendingOpen } = useAppStore.getState();
+    addPendingOpen(entry("t7"));
+    vi.advanceTimersByTime(6_000);
+    addPendingOpen(entry("t8"));
+    expect(useAppStore.getState().pendingOpens).toEqual([
+      entry("t7"),
+      entry("t8"),
+    ]);
+    vi.advanceTimersByTime(4_000);
+    // t7 is 10 s old, t8 only 4 s.
+    expect(useAppStore.getState().pendingOpens).toEqual([entry("t8")]);
+    expect(report).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(6_000);
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
+    expect(report).toHaveBeenCalledTimes(2);
+  });
+
+  it("removing one pending open leaves the others and their clocks", () => {
+    const report = vi.fn();
+    useAppStore.setState({ reportError: report });
+    const { addPendingOpen, removePendingOpen } = useAppStore.getState();
+    addPendingOpen(entry("t7"));
+    addPendingOpen(entry("t8"));
+    removePendingOpen("buildbox::t7");
+    expect(useAppStore.getState().pendingOpens).toEqual([entry("t8")]);
+    vi.advanceTimersByTime(10_000);
+    expect(report).toHaveBeenCalledTimes(1);
+  });
+
+  it("adding the same key again replaces it and restarts its clock", () => {
+    const { addPendingOpen } = useAppStore.getState();
+    addPendingOpen(entry("t7"));
+    vi.advanceTimersByTime(6_000);
+    addPendingOpen({ ...entry("t7"), how: "app" });
+    vi.advanceTimersByTime(6_000);
+    expect(useAppStore.getState().pendingOpens).toEqual([
+      { ...entry("t7"), how: "app" },
+    ]);
+  });
+
+  it("a pending open outlives the selection that went with it", () => {
+    const { addPendingOpen, setPendingSelectKey } = useAppStore.getState();
     setPendingSelectKey("buildbox::w3:p1");
-    setPendingOpen({
-      key: "buildbox::w3:p1",
-      machineId: "buildbox",
-      address: "w3:p1",
-    });
+    addPendingOpen(entry("w3:p1"));
     setPendingSelectKey(null);
     vi.advanceTimersByTime(10_000);
-    expect(useAppStore.getState().toast).not.toBeNull();
+    expect(useAppStore.getState().toast).toBe(EXPIRED);
   });
 
   it("opens the new-session sheet with a prefill and clears the prefill when the sheet closes", () => {

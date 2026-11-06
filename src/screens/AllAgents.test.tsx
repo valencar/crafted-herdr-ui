@@ -109,7 +109,7 @@ function setup(
     dialogOpen: 0,
     sheetPrefill: null,
     pendingSelectKey: null,
-    pendingOpen: null,
+    pendingOpens: [],
     dismissedVersion: null,
     query: "",
   });
