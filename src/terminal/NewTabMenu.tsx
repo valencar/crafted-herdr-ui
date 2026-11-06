@@ -18,7 +18,12 @@ import { useAppStore } from "../store/appStore";
 const MENU_WIDTH = 260;
 
 /** The agents of one open of the menu: the kinds, or `null` when the call failed. */
-type Loaded = { opened: number; kinds: string[] | null };
+type Loaded = {
+  opened: number;
+  kinds: string[] | null;
+  /** False when the workbox couldn't say which agents are installed and every known one is listed. */
+  checked: boolean;
+};
 
 /**
  * The session row's "New on {workbox}" button and its menu, after Herdr's "+" menu: Terminal
@@ -61,11 +66,15 @@ export function NewTabMenu({
     invokeTyped("list_run_choices", { machineId })
       .then((c) => {
         if (!cancelled) {
-          setLoaded({ opened, kinds: c.kinds.map((k) => k.kind) });
+          setLoaded({
+            opened,
+            kinds: c.kinds.map((k) => k.kind),
+            checked: c.kindsChecked,
+          });
         }
       })
       .catch(() => {
-        if (!cancelled) setLoaded({ opened, kinds: null });
+        if (!cancelled) setLoaded({ opened, kinds: null, checked: false });
       });
     return () => {
       cancelled = true;
@@ -114,6 +123,12 @@ export function NewTabMenu({
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
+    // ⌘N is the menu's own hint on New session…. `useHomeShortcuts` skips keys typed in a menu.
+    if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && e.key === "n") {
+      e.preventDefault();
+      fullSheet();
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     if (!/^[1-9]$/.test(e.key)) return;
     const kind = agents[Number(e.key) - 1];
@@ -191,6 +206,15 @@ export function NewTabMenu({
                     className="menu-item menu-note"
                   >
                     <span>Couldn’t load agents</span>
+                  </div>
+                )}
+                {answer?.kinds != null && !answer.checked && (
+                  <div
+                    role="menuitem"
+                    aria-disabled="true"
+                    className="menu-item menu-note"
+                  >
+                    <span>Couldn’t check which agents are installed here.</span>
                   </div>
                 )}
                 {agents.map((kind, i) => (

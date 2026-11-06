@@ -17,6 +17,7 @@ import type { SpaceLayout } from "../lib/bindings/SpaceLayout";
 import type { SpacePlace } from "../lib/bindings/SpacePlace";
 import type { TerminalView } from "../lib/bindings/TerminalView";
 import type { Row } from "../lib/grouping";
+import type { PendingOpen } from "../store/appStore";
 
 export type MachineSpec = {
   id: string;
@@ -405,4 +406,13 @@ export function rowOf(
     restarts: 0,
     ...r,
   };
+}
+
+/** The pending opens as a test writes them: without the `seq` the store stamps on each. */
+export function withoutSeq(opens: PendingOpen[]): Omit<PendingOpen, "seq">[] {
+  return opens.map((open) => {
+    const rest = { ...open };
+    delete rest.seq;
+    return rest;
+  });
 }

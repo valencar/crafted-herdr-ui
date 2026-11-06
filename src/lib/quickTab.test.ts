@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
-import { appState, buildboxTerms, machine, rowOf } from "../test/builders";
+import {
+  appState,
+  buildboxTerms,
+  machine,
+  rowOf,
+  withoutSeq,
+} from "../test/builders";
 import type { TabTarget } from "../terminal/terminalStore";
 import { activeQuickTarget, quickTabTarget, startQuickTab } from "./quickTab";
 
@@ -137,7 +143,7 @@ describe("startQuickTab", () => {
       },
     });
     expect(useAppStore.getState().pendingSelectKey).toBe("buildbox::t7");
-    expect(useAppStore.getState().pendingOpens).toEqual([
+    expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
       {
         key: "buildbox::t7",
         machineId: "buildbox",
@@ -186,7 +192,7 @@ describe("startQuickTab", () => {
       startQuickTab(target, { type: "shell" }),
     ]);
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(useAppStore.getState().pendingOpens).toEqual([
+    expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
       { key: "buildbox::t7", machineId: "buildbox", address: "t7", how: "app" },
       { key: "buildbox::t8", machineId: "buildbox", address: "t8", how: "app" },
     ]);

@@ -114,8 +114,12 @@ type TerminalStore = {
   lastTermKey: string | null;
   /** Each workbox's last active tab (machine id to `tabKey`); `activateMachine` goes back to it. Lives only while the app runs. */
   lastByMachine: Record<string, string>;
-  /** Focuses the tab with that key if there is one, else appends it; either way it becomes active. */
-  openTab: (t: NewTab) => void;
+  /**
+   * Focuses the tab with that key if there is one, else appends it; either way it becomes
+   * active, unless `opts.activate` is `false`: then the tab is added (or left) and the active
+   * tab, the last one and each workbox's last stay as they were.
+   */
+  openTab: (t: NewTab, opts?: { activate?: boolean }) => void;
   updateTab: (tabKey: string, patch: Partial<TermTab>) => void;
   /**
    * Starts a finished tab over in the same tab: it becomes active, shows "opening" with no old
@@ -173,8 +177,9 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
   activeKey: HOME,
   lastTermKey: null,
   lastByMachine: {},
-  openTab: (t) =>
+  openTab: (t, opts) =>
     set((s) => {
+      const background = opts?.activate === false;
       const shown = {
         activeKey: t.tabKey,
         lastTermKey: t.tabKey,
@@ -183,7 +188,9 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
           [t.target.machineId]: t.tabKey,
         },
       };
-      if (s.tabs.some((x) => x.tabKey === t.tabKey)) return shown;
+      if (s.tabs.some((x) => x.tabKey === t.tabKey)) {
+        return background ? {} : shown;
+      }
       const tab: TermTab = {
         ...t,
         state: "opening",
@@ -194,7 +201,7 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
         waiting: null,
         attempts: 0,
       };
-      return { ...shown, tabs: [...s.tabs, tab] };
+      return { ...(background ? {} : shown), tabs: [...s.tabs, tab] };
     }),
   updateTab: (tabKey, patch) =>
     set((s) => ({

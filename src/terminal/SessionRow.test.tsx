@@ -9,6 +9,7 @@ import {
   buildboxTerms,
   appState as buildState,
   machine,
+  withoutSeq,
 } from "../test/builders";
 import { useRowsByKey } from "./tabInfo";
 import { groupTabs } from "./tabOrder";
@@ -314,10 +315,10 @@ describe("SessionRow", () => {
   });
 
   describe("New on {workbox} menu", () => {
-    const choices = (kinds: string[]) => ({
+    const choices = (kinds: string[], kindsChecked = true) => ({
       kinds: kinds.map((kind) => ({ kind, takesTask: true })),
       templates: [],
-      kindsChecked: true,
+      kindsChecked,
     });
     /** `list_run_choices` answers `kinds`; `create_session` answers the address `t7`. */
     function answer(kinds: string[] = ["claude", "codex", "copilot"]) {
@@ -531,6 +532,77 @@ describe("SessionRow", () => {
       expect(screen.queryByRole("menu")).toBeNull();
     });
 
+    it("says_when_the_installed_agents_could_not_be_checked_and_keeps_the_list", async () => {
+      const user = userEvent.setup();
+      invoke.mockImplementation(async (cmd: string) =>
+        cmd === "list_run_choices"
+          ? choices(["claude", "codex"], false)
+          : { address: "t7" },
+      );
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      expect(names()).toEqual([
+        "Terminal|⌘T",
+        "Couldn’t check which agents are installed here.|",
+        "claude|1",
+        "codex|2",
+        "New session…|⌘N",
+      ]);
+      const note = within(menu()).getByRole("menuitem", {
+        name: "Couldn’t check which agents are installed here.",
+      });
+      expect(note).toHaveAttribute("aria-disabled", "true");
+      expect(note).toHaveClass("menu-note");
+      // The arrow keys skip it, and the digits still pick from the list.
+      await user.keyboard("{ArrowDown}");
+      expect(screen.getByRole("menuitem", { name: "claude" })).toHaveFocus();
+      await user.keyboard("2");
+      expect(invoke).toHaveBeenCalledWith(
+        ...created({ type: "agent", kind: "codex" }),
+      );
+    });
+
+    it("says_nothing_about_checking_when_the_agents_were_checked", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      expect(
+        within(menu()).queryByText(/Couldn’t check which agents/),
+      ).toBeNull();
+    });
+
+    it("cmd_n_in_the_menu_opens_the_full_sheet_with_the_workbox_and_folder", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      await user.keyboard("{Meta>}n{/Meta}");
+      expect(useAppStore.getState().sheet).toBe("new-session");
+      expect(useAppStore.getState().sheetPrefill).toEqual({
+        machineId: "buildbox",
+        folder: FOLDER,
+      });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(invoke).not.toHaveBeenCalledWith(
+        "create_session",
+        expect.anything(),
+      );
+    });
+
+    it("a_plain_n_or_another_modifier_does_not_open_the_sheet", async () => {
+      const user = userEvent.setup();
+      render(<Harness machineId="buildbox" />);
+      await user.click(button());
+      await screen.findByRole("menuitem", { name: "claude" });
+      await user.keyboard("n");
+      await user.keyboard("{Control>}n{/Control}");
+      await user.keyboard("{Meta>}{Shift>}n{/Shift}{/Meta}");
+      expect(useAppStore.getState().sheet).toBeNull();
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+    });
+
     it("terminal_starts_a_shell_in_the_active_terminals_folder_and_returns_focus", async () => {
       const user = userEvent.setup();
       render(<Harness machineId="buildbox" />);
@@ -538,7 +610,7 @@ describe("SessionRow", () => {
       await user.click(screen.getByRole("menuitem", { name: /^Terminal/ }));
       expect(invoke).toHaveBeenCalledWith(...created({ type: "shell" }));
       await vi.waitFor(() =>
-        expect(useAppStore.getState().pendingOpens).toEqual([
+        expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
           {
             key: "buildbox::t7",
             machineId: "buildbox",

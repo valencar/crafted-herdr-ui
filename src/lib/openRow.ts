@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAppStore } from "../store/appStore";
 import { useTerminalStore, watchTabKey } from "../terminal/terminalStore";
 import type { OpenTarget } from "./bindings/OpenTarget";
@@ -24,11 +24,12 @@ export function defaultOpenHow(): OpenHow {
  * `opts.observe` is Watch (spec 8.4): the same attach with `--observe`, which only shows the
  * terminal. It is its own tab (`watchTabKey`) next to an Open tab of the row, it goes to a tab
  * here unless `how` says otherwise, and it marks nothing seen (looking at it does, once per turn).
+ * `opts.activate: false` adds the tab without bringing it to the front (a tab here only).
  */
 export async function openRow(
   row: Row,
   how?: OpenHow,
-  opts?: { observe?: boolean },
+  opts?: { observe?: boolean; activate?: boolean },
 ): Promise<void> {
   const observe = opts?.observe === true;
   // A finished terminal can't be attached to. The buttons don't offer it; this covers the ways
@@ -40,17 +41,20 @@ export async function openRow(
   try {
     const inApp = (how ?? (observe ? "app" : defaultOpenHow())) === "app";
     if (inApp) {
-      useTerminalStore.getState().openTab({
-        tabKey: observe ? watchTabKey(row.key) : row.key,
-        target: {
-          kind: "terminal",
-          machineId: row.machineId,
-          address: row.address,
+      useTerminalStore.getState().openTab(
+        {
+          tabKey: observe ? watchTabKey(row.key) : row.key,
+          target: {
+            kind: "terminal",
+            machineId: row.machineId,
+            address: row.address,
+          },
+          title: observe ? `${row.name} (watching)` : row.name,
+          machineLabel: row.machineLabel,
+          ...(observe ? { observe: true } : {}),
         },
-        title: observe ? `${row.name} (watching)` : row.name,
-        machineLabel: row.machineLabel,
-        ...(observe ? { observe: true } : {}),
-      });
+        { activate: opts?.activate !== false },
+      );
     } else {
       await invokeTyped("open_session", {
         machineId: row.machineId,
@@ -96,14 +100,20 @@ export function useOpenWhenListed(rows: Row[]): void {
       setPendingSelectKey(null);
     }
   }, [pendingSelectKey, rows, select, setPendingSelectKey]);
-  // Every entry whose row is listed opens, in the order they were added (so the last one added
-  // ends up in front); the others wait for their own rows.
+  // Every entry whose row is listed opens, oldest first within one run. Across runs the order can
+  // break (a newer session's row is listed before an older one's), so an entry that opens in a
+  // tab after a newer one already did goes in behind it, without taking the focus.
+  const newestOpened = useRef(-1);
   useEffect(() => {
     for (const pending of pendingOpens) {
       const row = rows.find((r) => r.key === pending.key);
       if (!row) continue;
       removePendingOpen(pending.key);
-      void openRow(row, pending.how);
+      const seq = pending.seq ?? 0;
+      const inApp = (pending.how ?? defaultOpenHow()) === "app";
+      const late = inApp && seq < newestOpened.current;
+      if (inApp) newestOpened.current = Math.max(newestOpened.current, seq);
+      void openRow(row, pending.how, late ? { activate: false } : undefined);
     }
   }, [pendingOpens, rows, removePendingOpen]);
 }

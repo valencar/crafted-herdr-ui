@@ -337,4 +337,56 @@ describe("useOpenWhenListed", () => {
     ]);
     expect(useTerminalStore.getState().tabs).toEqual([]);
   });
+
+  it("an_older_entry_listed_after_a_newer_one_opened_goes_in_behind", async () => {
+    const { addPendingOpen } = useAppStore.getState();
+    const entry = (address: string) => ({
+      key: `buildbox::${address}`,
+      machineId: "buildbox",
+      address,
+      how: "app" as const,
+    });
+    addPendingOpen(entry("t7")); // older
+    addPendingOpen(entry("t8")); // newer
+    const { rerender } = renderHook(({ rows }) => useOpenWhenListed(rows), {
+      initialProps: { rows: [listed("buildbox", "t8")] },
+    });
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe("buildbox::t8"),
+    );
+    rerender({ rows: [listed("buildbox", "t8"), listed("buildbox", "t7")] });
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().tabs.map((t) => t.tabKey)).toEqual([
+        "buildbox::t8",
+        "buildbox::t7",
+      ]),
+    );
+    // The late one doesn't take the focus.
+    expect(useTerminalStore.getState().activeKey).toBe("buildbox::t8");
+    expect(useAppStore.getState().pendingOpens).toEqual([]);
+  });
+
+  it("a_later_entry_still_takes_the_focus_after_a_late_one", async () => {
+    const { addPendingOpen } = useAppStore.getState();
+    const entry = (address: string) => ({
+      key: `buildbox::${address}`,
+      machineId: "buildbox",
+      address,
+      how: "app" as const,
+    });
+    addPendingOpen(entry("t7"));
+    addPendingOpen(entry("t8"));
+    const { rerender } = renderHook(({ rows }) => useOpenWhenListed(rows), {
+      initialProps: { rows: [listed("buildbox", "t7")] },
+    });
+    // The older one opens first and is in front...
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe("buildbox::t7"),
+    );
+    // ...and the newer one, listed later, is opened in front of it.
+    rerender({ rows: [listed("buildbox", "t7"), listed("buildbox", "t8")] });
+    await vi.waitFor(() =>
+      expect(useTerminalStore.getState().activeKey).toBe("buildbox::t8"),
+    );
+  });
 });

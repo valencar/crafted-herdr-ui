@@ -55,6 +55,18 @@ describe("terminalStore", () => {
     });
   });
 
+  it("open_tab_without_activating_adds_the_tab_and_leaves_the_active_one", () => {
+    store().openTab(tab("w1:p1"));
+    store().openTab(tab("w1:p2"), { activate: false });
+    expect(keys()).toEqual(["buildbox::w1:p1", "buildbox::w1:p2"]);
+    expect(store().activeKey).toBe("buildbox::w1:p1");
+    expect(store().lastTermKey).toBe("buildbox::w1:p1");
+    expect(store().lastByMachine).toEqual({ buildbox: "buildbox::w1:p1" });
+    // An existing tab isn't focused either.
+    store().openTab(tab("w1:p2"), { activate: false });
+    expect(store().activeKey).toBe("buildbox::w1:p1");
+  });
+
   it("opening_the_same_key_twice_focuses_the_existing_tab", () => {
     store().openTab(tab("w1:p1"));
     store().openTab(tab("w1:p2"));

@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../store/appStore";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
-import { appState, buildboxTerms, machine, shellTerm } from "../test/builders";
+import {
+  appState,
+  buildboxTerms,
+  machine,
+  shellTerm,
+  withoutSeq,
+} from "../test/builders";
 import { runMenuAction } from "./menuActions";
 
 // xterm is tested on its own; `runMenuAction` only drags the workspace in with it.
@@ -68,7 +74,7 @@ describe("new-in-workbox (⌘T, New Tab)", () => {
       },
     });
     await vi.waitFor(() =>
-      expect(useAppStore.getState().pendingOpens).toEqual([
+      expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
         {
           key: "buildbox::t7",
           machineId: "buildbox",

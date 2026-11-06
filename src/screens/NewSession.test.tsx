@@ -21,6 +21,7 @@ import {
   machineView,
   shellTerm,
   type TermSpec,
+  withoutSeq,
 } from "../test/builders";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -1035,7 +1036,7 @@ describe("NewSession after create", () => {
     // The terminal is not in the state yet, so open_session must wait for Home.
     expect(callsTo("open_session")).toHaveLength(0);
     expect(callsTo("mark_seen")).toHaveLength(0);
-    expect(useAppStore.getState().pendingOpens).toEqual([
+    expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
       {
         key: "buildbox::t7",
         machineId: "buildbox",

@@ -21,6 +21,8 @@ export type PendingOpen = {
   machineId: string;
   address: string;
   how?: OpenTarget;
+  /** Set by `addPendingOpen`, rising with each add: the order the sessions were created in. */
+  seq?: number;
 };
 /**
  * An add the app is waiting to see in the machine list: either it knows the new machine's `id`
@@ -50,6 +52,8 @@ const PENDING_OPEN_TIMEOUT =
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 /** The selection's window. */
 let pendingSelectTimer: ReturnType<typeof setTimeout> | undefined;
+/** Rises with each pending open added: the order the sessions were created in. */
+let pendingOpenSeq = 0;
 /** One window per pending open, by key: each expires on its own, 10 s after it was added. */
 const pendingOpenTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -137,7 +141,7 @@ type AppStore = {
   closeDialog: () => void;
   setPendingSelectKey: (key: string | null) => void;
   /** Adds one (a second entry for the same key replaces the first) and starts its 10 s window. */
-  addPendingOpen: (open: PendingOpen) => void;
+  addPendingOpen: (open: Omit<PendingOpen, "seq">) => void;
   removePendingOpen: (key: string) => void;
   clearPendingOpens: () => void;
   setPendingAdd: (add: PendingAdd | null) => void;
@@ -246,7 +250,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({
       pendingOpens: [
         ...get().pendingOpens.filter((p) => p.key !== open.key),
-        open,
+        { ...open, seq: ++pendingOpenSeq },
       ],
     });
     armOpen(open.key, get, set);

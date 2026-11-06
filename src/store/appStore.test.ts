@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { appState } from "../test/builders";
+import { appState, withoutSeq } from "../test/builders";
 import { useAppStore } from "./appStore";
 
 const initial = useAppStore.getState();
@@ -169,9 +169,13 @@ describe("appStore", () => {
   it("holds a pending open for 10 s and reports it if the row never appears", () => {
     const { addPendingOpen } = useAppStore.getState();
     addPendingOpen(entry("w3:p1"));
-    expect(useAppStore.getState().pendingOpens).toEqual([entry("w3:p1")]);
+    expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
+      entry("w3:p1"),
+    ]);
     vi.advanceTimersByTime(9_999);
-    expect(useAppStore.getState().pendingOpens).toEqual([entry("w3:p1")]);
+    expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
+      entry("w3:p1"),
+    ]);
     expect(useAppStore.getState().toast).toBeNull();
     vi.advanceTimersByTime(1);
     expect(useAppStore.getState().pendingOpens).toEqual([]);
@@ -194,13 +198,15 @@ describe("appStore", () => {
     addPendingOpen(entry("t7"));
     vi.advanceTimersByTime(6_000);
     addPendingOpen(entry("t8"));
-    expect(useAppStore.getState().pendingOpens).toEqual([
+    expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
       entry("t7"),
       entry("t8"),
     ]);
     vi.advanceTimersByTime(4_000);
     // t7 is 10 s old, t8 only 4 s.
-    expect(useAppStore.getState().pendingOpens).toEqual([entry("t8")]);
+    expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
+      entry("t8"),
+    ]);
     expect(report).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(6_000);
     expect(useAppStore.getState().pendingOpens).toEqual([]);
@@ -214,7 +220,9 @@ describe("appStore", () => {
     addPendingOpen(entry("t7"));
     addPendingOpen(entry("t8"));
     removePendingOpen("buildbox::t7");
-    expect(useAppStore.getState().pendingOpens).toEqual([entry("t8")]);
+    expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
+      entry("t8"),
+    ]);
     vi.advanceTimersByTime(10_000);
     expect(report).toHaveBeenCalledTimes(1);
   });
@@ -225,9 +233,18 @@ describe("appStore", () => {
     vi.advanceTimersByTime(6_000);
     addPendingOpen({ ...entry("t7"), how: "app" });
     vi.advanceTimersByTime(6_000);
-    expect(useAppStore.getState().pendingOpens).toEqual([
+    expect(withoutSeq(useAppStore.getState().pendingOpens)).toEqual([
       { ...entry("t7"), how: "app" },
     ]);
+  });
+
+  it("stamps each pending open with a rising sequence number", () => {
+    const { addPendingOpen } = useAppStore.getState();
+    addPendingOpen(entry("t7"));
+    addPendingOpen(entry("t8"));
+    const [a, b] = useAppStore.getState().pendingOpens;
+    expect(a.seq).toBeDefined();
+    expect(b.seq).toBeGreaterThan(a.seq as number);
   });
 
   it("a pending open outlives the selection that went with it", () => {
