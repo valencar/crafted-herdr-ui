@@ -7,7 +7,7 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   invokeTyped: vi.fn(),
 }));
 import { invokeTyped } from "../lib/ipc";
-import { commandWords, openMachineAdd } from "./commandTabs";
+import { commandWords, openMachineAdd, openRefreshCore } from "./commandTabs";
 import { HOME, useTerminalStore } from "./terminalStore";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
@@ -130,6 +130,42 @@ describe("openMachineAdd", () => {
   });
 });
 
+describe("openRefreshCore", () => {
+  const ARGS = ["server", "restart", "--fresh"];
+
+  it("opens_the_refresh_in_a_tab_under_local", async () => {
+    invoke.mockReset().mockResolvedValue(ARGS);
+
+    await openRefreshCore();
+
+    expect(invoke).toHaveBeenCalledWith("core_refresh_args");
+    const { tabs, activeKey } = useTerminalStore.getState();
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]).toMatchObject({
+      tabKey: "local::cmd:server restart",
+      target: { kind: "command", machineId: "local", args: ARGS },
+      title: "Refresh core",
+      machineLabel: "Local",
+    });
+    expect(activeKey).toBe("local::cmd:server restart");
+  });
+
+  it("a_refusal_opens_nothing_and_says_why", async () => {
+    invoke.mockReset().mockRejectedValue({
+      kind: "invalid",
+      message:
+        "This herdr-core can’t refresh its environment. Update it to 0.1.20 or later.",
+    });
+
+    await openRefreshCore();
+
+    expect(useTerminalStore.getState().tabs).toEqual([]);
+    expect(useAppStore.getState().toast).toBe(
+      "This herdr-core can’t refresh its environment. Update it to 0.1.20 or later.",
+    );
+  });
+});
+
 describe("commandWords", () => {
   const tab = (args: string[]) => ({
     target: { kind: "command" as const, machineId: "m", args },
@@ -146,6 +182,13 @@ describe("commandWords", () => {
     ).toEqual({
       title: "Install hc",
       doing: "Installing hc on buildbox",
+    });
+  });
+
+  it("names_the_refresh_tab", () => {
+    expect(commandWords(tab(["server", "restart", "--fresh"]))).toEqual({
+      title: "Refresh core",
+      doing: "Restarting herdr-core",
     });
   });
 });

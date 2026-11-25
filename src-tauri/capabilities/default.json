@@ -12,6 +12,7 @@
     "allow-clear-ended",
     "allow-close-terminal",
     "allow-copy-attach-command",
+    "allow-core-refresh-args",
     "allow-core-status",
     "allow-create-session",
     "allow-get-command-log",

@@ -49,6 +49,8 @@ export type CommandResults = {
   machine_login_args: string[];
   /** What follows the core in `machine update <name>`, for a command tab. */
   machine_update_args: string[];
+  /** What follows the core in `server restart --fresh`, for a command tab; the UI confirms first. */
+  core_refresh_args: string[];
   refresh_now: null;
   reconnect_core: null;
   get_command_log: CommandLogEntry[];
@@ -78,6 +80,8 @@ export type CommandResults = {
   preview_launch_template: string;
   show_main: null;
   show_main_new_session: null;
+  /** Shows the main window and asks it for the Refresh core environment confirm. */
+  show_main_refresh_core: null;
   open_settings: null;
   /** The new terminal's id, for `term_write`, `term_resize` and `term_close`. */
   term_open: number;
@@ -121,6 +125,7 @@ export type CommandArgs = {
   machine_login_args: { machineId: string };
   /** The UI confirms first: it copies hc to the machine and restarts its core. */
   machine_update_args: { machineId: string };
+  core_refresh_args: undefined;
   refresh_now: { machineId?: string | null };
   reconnect_core: undefined;
   get_command_log: undefined;
@@ -152,6 +157,7 @@ export type CommandArgs = {
   preview_launch_template: { template: string };
   show_main: undefined;
   show_main_new_session: undefined;
+  show_main_refresh_core: undefined;
   open_settings: undefined;
   /** `onEvent` (the output channel) is added by `openTerm`; callers don't pass it. */
   term_open: {
@@ -281,6 +287,14 @@ export function onFocusRow(cb: (key: string) => void): Promise<() => void> {
 /** Subscribes to `"new-session"`: the tray or the popover asked for the New session sheet. */
 export function onNewSession(cb: () => void): Promise<() => void> {
   return listen("new-session", () => cb());
+}
+
+/**
+ * Subscribes to `"refresh-core"`: the Settings window asked the main window for the Refresh core
+ * environment confirm. It only asks; nothing has run.
+ */
+export function onRefreshCore(cb: () => void): Promise<() => void> {
+  return listen("refresh-core", () => cb());
 }
 
 /** Subscribes to `"menu"`: a native menu item was chosen; the payload is its id. */

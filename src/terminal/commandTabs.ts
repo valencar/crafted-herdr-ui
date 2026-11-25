@@ -13,6 +13,9 @@ export function commandWords(tab: Pick<TermTab, "target" | "machineLabel">): {
   doing: string;
 } {
   const args = tab.target.kind === "command" ? tab.target.args : [];
+  if (args[0] === "server" && args[1] === "restart") {
+    return { title: "Refresh core", doing: "Restarting herdr-core" };
+  }
   switch (args[1]) {
     case "login":
       return { title: "Log in", doing: `Logging in to ${tab.machineLabel}` };
@@ -106,5 +109,22 @@ export async function openMachineAdd(
   } catch (e) {
     useAppStore.getState().reportError(e);
     return false;
+  }
+}
+
+/**
+ * Opens `server restart --fresh` in an in-app tab under Local, where the person sees what hc
+ * says while the core restarts with their login shell's environment. Rust answers the arguments
+ * (and refuses a core that can't do it, or an environment it couldn't read), and checks them
+ * again when the tab starts. **Callers go through the confirm first** (`RefreshCoreHost`):
+ * `openCommandTab` runs an ended tab with the same key again with no prompt of its own, and a
+ * restart is the person's explicit click. A refusal goes to the toast.
+ */
+export async function openRefreshCore(): Promise<void> {
+  try {
+    const args = await invokeTyped("core_refresh_args");
+    openCommandTab({ id: "local", name: "Local" }, args);
+  } catch (e) {
+    useAppStore.getState().reportError(e);
   }
 }

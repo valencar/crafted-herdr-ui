@@ -398,6 +398,57 @@ describe("Settings", () => {
     expect(invoke).not.toHaveBeenCalledWith("set_settings", expect.anything());
   });
 
+  describe("Refresh core environment", () => {
+    const stateWith = (refresh_environment: boolean): AppState =>
+      appState([], { path: HERDR.path, abilities: { refresh_environment } });
+
+    it("asks_the_main_window_to_refresh", async () => {
+      const user = await setup({}, "herdr-core", stateWith(true));
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Refresh core environment…",
+        }),
+      );
+      expect(invoke).toHaveBeenCalledWith("show_main_refresh_core");
+      // Settings runs nothing itself: no arguments are asked for, no tab opens here.
+      expect(invoke).not.toHaveBeenCalledWith("core_refresh_args");
+    });
+
+    it("is_hidden_on_a_core_that_cannot_refresh", async () => {
+      await setup({}, "herdr-core", stateWith(false));
+      await screen.findByText("/home/dev/.local/bin/hc");
+      expect(
+        screen.queryByRole("button", { name: "Refresh core environment…" }),
+      ).toBeNull();
+    });
+
+    it("is_hidden_before_the_first_state", async () => {
+      await setup({}, "herdr-core", null as unknown as AppState);
+      await screen.findByText("/home/dev/.local/bin/hc");
+      expect(
+        screen.queryByRole("button", { name: "Refresh core environment…" }),
+      ).toBeNull();
+    });
+
+    it("a_failure_to_ask_goes_to_the_toast", async () => {
+      invoke.mockImplementation(async (name: string) => {
+        if (name === "show_main_refresh_core")
+          throw { kind: "invalid", message: "No window." };
+        if (name === "core_status") return herdr;
+        return null;
+      });
+      const user = await setup({}, "herdr-core", stateWith(true));
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Refresh core environment…",
+        }),
+      );
+      await waitFor(() =>
+        expect(useAppStore.getState().toast).toBe("No window."),
+      );
+    });
+  });
+
   it("says_when_the_saved_path_is_gone_or_is_not_herdr_core", async () => {
     herdr = { ...HERDR, saved_missing: true };
     await setup({ core_path: "/gone/hc" }, "herdr-core");

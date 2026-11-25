@@ -400,4 +400,5 @@ herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, i
 
 - [ ] On a sandbox core 0.1.20 or later (`HC_SESSION=herdr-ui-qa`, its own `XDG_*` dirs; never your own core), Refresh core environment… (Palette or Settings), then Restart herdr-core: a tab opens, shows hc's output and ends. Open in-app tabs reattach once the core is back.
 - [ ] A terminal started after the refresh has `EDITOR` (or another variable your login profile exports) from the login shell, and no `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` from the app's launcher. Programs that were running keep going.
-- [ ] On a core older than 0.1.20 the action is not offered.
+- [ ] From Settings → herdr-core and from ⌘K (on a sandbox core 0.1.20 or later), the main window comes forward with the "Refresh core environment" confirm (Settings: even when the main window was hidden or behind another app). Cancel (or Escape) runs nothing: no tab opens and the core is not restarted. Confirm opens the "Refresh core" tab, and the app reconnects within the 2-minute retry. After it ends, asking again shows the confirm again; the ended tab never restarts the core by itself, and its bar offers only Close tab.
+- [ ] On a core older than 0.1.20 the action is not offered (not in ⌘K, not in Settings → herdr-core).

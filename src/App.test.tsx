@@ -44,6 +44,7 @@ const ipc = vi.hoisted(() => ({
   onFocusRow: vi.fn(),
   onOpenRow: vi.fn(),
   onNewSession: vi.fn(),
+  onRefreshCore: vi.fn(),
   onMenu: vi.fn(),
   invokeTyped: vi.fn(),
   setWindowTheme: vi.fn(),
@@ -65,6 +66,7 @@ beforeEach(() => {
   ipc.onFocusRow.mockReset().mockResolvedValue(() => {});
   ipc.onOpenRow.mockReset().mockResolvedValue(() => {});
   ipc.onNewSession.mockReset().mockResolvedValue(() => {});
+  ipc.onRefreshCore.mockReset().mockResolvedValue(() => {});
   ipc.onMenu.mockReset().mockResolvedValue(() => {});
   ipc.invokeTyped
     .mockReset()
@@ -78,6 +80,7 @@ afterEach(() => {
     activityOpen: false,
     paletteOpen: false,
     shortcutsOpen: false,
+    refreshCoreOpen: false,
     dialogOpen: 0,
   });
   useTerminalStore.setState({
@@ -423,6 +426,97 @@ it("opens the New session sheet when the tray or the popover asks", async () => 
   await waitFor(() => expect(ipc.onNewSession).toHaveBeenCalled());
   act(() => handler(ipc.onNewSession)());
   expect(useAppStore.getState().sheet).toBe("new-session");
+});
+
+describe("refresh core environment", () => {
+  const REFRESH = ["server", "restart", "--fresh"];
+  const refreshCalls = () =>
+    ipc.invokeTyped.mock.calls.filter((c) => c[0] === "core_refresh_args");
+
+  beforeEach(() => {
+    ipc.invokeTyped.mockImplementation(async (name: string) =>
+      name === "core_refresh_args"
+        ? REFRESH
+        : { installed: [], default: "ghostty" },
+    );
+  });
+
+  it("opens_the_tab_only_after_confirm", async () => {
+    render(<App />);
+    await waitFor(() => expect(ipc.onRefreshCore).toHaveBeenCalled());
+    act(() => handler(ipc.onRefreshCore)());
+
+    // The event only asks: the confirm is up, nothing has been asked of Rust, no tab is open.
+    const dialog = await screen.findByRole("dialog", {
+      name: "Refresh core environment",
+    });
+    expect(dialog).toHaveTextContent(
+      "Restart herdr-core with your login shell’s environment? New terminals get it; running programs keep going.",
+    );
+    expect(refreshCalls()).toHaveLength(0);
+    expect(useTerminalStore.getState().tabs).toHaveLength(0);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Restart herdr-core" }),
+    );
+    await waitFor(() =>
+      expect(useTerminalStore.getState().tabs).toHaveLength(1),
+    );
+    expect(refreshCalls()).toHaveLength(1);
+    expect(useTerminalStore.getState().tabs[0]).toMatchObject({
+      tabKey: "local::cmd:server restart",
+      target: { kind: "command", machineId: "local", args: REFRESH },
+      title: "Refresh core",
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "Refresh core environment" }),
+    ).toBeNull();
+  });
+
+  it("cancel_calls_nothing_at_all", async () => {
+    render(<App />);
+    await waitFor(() => expect(ipc.onRefreshCore).toHaveBeenCalled());
+    act(() => handler(ipc.onRefreshCore)());
+    await screen.findByRole("dialog", { name: "Refresh core environment" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(
+      screen.queryByRole("dialog", { name: "Refresh core environment" }),
+    ).toBeNull();
+    expect(refreshCalls()).toHaveLength(0);
+    expect(useTerminalStore.getState().tabs).toHaveLength(0);
+  });
+
+  it("an_ended_refresh_tab_is_not_run_again_without_the_confirm", async () => {
+    render(<App />);
+    await waitFor(() => expect(ipc.onRefreshCore).toHaveBeenCalled());
+    act(() => handler(ipc.onRefreshCore)());
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Restart herdr-core" }),
+    );
+    await waitFor(() =>
+      expect(useTerminalStore.getState().tabs).toHaveLength(1),
+    );
+    act(() =>
+      useTerminalStore
+        .getState()
+        .sessionEnded(
+          "local::cmd:server restart",
+          { code: 0, lastLine: "done" },
+          undefined,
+          "ready",
+        ),
+    );
+
+    // A second request goes through the confirm again; Cancel leaves the ended tab as it was.
+    act(() => handler(ipc.onRefreshCore)());
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Cancel" }),
+    );
+    expect(refreshCalls()).toHaveLength(1);
+    expect(useTerminalStore.getState().tabs[0].run ?? 0).toBe(0);
+  });
 });
 
 it("opens Settings from the sidebar link, and leaves ⌘, to the native menu", async () => {

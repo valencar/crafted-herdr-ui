@@ -746,6 +746,11 @@ function HerdrCore({
   update: Update;
 }) {
   const [status, setStatus] = useState<CoreStatus | null>(null);
+  // Only a core that can do it (0.1.20 or later) offers it; with no state yet, nothing does.
+  const canRefresh = useAppStore(
+    (s) => s.state?.core_abilities.refresh_environment ?? false,
+  );
+  const reportError = useAppStore((s) => s.reportError);
   const refresh = useCallback(() => {
     invokeTyped("core_status")
       .then(setStatus)
@@ -756,6 +761,11 @@ function HerdrCore({
   const change = async (path: string | null) => {
     await update({ core_path: path });
     refresh();
+  };
+  // Settings runs nothing: it brings the main window forward, which asks first (Confirm there is
+  // the only thing that restarts the core).
+  const askRefresh = () => {
+    invokeTyped("show_main_refresh_core").catch(reportError);
   };
   const choose = async () => {
     const picked = await openDialog({ multiple: false, directory: false });
@@ -814,6 +824,11 @@ function HerdrCore({
             onClick={() => void change(null)}
           >
             Find it automatically
+          </button>
+        )}
+        {canRefresh && (
+          <button type="button" className="btn" onClick={askRefresh}>
+            Refresh core environment…
           </button>
         )}
       </div>

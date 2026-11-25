@@ -27,6 +27,7 @@ const {
   onMenu,
   onNewSession,
   onOpenRow,
+  onRefreshCore,
   openTerm,
   putFiles,
   onPreview,
@@ -185,14 +186,18 @@ describe("settings and window events", () => {
     await onSettings(settings);
     await onFocusRow(focus);
     await onNewSession(newSession);
+    const refresh = vi.fn();
+    await onRefreshCore(refresh);
 
     handlers.get("settings")!({ payload: { group_by: "status" } });
     handlers.get("focus-row")!({ payload: "buildbox::w1:p1" });
     handlers.get("new-session")!({ payload: null });
+    handlers.get("refresh-core")!({ payload: null });
 
     expect(settings).toHaveBeenCalledWith({ group_by: "status" });
     expect(focus).toHaveBeenCalledWith("buildbox::w1:p1");
     expect(newSession).toHaveBeenCalledWith();
+    expect(refresh).toHaveBeenCalledWith();
   });
 });
 
