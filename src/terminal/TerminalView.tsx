@@ -18,6 +18,7 @@ import { useResolvedTheme } from "../lib/theme";
 import { useAppStore } from "../store/appStore";
 import { rowKeyOf, useTerminalStore, type TermTab } from "./terminalStore";
 import { TermBar } from "./TermBar";
+import { modalOpen } from "./modal";
 import { useRowsByKey } from "./tabInfo";
 import { useTermSession } from "./useTermSession";
 import { copyFromTerminal, registerOscClipboard } from "./oscClipboard";
@@ -41,12 +42,6 @@ function copyLink(event: { metaKey: boolean }, uri: string): void {
         .getState()
         .showToast("Couldn’t copy to the clipboard.", "error"),
   );
-}
-
-/** A sheet or a dialog is open, so the terminal must not take keyboard focus. */
-function modalOpen(): boolean {
-  const { sheet, dialogOpen } = useAppStore.getState();
-  return sheet !== null || dialogOpen > 0;
 }
 
 /** What the find bar (in the panel) can ask of a tab's terminal. */

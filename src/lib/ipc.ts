@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { ActionError } from "./bindings/ActionError";
@@ -11,6 +12,9 @@ import type { CoreStatus } from "./bindings/CoreStatus";
 import type { MenuId } from "./bindings/MenuId";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
+import type { PutFilesResult } from "./bindings/PutFilesResult";
+import type { PutItem } from "./bindings/PutItem";
+import type { PutProgress } from "./bindings/PutProgress";
 import type { RunChoices } from "./bindings/RunChoices";
 import type { Settings } from "./bindings/Settings";
 import type { ShortcutStatus } from "./bindings/ShortcutStatus";
@@ -309,6 +313,63 @@ export async function openTerm(
       cols,
       rows,
       onEvent: channel,
+    });
+  } catch (e) {
+    throw toActionError(e);
+  }
+}
+
+/**
+ * A file drag over the window: `paths` is what Tauri reported (only `drop` carries them, and a
+ * `leave` has no point, so `x` and `y` are 0), the point is in CSS pixels.
+ */
+export type FileDropEvent = {
+  type: "enter" | "over" | "drop" | "leave";
+  paths: string[];
+  x: number;
+  y: number;
+};
+
+/**
+ * Subscribes to files dragged over this window from Finder. Tauri reports physical pixels; the
+ * point is divided by `devicePixelRatio` so it can be compared with a `getBoundingClientRect`.
+ * The paths are handed over exactly as Tauri gave them: Rust compares a put against them.
+ */
+export function onFileDrop(
+  cb: (e: FileDropEvent) => void,
+): Promise<() => void> {
+  return getCurrentWebview().onDragDropEvent((event) => {
+    const p = event.payload;
+    const ratio = window.devicePixelRatio || 1;
+    const at = p.type === "leave" ? { x: 0, y: 0 } : p.position;
+    cb({
+      type: p.type,
+      paths: p.type === "enter" || p.type === "drop" ? p.paths : [],
+      x: at.x / ratio,
+      y: at.y / ratio,
+    });
+  });
+}
+
+/**
+ * Sends dropped files and pasted images to a terminal (`terminal.put`) and answers where each
+ * landed on that terminal's machine. `onProgress` is told before each item. Rejects with an
+ * `ActionError`.
+ */
+export async function putFiles(
+  machineId: string,
+  address: string,
+  items: PutItem[],
+  onProgress: (p: PutProgress) => void,
+): Promise<PutFilesResult> {
+  const channel = new Channel<PutProgress>();
+  channel.onmessage = onProgress;
+  try {
+    return await invoke<PutFilesResult>("put_files", {
+      machineId,
+      address,
+      items,
+      onProgress: channel,
     });
   } catch (e) {
     throw toActionError(e);

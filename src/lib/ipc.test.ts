@@ -10,6 +10,10 @@ class MockChannel<T> {
 }
 vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: MockChannel }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
+const onDragDropEvent = vi.fn();
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ onDragDropEvent }),
+}));
 const writeText = vi.fn();
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText }));
 
@@ -18,11 +22,13 @@ const {
   getSettings,
   getState,
   invokeTyped,
+  onFileDrop,
   onFocusRow,
   onMenu,
   onNewSession,
   onOpenRow,
   openTerm,
+  putFiles,
   onPreview,
   onSettings,
   onState,
@@ -32,6 +38,7 @@ const {
 beforeEach(() => {
   invoke.mockReset();
   listen.mockReset();
+  onDragDropEvent.mockReset();
   writeText.mockReset();
 });
 
@@ -263,5 +270,68 @@ describe("onMenu", () => {
     expect(listen.mock.calls[0][0]).toBe("menu");
     listen.mock.calls[0][1]({ payload: "toggle-terminal" });
     expect(cb).toHaveBeenCalledWith("toggle-terminal");
+  });
+});
+
+describe("onFileDrop", () => {
+  it("hands over the paths untouched and the point in CSS pixels", async () => {
+    vi.stubGlobal("devicePixelRatio", 2);
+    const unlisten = vi.fn();
+    onDragDropEvent.mockResolvedValue(unlisten);
+    const cb = vi.fn();
+
+    await expect(onFileDrop(cb)).resolves.toBe(unlisten);
+
+    const handler = onDragDropEvent.mock.calls[0][0];
+    handler({
+      payload: {
+        type: "drop",
+        paths: [" /Users/dev/a b.png"],
+        position: { x: 200, y: 100 },
+      },
+    });
+    handler({ payload: { type: "over", position: { x: 40, y: 20 } } });
+    handler({ payload: { type: "leave" } });
+    vi.unstubAllGlobals();
+
+    expect(cb.mock.calls).toEqual([
+      [{ type: "drop", paths: [" /Users/dev/a b.png"], x: 100, y: 50 }],
+      [{ type: "over", paths: [], x: 20, y: 10 }],
+      [{ type: "leave", paths: [], x: 0, y: 0 }],
+    ]);
+  });
+});
+
+describe("putFiles", () => {
+  it("sends the items with a progress channel and answers the paths", async () => {
+    invoke.mockImplementation(async (_name, args) => {
+      args.onProgress.onmessage({ index: 0, total: 1, name: "a.png" });
+      return { paths: ["/home/dev/.cache/a.png"] };
+    });
+    const seen: unknown[] = [];
+
+    const out = await putFiles(
+      "buildbox-id",
+      "t7",
+      [{ kind: "path", path: "/Users/dev/a.png" }],
+      (p) => seen.push(p),
+    );
+
+    expect(out).toEqual({ paths: ["/home/dev/.cache/a.png"] });
+    expect(seen).toEqual([{ index: 0, total: 1, name: "a.png" }]);
+    expect(invoke.mock.calls[0][0]).toBe("put_files");
+    expect(invoke.mock.calls[0][1]).toMatchObject({
+      machineId: "buildbox-id",
+      address: "t7",
+      items: [{ kind: "path", path: "/Users/dev/a.png" }],
+    });
+  });
+
+  it("rejects with an ActionError", async () => {
+    invoke.mockRejectedValue("boom");
+    await expect(putFiles("local", "t7", [], () => {})).rejects.toEqual({
+      kind: "invalid",
+      message: "boom",
+    });
   });
 });
