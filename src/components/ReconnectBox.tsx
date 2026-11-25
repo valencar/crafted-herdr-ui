@@ -8,7 +8,8 @@ import { UpdateConfirm } from "./WorkboxDialogs";
 
 /**
  * What can be done about a workbox that needs attention, as buttons: Connect now (`machine.connect`),
- * Log in… when the core waits for a login, and Update hc there… when it needs an update or runs
+ * Log in… (first, and the primary button, when the core waits for a login: it retries a failed
+ * one only every few minutes), and Update hc there… when it needs an update or runs
  * an older hc than this computer (`updateOffered`). Log in and Update open a tab here; Update asks
  * first. Nothing runs until a click.
  */
@@ -18,6 +19,7 @@ export function ReconnectBox({ machine }: { machine: MachineView }) {
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(false);
   if (machine.is_local) return null;
+  const login = needsLogin(machine);
   const connect = () => {
     setBusy(true);
     invokeTyped("machine_connect", { machineId: machine.id })
@@ -26,6 +28,15 @@ export function ReconnectBox({ machine }: { machine: MachineView }) {
   };
   return (
     <div className="machine-fixes">
+      {login && (
+        <button
+          type="button"
+          className="btn btn-small btn-primary"
+          onClick={() => void openMachineCommand(machine, "login")}
+        >
+          Log in…
+        </button>
+      )}
       <button
         type="button"
         className="btn btn-small"
@@ -34,15 +45,6 @@ export function ReconnectBox({ machine }: { machine: MachineView }) {
       >
         Connect now
       </button>
-      {needsLogin(machine) && (
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() => void openMachineCommand(machine, "login")}
-        >
-          Log in…
-        </button>
-      )}
       {updateOffered(machine, coreVersion) && (
         <button
           type="button"

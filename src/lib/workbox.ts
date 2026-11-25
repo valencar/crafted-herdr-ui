@@ -38,6 +38,10 @@ export function needsLogin(machine: MachineView): boolean {
   return !machine.is_local && machine.state === "needs_login";
 }
 
+/** Why Log in… is the lead action: since core 0.1.21 a failed login is retried only every few minutes. */
+export const LOGIN_RETRY_NOTE =
+  "herdr-core retries a failed login only every few minutes. Log in to reconnect now.";
+
 /**
  * Whether Update hc there… is offered: the core says the machine needs an update, or the hc
  * there is numerically older than the one running here (`coreVersion`, this computer's).

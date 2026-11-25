@@ -4,6 +4,7 @@ import type { MachineView } from "../lib/bindings/MachineView";
 import { formatStaleness } from "../lib/format";
 import { copyText } from "../lib/ipc";
 import {
+  LOGIN_RETRY_NOTE,
   lingerCommand,
   needsLogin,
   stateLine,
@@ -129,6 +130,9 @@ export function WorkboxSummary({
         </div>
         <span className="mono muted workbox-meta">{meta}</span>
         {state && <p className="workbox-state">{state}</p>}
+        {needsLogin(machine) && (
+          <p className="workbox-state">{LOGIN_RETRY_NOTE}</p>
+        )}
         {stopsAtLogout(machine) && <LogoutWarning machine={machine} />}
         {/* This computer has no core state, so its trouble is told by its health alone. */}
         {!state &&
@@ -157,6 +161,11 @@ export function WorkboxSummary({
       </dl>
       {!machine.is_local && (
         <div className="workbox-actions">
+          {needsLogin(machine) && (
+            <button type="button" className="btn btn-primary" onClick={onLogIn}>
+              Log in…
+            </button>
+          )}
           <button
             type="button"
             className="btn"
@@ -165,11 +174,6 @@ export function WorkboxSummary({
           >
             Connect now
           </button>
-          {needsLogin(machine) && (
-            <button type="button" className="btn" onClick={onLogIn}>
-              Log in…
-            </button>
-          )}
           {updateOffered(machine, coreVersion) && (
             <button type="button" className="btn" onClick={onUpdate}>
               Update hc there…

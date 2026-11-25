@@ -389,3 +389,9 @@ herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, i
 - [ ] A remote Linux workbox whose user has no linger (core 0.1.22) shows the "stops at logout" badge in the sidebar row, on its Dashboard card, and the warning with a Copy button on its Workbox screen (the copied line is `sudo loginctl enable-linger -- dev`). Run it there yourself; after that it clears within about a minute and ten seconds, with no click. A workbox that is not Linux, or runs an older core, shows nothing.
 - [ ] A workbox with "stops at logout" (and Temporary too) keeps its name readable in the 220px sidebar: the badges sit on their own line under the name, and nothing scrolls sideways.
 - [ ] Its Dashboard card at the narrowest width (260px per card) shows the badges without covering the health label: they wrap under the name.
+
+### Log in nudge
+
+- [ ] A workbox whose SSH key needs a passphrase (needs_login) shows "herdr-core retries a failed login only every few minutes. Log in to reconnect now." and a primary Log in… button, ahead of Connect now, in its attention notice on the Dashboard and in All agents. On its Dashboard card, Log in… replaces Retry now. On its Workbox screen the sentence sits directly under the state line, before any "stops at logout" warning, and Log in… is the first button.
+- [ ] Log in… opens the Log in tab; after you enter the passphrase there, the workbox connects right away (no wait of a few minutes) and the notice goes.
+- [ ] An unreachable workbox (not a login problem) shows no sentence, and Connect now stays first.

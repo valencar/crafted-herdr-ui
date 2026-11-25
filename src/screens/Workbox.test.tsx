@@ -458,6 +458,51 @@ describe("Workbox", () => {
     ).toBeNull();
   });
 
+  it("explains_the_login_retry_on_the_workbox_screen", () => {
+    const SENTENCE =
+      "herdr-core retries a failed login only every few minutes. Log in to reconnect now.";
+    setup(
+      appState(
+        machine(
+          "buildbox",
+          {
+            state: "needs_login",
+            since: NOW - 2 * 60_000,
+            keepsRunningAfterLogout: false,
+          },
+          { kind: "attention", error: "Needs login" },
+        ),
+      ),
+    );
+    const sentence = screen.getByText(SENTENCE);
+    // Directly under the state line, before the logout warning.
+    const state = screen.getByText("Needs login · since 2m");
+    expect(state.nextElementSibling).toBe(sentence);
+    expect(sentence.nextElementSibling).toHaveTextContent(
+      "end when your last SSH login there closes",
+    );
+    // Log in… leads the actions.
+    const actions = screen
+      .getByRole("button", { name: "Log in…" })
+      .closest(".workbox-actions") as HTMLElement;
+    expect(within(actions).getAllByRole("button")[0]).toHaveTextContent(
+      "Log in…",
+    );
+  });
+
+  it("says_nothing_about_logging_in_for_other_states", () => {
+    setup(
+      appState(
+        machine(
+          "buildbox",
+          { state: "unreachable", since: NOW - 2 * 60_000 },
+          { kind: "attention", error: "ssh: connection refused" },
+        ),
+      ),
+    );
+    expect(screen.queryByText(/retries a failed login/)).toBeNull();
+  });
+
   it("update_asks_first_then_opens_a_command_tab", async () => {
     const user = setup(
       appState(
