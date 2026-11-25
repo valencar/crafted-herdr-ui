@@ -11,6 +11,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tokio::io::AsyncReadExt as _;
 use ts_rs::TS;
 
 use crate::actions::{ActionError, core_failure};
@@ -23,7 +24,7 @@ pub const MAX_PUT_BYTES: u64 = 8 << 20;
 const DROP_TTL: Duration = Duration::from_secs(60);
 
 /// One thing to send: a file the person dropped, or an image they pasted (base64).
-#[derive(Debug, Deserialize, TS)]
+#[derive(Deserialize, TS)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -33,6 +34,19 @@ const DROP_TTL: Duration = Duration::from_secs(60);
 pub enum PutItem {
     Path { path: String },
     Clip { name: String, data: String },
+}
+
+// Never formatted with its bytes: a clip's `data` is left out.
+impl std::fmt::Debug for PutItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Path { path } => f.debug_struct("Path").field("path", path).finish(),
+            Self::Clip { name, .. } => f
+                .debug_struct("Clip")
+                .field("name", name)
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 /// Sent before each item, so the UI can say "Sending a.png · 1 of 2".
@@ -53,29 +67,28 @@ pub struct PutFilesResult {
 }
 
 /// Where an item's bytes come from.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub enum Source {
     File(PathBuf),
     /// Base64, already checked to decode and to fit.
     Clip(String),
 }
 
+// Never formatted with its bytes: a clip's base64 is not part of the Debug output.
+impl std::fmt::Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::File(path) => f.debug_tuple("File").field(path).finish(),
+            Self::Clip(_) => f.write_str("Clip(..)"),
+        }
+    }
+}
+
 /// An item that passed its checks.
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Prepared {
     pub name: String,
     pub source: Source,
-}
-
-// Never formatted with its bytes: a clip's base64 is not part of the Debug output.
-impl std::fmt::Debug for Prepared {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = match &self.source {
-            Source::File(path) => format!("File({})", path.display()),
-            Source::Clip(_) => "Clip(..)".to_owned(),
-        };
-        write!(f, "Prepared {{ name: {:?}, source: {source} }}", self.name)
-    }
 }
 
 /// The files of the main window's last drop. Only these may be read by `put_files`, and only for
@@ -141,6 +154,12 @@ fn prepare_path(
             "{name} is a folder; only files can be sent to {workbox}"
         )));
     }
+    // A pipe or a device has no length and may never end: reading it would never return.
+    if !meta.is_file() {
+        return Err(ActionError::invalid(format!(
+            "{name} isn’t a file; only files can be sent to {workbox}"
+        )));
+    }
     if meta.len() > MAX_PUT_BYTES {
         return Err(ActionError::invalid(over_message(&name)));
     }
@@ -188,15 +207,7 @@ pub async fn send(
         });
         let data = match item.source {
             Source::Clip(data) => data,
-            Source::File(path) => {
-                let bytes = tokio::fs::read(&path).await.map_err(|e| {
-                    ActionError::invalid(format!("{} can’t be read: {e}", item.name))
-                })?;
-                if bytes.len() as u64 > MAX_PUT_BYTES {
-                    return Err(ActionError::invalid(over_message(&item.name)));
-                }
-                STANDARD.encode(bytes)
-            }
+            Source::File(path) => STANDARD.encode(read_bounded(&path, &item.name).await?),
         };
         let params = json!({"terminal": full, "name": item.name, "data": data});
         let reply = core
@@ -214,6 +225,30 @@ pub async fn send(
         paths.push(path.to_owned());
     }
     Ok(paths)
+}
+
+/// Reads a regular file of at most `MAX_PUT_BYTES`. The file is opened once and the open
+/// handle is checked, and the read stops one byte past the limit, so a file that grew after
+/// `prepare` is refused without being read in full.
+async fn read_bounded(path: &Path, name: &str) -> Result<Vec<u8>, ActionError> {
+    let unreadable = |e: std::io::Error| ActionError::invalid(format!("{name} can’t be read: {e}"));
+    let file = tokio::fs::File::open(path).await.map_err(unreadable)?;
+    let meta = file.metadata().await.map_err(unreadable)?;
+    if !meta.is_file() {
+        return Err(ActionError::invalid(format!("{name} isn’t a file.")));
+    }
+    if meta.len() > MAX_PUT_BYTES {
+        return Err(ActionError::invalid(over_message(name)));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_PUT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(unreadable)?;
+    if bytes.len() as u64 > MAX_PUT_BYTES {
+        return Err(ActionError::invalid(over_message(name)));
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -388,7 +423,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ok[0].name, "paste-20261125-163000.png");
-        assert_eq!(ok[0].source, Source::Clip(good));
+        assert!(matches!(&ok[0].source, Source::Clip(data) if *data == good));
     }
 
     #[test]
@@ -412,6 +447,84 @@ mod tests {
             name: "a.png".to_owned(),
             source: Source::Clip(marker.clone()),
         };
-        assert!(!format!("{prepared:?}").contains(&marker));
+        let item = clip("a.png", &marker);
+        for shown in [
+            format!("{prepared:?}"),
+            format!("{:?}", prepared.source),
+            format!("{item:?}"),
+            format!("{:#?}", [&item]),
+        ] {
+            assert!(!shown.contains(&marker), "{shown}");
+            assert!(
+                shown.contains("a.png") || shown.contains("Clip(..)"),
+                "{shown}"
+            );
+        }
+        // The path variants still show what they are.
+        let path_item = PutItem::Path {
+            path: "/Users/dev/a.txt".to_owned(),
+        };
+        assert!(format!("{path_item:?}").contains("/Users/dev/a.txt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_pipe_without_blocking() {
+        let dir = TempDir::new().unwrap();
+        let fifo = dir.path().join("pipe");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let dropped = DroppedFiles::default();
+        let at = Instant::now();
+        dropped.record(vec![fifo.clone()], at);
+        // `metadata` does not open the pipe, so this returns at once.
+        let err = prepare(&[item(&fifo)], &dropped, at, "buildbox").unwrap_err();
+        assert_eq!(
+            message(err),
+            "pipe isn’t a file; only files can be sent to buildbox"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_that_grew_after_prepare_is_refused_by_send() {
+        let dir = TempDir::new().unwrap();
+        let (path, dropped, at) = dropped_file(&dir, "grows.bin", 10);
+        let prepared = prepare(&[item(&path)], &dropped, at, "buildbox").unwrap();
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(MAX_PUT_BYTES + 1)
+            .unwrap();
+        // The core is never reached: it would fail to start, and nothing would be logged as ok.
+        let core = CoreClient::new(std::sync::Arc::new(crate::core::ProcessConnector {
+            bin: PathBuf::from("/nonexistent/hc"),
+            env: Vec::new(),
+        }));
+        let err = send(&core, "local", "t7", prepared, |_| {})
+            .await
+            .unwrap_err();
+        assert_eq!(
+            message(err),
+            "grows.bin is over 8 MB; herdr-core can’t send it."
+        );
+        assert!(core.command_log().is_empty(), "nothing reached the core");
+    }
+
+    #[tokio::test]
+    async fn read_bounded_reads_exactly_the_limit_and_names_a_missing_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("exact.bin");
+        File::create(&path).unwrap().set_len(MAX_PUT_BYTES).unwrap();
+        assert_eq!(
+            read_bounded(&path, "exact.bin").await.unwrap().len() as u64,
+            MAX_PUT_BYTES
+        );
+        let missing = dir.path().join("gone.bin");
+        let err = read_bounded(&missing, "gone.bin").await.unwrap_err();
+        assert!(message(err).starts_with("gone.bin can’t be read: "));
     }
 }
