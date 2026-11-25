@@ -84,6 +84,9 @@ scripts/build-site.sh  # project site (site/) → _site/; deployed to GitHub Pag
   | `agy` | antigravity |
   | `kiro-cli` | kiro |
   | `qodercli` | qoder |
+  | `kimi-code` | kimi |
+  | `kimicodecli` | kimi |
+  | `oh-my-pi` | omp |
 
   The same file gives each kind's start argv; Codex starts as `codex --no-daemon` per herdr-core's skill.
 - Sessions: `HC_SESSION` selects a local core session. `machine add --session` selects one on a remote.

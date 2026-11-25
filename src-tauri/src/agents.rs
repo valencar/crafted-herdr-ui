@@ -84,6 +84,9 @@ pub struct KnownAgent {
 /// confirm a starting prompt as a positional argument: claude (CLI reference: `claude "query"`),
 /// codex (`codex [PROMPT]`, codex-rs/tui/src/cli.rs) and gemini (CLI reference: `gemini "query"`).
 /// Codex starts with `--no-daemon`, or its commands would run outside `hc` (herdr-core's skill).
+/// goose and omp (`oh-my-pi`) and kimi's `kimi-code` and `kimicodecli` follow herdr-app's list. Cursor
+/// stays `cursor-agent`: herdr-app runs it as `agent` and matches that word, but a bare `agent` is
+/// also herdr-app's own generic program, so it is not taken as Cursor here.
 pub const KNOWN_AGENTS: &[KnownAgent] = &[
     agent(
         "claude",
@@ -119,8 +122,15 @@ pub const KNOWN_AGENTS: &[KnownAgent] = &[
     agent("amp", &[], "amp", &["amp"], TaskArg::None),
     agent("grok", &["grok-build"], "grok", &["grok"], TaskArg::None),
     agent("dsh-tui", &[], "dsh-tui", &["dsh-tui"], TaskArg::None),
+    agent("goose", &[], "goose", &["goose"], TaskArg::None),
     agent("agy", &["agy"], "antigravity", &["agy"], TaskArg::None),
-    agent("kimi", &[], "kimi", &["kimi"], TaskArg::None),
+    agent(
+        "kimi",
+        &["kimi-code", "kimicodecli"],
+        "kimi",
+        &["kimi"],
+        TaskArg::None,
+    ),
     agent(
         "kiro-cli",
         &["kiro-cli"],
@@ -138,6 +148,7 @@ pub const KNOWN_AGENTS: &[KnownAgent] = &[
     ),
     agent("crush", &[], "crush", &["crush"], TaskArg::None),
     agent("gemini", &[], "gemini", &["gemini"], TaskArg::Positional),
+    agent("omp", &["oh-my-pi"], "omp", &["omp"], TaskArg::None),
 ];
 
 const fn agent(
@@ -508,6 +519,48 @@ mod tests {
     }
 
     #[test]
+    fn knows_goose_and_omp() {
+        // 7501 `app` aliases.
+        for (app, kind) in [
+            ("oh-my-pi", "omp"),
+            ("omp", "omp"),
+            ("kimi-code", "kimi"),
+            ("kimicodecli", "kimi"),
+            ("kimi", "kimi"),
+            ("goose", "goose"),
+        ] {
+            assert_eq!(
+                kind_of(&reported("idle", Some(app))).as_deref(),
+                Some(kind),
+                "{app}"
+            );
+        }
+        // The foreground program, then argv[0]'s basename.
+        let mut t = term(&["sh"]);
+        t.foreground = Some(fg("goose", "/home/dev/web-app"));
+        assert_eq!(kind_of(&t).as_deref(), Some("goose"));
+        let mut t = term(&["/home/dev/.local/bin/omp"]);
+        t.foreground = None;
+        assert_eq!(kind_of(&t).as_deref(), Some("omp"));
+        assert!(classify(&t, None, 0).is_agent);
+        // A foreground name that is an alias.
+        let mut t = term(&["sh"]);
+        t.foreground = Some(fg("kimi-code", "/home/dev/web-app"));
+        assert_eq!(kind_of(&t).as_deref(), Some("kimi"));
+        // Start argv.
+        for (kind, start) in [("goose", "goose"), ("omp", "omp"), ("kimi", "kimi")] {
+            let a = KNOWN_AGENTS.iter().find(|a| a.kind == kind).unwrap();
+            assert_eq!(a.start, &[start], "{kind}");
+            assert_eq!(a.task, TaskArg::None, "{kind}");
+        }
+        // R4: Cursor is unchanged; a bare `agent` is not Cursor.
+        assert_eq!(
+            kind_of(&reported("idle", Some("agent"))).as_deref(),
+            Some("agent")
+        );
+    }
+
+    #[test]
     fn known_agents_cover_every_logo_and_alias() {
         for kind in ["claude", "copilot", "opencode", "cursor", "gemini", "codex"] {
             assert!(KNOWN_AGENTS.iter().any(|a| a.kind == kind), "{kind}");
@@ -520,6 +573,9 @@ mod tests {
             ("agy", "antigravity"),
             ("kiro-cli", "kiro"),
             ("qodercli", "qoder"),
+            ("kimi-code", "kimi"),
+            ("kimicodecli", "kimi"),
+            ("oh-my-pi", "omp"),
         ] {
             let found = KNOWN_AGENTS.iter().find(|a| a.app.contains(&app)).unwrap();
             assert_eq!(found.kind, kind, "{app}");

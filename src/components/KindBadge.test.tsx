@@ -15,6 +15,22 @@ describe("KindBadge", () => {
     expect(screen.queryByText("CC")).toBeNull();
   });
 
+  it("draws_the_goose_and_omp_logos", () => {
+    for (const [kind, viewBox, mono] of [
+      ["goose", "0 0 24 24", "GO"],
+      ["omp", "0 0 96 96", "OM"],
+    ] as const) {
+      const { container, unmount } = render(<KindBadge kind={kind} />);
+      const logo = container.querySelector("svg");
+      expect(logo, kind).not.toBeNull();
+      expect(logo, kind).toHaveAttribute("viewBox", viewBox);
+      expect(logo, kind).toHaveAttribute("fill", "currentColor");
+      expect(logo?.querySelector("path"), kind).toHaveAttribute("d");
+      expect(screen.queryByText(mono), kind).toBeNull();
+      unmount();
+    }
+  });
+
   it("every_logo_is_monochrome_and_has_path_data", () => {
     for (const [kind, logo] of Object.entries(AGENT_LOGOS)) {
       expect(logo?.tone, kind).toBe("mono");
