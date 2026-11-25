@@ -57,6 +57,8 @@ pub struct HelloInfo {
     /// `hello.core.name`: the host name.
     pub core_display_name: String,
     pub features: Vec<String>,
+    /// `hello.methods`: what the core can do, so the app can tell an ability from its absence.
+    pub methods: Vec<String>,
 }
 
 /// How long a call may take, by method. The one place timeouts are chosen.
@@ -146,6 +148,7 @@ pub async fn hello(conn: &Connection) -> Result<HelloInfo, CoreError> {
         core_id: text("/core/id"),
         core_display_name: text("/core/name"),
         features: strings(result.get("features")),
+        methods,
     })
 }
 
@@ -557,6 +560,13 @@ mod tests {
         let mut h = hello_result();
         h["methods"].as_array_mut().unwrap().retain(|m| m != method);
         h
+    }
+
+    #[tokio::test]
+    async fn hello_keeps_the_methods_list() {
+        let info = hello_over(Reply::Result(hello_result())).await.unwrap();
+        assert!(info.methods.contains(&"terminal.run".to_owned()));
+        assert!(info.methods.contains(&"terminal.put".to_owned()));
     }
 
     #[tokio::test]

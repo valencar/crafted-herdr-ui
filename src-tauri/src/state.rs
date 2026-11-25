@@ -7,6 +7,8 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::agents::TerminalView;
+use crate::core::HelloInfo;
+use crate::env::parse_version;
 
 /// Where Herdr (herdr-app) put a terminal, read from its layout document (spec §8.6).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -77,6 +79,35 @@ pub struct MachineView {
     /// Addresses are local to this machine (`t7`); `parent` is still the full address.
     pub terminals: Vec<TerminalView>,
     pub layout: Option<SpaceLayout>,
+    /// Whether this machine's programs keep running after the last SSH login ends. `None` when
+    /// the core doesn't say, and for this computer.
+    pub keeps_running_after_logout: Option<bool>,
+    /// The user to name in `sudo loginctl enable-linger`, when the core knows it.
+    pub logout_linger_user: Option<String>,
+}
+
+/// What the connected core can do, read from its `hello`. A core without an ability just hides
+/// the UI for it; it is never `Incompatible` for that.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct CoreAbilities {
+    /// `terminal.put` is in `hello.methods`.
+    pub put_files: bool,
+    /// `hc server restart --fresh` exists: core 0.1.20 or later.
+    pub refresh_environment: bool,
+}
+
+impl CoreAbilities {
+    /// No hello yet: nothing is offered.
+    pub fn from_hello(info: Option<&HelloInfo>) -> CoreAbilities {
+        let Some(info) = info else {
+            return CoreAbilities::default();
+        };
+        CoreAbilities {
+            put_files: info.methods.iter().any(|m| m == "terminal.put"),
+            refresh_environment: parse_version(&info.version).is_some_and(|v| v >= (0, 1, 20)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -107,6 +138,8 @@ pub struct AppState {
     /// `None` when herdr-core was not found.
     pub core_path: Option<String>,
     pub core_state: CoreState,
+    /// What the connected core can do; all false until it has said hello.
+    pub core_abilities: CoreAbilities,
     #[ts(type = "number")]
     pub generated_at_ms: u64,
 }
@@ -162,6 +195,8 @@ pub(crate) mod fixtures {
             last_ok_ms: None,
             terminals,
             layout: None,
+            keeps_running_after_logout: None,
+            logout_linger_user: None,
         }
     }
 
@@ -189,6 +224,7 @@ pub(crate) mod fixtures {
             core_version: None,
             core_path: None,
             core_state: CoreState::Ready,
+            core_abilities: CoreAbilities::default(),
             generated_at_ms: 0,
         }
     }
@@ -197,6 +233,82 @@ pub(crate) mod fixtures {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hello_info(version: &str, methods: &[&str]) -> HelloInfo {
+        HelloInfo {
+            version: version.into(),
+            core_id: String::new(),
+            core_display_name: String::new(),
+            features: Vec::new(),
+            methods: methods.iter().map(|m| (*m).to_owned()).collect(),
+        }
+    }
+
+    fn info_of(hello: &str) -> HelloInfo {
+        let v: serde_json::Value = serde_json::from_str(hello).unwrap();
+        let strings = |k: &str| -> Vec<String> {
+            v[k].as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().to_owned())
+                .collect()
+        };
+        HelloInfo {
+            version: v["version"].as_str().unwrap().into(),
+            core_id: String::new(),
+            core_display_name: String::new(),
+            features: strings("features"),
+            methods: strings("methods"),
+        }
+    }
+
+    #[test]
+    fn abilities_of_a_0_1_22_core() {
+        let info = info_of(include_str!("../tests/fixtures/hc/hello.json"));
+        assert_eq!(info.version, "0.1.22");
+        assert_eq!(
+            CoreAbilities::from_hello(Some(&info)),
+            CoreAbilities {
+                put_files: true,
+                refresh_environment: true
+            }
+        );
+    }
+
+    #[test]
+    fn abilities_of_a_0_1_18_core() {
+        let info = info_of(include_str!("../tests/fixtures/hc/hello_0_1_18.json"));
+        assert_eq!(info.version, "0.1.18");
+        assert_eq!(
+            CoreAbilities::from_hello(Some(&info)),
+            CoreAbilities {
+                put_files: true,
+                refresh_environment: false
+            }
+        );
+    }
+
+    #[test]
+    fn refresh_needs_0_1_20() {
+        let refresh = |version: &str| {
+            CoreAbilities::from_hello(Some(&hello_info(version, &["terminal.put"])))
+                .refresh_environment
+        };
+        assert!(!refresh("0.1.19"));
+        assert!(refresh("0.1.20"));
+        assert!(refresh("0.1.21-rc1"));
+        assert!(refresh("0.2.0"));
+        assert!(!refresh(""));
+        assert!(!refresh("garbage"));
+
+        // No terminal.put in the methods: no file puts, whatever the version.
+        let no_put = CoreAbilities::from_hello(Some(&hello_info("0.1.22", &["terminal.run"])));
+        assert!(!no_put.put_files);
+        assert!(no_put.refresh_environment);
+
+        // No hello yet: nothing is offered.
+        assert_eq!(CoreAbilities::from_hello(None), CoreAbilities::default());
+    }
 
     #[test]
     fn health_serializes_tagged_by_kind() {

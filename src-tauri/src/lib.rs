@@ -85,6 +85,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         core_version: None,
         core_path: None,
         core_state: CoreState::Connecting,
+        core_abilities: Default::default(),
         generated_at_ms: 0,
     });
     let emit_handle = handle.clone();

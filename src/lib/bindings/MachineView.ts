@@ -24,4 +24,13 @@ last_ok_ms: number | null,
 /**
  * Addresses are local to this machine (`t7`); `parent` is still the full address.
  */
-terminals: Array<TerminalView>, layout: SpaceLayout | null, };
+terminals: Array<TerminalView>, layout: SpaceLayout | null, 
+/**
+ * Whether this machine's programs keep running after the last SSH login ends. `None` when
+ * the core doesn't say, and for this computer.
+ */
+keeps_running_after_logout: boolean | null, 
+/**
+ * The user to name in `sudo loginctl enable-linger`, when the core knows it.
+ */
+logout_linger_user: string | null, };
