@@ -103,6 +103,8 @@ describe("fileSend", () => {
       },
     });
     expect(sendMode(command, undefined, true)).toEqual(off);
+    // Even with a row present, a command tab takes no input.
+    expect(sendMode(command, row("local"), true)).toEqual(off);
     for (const state of ["opening", "detached", "error"] as const) {
       expect(sendMode(tab({ state }), row("local"), true), state).toEqual(off);
     }

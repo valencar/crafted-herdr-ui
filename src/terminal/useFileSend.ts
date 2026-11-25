@@ -137,6 +137,8 @@ export function useFileSend({ tab, active, termRef, hostRef }: Props): {
       );
     };
     void onFileDrop((e) => {
+      // Between this effect's cleanup and the unlisten answering, the old listener is still there.
+      if (stopped) return;
       if (e.type === "leave") return setDrag("none");
       if (!inside(e.x, e.y)) return setDrag("none");
       const { mode } = latest.current;
@@ -145,9 +147,10 @@ export function useFileSend({ tab, active, termRef, hostRef }: Props): {
       }
       setDrag("none");
       if (mode.drop === "off" || e.paths.length === 0) return;
+      // A control character refuses the whole drop, typed or sent.
+      if (e.paths.some(hasControlChar)) return toast(LINE_BREAK);
       if (sendingRef.current) return toast(STILL_SENDING, "info");
       if (mode.drop === "type") {
-        if (e.paths.some(hasControlChar)) return toast(LINE_BREAK);
         termRef.current?.paste(typedPaths(e.paths));
         return;
       }

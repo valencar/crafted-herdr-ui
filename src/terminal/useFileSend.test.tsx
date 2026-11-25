@@ -242,24 +242,50 @@ describe("useFileSend", () => {
   });
 
   it("sends_nothing_to_a_tab_that_takes_no_input", async () => {
-    const cases: Array<[string, TermTab]> = [
-      ["watch", openTab("local", { observe: true })],
-      ["detached", openTab("buildbox-id", { state: "detached", termId: null })],
+    // Each case differs from a live local terminal in one thing only, and runs on a fresh
+    // store, so it fails if the guard it names is removed.
+    const command: TermTab["target"] = {
+      kind: "command",
+      machineId: "local",
+      args: ["machine", "login"],
+    };
+    const cases: Array<[string, () => TermTab]> = [
+      ["watch", () => openTab("local", { observe: true })],
+      ["command tab with a row", () => openTab("local", { target: command })],
+      ["opening", () => openTab("local", { state: "opening", termId: null })],
+      ["detached", () => openTab("local", { state: "detached", termId: null })],
+      ["error", () => openTab("local", { state: "error", termId: null })],
       [
-        "command",
-        {
-          ...openTab("local"),
-          tabKey: "local::cmd:machine login",
-          target: {
-            kind: "command",
-            machineId: "local",
-            args: ["machine", "login"],
-          },
+        "ended row",
+        () => {
+          setState(true);
+          return openTab("local");
+        },
+      ],
+      [
+        "no row",
+        () => {
+          const tabKey = "local::t99";
+          useTerminalStore.getState().openTab({
+            tabKey,
+            target: { kind: "terminal", machineId: "local", address: "t99" },
+            title: "gone",
+            machineLabel: "local",
+          });
+          useTerminalStore
+            .getState()
+            .updateTab(tabKey, { state: "live", termId: 11 });
+          return useTerminalStore
+            .getState()
+            .tabs.find((t) => t.tabKey === tabKey)!;
         },
       ],
     ];
-    for (const [name, tab] of cases) {
-      const { paste, result, unmount } = setup(tab);
+    for (const [name, make] of cases) {
+      useTerminalStore.setState({ tabs: [], activeKey: HOME });
+      setState();
+      h.putFiles.mockClear();
+      const { paste, result, unmount } = setup(make());
       await hover("over");
       expect(result.current.drag, name).toBe("refuse");
       await drop(["/Users/dev/a.png"]);
@@ -267,13 +293,36 @@ describe("useFileSend", () => {
       expect(h.putFiles, name).not.toHaveBeenCalled();
       unmount();
     }
-    // An ended row.
-    setState(true);
-    const { paste, result } = setup(openTab("local"));
-    await hover("over");
-    expect(result.current.drag).toBe("refuse");
-    await drop(["/Users/dev/a.png"]);
+  });
+
+  it("refuses_a_remote_drop_with_a_line_break_in_a_path", async () => {
+    const { paste } = setup(openTab("buildbox-id"));
+    await drop(["/Users/dev/a.png", "/Users/dev/b\nc.png"]);
+    expect(h.putFiles).not.toHaveBeenCalled();
     expect(paste).not.toHaveBeenCalled();
+    expect(useAppStore.getState().toast).toBe(
+      "A path with a line break can’t be typed.",
+    );
+  });
+
+  it("ignores_a_drop_that_arrives_before_the_unlisten_answers", async () => {
+    let answer: (off: () => void) => void = () => {};
+    const ipc = await import("../lib/ipc");
+    vi.mocked(ipc.onFileDrop).mockImplementationOnce((cb) => {
+      h.drop = cb;
+      return new Promise((resolve) => (answer = resolve));
+    });
+    const { paste, rerender } = setup(openTab("local"));
+    const old = h.drop!;
+    rerender({ active: false });
+    // The old listener is still registered: its drop must do nothing.
+    await act(async () => {
+      old({ type: "drop", paths: ["/Users/dev/a.png"], x: 100, y: 100 });
+      answer(h.unlisten);
+      await Promise.resolve();
+    });
+    expect(paste).not.toHaveBeenCalled();
+    expect(h.unlisten).toHaveBeenCalledTimes(1);
   });
 
   it("refuses_remote_drops_and_image_paste_without_terminal_put", async () => {

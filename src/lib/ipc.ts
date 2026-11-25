@@ -330,9 +330,16 @@ export type FileDropEvent = {
   y: number;
 };
 
+/** Whether the webview is WKWebView (macOS): its user agent says "Macintosh". */
+function onMac(): boolean {
+  return /Macintosh|Mac OS X/.test(navigator.userAgent);
+}
+
 /**
- * Subscribes to files dragged over this window from Finder. Tauri reports physical pixels; the
- * point is divided by `devicePixelRatio` so it can be compared with a `getBoundingClientRect`.
+ * Subscribes to files dragged over this window from Finder. The point is in CSS pixels, so it
+ * can be compared with a `getBoundingClientRect`. On macOS wry reports points (no backing
+ * scale) that tauri-runtime-wry wraps as `PhysicalPosition`, so they already are CSS pixels; on
+ * Windows (WebView2) they are physical and are divided by `devicePixelRatio`.
  * The paths are handed over exactly as Tauri gave them: Rust compares a put against them.
  */
 export function onFileDrop(
@@ -340,7 +347,7 @@ export function onFileDrop(
 ): Promise<() => void> {
   return getCurrentWebview().onDragDropEvent((event) => {
     const p = event.payload;
-    const ratio = window.devicePixelRatio || 1;
+    const ratio = onMac() ? 1 : window.devicePixelRatio || 1;
     const at = p.type === "leave" ? { x: 0, y: 0 } : p.position;
     cb({
       type: p.type,
