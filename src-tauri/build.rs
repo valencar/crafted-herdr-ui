@@ -55,6 +55,7 @@ const COMMANDS: &[&str] = &[
     "set_looking",
     "herdr_app_status",
     "open_in_herdr",
+    "put_files",
 ];
 
 fn main() {

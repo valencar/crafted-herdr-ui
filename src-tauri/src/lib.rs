@@ -9,6 +9,7 @@ pub mod menu;
 pub mod notify;
 pub mod preview;
 pub mod pty;
+pub mod put;
 pub mod settings;
 pub mod ssh_config;
 pub mod state;
@@ -18,9 +19,9 @@ pub mod tray;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tauri::{DragDropEvent, Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::watch;
 
@@ -28,6 +29,7 @@ use crate::core::{CommandLog, CoreClient, ProcessConnector};
 use activity::ActivityV2;
 use preview::{PREVIEW_EVENT, PreviewManager};
 use pty::PortablePty;
+use put::DroppedFiles;
 use settings::{CoreLocator, SharedSettings, ShortcutState, ShortcutStatus};
 use state::{AppState, CoreState};
 use sync::{CoreSync, Emit, NotifySink, SyncCell};
@@ -122,6 +124,7 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(herdr_app::HerdrApp::new());
     app.manage(PopoverGuard::default());
     app.manage(notify::Looking::default());
+    app.manage(DroppedFiles::default());
     app.manage(shared.clone());
 
     let tray_icon = tray::create_tray(&handle)?;
@@ -219,6 +222,12 @@ fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
             api.prevent_close();
             tray::hide_main(window.app_handle());
         }
+        // The files of a Finder drop: `put_files` reads only these, and only for a minute.
+        (MAIN_WINDOW, WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. })) => {
+            if let Some(dropped) = window.try_state::<DroppedFiles>() {
+                dropped.record(paths.clone(), Instant::now());
+            }
+        }
         (MAIN_WINDOW, _) => track_visibility(window, event),
         (POPOVER_WINDOW, WindowEvent::Focused(false)) => {
             tray::popover_lost_focus(window.app_handle());
@@ -306,6 +315,7 @@ pub fn run() {
             commands::set_looking,
             commands::herdr_app_status,
             commands::open_in_herdr,
+            commands::put_files,
         ])
         .menu(menu::build)
         .on_menu_event(menu::on_event)

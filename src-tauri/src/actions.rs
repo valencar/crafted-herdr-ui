@@ -682,7 +682,7 @@ const PINNED_LABEL: &str = "herdr.pinned";
 /// have been applied (the request may have reached the core), so it is `MaybeApplied`; the
 /// exception is the pool connection's own `hello`, which times out before the request was ever
 /// sent. `terminal` is the full address the call was about.
-fn core_failure(error: CoreError, method: &str, terminal: &str) -> ActionError {
+pub(crate) fn core_failure(error: CoreError, method: &str, terminal: &str) -> ActionError {
     match error {
         CoreError::Timeout { method: timed } if timed != "hello" => ActionError::MaybeApplied {
             message: format!(

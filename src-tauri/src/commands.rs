@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use serde::Deserialize;
 use tauri::ipc::Channel;
@@ -16,11 +17,13 @@ use crate::actions::{
     NewSessions, RowActions, RunChoices, machine_command_args, preview, preview_add,
 };
 use crate::activity::ActivityV2;
+use crate::agents::DisplayStatus;
 use crate::core::{CommandLogEntry, CoreClient};
 use crate::herdr_app::HerdrApp;
 use crate::notify::{self, Looking};
 use crate::preview::{self, PreviewManager};
 use crate::pty::TermSize;
+use crate::put::{self, DroppedFiles, PutFilesResult, PutItem, PutProgress};
 use crate::settings::{
     self, CoreLocator, CoreStatus, Settings, SharedSettings, ShortcutState, ShortcutStatus, changes,
 };
@@ -644,6 +647,53 @@ async fn on_sessions<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(move || work(&sessions))
         .await
         .map_err(|e| ActionError::invalid(e.to_string()))
+}
+
+/// Sends dropped files and pasted images to a terminal (`terminal.put`) and answers the paths
+/// where they landed on its machine. Every item is checked before any is sent; progress goes to
+/// `on_progress` before each. The UI types the paths; nothing here does.
+#[tauri::command]
+pub async fn put_files(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    dropped: State<'_, DroppedFiles>,
+    machine_id: String,
+    address: String,
+    items: Vec<PutItem>,
+    on_progress: Channel<PutProgress>,
+) -> Result<PutFilesResult, ActionError> {
+    let sync = sync
+        .get()
+        .ok_or_else(|| ActionError::invalid("herdr-core is not connected yet."))?;
+    if !sync.state().is_some_and(|s| s.core_abilities.put_files) {
+        return Err(ActionError::invalid("This herdr-core can’t receive files."));
+    }
+    let (Some(full), Some(machine)) = (
+        sync.full_address(&machine_id, &address),
+        sync.machine_name(&machine_id),
+    ) else {
+        return Err(ActionError::invalid(format!(
+            "Unknown workbox {machine_id}."
+        )));
+    };
+    if sync
+        .terminal(&machine_id, &address)
+        .is_some_and(|t| t.status == DisplayStatus::Ended)
+    {
+        return Err(ActionError::invalid("This terminal has ended."));
+    }
+    let workbox = if machine_id == LOCAL {
+        "this computer"
+    } else {
+        machine.as_str()
+    };
+    let prepared = put::prepare(&items, &dropped, Instant::now(), workbox)?;
+    let result = put::send(&core, &machine_id, &full, prepared, |progress| {
+        let _ = on_progress.send(progress);
+    })
+    .await;
+    refresh_if_maybe_applied(&result, || sync.refresh_machines());
+    result.map(|paths| PutFilesResult { paths })
 }
 
 /// Types keystrokes or a paste into a terminal tab. Nothing but input goes through here.

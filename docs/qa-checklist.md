@@ -371,3 +371,9 @@ herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, i
 
 - [ ] An agent exits back to the shell (quit Claude or another agent in a sandbox-core terminal, so the shell prompt is back): within a moment its row stops showing the agent's last status (core 0.1.20 clears it), and nothing else about the row breaks.
 - [ ] `restore_screen = true` on the sandbox core only (set it in the sandbox's config dir, never your own), with a kept terminal live there (a New session you made with keep on). Restart the *sandbox* core the way the v0.9 "Deliberate stop" item does, never `hc server restart`: run `hc server stop` in the sandbox session (`HC_SESSION=herdr-ui-qa` and its own `XDG_*` dirs), then press Reconnect in the app. The kept terminal comes back with its last screen above the new shell: the Inspector's preview shows the restored screen and nothing breaks (no error, no layout jump).
+
+### Sending files (`put_files`; the UI that calls it lands in a later task)
+
+- [ ] Drop a file from Finder onto a terminal tab of a remote workbox (core 0.1.22 on both ends): it lands on the remote machine (`herdr-core/files/<terminal>/` under its state dir), its path is typed at the prompt, and the command log shows `hc put buildbox/t7 <name> # <size>` with no file contents.
+- [ ] Drop a file over 8 MB: the toast says `{name} is over 8 MB; herdr-core can’t send it.` and nothing is typed. Drop a folder: `{name} is a folder; only files can be sent to {workbox}`.
+- [ ] Drop two files, one a folder: the whole drop is refused and the file is not sent either.
