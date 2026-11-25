@@ -14,7 +14,8 @@ use ts_rs::TS;
 use crate::LOCAL;
 use crate::actions::{
     ActionError, AddMachineRequest, CreatedSession, KindsCache, MachineActions, NewSessionRequest,
-    NewSessions, RowActions, RunChoices, machine_command_args, preview, preview_add,
+    NewSessions, REFRESH_ARGS, RowActions, RunChoices, machine_command_args, preview, preview_add,
+    refresh_args,
 };
 use crate::activity::ActivityV2;
 use crate::agents::DisplayStatus;
@@ -534,6 +535,18 @@ fn core_env(locator: &CoreLocator) -> Vec<(String, String)> {
     crate::env::forwarded_env(&locator.login())
 }
 
+/// The variables a terminal tab runs its command with. Every command gets `core_env`, except
+/// Refresh core environment (`server restart --fresh`), which gives the new environment to every
+/// terminal the core starts afterwards and so runs with the login shell's (`env::refresh_env`,
+/// Ruling R1). Both only ever run `hc`.
+fn tab_env(args: &[String], login: &crate::env::LoginEnv) -> Vec<(String, String)> {
+    if args == REFRESH_ARGS {
+        crate::env::refresh_env(login)
+    } else {
+        crate::env::forwarded_env(login)
+    }
+}
+
 /// A target's command for the current core and state.
 fn launch_for(
     locator: &CoreLocator,
@@ -619,7 +632,10 @@ pub async fn term_open(
     on_event: Channel<TermEvent>,
 ) -> Result<TermId, ActionError> {
     let launch = launch_for(&locator, &sync, &target, observe)?;
-    let env = core_env(&locator);
+    let env = match &target {
+        TermTarget::Command { args } => tab_env(args, &locator.login()),
+        TermTarget::Terminal { .. } => core_env(&locator),
+    };
     let sink: TermSink = Arc::new(move |event| on_event.send(event).is_ok());
     let sessions = Arc::clone(&sessions);
     let argv = launch.argv;
@@ -973,6 +989,25 @@ pub fn show_main(app: AppHandle) {
     tray::hide_popover(&app);
 }
 
+/// What follows the core in `server restart --fresh`, for the Refresh core environment tab. The
+/// UI asks for a confirmation before it opens the tab; nothing runs here.
+#[tauri::command]
+pub fn core_refresh_args(sync: State<'_, SyncCell>) -> Result<Vec<String>, ActionError> {
+    let abilities = sync
+        .get()
+        .and_then(|s| s.state())
+        .map(|s| s.core_abilities)
+        .ok_or_else(|| ActionError::invalid("herdr-core is not connected yet."))?;
+    refresh_args(abilities).map_err(ActionError::invalid)
+}
+
+/// Shows the main window and asks it to confirm Refresh core environment, from the popover or the
+/// tray. The confirmation and the tab are the main window's.
+#[tauri::command]
+pub fn show_main_refresh_core(app: AppHandle) {
+    tray::show_main_refresh_core(&app);
+}
+
 /// Shows the main window with the New session sheet open, from the popover.
 #[tauri::command]
 pub fn show_main_new_session(app: AppHandle) {
@@ -1257,6 +1292,38 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_refresh_tab_runs_the_resolved_core() {
+        let target = TermTarget::Command {
+            args: REFRESH_ARGS.map(str::to_owned).into(),
+        };
+        let launch = term_launch(core(), &target, false, |_, _| None).unwrap();
+        assert_eq!(
+            launch.argv,
+            [
+                "/opt/herdr-core/bin/herdr-core",
+                "server",
+                "restart",
+                "--fresh"
+            ]
+        );
+        assert_eq!(launch.display, "herdr-core server restart --fresh");
+        assert_eq!(launch.machine_id, "local");
+    }
+
+    #[test]
+    fn picks_the_refresh_environment_only_for_the_refresh_args() {
+        let login =
+            crate::env::parse_env_output("PATH=/a\0EDITOR=vim\0HC_TERMINAL_ID=t7\0HC_SCOPE=t7\0");
+        let refresh: Vec<String> = REFRESH_ARGS.map(str::to_owned).into();
+        let env = tab_env(&refresh, &login);
+        assert_eq!(env, crate::env::refresh_env(&login));
+        assert!(env.iter().any(|(k, _)| k == "EDITOR"));
+        let other: Vec<String> = ["machine", "login", "buildbox"].map(str::to_owned).into();
+        assert_eq!(tab_env(&other, &login), crate::env::forwarded_env(&login));
+        assert!(!tab_env(&other, &login).iter().any(|(k, _)| k == "EDITOR"));
     }
 
     #[test]

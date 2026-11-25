@@ -395,3 +395,9 @@ herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, i
 - [ ] A workbox whose SSH key needs a passphrase (needs_login) shows "herdr-core retries a failed login only every few minutes. Log in to reconnect now." and a primary Log in… button, ahead of Connect now, in its attention notice on the Dashboard and in All agents. On its Dashboard card, Log in… replaces Retry now. On its Workbox screen the sentence sits directly under the state line, before any "stops at logout" warning, and Log in… is the first button.
 - [ ] Log in… opens the Log in tab; after you enter the passphrase there, the workbox connects right away (no wait of a few minutes) and the notice goes.
 - [ ] An unreachable workbox (not a login problem) shows no sentence, and Connect now stays first.
+
+### Refresh core environment
+
+- [ ] On a sandbox core 0.1.20 or later (`HC_SESSION=herdr-ui-qa`, its own `XDG_*` dirs; never your own core), Refresh core environment… (Palette or Settings), then Restart herdr-core: a tab opens, shows hc's output and ends. Open in-app tabs reattach once the core is back.
+- [ ] A terminal started after the refresh has `EDITOR` (or another variable your login profile exports) from the login shell, and no `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` from the app's launcher. Programs that were running keep going.
+- [ ] On a core older than 0.1.20 the action is not offered.

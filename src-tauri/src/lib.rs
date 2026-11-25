@@ -306,6 +306,8 @@ pub fn run() {
             commands::preview_launch_template,
             commands::show_main,
             commands::show_main_new_session,
+            commands::core_refresh_args,
+            commands::show_main_refresh_core,
             commands::open_settings,
             commands::term_open,
             commands::term_write,

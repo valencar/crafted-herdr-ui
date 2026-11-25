@@ -52,6 +52,8 @@ const HERDR_APP_FORWARDED: [&str; 8] = [
     "HERDR_APP_HOME",
     "XDG_CONFIG_HOME",
 ];
+/// What `refresh_env` leaves out of the login environment.
+const REFRESH_DROPPED: [&str; 3] = ["HC_TERMINAL_SOCKET", "HC_TERMINAL_ID", "HC_SCOPE"];
 const DEFAULT_TERM: &str = "xterm-256color";
 
 /// The environment of the user's login shell.
@@ -163,6 +165,27 @@ pub fn forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
     pick_env(login, &FORWARDED)
 }
 
+/// The variables the Refresh core environment tab runs `hc server restart --fresh` with (Ruling
+/// R1). `--fresh` gives every new terminal the environment of the `hc` process that runs it, so
+/// this is the whole login-shell environment (`SHELL`, `LC_*`, `EDITOR`, what the profile
+/// exports), not the eleven names of `forwarded_env`. Never `HC_TERMINAL_SOCKET`,
+/// `HC_TERMINAL_ID` or `HC_SCOPE`: a shell inside a core terminal has them, and they would scope
+/// the new environment to that terminal. `TERM` is defaulted as `forwarded_env` does. Only for
+/// that one command, which runs `hc`; sorted by name so it is the same every time.
+pub fn refresh_env(login: &LoginEnv) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = login
+        .vars
+        .iter()
+        .filter(|(key, _)| !REFRESH_DROPPED.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    if !login.vars.contains_key("TERM") {
+        env.push(("TERM".to_string(), DEFAULT_TERM.to_string()));
+    }
+    env.sort();
+    env
+}
+
 /// The variables the legacy herdr probe gets: the first six of `forwarded_env`, never an `HC_*`
 /// or `XDG_*` name. Permanent, for `find_legacy_herdr` only.
 pub fn legacy_forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
@@ -249,6 +272,31 @@ mod tests {
         assert!(fwd.contains(&("SSH_AUTH_SOCK".to_string(), "/tmp/s".to_string())));
         assert!(fwd.contains(&("PATH".to_string(), "/a".to_string())));
         assert!(!fwd.iter().any(|(k, _)| k == "X"));
+    }
+
+    #[test]
+    fn refresh_env_keeps_the_login_environment_but_the_terminal_names() {
+        let login = parse_env_output(
+            "PATH=/a\0EDITOR=vim\0LC_ALL=en_US.UTF-8\0HC_SESSION=work\0XDG_STATE_HOME=/home/dev/s\0\
+             HC_TERMINAL_ID=t7\0HC_TERMINAL_SOCKET=/tmp/t.sock\0HC_SCOPE=t7\0",
+        );
+        let env: HashMap<String, String> = refresh_env(&login).into_iter().collect();
+        for (k, v) in [
+            ("PATH", "/a"),
+            ("EDITOR", "vim"),
+            ("LC_ALL", "en_US.UTF-8"),
+            ("HC_SESSION", "work"),
+            ("XDG_STATE_HOME", "/home/dev/s"),
+        ] {
+            assert_eq!(env.get(k).map(String::as_str), Some(v), "{k}");
+        }
+        for k in ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_SCOPE"] {
+            assert!(!env.contains_key(k), "{k}");
+        }
+        // No TERM in the login environment: the default, as `forwarded_env` does.
+        assert_eq!(env.get("TERM").map(String::as_str), Some("xterm-256color"));
+        let kept = refresh_env(&parse_env_output("TERM=screen\0"));
+        assert!(kept.contains(&("TERM".to_string(), "screen".to_string())));
     }
 
     #[test]

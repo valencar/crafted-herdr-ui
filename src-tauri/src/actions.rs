@@ -16,6 +16,7 @@ use crate::activity::ActivityV2;
 use crate::agents::{DisplayStatus, KNOWN_AGENTS, KnownAgent, TaskArg, TerminalView};
 use crate::core::model::TemplateInfo;
 use crate::core::{CoreClient, CoreError};
+use crate::state::CoreAbilities;
 use crate::terminal::{is_session, is_target, is_via};
 use crate::{LOCAL, lock};
 
@@ -432,6 +433,21 @@ impl<'a> NewSessions<'a> {
 pub fn machine_command_args(verb: &str, name: &str) -> Result<Vec<String>, String> {
     validate_name(name)?;
     Ok(["machine", verb, name].map(str::to_owned).to_vec())
+}
+
+/// What follows the core binary in `server restart --fresh`, the command behind Refresh core
+/// environment, which runs in an in-app terminal tab (hc 0.1.20 and later). Refused when the
+/// core can't do it.
+pub const REFRESH_ARGS: [&str; 3] = ["server", "restart", "--fresh"];
+
+pub fn refresh_args(abilities: CoreAbilities) -> Result<Vec<String>, String> {
+    if !abilities.refresh_environment {
+        return Err(
+            "This herdr-core can’t refresh its environment. Update it to 0.1.20 or later."
+                .to_owned(),
+        );
+    }
+    Ok(REFRESH_ARGS.map(str::to_owned).to_vec())
 }
 
 /// What the Add workbox sheet sends. Exactly one of `target` (an SSH host or Host alias) and
@@ -1514,5 +1530,28 @@ mod tests {
         // And the allowlist itself no longer takes an address-shaped name either.
         let shaped: Vec<String> = ["machine", "login", "t7"].map(str::to_owned).to_vec();
         assert!(!allowed_core_args(&shaped));
+    }
+
+    #[test]
+    fn refresh_args_need_the_ability() {
+        use crate::state::CoreAbilities;
+        let without = CoreAbilities {
+            refresh_environment: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            refresh_args(without),
+            Err(
+                "This herdr-core can’t refresh its environment. Update it to 0.1.20 or later."
+                    .to_owned()
+            )
+        );
+        let with = CoreAbilities {
+            refresh_environment: true,
+            ..Default::default()
+        };
+        let args = refresh_args(with).unwrap();
+        assert_eq!(args, ["server", "restart", "--fresh"]);
+        assert!(crate::terminal::allowed_core_args(&args));
     }
 }
