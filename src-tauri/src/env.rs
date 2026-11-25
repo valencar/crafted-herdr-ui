@@ -53,13 +53,25 @@ const HERDR_APP_FORWARDED: [&str; 8] = [
     "XDG_CONFIG_HOME",
 ];
 /// What `refresh_env` leaves out of the login environment.
-const REFRESH_DROPPED: [&str; 3] = ["HC_TERMINAL_SOCKET", "HC_TERMINAL_ID", "HC_SCOPE"];
+const REFRESH_DROPPED: [&str; 7] = [
+    "HC_TERMINAL_SOCKET",
+    "HC_TERMINAL_ID",
+    "HC_SCOPE",
+    "PWD",
+    "OLDPWD",
+    "SHLVL",
+    "_",
+];
 const DEFAULT_TERM: &str = "xterm-256color";
 
 /// The environment of the user's login shell.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoginEnv {
     pub vars: HashMap<String, String>,
+    /// True when the login shell could not be read (it failed or took too long) and `vars` is
+    /// this process's own environment instead. Only `capture_login_env` sets it. A Dock-launched
+    /// app's is launchd's minimal one, so Refresh core environment won't hand it to the core.
+    pub fell_back: bool,
 }
 
 fn is_env_name(s: &str) -> bool {
@@ -82,13 +94,25 @@ pub fn parse_env_output(s: &str) -> LoginEnv {
             is_env_name(key).then(|| (key.to_string(), value.to_string()))
         })
         .collect();
-    LoginEnv { vars }
+    LoginEnv {
+        vars,
+        fell_back: false,
+    }
 }
 
 /// This process's own environment, as a `LoginEnv`.
 pub(crate) fn process_env() -> LoginEnv {
     LoginEnv {
         vars: std::env::vars().collect(),
+        fell_back: false,
+    }
+}
+
+/// This process's environment standing in for a login shell that couldn't be read.
+fn fallback_env() -> LoginEnv {
+    LoginEnv {
+        fell_back: true,
+        ..process_env()
     }
 }
 
@@ -127,12 +151,12 @@ async fn capture_login_env_with(shell: &str, limit: Duration) -> LoginEnv {
         Some(out) => {
             let login = parse_env_output(&out);
             if login.vars.is_empty() {
-                process_env()
+                fallback_env()
             } else {
                 login
             }
         }
-        None => process_env(),
+        None => fallback_env(),
     }
 }
 
@@ -171,7 +195,9 @@ pub fn forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
 /// exports), not the eleven names of `forwarded_env`. Never `HC_TERMINAL_SOCKET`,
 /// `HC_TERMINAL_ID` or `HC_SCOPE`: a shell inside a core terminal has them, and they would scope
 /// the new environment to that terminal. `TERM` is defaulted as `forwarded_env` does. Only for
-/// that one command, which runs `hc`; sorted by name so it is the same every time.
+/// that one command, which runs `hc`; sorted by name so it is the same every time. Also leaves
+/// out the capturing shell's own bookkeeping (`PWD`, `OLDPWD`, `SHLVL`, `_`), which every new
+/// terminal would inherit. Callers check `fell_back` first (`commands::tab_env`).
 pub fn refresh_env(login: &LoginEnv) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = login
         .vars
@@ -278,7 +304,8 @@ mod tests {
     fn refresh_env_keeps_the_login_environment_but_the_terminal_names() {
         let login = parse_env_output(
             "PATH=/a\0EDITOR=vim\0LC_ALL=en_US.UTF-8\0HC_SESSION=work\0XDG_STATE_HOME=/home/dev/s\0\
-             HC_TERMINAL_ID=t7\0HC_TERMINAL_SOCKET=/tmp/t.sock\0HC_SCOPE=t7\0",
+             HC_TERMINAL_ID=t7\0HC_TERMINAL_SOCKET=/tmp/t.sock\0HC_SCOPE=t7\0\
+             PWD=/\0OLDPWD=/home/dev\0SHLVL=1\0_=/usr/bin/env\0",
         );
         let env: HashMap<String, String> = refresh_env(&login).into_iter().collect();
         for (k, v) in [
@@ -290,7 +317,15 @@ mod tests {
         ] {
             assert_eq!(env.get(k).map(String::as_str), Some(v), "{k}");
         }
-        for k in ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_SCOPE"] {
+        for k in [
+            "HC_TERMINAL_ID",
+            "HC_TERMINAL_SOCKET",
+            "HC_SCOPE",
+            "PWD",
+            "OLDPWD",
+            "SHLVL",
+            "_",
+        ] {
             assert!(!env.contains_key(k), "{k}");
         }
         // No TERM in the login environment: the default, as `forwarded_env` does.
@@ -432,6 +467,7 @@ mod tests {
             login.vars.get("SSH_AUTH_SOCK").map(String::as_str),
             Some("/tmp/agent")
         );
+        assert!(!login.fell_back);
     }
 
     #[tokio::test]
@@ -443,6 +479,7 @@ mod tests {
     #[tokio::test]
     async fn capture_falls_back_to_process_env_when_shell_is_missing() {
         let login = capture_login_env_with("/nonexistent/shell", Duration::from_secs(5)).await;
+        assert!(login.fell_back);
         assert_eq!(login.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
     }
 
@@ -453,6 +490,7 @@ mod tests {
         let started = std::time::Instant::now();
         let login = capture_login_env_with(&shell, Duration::from_millis(300)).await;
         assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(login.fell_back);
         assert_eq!(login.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
     }
 
@@ -461,6 +499,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let shell = fake_shell(dir.path(), "sh-fail", "echo 'PATH=/bad'; exit 3");
         let login = capture_login_env_with(&shell, Duration::from_secs(5)).await;
+        assert!(login.fell_back);
         assert_eq!(login.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
     }
 

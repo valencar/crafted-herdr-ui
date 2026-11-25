@@ -539,12 +539,49 @@ fn core_env(locator: &CoreLocator) -> Vec<(String, String)> {
 /// Refresh core environment (`server restart --fresh`), which gives the new environment to every
 /// terminal the core starts afterwards and so runs with the login shell's (`env::refresh_env`,
 /// Ruling R1). Both only ever run `hc`.
-fn tab_env(args: &[String], login: &crate::env::LoginEnv) -> Vec<(String, String)> {
+/// Refresh is refused when the login shell couldn't be read (`LoginEnv::fell_back`): the
+/// app's own launch environment would replace the core's, which isn't what the confirm promises.
+fn tab_env(
+    args: &[String],
+    login: &crate::env::LoginEnv,
+) -> Result<Vec<(String, String)>, ActionError> {
     if args == REFRESH_ARGS {
-        crate::env::refresh_env(login)
+        check_login_captured(login)?;
+        Ok(crate::env::refresh_env(login))
     } else {
-        crate::env::forwarded_env(login)
+        Ok(crate::env::forwarded_env(login))
     }
+}
+
+fn check_login_captured(login: &crate::env::LoginEnv) -> Result<(), ActionError> {
+    if login.fell_back {
+        return Err(ActionError::invalid(
+            "Couldn’t read your login shell’s environment.",
+        ));
+    }
+    Ok(())
+}
+
+/// The arguments of Refresh core environment, for a core that can and a login environment that
+/// was read.
+fn refresh_request(
+    abilities: crate::state::CoreAbilities,
+    login: &crate::env::LoginEnv,
+) -> Result<Vec<String>, ActionError> {
+    let args = refresh_args(abilities).map_err(ActionError::invalid)?;
+    check_login_captured(login)?;
+    Ok(args)
+}
+
+/// The external launcher's environment isn't the login shell's, and `--fresh` replaces the
+/// core's whole environment with it, so Refresh core environment runs only in a tab here.
+fn refuse_refresh_outside_a_tab(args: &[String]) -> Result<(), ActionError> {
+    if args == REFRESH_ARGS {
+        return Err(ActionError::invalid(
+            "Refresh core environment runs only in a tab here.",
+        ));
+    }
+    Ok(())
 }
 
 /// A target's command for the current core and state.
@@ -633,7 +670,7 @@ pub async fn term_open(
 ) -> Result<TermId, ActionError> {
     let launch = launch_for(&locator, &sync, &target, observe)?;
     let env = match &target {
-        TermTarget::Command { args } => tab_env(args, &locator.login()),
+        TermTarget::Command { args } => tab_env(args, &locator.login())?,
         TermTarget::Terminal { .. } => core_env(&locator),
     };
     let sink: TermSink = Arc::new(move |event| on_event.send(event).is_ok());
@@ -786,6 +823,7 @@ pub async fn open_in_terminal(
     settings: State<'_, SharedSettings>,
     args: Vec<String>,
 ) -> Result<(), ActionError> {
+    refuse_refresh_outside_a_tab(&args)?;
     let launch = term_launch(
         &resolved_core(&locator)?,
         &TermTarget::Command { args },
@@ -992,13 +1030,16 @@ pub fn show_main(app: AppHandle) {
 /// What follows the core in `server restart --fresh`, for the Refresh core environment tab. The
 /// UI asks for a confirmation before it opens the tab; nothing runs here.
 #[tauri::command]
-pub fn core_refresh_args(sync: State<'_, SyncCell>) -> Result<Vec<String>, ActionError> {
+pub fn core_refresh_args(
+    sync: State<'_, SyncCell>,
+    locator: State<'_, CoreLocator>,
+) -> Result<Vec<String>, ActionError> {
     let abilities = sync
         .get()
         .and_then(|s| s.state())
         .map(|s| s.core_abilities)
         .ok_or_else(|| ActionError::invalid("herdr-core is not connected yet."))?;
-    refresh_args(abilities).map_err(ActionError::invalid)
+    refresh_request(abilities, &locator.login())
 }
 
 /// Shows the main window and asks it to confirm Refresh core environment, from the popover or the
@@ -1318,12 +1359,64 @@ mod tests {
         let login =
             crate::env::parse_env_output("PATH=/a\0EDITOR=vim\0HC_TERMINAL_ID=t7\0HC_SCOPE=t7\0");
         let refresh: Vec<String> = REFRESH_ARGS.map(str::to_owned).into();
-        let env = tab_env(&refresh, &login);
+        let env = tab_env(&refresh, &login).unwrap();
         assert_eq!(env, crate::env::refresh_env(&login));
         assert!(env.iter().any(|(k, _)| k == "EDITOR"));
         let other: Vec<String> = ["machine", "login", "buildbox"].map(str::to_owned).into();
-        assert_eq!(tab_env(&other, &login), crate::env::forwarded_env(&login));
-        assert!(!tab_env(&other, &login).iter().any(|(k, _)| k == "EDITOR"));
+        assert_eq!(
+            tab_env(&other, &login).unwrap(),
+            crate::env::forwarded_env(&login)
+        );
+        assert!(
+            !tab_env(&other, &login)
+                .unwrap()
+                .iter()
+                .any(|(k, _)| k == "EDITOR")
+        );
+    }
+
+    fn fell_back() -> crate::env::LoginEnv {
+        crate::env::LoginEnv {
+            fell_back: true,
+            ..crate::env::parse_env_output("PATH=/usr/bin\0")
+        }
+    }
+
+    #[test]
+    fn a_login_shell_that_could_not_be_read_is_never_refreshed_with() {
+        let msg = "Couldn’t read your login shell’s environment.";
+        let refresh: Vec<String> = REFRESH_ARGS.map(str::to_owned).into();
+        let err = tab_env(&refresh, &fell_back()).unwrap_err();
+        assert_eq!(err, ActionError::invalid(msg));
+        // Another command doesn't carry the login environment, so it still opens.
+        let other: Vec<String> = ["machine", "login", "buildbox"].map(str::to_owned).into();
+        assert!(tab_env(&other, &fell_back()).is_ok());
+
+        let able = crate::state::CoreAbilities {
+            refresh_environment: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            refresh_request(able, &fell_back()),
+            Err(ActionError::invalid(msg))
+        );
+        let captured = crate::env::parse_env_output("PATH=/usr/bin\0");
+        assert_eq!(refresh_request(able, &captured), Ok(refresh));
+        // A core that can't refresh is refused first, with its own words.
+        assert!(refresh_request(Default::default(), &captured).is_err());
+    }
+
+    #[test]
+    fn an_external_terminal_never_runs_the_refresh() {
+        let refresh: Vec<String> = REFRESH_ARGS.map(str::to_owned).into();
+        assert_eq!(
+            refuse_refresh_outside_a_tab(&refresh),
+            Err(ActionError::invalid(
+                "Refresh core environment runs only in a tab here."
+            ))
+        );
+        let other: Vec<String> = ["machine", "login", "buildbox"].map(str::to_owned).into();
+        assert_eq!(refuse_refresh_outside_a_tab(&other), Ok(()));
     }
 
     #[test]
