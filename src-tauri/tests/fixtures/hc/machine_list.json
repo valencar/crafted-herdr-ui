@@ -49,7 +49,7 @@
       "state": "needs_update",
       "target": "fly ssh console -a edgebox --pty=false -C",
       "temporary": true,
-      "version": "0.1.22",
+      "version": "0.1.12",
       "via": true
     },
     {
