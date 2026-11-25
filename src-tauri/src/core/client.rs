@@ -68,6 +68,8 @@ pub fn timeout_for(method: &str) -> Duration {
         // The core waits up to three minutes for the person's draft.
         "terminal.send" => Duration::from_secs(200),
         "terminal.interrupt" | "machine.exec" => Duration::from_secs(20),
+        // Up to 8 MB of base64, which the core may have to relay to a remote machine.
+        "terminal.put" => Duration::from_secs(120),
         // Dialing a remote machine can take about 20 s.
         "machine.connect" => Duration::from_secs(30),
         _ => Duration::from_secs(10),
@@ -663,6 +665,7 @@ mod tests {
         assert_eq!(secs("terminal.send"), 200);
         assert_eq!(secs("terminal.interrupt"), 20);
         assert_eq!(secs("machine.exec"), 20);
+        assert_eq!(secs("terminal.put"), 120);
         // A dial to a remote machine can hold the call for about 20 s.
         assert_eq!(secs("machine.connect"), 30);
         assert_eq!(secs("machine.list"), 10);
@@ -716,6 +719,44 @@ mod tests {
         assert_eq!(failed.machine, None, "local is no machine");
         assert_eq!(failed.exit_code, Some(1));
         assert!(failed.error.as_deref().unwrap().contains("no terminal"));
+    }
+
+    #[test]
+    fn put_waits_two_minutes() {
+        assert_eq!(timeout_for("terminal.put"), Duration::from_secs(120));
+    }
+
+    #[tokio::test]
+    async fn a_put_is_logged_without_its_data() {
+        let marker = "SEVSRFJVSVFBTUFSS0VS";
+        let client = CoreClient::new(Arc::new(FnConnector(|| {
+            let (conn, notes, core) = connect(|req| match req["method"].as_str() {
+                Some("hello") => (0, Reply::Result(hello_result())),
+                _ => (
+                    0,
+                    Reply::Error(json!({"code": -32000, "message": "no room",
+                        "data": {"kind": "unavailable", "hint": "try later"}})),
+                ),
+            });
+            Ok((conn.keep_alive(core), notes))
+        })));
+        let data = marker.repeat(40);
+        let err = client
+            .call_long(
+                "buildbox",
+                "terminal.put",
+                json!({"terminal": "t7", "name": "shot.png", "data": data}),
+            )
+            .await
+            .unwrap_err();
+        assert!(!err.to_string().contains(marker), "{err}");
+        let log = client.command_log();
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert_eq!(log[0].method, "terminal.put");
+        assert_eq!(log[0].display, "hc put t7 shot.png # 600 B");
+        assert_eq!(log[0].exit_code, Some(1));
+        let everything = format!("{log:?}");
+        assert!(!everything.contains(marker), "{everything}");
     }
 
     #[tokio::test]
