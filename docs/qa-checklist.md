@@ -383,3 +383,7 @@ herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, i
 - [ ] ⌃V in Claude Code still pastes its own clipboard image (the key reaches the program; the app does nothing).
 - [ ] The overlay appears only over the terminal, not over the sidebar, the tab strip or the split Dashboard column, and clears when the drag leaves the window or is dropped.
 - [ ] With Reduce motion on in System Settings: the overlay and the chip appear with no fade.
+
+### Stops at logout
+
+- [ ] A remote Linux workbox whose user has no linger (core 0.1.22) shows the "stops at logout" badge in the sidebar row, on its Dashboard card, and the warning with a Copy button on its Workbox screen (the copied line is `sudo loginctl enable-linger -- dev`). Run it there yourself; after that it clears within about a minute and ten seconds, with no click. A workbox that is not Linux, or runs an older core, shows nothing.

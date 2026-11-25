@@ -606,6 +606,25 @@ describe("Dashboard", () => {
     expect(within(card("buildbox")).queryByText("Temporary")).toBeNull();
   });
 
+  it("marks_a_card_that_stops_at_logout", () => {
+    const stops = machineView(
+      { id: "edgebox", keepsRunningAfterLogout: false },
+      [],
+    );
+    const keeps = machineView(
+      { id: "gpubox", keepsRunningAfterLogout: true },
+      [],
+    );
+    setup(appState(machine("buildbox"), stops, keeps));
+    const card = (name: string) =>
+      within(section("Workboxes")).getByRole("article", { name });
+    expect(
+      within(card("edgebox")).getByText("stops at logout"),
+    ).toBeInTheDocument();
+    expect(within(card("gpubox")).queryByText("stops at logout")).toBeNull();
+    expect(within(card("buildbox")).queryByText("stops at logout")).toBeNull();
+  });
+
   it("workbox_card_actions_follow_health", async () => {
     const user = setup(
       appState(

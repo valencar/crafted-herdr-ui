@@ -1,5 +1,6 @@
 import { Kbd } from "./Kbd";
 import { HealthDot, StatusDot } from "./StatusDot";
+import { LogoutBadge } from "./LogoutBadge";
 import { TemporaryBadge } from "./TemporaryBadge";
 import { Tooltip } from "./Tooltip";
 import { useWorkboxColorMenu } from "./WorkboxColorMenu";
@@ -15,7 +16,7 @@ import {
   type Group,
 } from "../lib/grouping";
 import { toggleSidebar } from "../lib/uiHelpers";
-import { shownMachines } from "../lib/workbox";
+import { shownMachines, stopsAtLogout } from "../lib/workbox";
 import { useWorkboxColor } from "../lib/workboxColors";
 import { useAppStore } from "../store/appStore";
 import { HomeIcon } from "../terminal/HomeIcon";
@@ -83,7 +84,7 @@ function RailWorkbox({
   onOpen: () => void;
 }) {
   const color = useWorkboxColor(m.id);
-  const label = `${m.name}: ${HEALTH_LABEL[m.health.kind]}${m.temporary ? ", temporary" : ""}`;
+  const label = `${m.name}: ${HEALTH_LABEL[m.health.kind]}${m.temporary ? ", temporary" : ""}${stopsAtLogout(m) ? ", stops at logout" : ""}`;
   return (
     <Tooltip label={label}>
       <button
@@ -322,7 +323,7 @@ export function Sidebar({
       {shown.map((m) => (
         <WorkboxBox key={m.id} machineId={m.id}>
           <Tooltip
-            label={`${m.name}: ${HEALTH_LABEL[m.health.kind]}${m.temporary ? ", temporary" : ""}`}
+            label={`${m.name}: ${HEALTH_LABEL[m.health.kind]}${m.temporary ? ", temporary" : ""}${stopsAtLogout(m) ? ", stops at logout" : ""}`}
             disabled={colorMenu.openId === m.id}
           >
             <button
@@ -335,6 +336,7 @@ export function Sidebar({
               <WorkboxTile machineId={m.id} label={m.name} health={m.health} />
               <span className="nav-label">{m.name}</span>
               {m.temporary && <TemporaryBadge />}
+              {stopsAtLogout(m) && <LogoutBadge />}
               <span className="health" data-health={m.health.kind}>
                 {HEALTH_LABEL[m.health.kind]}
               </span>

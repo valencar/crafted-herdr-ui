@@ -1,6 +1,8 @@
 import { Skeleton } from "./Skeleton";
 import { legendText, StatusBar } from "./StatusBar";
 import { HealthDot } from "./StatusDot";
+import { stopsAtLogout } from "../lib/workbox";
+import { LogoutBadge } from "./LogoutBadge";
 import { TemporaryBadge } from "./TemporaryBadge";
 import { WorkboxTile } from "./WorkboxTile";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -55,6 +57,7 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
             {machine.name}
           </h3>
           {machine.temporary && <TemporaryBadge />}
+          {stopsAtLogout(machine) && <LogoutBadge />}
         </div>
         <span className="health" data-health={kind}>
           <HealthDot health={machine.health} />

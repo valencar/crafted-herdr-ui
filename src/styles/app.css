@@ -1655,6 +1655,49 @@ select.field {
   color: var(--text-2);
   border: 1px solid var(--border-strong);
 }
+.logout-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 1px 7px;
+  color: var(--text-2);
+  border: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+.logout-badge-glyph {
+  flex: none;
+  color: var(--st-needs);
+}
+.logout-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.logout-warning-text {
+  margin: 0;
+  font-size: var(--fs-meta);
+  color: var(--text-2);
+}
+.logout-warning-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.logout-warning-command code {
+  font-size: var(--fs-meta);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 8px;
+  overflow-wrap: anywhere;
+}
 .machine-fixes {
   display: flex;
   flex-wrap: wrap;

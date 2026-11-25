@@ -152,6 +152,35 @@ describe("Sidebar", () => {
     ).toBeInTheDocument();
   });
 
+  it("marks_a_workbox_that_stops_at_logout", () => {
+    const stops = machineView(
+      { id: "edgebox", target: "edgebox", keepsRunningAfterLogout: false },
+      null,
+    );
+    const keeps = machineView(
+      { id: "gpubox", target: "gpubox", keepsRunningAfterLogout: true },
+      null,
+    );
+    const unknown = machineView({ id: "staging", target: "staging" }, null);
+    renderSidebar(false, {
+      machines: [machine("buildbox", "online"), stops, keeps, unknown],
+    });
+    const row = screen.getByRole("button", { name: /^edgebox/ });
+    expect(within(row).getByText("stops at logout")).toBeInTheDocument();
+    for (const name of [/^buildbox/, /^gpubox/, /^staging/]) {
+      const plain = screen.getByRole("button", { name });
+      expect(within(plain).queryByText("stops at logout")).toBeNull();
+    }
+    cleanup();
+    // The rail has no room for words, so its name says so.
+    renderSidebar(true, { machines: [stops] });
+    expect(
+      screen.getByRole("button", {
+        name: "edgebox: Online, stops at logout",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("a_hidden_workbox_is_not_listed_in_either_sidebar", () => {
     const hidden = machine("gpubox", "hidden");
     const machines = [machine("buildbox", "online"), hidden];
