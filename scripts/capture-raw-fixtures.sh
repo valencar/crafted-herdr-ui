@@ -5,8 +5,9 @@
 # src-tauri/tests/fixtures/hc/ and are rewritten with generic names by hand or script.
 #
 # Runs only reads: `hc --version`, `hc schema`, `hc server status`, `hc ls --all`,
-# `hc machine ls`, `hc templates`, a short `hc events` sample, and one `hc connect`
-# conversation (hello, events.subscribe, machine.list, templates.list, doc.get).
+# `hc machine ls`, `hc templates`, `hc server restart --help` (clap answers it before any core
+# starts, and nothing restarts), a short `hc events` sample, and one `hc connect` conversation
+# (hello, terminal.list, events.subscribe, machine.list, templates.list, doc.get).
 # Note: every hc command starts a stopped local core (CLAUDE.md rule 5, the stated exception).
 #
 # It only runs against the sandbox core (CLAUDE.md rule 4), never the person's own:
@@ -96,6 +97,8 @@ capture server_status.json "$hc" server status
 capture ls_all.json "$hc" ls --all --json
 capture machine_ls.json "$hc" machine ls --json
 capture templates.json "$hc" templates --json
+# --help exits in clap before the core is contacted; it never restarts anything.
+capture server_restart_help.txt "$hc" server restart --help
 
 # A few seconds of the live event stream (one JSON line each when piped).
 "$hc" events --json >"$out/events_sample.jsonl" 2>"$out/events_sample.jsonl.stderr" &
@@ -111,7 +114,8 @@ echo "captured events_sample.jsonl"
   printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"machine.list","params":{}}'
   printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"templates.list","params":{}}'
   printf '%s\n' '{"jsonrpc":"2.0","id":4,"method":"doc.get","params":{"name":"herdr-app"}}'
-  printf '%s\n' '{"jsonrpc":"2.0","id":5,"method":"events.subscribe","params":{}}'
+  printf '%s\n' '{"jsonrpc":"2.0","id":5,"method":"terminal.list","params":{}}'
+  printf '%s\n' '{"jsonrpc":"2.0","id":6,"method":"events.subscribe","params":{}}'
   sleep 3
 } | "$hc" connect >"$out/connect_conversation.jsonl" 2>"$out/connect_conversation.jsonl.stderr"
 echo "captured connect_conversation.jsonl"

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crafted_herdr_ui_lib::core::{CoreClient, CoreError, ProcessConnector};
+use crafted_herdr_ui_lib::core::{Connector, CoreClient, CoreError, ProcessConnector, hello};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -44,6 +44,34 @@ fn connects(dir: &TempDir) -> usize {
         .lines()
         .filter(|l| *l == r#"argv ["connect"]"#)
         .count()
+}
+
+#[tokio::test]
+async fn a_0_1_18_core_still_says_hello() {
+    // The 0.1.18 `hello` captured before the 0.1.22 re-capture: the app must still connect to it.
+    let dir = TempDir::new().unwrap();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hc");
+    fs::copy(
+        fixtures.join("hello_0_1_18.json"),
+        dir.path().join("hello.json"),
+    )
+    .unwrap();
+    fixture(&dir, "machine.list.json", &json!({"machines": []}));
+    let connector = Arc::new(ProcessConnector {
+        bin: common::fake_hc_bin(),
+        env: common::fake_hc_env(dir.path()),
+    });
+
+    let client = CoreClient::new(connector.clone());
+    let listed = client
+        .call("local", "machine.list", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed, json!({"machines": []}));
+
+    let (conn, _events) = connector.connect().await.unwrap();
+    let info = hello(&conn).await.unwrap();
+    assert_eq!(info.version, "0.1.18");
 }
 
 #[tokio::test]

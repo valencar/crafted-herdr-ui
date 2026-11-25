@@ -39,9 +39,9 @@ scripts/check-no-personal-data.sh
 scripts/build-site.sh  # project site (site/) → _site/; deployed to GitHub Pages by .github/workflows/pages.yml
 ```
 
-## herdr-core facts the code relies on (verified on hc 0.1.18)
+## herdr-core facts the code relies on (verified on hc 0.1.22)
 
-- Binary: the installer puts `herdr-core` in `~/.local/bin`, and `hc` beside it only if no other `hc` exists. Another program also ships an `hc` (a window-manager client). A binary counts only if `--version` prints `hc X.Y.Z` (`hc 0.1.18` here, from either name).
+- Binary: the installer puts `herdr-core` in `~/.local/bin`, and `hc` beside it only if no other `hc` exists. Another program also ships an `hc` (a window-manager client). A binary counts only if `--version` prints `hc X.Y.Z` (`hc 0.1.22` here, from either name).
 - `hc connect` speaks JSON-RPC 2.0, one message per line, over stdin/stdout. `hello {generation: 1}` returns `version`, `core {id, name}`, `methods`, `features`. A connection that calls `events.subscribe` in plain mode then carries only notifications (a call sent on it later is never answered).
 - `events.subscribe` returns `{seq, terminals}`, then sends `event` notifications, a `heartbeat` every 15 s, and `missed` with a fresh snapshot. Event types: `created`, `lost`, `restarted`, `keep`, `finished`, `removed`, `status`, `turn`, `title`, `labels`, `size`, `foreground`, `doc`. How each one applies is in `schema/README.md` "Events". Terminals on added machines arrive in the same stream as `name/t7`. `seq` restarts with each core process, and a restarted core numbers new terminals with a suffix (`t1b`).
   - A `status` event carries `{status, records, reported}` and no `status_ms`. Snapshots do carry it, and the core stamps it when the root state word changes. So the app stamps its own time on a root-state change.
@@ -53,9 +53,18 @@ scripts/build-site.sh  # project site (site/) → _site/; deployed to GitHub Pag
   - `state` is `connecting`, `connected`, `needs_login`, `needs_update` (the remote hc is incompatible) or `unreachable`.
   - `id` is the other core's permanent id. `name` is what our core calls it, and it can be renamed.
   - `session` is `null` for a default session. `why` and `since_ms` appear only when there's a reason (`since_ms` not while `connecting`).
+  - 0.1.22 adds `keeps_running_after_logout` (bool|null, default null; only a remote Linux/systemd machine says `false`) and `logout_linger_user` (string|null, the account `loginctl enable-linger` would name). Captured: both are `null` on `hello` and `server.status` of the macOS sandbox core. A 0.1.18 core's `machine.list` and `hello` lack both keys (the `hello_0_1_18.json` fixture), so the app reads them with a default; nothing is "Incompatible" for it.
 - Documents: `doc.get {name, on?}` returns `{value, version}`; an unwritten name gives `{value: null, version: 0}`. herdr-app keeps its spaces in the document `herdr-app` on each machine. Snapshots carry terminals only, so documents are re-read after subscribing, after `missed`, and on `doc` events.
 - **Plain mode runs one call at a time per connection.** The core finishes a call before it reads the next line. Only framed mode's channel 0 runs calls side by side. A call to a remote machine that is still dialing can hold its connection for about 20 s.
 - **Starting:** on Unix, `hc connect` (and every `hc` command) starts a stopped local core.
+- **0.1.20 to 0.1.22 additions** (each marked how it was checked):
+  - `terminal.put {terminal, name, data}` (`data` base64, at most 8 MB raw) answers `PutResult {path, bytes}`: the name is reduced to `[A-Za-z0-9._-]` and gets `-2`… when taken, and the file lives in the core's per-terminal folder and goes with the terminal. Captured: the 0.1.22 `hello.methods` lists `terminal.put` and the schema describes it so. Captured too: `hello.features` lists `put_chunks` and `hello.methods` `terminal.put_begin`, `terminal.put_chunk`, `terminal.put_finish` and `terminal.put_abort` (the core's own piecewise path for a direct route; the app calls only `terminal.put`).
+  - `terminal.list` always carries `machines` (and `hidden_finished`) next to `terminals`. Captured.
+  - `hc server restart --fresh` (0.1.20) sends the caller's whole environment as `server.restart {environment}` and needs the `restart_environment` feature. Captured: 0.1.22's `hello.features` **does list `restart_environment`** (the 0.1.18 fixture does not). `server restart --help` is captured in `fixtures-raw/hc/server_restart_help.txt` (`--fresh`: "Take this shell's environment for new terminals; run from a terminal outside Herdr").
+  - A status clears (`null`) when an agent exits back to bash, zsh or fish (0.1.20; upstream CHANGELOG, not captured).
+  - With `restore_screen = true` a kept terminal shows its last screen above the new shell, so `terminal.read` may include it (0.1.21; upstream CHANGELOG, not captured). The preview may show it; no change.
+  - A failed SSH login to a machine is retried after 2 minutes, then 5, then every 10 (0.1.21; upstream CHANGELOG, not captured).
+  - `hello` also carries `login_session {gui, id, user}` (captured; the app ignores it). `events.subscribe` takes a `docs` list of document names (a name ending in `*` is a prefix; 0.1.22, from the schema; the app subscribes without it and hears every document).
 - **`terminal.read {lines}`** returns `{complete, how, text}`: the screen plus `lines` of history above it. With `lines > 0` on a full-screen program that is idle or done, core scrolls the program to read its history: it holds keystrokes and repaints every viewer while it does (upstream `SKILL.md`: "History reads may scroll a full-screen app, then restore its view"). The app only ever reads with `lines: 0`.
 - **`templates.list` is local only** (an `on` param is ignored). A remote machine resolves template names itself. A broken template is listed with an `error`.
 - **Names** (terminals, machines): 1–32 of `a-z 0-9 - _ .`, starting with a letter or digit, and not shaped like an address (`t7`, `t1b`).

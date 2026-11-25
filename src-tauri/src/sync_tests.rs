@@ -421,7 +421,7 @@ async fn builds_state_from_subscribe_and_machine_list() {
     let h = Harness::new().up().await;
     let state = h.state();
     assert_eq!(state.core_state, CoreState::Ready);
-    assert_eq!(state.core_version.as_deref(), Some("0.1.18"));
+    assert_eq!(state.core_version.as_deref(), Some("0.1.22"));
 
     // Local first, then the list's order.
     let ids: Vec<&str> = state.machines.iter().map(|m| m.id.as_str()).collect();
@@ -431,7 +431,7 @@ async fn builds_state_from_subscribe_and_machine_list() {
     assert_eq!(local.name, "Local");
     assert!(local.is_local);
     assert_eq!(local.host.as_deref(), Some("workstation"));
-    assert_eq!(local.hc_version.as_deref(), Some("0.1.18"));
+    assert_eq!(local.hc_version.as_deref(), Some("0.1.22"));
     assert_eq!(local.health, Health::Online);
     assert_eq!(local.terminals.len(), 8);
 
@@ -453,7 +453,7 @@ async fn builds_state_from_subscribe_and_machine_list() {
     assert_eq!(buildbox.name, "buildbox");
     assert_eq!(buildbox.health, Health::Online);
     assert_eq!(buildbox.target.as_deref(), Some("dev@buildbox.example"));
-    assert_eq!(buildbox.hc_version.as_deref(), Some("0.1.18"));
+    assert_eq!(buildbox.hc_version.as_deref(), Some("0.1.22"));
     assert_eq!(addresses(&state, BUILDBOX), ["t2", "t3", "t4"]);
 
     // The core's own word for each machine, and the flags the Workbox screen shows. Local has

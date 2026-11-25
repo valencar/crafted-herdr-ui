@@ -946,7 +946,7 @@ mod tests {
         assert_eq!(by("gpubox").since_ms, None);
         assert_eq!(by("staging").since_ms, Some(1767225917311));
         assert!(by("edgebox").temporary && by("edgebox").via);
-        assert_eq!(by("edgebox").version, "0.1.12");
+        assert_eq!(by("edgebox").version, "0.1.22");
         assert!(
             by("devbox")
                 .why

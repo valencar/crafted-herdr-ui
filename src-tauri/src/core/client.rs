@@ -568,7 +568,7 @@ mod tests {
             (0, Reply::Result(hello_result()))
         });
         let info = hello(&conn).await.unwrap();
-        assert_eq!(info.version, "0.1.18");
+        assert_eq!(info.version, "0.1.22");
         assert_eq!(info.core_id, "000000000000000000000000c0de0001");
         assert_eq!(info.core_display_name, "workstation");
         assert!(info.features.contains(&"events".to_owned()));
@@ -1046,7 +1046,7 @@ mod tests {
     async fn open_events_returns_a_fresh_connection_after_hello() {
         let client = client();
         let (conn, _notes, info) = client.open_events().await.unwrap();
-        assert_eq!(info.version, "0.1.18");
+        assert_eq!(info.version, "0.1.22");
         assert!(!conn.is_closed());
         assert!(client.command_log().is_empty());
     }

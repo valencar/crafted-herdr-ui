@@ -361,7 +361,7 @@ export function appState(
 ): AppState {
   return {
     machines: machines.map(([m, terms]) => machineView(m, terms)),
-    core_version: opts.version === undefined ? "0.1.18" : opts.version,
+    core_version: opts.version === undefined ? "0.1.22" : opts.version,
     core_path: opts.path === undefined ? "/home/dev/.local/bin/hc" : opts.path,
     // No path means the core was not found; startup says so with `notFound`.
     core_state: opts.path === null ? { kind: "notFound" } : { kind: "ready" },

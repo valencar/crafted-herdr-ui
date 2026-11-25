@@ -20,5 +20,5 @@ fn fake_hc_runs_under_a_cleared_env() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "hc 0.1.17\n");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "hc 0.1.22\n");
 }
