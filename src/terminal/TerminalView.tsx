@@ -20,6 +20,10 @@ import { rowKeyOf, useTerminalStore, type TermTab } from "./terminalStore";
 import { TermBar } from "./TermBar";
 import { modalOpen } from "./modal";
 import { useRowsByKey } from "./tabInfo";
+import { DropOverlay } from "./DropOverlay";
+import { SendingChip } from "./SendingChip";
+import { dropLabel, sendMode } from "./fileSend";
+import { useFileSend } from "./useFileSend";
 import { useTermSession } from "./useTermSession";
 import { copyFromTerminal, registerOscClipboard } from "./oscClipboard";
 import { terminalFont } from "./terminalFonts";
@@ -323,6 +327,11 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
   // or remote). The pane is "gone" only when its workbox has a list to look in and it is not on it.
   const rows = useRowsByKey();
   const row = rows.get(rowKeyOf(tab.tabKey));
+  // Files dropped from Finder and images pasted into the terminal; the overlay and the chip are
+  // drawn below. The overlay's words come from the same mode the hook acts on.
+  const { drag, sending } = useFileSend({ tab, active, termRef, hostRef });
+  const canPut = useAppStore((s) => s.state?.core_abilities.put_files ?? false);
+  const dropWords = dropLabel(sendMode(tab, row, canPut), tab.machineLabel);
   const machine = useAppStore((s) =>
     s.state?.machines.find((m) => m.id === tab.target.machineId),
   );
@@ -406,6 +415,8 @@ export function TerminalView({ tab, active, fontSize, font, ref }: Props) {
   return (
     <div className="term-view" hidden={!active}>
       <div className="term-host" ref={hostRef} />
+      <DropOverlay drag={drag} label={dropWords} />
+      <SendingChip sending={sending} />
       {bar && (
         <TermBar
           tab={tab}

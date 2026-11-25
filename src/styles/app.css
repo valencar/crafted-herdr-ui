@@ -2108,6 +2108,49 @@ select.field {
   gap: 8px;
 }
 
+/* A file dragged over the terminal: a veil over the host that says where it would go. It takes no
+   pointer events, so it never gets in the way of the drag or of the terminal under it. */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  border: 2px dashed var(--focus);
+  color: var(--text);
+  font-size: var(--fs-body);
+  pointer-events: none;
+  animation: enter-fade var(--dur-fast) var(--ease-out);
+}
+/* A refusal is told by its words and its solid, muted border, never by color alone. */
+.drop-overlay.is-refused {
+  border-style: solid;
+  border-color: var(--border-strong);
+  color: var(--text-2);
+}
+/* The file on its way, in the corner over the last rows. */
+.sending-chip {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 3;
+  max-width: calc(100% - 28px);
+  padding: 6px 12px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: var(--fs-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: enter-fade var(--dur-fast) var(--ease-out);
+}
+
 /* ---------- workspace ---------- */
 
 /* The middle of the window: the tab strip, then the active tab at full size. It fills what the

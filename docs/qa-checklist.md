@@ -372,9 +372,14 @@ herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, i
 - [ ] An agent exits back to the shell (quit Claude or another agent in a sandbox-core terminal, so the shell prompt is back): within a moment its row stops showing the agent's last status (core 0.1.20 clears it), and nothing else about the row breaks.
 - [ ] `restore_screen = true` on the sandbox core only (set it in the sandbox's config dir, never your own), with a kept terminal live there (a New session you made with keep on). Restart the *sandbox* core the way the v0.9 "Deliberate stop" item does, never `hc server restart`: run `hc server stop` in the sandbox session (`HC_SESSION=herdr-ui-qa` and its own `XDG_*` dirs), then press Reconnect in the app. The kept terminal comes back with its last screen above the new shell: the Inspector's preview shows the restored screen and nothing breaks (no error, no layout jump).
 
-### Sending files (`put_files`; the UI that calls it lands in a later task)
+### Sending files (`put_files`)
 
 - [ ] Drop a file from Finder onto a terminal tab of a remote workbox (core 0.1.22 on both ends): it lands on the remote machine (`herdr-core/files/<terminal>/` under its state dir), its path is typed at the prompt, and the command log shows `hc put buildbox/t7 <name> # <size>` with no file contents.
 - [ ] Drop a file over 8 MB: the toast says `{name} is over 8 MB; herdr-core can’t send it.` and nothing is typed. Drop a folder: `{name} is a folder; only files can be sent to {workbox}`.
 - [ ] Drop two files, one a folder: the whole drop is refused and the file is not sent either.
 - [ ] Drop a file on each quadrant of the terminal (top-left, top-right, bottom-left, bottom-right) and on the Dashboard split column beside it (⌘\), on a Retina and on a non-Retina display: only a drop inside the terminal acts (the overlay shows and the path is typed), a drop on the split column, the tab strip or the sidebar does nothing, and the overlay follows the pointer's edge exactly.
+- [ ] A real Finder drop on a local tab types the quoted path with a trailing space and no Enter; on a remote tab the file lands there first and its path is typed. The overlay says "Drop to type the path" (local) or "Drop to send to {workbox}" (remote), and "Can’t send files to this terminal" on a Watch tab or one that is detached.
+- [ ] Copy a screenshot with ⌃⇧⌘4 and paste it with ⌘V on a local and on a remote tab: the "Sending paste-….png…" chip shows while it goes, one path is typed. ⌘V of a screenshot types one path, not also garbage or an empty paste.
+- [ ] ⌃V in Claude Code still pastes its own clipboard image (the key reaches the program; the app does nothing).
+- [ ] The overlay appears only over the terminal, not over the sidebar, the tab strip or the split Dashboard column, and clears when the drag leaves the window or is dropped.
+- [ ] With Reduce motion on in System Settings: the overlay and the chip appear with no fade.

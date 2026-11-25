@@ -36,6 +36,7 @@
     "allow-open-settings",
     "allow-preview-add-machine",
     "allow-preview-new-session",
+    "allow-put-files",
     "allow-read-tail",
     "allow-reconnect-core",
     "allow-refresh-now",
