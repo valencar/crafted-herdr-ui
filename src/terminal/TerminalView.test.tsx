@@ -1,5 +1,11 @@
 import { createRef, useEffect, useState } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TermEvent } from "../lib/bindings/TermEvent";
@@ -2372,15 +2378,16 @@ describe("TerminalView", () => {
       const xtermHeard = vi.fn();
       textarea.addEventListener("paste", xtermHeard);
       const event = imagePaste();
-      await act(async () => {
+      act(() => {
         textarea.dispatchEvent(event);
-        await new Promise((r) => setTimeout(r, 0));
       });
       expect(event.defaultPrevented).toBe(true);
       expect(xtermHeard).not.toHaveBeenCalled();
+      // The image is read with a FileReader, which jsdom finishes on its own schedule (under load
+      // it can be after any fixed pause), so wait for what the send ends with: the typed path.
+      await waitFor(() => expect(term().paste).toHaveBeenCalledTimes(1));
       expect(h.putFiles).toHaveBeenCalledTimes(1);
       // What xterm was driven with: only the path, once, as its own paste.
-      expect(term().paste).toHaveBeenCalledTimes(1);
       expect(term().paste).toHaveBeenCalledWith("'/home/dev/a.png' ");
       expect(invoke).not.toHaveBeenCalledWith("term_write", expect.anything());
     });
