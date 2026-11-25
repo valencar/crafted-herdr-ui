@@ -3515,6 +3515,12 @@ select.field {
   gap: 4px 8px;
   min-width: 0;
 }
+.wb-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .wb-card-name {
   min-width: 0;
   overflow-wrap: anywhere;

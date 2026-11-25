@@ -52,10 +52,17 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
     >
       <div className="wb-card-head">
         <div className="wb-card-id">
-          <WorkboxTile size="sm" machineId={machine.id} label={machine.name} />
-          <h3 id={headingId} className="wb-card-name mono">
-            {machine.name}
-          </h3>
+          {/* The tile and the name are one unit that never wraps apart; only the badges drop. */}
+          <div className="wb-card-title">
+            <WorkboxTile
+              size="sm"
+              machineId={machine.id}
+              label={machine.name}
+            />
+            <h3 id={headingId} className="wb-card-name mono">
+              {machine.name}
+            </h3>
+          </div>
           {machine.temporary && <TemporaryBadge />}
           {stopsAtLogout(machine) && <LogoutBadge />}
         </div>
