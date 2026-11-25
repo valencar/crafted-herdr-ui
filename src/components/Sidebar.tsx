@@ -328,19 +328,24 @@ export function Sidebar({
           >
             <button
               type="button"
-              className="nav-item"
+              className={`nav-item${m.temporary || stopsAtLogout(m) ? " has-badges" : ""}`}
               aria-current={m.id === activeWorkbox ? "page" : undefined}
               onClick={() => onWorkbox(m.id)}
               onContextMenu={colorMenu.onContextMenu(m.id, m.name)}
             >
               <WorkboxTile machineId={m.id} label={m.name} health={m.health} />
               <span className="nav-label">{m.name}</span>
-              {m.temporary && <TemporaryBadge />}
-              {stopsAtLogout(m) && <LogoutBadge />}
               <span className="health" data-health={m.health.kind}>
                 {HEALTH_LABEL[m.health.kind]}
               </span>
               <span className="count">{agentsByMachine.get(m.id) ?? 0}</span>
+              {/* The badges can't fit beside the name in 220px: their own line under it. */}
+              {(m.temporary || stopsAtLogout(m)) && (
+                <span className="nav-badges">
+                  {m.temporary && <TemporaryBadge />}
+                  {stopsAtLogout(m) && <LogoutBadge />}
+                </span>
+              )}
             </button>
           </Tooltip>
           {(tabsByMachine.get(m.id) ?? []).map((tab) => {

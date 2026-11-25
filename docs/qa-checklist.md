@@ -387,3 +387,5 @@ herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, i
 ### Stops at logout
 
 - [ ] A remote Linux workbox whose user has no linger (core 0.1.22) shows the "stops at logout" badge in the sidebar row, on its Dashboard card, and the warning with a Copy button on its Workbox screen (the copied line is `sudo loginctl enable-linger -- dev`). Run it there yourself; after that it clears within about a minute and ten seconds, with no click. A workbox that is not Linux, or runs an older core, shows nothing.
+- [ ] A workbox with "stops at logout" (and Temporary too) keeps its name readable in the 220px sidebar: the badges sit on their own line under the name, and nothing scrolls sideways.
+- [ ] Its Dashboard card at the narrowest width (260px per card) shows the badges without covering the health label: they wrap under the name.

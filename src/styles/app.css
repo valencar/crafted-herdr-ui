@@ -489,6 +489,20 @@ kbd {
     color var(--dur-fast),
     border-color var(--dur-fast);
 }
+/* A workbox row with badges: the badges get a line of their own, under the name. */
+.nav-item.has-badges {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.nav-badges {
+  flex: 0 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+  /* Under the name: the tile's 20px and the row's 10px gap. */
+  padding-left: 30px;
+}
 .nav-item[aria-current="page"] {
   background: var(--selected);
 }
@@ -3496,11 +3510,14 @@ select.field {
 }
 .wb-card-id {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   min-width: 0;
 }
 .wb-card-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: var(--fs-body);
   font-weight: 600;
