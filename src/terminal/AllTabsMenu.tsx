@@ -3,7 +3,7 @@ import { StatusDot } from "../components/StatusDot";
 import type { Row } from "../lib/grouping";
 import { useMenuBehavior } from "../lib/useMenuBehavior";
 import { HomeIcon } from "./HomeIcon";
-import { tabDotStatus, tabName, tabStatus } from "./tabInfo";
+import { tabDotStatus, tabName, tabStatus, tabTitle } from "./tabInfo";
 import type { TabGroup } from "./tabOrder";
 import { HOME, rowKeyOf } from "./terminalStore";
 
@@ -101,7 +101,9 @@ export function AllTabsMenu({
                     onClick={() => choose(tab.tabKey)}
                   >
                     <StatusDot status={tabDotStatus(tab, row)} />
-                    <span className="mono menu-tab-title">{tab.title}</span>
+                    <span className="mono menu-tab-title">
+                      {tabTitle(tab, row)}
+                    </span>
                     {words && <span className="muted">{words}</span>}
                   </button>
                 );

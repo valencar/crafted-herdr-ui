@@ -19,6 +19,7 @@ import {
   countNeeds,
   tabDotStatus,
   tabName,
+  tabTitle,
   tabStatus,
   tabSubline,
 } from "./tabInfo";
@@ -151,7 +152,9 @@ export function SessionRow({
                     }}
                   >
                     <StatusDot status={tabDotStatus(tab, row)} live />
-                    <span className="mono session-tab-title">{tab.title}</span>
+                    <span className="mono session-tab-title">
+                      {tabTitle(tab, row)}
+                    </span>
                     {sub && (
                       <span
                         className="session-tab-sub"
@@ -171,7 +174,7 @@ export function SessionRow({
                 <button
                   type="button"
                   className="icon-btn"
-                  aria-label={`Close tab ${tab.title}`}
+                  aria-label={`Close tab ${tabTitle(tab, row)}`}
                   onClick={() => closeTab(tab.tabKey)}
                 >
                   ×

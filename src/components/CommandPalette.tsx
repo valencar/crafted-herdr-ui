@@ -29,7 +29,7 @@ import {
   useTerminals,
 } from "../lib/uiHelpers";
 import { useAppStore, useModalOpen } from "../store/appStore";
-import { tabStatus, useRowsByKey } from "../terminal/tabInfo";
+import { tabStatus, tabTitle, useRowsByKey } from "../terminal/tabInfo";
 import { stripOrder, tabShortcut } from "../terminal/tabOrder";
 import { rowKeyOf, useTerminalStore } from "../terminal/terminalStore";
 
@@ -277,7 +277,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         const n = tabShortcut(tab.tabKey, tabs, machines ?? []);
         return {
           key: tab.tabKey,
-          title: tab.title,
+          title: tabTitle(tab, row ?? undefined),
           detail: [tab.machineLabel, words].filter(Boolean).join(" · "),
           shortcut: n === null ? null : tabShortcutId(n),
           row,

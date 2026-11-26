@@ -45,12 +45,22 @@ export function tabStatus(tab: TermTab, row: Row | undefined): string | null {
   return row && isNeedsYou(row) ? `${state} · ${rowLabel}` : state;
 }
 
+/**
+ * What a tab is called: its row's live name (`displayName`: the name, then Herdr's tab name, then
+ * the core title), so it follows an agent that sets a title; a Watch tab adds " (watching)". A
+ * tab with no row (a command tab, a terminal gone from the list) keeps the title it opened with.
+ * Every place that shows a tab's name uses this, so they agree.
+ */
+export function tabTitle(tab: TermTab, row: Row | undefined): string {
+  if (!row) return tab.title;
+  return tab.observe ? `${row.name} (watching)` : row.name;
+}
+
 /** The accessible name of a tab: "{title}, {status words}", else "{title} on {workbox}". */
 export function tabName(tab: TermTab, row: Row | undefined): string {
+  const title = tabTitle(tab, row);
   const words = tabStatus(tab, row);
-  return words
-    ? `${tab.title}, ${words}`
-    : `${tab.title} on ${tab.machineLabel}`;
+  return words ? `${title}, ${words}` : `${title} on ${tab.machineLabel}`;
 }
 
 /** What the dot's colour stands for: the agent's status while live, else the session state (a failed one is `failed`, never an agent's `error`). */

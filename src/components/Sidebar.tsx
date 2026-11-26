@@ -23,6 +23,7 @@ import { HomeIcon } from "../terminal/HomeIcon";
 import {
   tabDotStatus,
   tabName,
+  tabTitle,
   tabTreeName,
   useRowsByKey,
 } from "../terminal/tabInfo";
@@ -362,7 +363,7 @@ export function Sidebar({
                   onClick={() => activate(tab.tabKey)}
                 >
                   <StatusDot status={tabDotStatus(tab, row)} live />
-                  <span className="mono">{tab.title}</span>
+                  <span className="mono">{tabTitle(tab, row)}</span>
                   {shortcut !== null && <HintSlot shortcut={shortcut} />}
                 </button>
               </Tooltip>

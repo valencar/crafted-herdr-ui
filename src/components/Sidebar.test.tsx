@@ -316,8 +316,8 @@ describe("Sidebar", () => {
     useAppStore.setState({
       state: { ...buildState([]), machines },
     });
-    openTab("w1:p1", "agent w1:p1");
-    openTab("w2:p1", "agent w2:p1");
+    openTab("w1:p1", "planner");
+    openTab("w2:p1", "tester");
     act(() =>
       useTerminalStore.getState().openTab({
         tabKey: "gpubox::t9",
@@ -335,11 +335,11 @@ describe("Sidebar", () => {
     const nav = screen.getByRole("navigation", { name: "Sidebar" });
     const terms = [...nav.querySelectorAll<HTMLElement>("button.nav-term")];
     expect(terms.map((t) => t.getAttribute("aria-label"))).toEqual([
-      "agent w1:p1, Needs input, terminal tab",
-      "agent w2:p1, Done, unseen, terminal tab",
+      "planner, Needs input, terminal tab",
+      "tester, Done, unseen, terminal tab",
       "herdr on gpubox, terminal tab",
     ]);
-    expect(terms[0].querySelector(".mono")).toHaveTextContent("agent w1:p1");
+    expect(terms[0].querySelector(".mono")).toHaveTextContent("planner");
     expect(terms[0].querySelector(".sdot")).toHaveAttribute(
       "data-status",
       "blocked",
@@ -361,11 +361,11 @@ describe("Sidebar", () => {
     useAppStore.setState({
       state: { ...buildState([]), machines },
     });
-    openTab("w2:p2", "agent w2:p2");
+    openTab("w2:p2", "claude");
     renderSidebar(false, { machines });
     expect(
       screen.getByRole("button", {
-        name: "agent w2:p2, Opening…, terminal tab",
+        name: "claude, Opening…, terminal tab",
       }),
     ).toBeInTheDocument();
   });
@@ -375,14 +375,15 @@ describe("Sidebar", () => {
     useAppStore.setState({
       state: { ...buildState([]), machines },
     });
-    openTab("w1:p1", "agent w1:p1");
-    openTab("w2:p1", "agent w2:p1");
+    openTab("w1:p1", "planner");
+    openTab("w2:p1", "tester");
     renderSidebar(false, { machines });
+    expect(screen.getByRole("button", { name: /^tester,/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(
-      screen.getByRole("button", { name: /^agent w2:p1,/ }),
-    ).toHaveAttribute("aria-current", "page");
-    expect(
-      screen.getByRole("button", { name: /^agent w1:p1,/ }),
+      screen.getByRole("button", { name: /^planner,/ }),
     ).not.toHaveAttribute("aria-current");
   });
 
@@ -391,13 +392,13 @@ describe("Sidebar", () => {
     useAppStore.setState({
       state: { ...buildState([]), machines },
     });
-    openTab("w1:p1", "agent w1:p1");
-    openTab("w2:p1", "agent w2:p1");
+    openTab("w1:p1", "planner");
+    openTab("w2:p1", "tester");
     act(() => useTerminalStore.getState().activate(HOME));
     renderSidebar(false, { machines });
     await userEvent
       .setup()
-      .click(screen.getByRole("button", { name: /^agent w1:p1,/ }));
+      .click(screen.getByRole("button", { name: /^planner,/ }));
     expect(useTerminalStore.getState().activeKey).toBe("buildbox::w1:p1");
   });
 
@@ -546,7 +547,7 @@ describe("Sidebar", () => {
     useAppStore.setState({
       state: { ...buildState([]), machines },
     });
-    openTab("w1:p1", "agent w1:p1");
+    openTab("w1:p1", "planner");
     renderSidebar(true, { machines });
     const rail = screen.getByRole("navigation", { name: "Sidebar" });
     expect(
@@ -582,7 +583,7 @@ describe("Sidebar", () => {
 
   it("rail_does_not_show_nested_terminals", () => {
     const machines = [withSnapshot("buildbox")];
-    openTab("w1:p1", "agent w1:p1");
+    openTab("w1:p1", "planner");
     renderSidebar(true, { machines });
     expect(
       screen
@@ -606,8 +607,8 @@ describe("Sidebar", () => {
     useAppStore.setState({
       state: { ...buildState([]), machines },
     });
-    openTab("w1:p1", "agent w1:p1");
-    openTab("w2:p1", "agent w2:p1");
+    openTab("w1:p1", "planner");
+    openTab("w2:p1", "tester");
     renderSidebar(false, { machines });
     const nav = screen.getByRole("navigation", { name: "Sidebar" });
     const terms = [...nav.querySelectorAll<HTMLElement>("button.nav-term")];
@@ -623,7 +624,7 @@ describe("Sidebar", () => {
     useAppStore.setState({
       state: { ...buildState([]), machines },
     });
-    openTab("w1:p1", "agent w1:p1");
+    openTab("w1:p1", "planner");
     const projects = [project("api-service")];
     const { unmount } = renderSidebar(false, { machines, projects });
     expect(document.querySelectorAll("[title]")).toHaveLength(0);
@@ -658,14 +659,14 @@ describe("Sidebar", () => {
       useAppStore.setState({
         state: { ...buildState([]), machines },
       });
-      openTab("w1:p1", "agent w1:p1");
-      openTab("w2:p1", "agent w2:p1");
+      openTab("w1:p1", "planner");
+      openTab("w2:p1", "tester");
       act(() => useTerminalStore.getState().activate(HOME));
       renderSidebar(false, { machines });
       scroll.mockClear();
       act(() => useTerminalStore.getState().activate("buildbox::w1:p1"));
       expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
-      const row = screen.getByRole("button", { name: /^agent w1:p1,/ });
+      const row = screen.getByRole("button", { name: /^planner,/ });
       expect(row).toHaveAttribute("aria-current", "page");
       expect(scroll.mock.contexts[scroll.mock.contexts.length - 1]).toBe(row);
     } finally {
@@ -721,11 +722,18 @@ describe("Sidebar", () => {
     });
 
     it("a_terminal_row_tooltip_has_its_title_and_status", () => {
-      const machines = [withSnapshot("buildbox")];
+      const long = "a-very-long-agent-title-that-fades-at-the-edge";
+      // The tab's name is its row's, so the long title is the row's name.
+      const machines = [
+        machineView(
+          { id: "buildbox", target: "buildbox", lastOkMs: null },
+          buildboxTerms({ "w1:p1": { name: long } }),
+        ),
+      ];
       useAppStore.setState({
         state: { ...buildState([]), machines },
       });
-      openTab("w1:p1", "a-very-long-agent-title-that-fades-at-the-edge");
+      openTab("w1:p1", long);
       act(() =>
         useTerminalStore
           .getState()
