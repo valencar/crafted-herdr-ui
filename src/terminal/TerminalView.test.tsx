@@ -2293,7 +2293,14 @@ describe("TerminalView", () => {
         }),
       );
     const hover = (type: "enter" | "leave", x = 100, y = 100) =>
-      act(() => h.drop?.({ type, paths: [], x, y }));
+      act(() =>
+        h.drop?.({
+          type,
+          paths: type === "enter" ? ["/Users/dev/a.txt"] : [],
+          x,
+          y,
+        }),
+      );
     const png = () =>
       new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" });
     /** A paste event carrying `files` and no text, as ⌘V of a screenshot makes. */
@@ -2386,6 +2393,8 @@ describe("TerminalView", () => {
       // The image is read with a FileReader, which jsdom finishes on its own schedule (under load
       // it can be after any fixed pause), so wait for what the send ends with: the typed path.
       await waitFor(() => expect(term().paste).toHaveBeenCalledTimes(1));
+      // A late synthetic paste would have arrived by now.
+      expect(xtermHeard).not.toHaveBeenCalled();
       expect(h.putFiles).toHaveBeenCalledTimes(1);
       // What xterm was driven with: only the path, once, as its own paste.
       expect(term().paste).toHaveBeenCalledWith("'/home/dev/a.png' ");

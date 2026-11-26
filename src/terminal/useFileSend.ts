@@ -20,6 +20,7 @@ import { useRowsByKey } from "./tabInfo";
 const STILL_SENDING = "Still sending files to this terminal.";
 const LINE_BREAK = "A path with a line break can’t be typed.";
 const UNREADABLE_IMAGE = "The pasted image couldn’t be read.";
+const SESSION_CHANGED = "The terminal changed while sending; nothing was typed.";
 
 type Props = {
   tab: TermTab;
@@ -110,6 +111,7 @@ export function useFileSend({ tab, active, termRef, hostRef }: Props): {
         },
       );
       if (sessionOf(from.tabKey) === started) typeAnswered(paths);
+      else toast(SESSION_CHANGED, "info");
     } catch (e) {
       const err = e as ActionError;
       toast(
@@ -125,6 +127,9 @@ export function useFileSend({ tab, active, termRef, hostRef }: Props): {
     if (!active) return;
     let off: (() => void) | undefined;
     let stopped = false;
+    // Whether the drag in progress carries files: only `enter` reports paths (`over` never
+    // does), and wry fires both for text and URLs too, which need no overlay and drop nothing.
+    let hasFiles = true;
     const inside = (x: number, y: number): boolean => {
       const r = hostRef.current?.getBoundingClientRect();
       return (
@@ -139,12 +144,18 @@ export function useFileSend({ tab, active, termRef, hostRef }: Props): {
     void onFileDrop((e) => {
       // Between this effect's cleanup and the unlisten answering, the old listener is still there.
       if (stopped) return;
-      if (e.type === "leave") return setDrag("none");
+      if (e.type === "enter") hasFiles = e.paths.length > 0;
+      if (e.type === "leave") {
+        hasFiles = true;
+        return setDrag("none");
+      }
       if (!inside(e.x, e.y)) return setDrag("none");
       const { mode } = latest.current;
       if (e.type !== "drop") {
+        if (!hasFiles) return setDrag("none");
         return setDrag(mode.drop === "off" ? "refuse" : "accept");
       }
+      hasFiles = true;
       setDrag("none");
       if (mode.drop === "off" || e.paths.length === 0) return;
       // A control character refuses the whole drop, typed or sent.

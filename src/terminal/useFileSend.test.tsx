@@ -95,8 +95,13 @@ const drop = (paths: string[], x = 100, y = 100) =>
     h.drop?.({ type: "drop", paths, x, y });
     await Promise.resolve();
   });
-const hover = (type: "enter" | "over" | "leave", x = 100, y = 100) =>
-  act(() => h.drop?.({ type: type, paths: [], x, y }));
+/** Only `enter` (and `drop`) carry paths, as wry reports them; `over` never does. */
+const hover = (
+  type: "enter" | "over" | "leave",
+  x = 100,
+  y = 100,
+  paths: string[] = type === "enter" ? ["/Users/dev/a.txt"] : [],
+) => act(() => h.drop?.({ type: type, paths, x, y }));
 
 /** A paste event that carries `files` and, if given, plain text. */
 function pasteEvent(files: File[], text?: string): ClipboardEvent {
@@ -405,6 +410,10 @@ describe("useFileSend", () => {
     );
     await act(async () => finish({ paths: ["/home/dev/.cache/a.png"] }));
     expect(paste).not.toHaveBeenCalled();
+    expect(useAppStore.getState().toast).toBe(
+      "The terminal changed while sending; nothing was typed.",
+    );
+    expect(useAppStore.getState().toastTone).toBe("info");
   });
 
   it("types_nothing_when_the_tab_was_closed", async () => {
@@ -468,6 +477,24 @@ describe("useFileSend", () => {
     expect(result.current.drag).toBe("accept");
     await hover("leave");
     expect(result.current.drag).toBe("none");
+  });
+
+  it("shows_no_overlay_for_a_drag_that_carries_no_files", async () => {
+    const { result, paste } = setup(openTab("local"));
+    // Text or a URL dragged over the window: wry still fires enter and over, with no paths.
+    await hover("enter", 100, 100, []);
+    expect(result.current.drag).toBe("none");
+    await hover("over");
+    expect(result.current.drag).toBe("none");
+    await drop([]);
+    expect(result.current.drag).toBe("none");
+    expect(paste).not.toHaveBeenCalled();
+    expect(h.putFiles).not.toHaveBeenCalled();
+    // The next drag carries files and is welcomed again.
+    await hover("enter");
+    expect(result.current.drag).toBe("accept");
+    await hover("over");
+    expect(result.current.drag).toBe("accept");
   });
 
   it("listens_only_while_active", async () => {
