@@ -1,6 +1,8 @@
 import { Skeleton } from "./Skeleton";
 import { legendText, StatusBar } from "./StatusBar";
 import { HealthDot } from "./StatusDot";
+import { needsLogin, stopsAtLogout } from "../lib/workbox";
+import { LogoutBadge } from "./LogoutBadge";
 import { TemporaryBadge } from "./TemporaryBadge";
 import { WorkboxTile } from "./WorkboxTile";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -16,6 +18,7 @@ import {
 import type { Row } from "../lib/grouping";
 import { invokeTyped } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
+import { openMachineCommand } from "../terminal/commandTabs";
 import { useId } from "react";
 
 type Props = {
@@ -34,6 +37,7 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
   // The first connect: nothing is known yet, so the card holds its shape with placeholders.
   const pending = isPending(machine.health);
   const stale = kind !== "online";
+  const retryable = kind === "reconnecting" || kind === "attention";
   const counts = statusCounts(rows);
   // An online workbox is live on the event stream, but `last_ok_ms` is when it last looked
   // healthy, so its age says nothing about freshness: say "Up to date" instead. A
@@ -50,11 +54,19 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
     >
       <div className="wb-card-head">
         <div className="wb-card-id">
-          <WorkboxTile size="sm" machineId={machine.id} label={machine.name} />
-          <h3 id={headingId} className="wb-card-name mono">
-            {machine.name}
-          </h3>
+          {/* The tile and the name are one unit that never wraps apart; only the badges drop. */}
+          <div className="wb-card-title">
+            <WorkboxTile
+              size="sm"
+              machineId={machine.id}
+              label={machine.name}
+            />
+            <h3 id={headingId} className="wb-card-name mono">
+              {machine.name}
+            </h3>
+          </div>
           {machine.temporary && <TemporaryBadge />}
+          {stopsAtLogout(machine) && <LogoutBadge />}
         </div>
         <span className="health" data-health={kind}>
           <HealthDot health={machine.health} />
@@ -82,22 +94,32 @@ export function WorkboxCard({ machine, rows, tabCount, nowMs }: Props) {
           </div>
         </>
       )}
-      {(kind === "reconnecting" || kind === "attention") && (
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() =>
-            // A remote workbox is dialed again (`machine.connect`); Local has no such call, so
-            // it re-reads (Task 14 owns its card).
-            (machine.is_local
-              ? invokeTyped("refresh_now", { machineId: machine.id })
-              : invokeTyped("machine_connect", { machineId: machine.id })
-            ).catch(report)
-          }
-        >
-          Retry now
-        </button>
-      )}
+      {retryable &&
+        (needsLogin(machine) ? (
+          // The core retries a failed login only every few minutes: Log in… leads.
+          <button
+            type="button"
+            className="btn btn-small btn-primary"
+            onClick={() => void openMachineCommand(machine, "login")}
+          >
+            Log in…
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() =>
+              // A remote workbox is dialed again (`machine.connect`); Local has no such call, so
+              // it re-reads (Task 14 owns its card).
+              (machine.is_local
+                ? invokeTyped("refresh_now", { machineId: machine.id })
+                : invokeTyped("machine_connect", { machineId: machine.id })
+              ).catch(report)
+            }
+          >
+            Retry now
+          </button>
+        ))}
     </article>
   );
 }

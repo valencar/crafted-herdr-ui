@@ -29,7 +29,7 @@ import {
   useTerminals,
 } from "../lib/uiHelpers";
 import { useAppStore, useModalOpen } from "../store/appStore";
-import { tabStatus, useRowsByKey } from "../terminal/tabInfo";
+import { tabStatus, tabTitle, useRowsByKey } from "../terminal/tabInfo";
 import { stripOrder, tabShortcut } from "../terminal/tabOrder";
 import { rowKeyOf, useTerminalStore } from "../terminal/terminalStore";
 
@@ -184,6 +184,17 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             firstRestorable([previousFocus, menuTrigger]) ?? null,
           ),
       }));
+    // Only a core that can do it (0.1.20 or later) offers it; with no state yet, nothing does.
+    const refreshCommands = state?.core_abilities.refresh_environment
+      ? [
+          {
+            id: "refresh-core",
+            label: "Refresh core environment…",
+            // Asks first, in `RefreshCoreHost`; nothing runs from here.
+            run: () => store.setRefreshCoreOpen(true),
+          },
+        ]
+      : [];
     return buildItems({
       rows,
       machines: machines ?? [],
@@ -250,6 +261,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           },
         },
         ...clearEndedCommands,
+        ...refreshCommands,
         {
           id: "refresh",
           label: "Refresh",
@@ -265,7 +277,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         const n = tabShortcut(tab.tabKey, tabs, machines ?? []);
         return {
           key: tab.tabKey,
-          title: tab.title,
+          title: tabTitle(tab, row ?? undefined),
           detail: [tab.machineLabel, words].filter(Boolean).join(" · "),
           shortcut: n === null ? null : tabShortcutId(n),
           row,

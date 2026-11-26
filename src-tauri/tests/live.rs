@@ -42,6 +42,7 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use crafted_herdr_ui_lib::core::{
     CoreClient, CoreError, Notification, ProcessConnector, timeout_for,
 };
@@ -202,6 +203,49 @@ async fn round_trip(
         return Err(format!("terminal.read gave no text: {read}"));
     }
     println!("  read ok");
+
+    // 4b. put a file beside it, then read it back on the terminal's own machine.
+    const PUT_TEXT: &str = "herdr-ui-qa\n";
+    let put = client
+        .call_long(
+            "local",
+            "terminal.put",
+            json!({
+                "terminal": full,
+                "name": "herdr-ui-qa.txt",
+                "data": base64::engine::general_purpose::STANDARD.encode(PUT_TEXT),
+            }),
+        )
+        .await
+        .map_err(|e| format!("terminal.put: {e:?}"))?;
+    let landed = put
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "terminal.put answered no path".to_owned())?;
+    if put.get("bytes").and_then(Value::as_u64) != Some(PUT_TEXT.len() as u64) {
+        return Err(format!("terminal.put counted {:?} bytes", put.get("bytes")));
+    }
+    let mut exec = json!({"argv": ["cat", landed]});
+    if let Some(on) = on {
+        exec["on"] = json!(on);
+    }
+    let out = client
+        .call("local", "machine.exec", exec)
+        .await
+        .map_err(|e| format!("machine.exec cat: {e:?}"))?;
+    // `stdout` is base64.
+    let stdout = out
+        .get("stdout")
+        .and_then(Value::as_str)
+        .and_then(|b64| base64::engine::general_purpose::STANDARD.decode(b64).ok())
+        .ok_or_else(|| "machine.exec gave no readable stdout".to_owned())?;
+    if stdout != PUT_TEXT.as_bytes() {
+        return Err(format!(
+            "the file read back as {:?}, not {PUT_TEXT:?}",
+            String::from_utf8_lossy(&stdout)
+        ));
+    }
+    println!("  put ok: {landed}");
 
     // 5. kill it and see it finish.
     client

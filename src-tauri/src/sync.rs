@@ -102,7 +102,7 @@ use crate::core::{
     timeout_for,
 };
 use crate::settings::SharedSettings;
-use crate::state::{AppState, CoreState, Health, MachineView, SpaceLayout};
+use crate::state::{AppState, CoreAbilities, CoreState, Health, MachineView, SpaceLayout};
 use crate::{LOCAL, lock, now_ms};
 
 /// No line on the event connection for this long means it is dead (a heartbeat is due every 15 s).
@@ -449,6 +449,7 @@ impl CoreSync {
             core_version: None,
             core_path: None,
             core_state: CoreState::Connecting,
+            core_abilities: Default::default(),
             generated_at_ms: now_ms(),
         };
         let inner = Arc::new(Inner {
@@ -690,6 +691,7 @@ fn same_shown(a: &AppState, b: Option<&AppState>) -> bool {
     a.core_version == b.core_version
         && a.core_path == b.core_path
         && a.core_state == b.core_state
+        && a.core_abilities == b.core_abilities
         && a.machines.len() == b.machines.len()
         && a.machines.iter().zip(&b.machines).all(|(x, y)| {
             x.id == y.id
@@ -704,6 +706,8 @@ fn same_shown(a: &AppState, b: Option<&AppState>) -> bool {
                 && x.state_since_ms == y.state_since_ms
                 && x.terminals == y.terminals
                 && x.layout == y.layout
+                && x.keeps_running_after_logout == y.keeps_running_after_logout
+                && x.logout_linger_user == y.logout_linger_user
         })
 }
 
@@ -776,6 +780,8 @@ impl Inner {
             last_ok_ms: None,
             terminals: by_machine.remove(LOCAL).unwrap_or_default(),
             layout: m.layouts.get(LOCAL).cloned(),
+            keeps_running_after_logout: None,
+            logout_linger_user: None,
         });
         for x in &m.machines {
             machines.push(MachineView {
@@ -799,6 +805,8 @@ impl Inner {
                 last_ok_ms: None,
                 terminals: by_machine.remove(&x.id).unwrap_or_default(),
                 layout: m.layouts.get(&x.id).cloned(),
+                keeps_running_after_logout: x.keeps_running_after_logout,
+                logout_linger_user: x.logout_linger_user.clone(),
             });
         }
         for machine in &mut machines {
@@ -813,6 +821,7 @@ impl Inner {
         m.views = views;
         m.state = AppState {
             machines,
+            core_abilities: CoreAbilities::from_hello(info.as_ref()),
             core_version: info.map(|i| i.version),
             core_path: m.core_path.clone(),
             core_state: m.core_state.clone(),

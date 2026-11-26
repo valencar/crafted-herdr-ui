@@ -86,7 +86,7 @@ function sh(dir: string, ...args: string[]) {
 
 describe("fake-hc", () => {
   it("prints_version_fixture", () => {
-    expect(sh(fixtureDir(), "--version").stdout).toBe("hc 0.1.17\n");
+    expect(sh(fixtureDir(), "--version").stdout).toBe("hc 0.1.22\n");
     const dir = fixtureDir({ "version.txt": "hc 0.1.18\n" });
     const r = sh(dir, "--version");
     expect(r.stdout).toBe("hc 0.1.18\n");
@@ -303,6 +303,21 @@ describe("fake-hc", () => {
     }
     expect(sh(dir, "frobnicate").status).toBe(2);
     expect(sh(dir, "machine", "remove", "x").status).toBe(2);
+  });
+
+  it("runs_server_restart_fresh", () => {
+    const dir = fixtureDir();
+    for (const args of [
+      ["server", "restart"],
+      ["server", "restart", "--fresh"],
+    ]) {
+      const r = sh(dir, ...args);
+      expect(r.stdout).toBe("ok\n");
+      expect(r.status).toBe(0);
+    }
+    const log = readFileSync(join(dir, "calls.log"), "utf8");
+    expect(log).toContain('argv ["server","restart","--fresh"]');
+    expect(sh(dir, "server", "stop").status).toBe(2);
   });
 
   it("logs_every_request", async () => {

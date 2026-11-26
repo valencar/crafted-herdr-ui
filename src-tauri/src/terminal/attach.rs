@@ -97,8 +97,9 @@ pub fn is_via(s: &str) -> bool {
 /// - `machine add`, then exactly one of `<target>` or `--via <cmd>` (`--via` needs `--name`),
 ///   and any of `--name <name>`, `--session <name>`, `--temp` and `--install`, each at most once
 ///   and in any order
+/// - `server restart --fresh` (Refresh core environment), with no other argument
 ///
-/// Nothing else: not `server stop`, `machine rm`, `kill`, `rm`, `update` or a bare call.
+/// Nothing else: not `server stop`, not `server restart` without `--fresh`, `machine rm`, `kill`, `rm`, `update` or a bare call.
 pub fn allowed_core_args(args: &[String]) -> bool {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
@@ -110,6 +111,8 @@ pub fn allowed_core_args(args: &[String]) -> bool {
             is_name(name) && crate::actions::validate_name(name).is_ok()
         }
         ["machine", "add", rest @ ..] => allowed_machine_add(rest),
+        // The one `server` command: nothing else under it (not `stop`, not a plain `restart`).
+        ["server", "restart", "--fresh"] => true,
         _ => false,
     }
 }
@@ -375,6 +378,24 @@ mod tests {
             &["machine", "add", "buildbox;ls"],
         ] {
             assert!(!allowed_core_args(&strs(bad)), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn allows_only_server_restart_fresh() {
+        assert!(ok(&["server", "restart", "--fresh"]));
+        for bad in [
+            &["server", "restart"][..],
+            &["server", "stop"],
+            &["server"],
+            &["server", "restart", "--fresh", "x"],
+            &["server", "restart", "--fresh", "--fresh"],
+            &["server", "restart", "--fresh", "--force"],
+            &["server", "restart", "x"],
+            &["server", "status"],
+            &["--fresh", "server", "restart"],
+        ] {
+            assert!(!ok(bad), "{bad:?}");
         }
     }
 

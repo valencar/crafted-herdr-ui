@@ -10,10 +10,19 @@
     "status",
     "shell",
     "resize_notifications",
-    "automatic_input"
+    "automatic_input",
+    "restart_environment",
+    "put_chunks"
   ],
   "framed": false,
   "generation": 1,
+  "keeps_running_after_logout": null,
+  "login_session": {
+    "gui": false,
+    "id": 4242,
+    "user": 1000
+  },
+  "logout_linger_user": null,
   "methods": [
     "hello",
     "server.status",
@@ -34,6 +43,10 @@
     "terminal.keys",
     "terminal.interrupt",
     "terminal.put",
+    "terminal.put_begin",
+    "terminal.put_chunk",
+    "terminal.put_finish",
+    "terminal.put_abort",
     "machine.exec",
     "file.read",
     "file.write",
@@ -48,5 +61,5 @@
     "machine.rm",
     "rpc.discover"
   ],
-  "version": "0.1.18"
+  "version": "0.1.22"
 }

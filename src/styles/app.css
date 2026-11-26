@@ -489,6 +489,20 @@ kbd {
     color var(--dur-fast),
     border-color var(--dur-fast);
 }
+/* A workbox row with badges: the badges get a line of their own, under the name. */
+.nav-item.has-badges {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.nav-badges {
+  flex: 0 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+  /* Under the name: the tile's 20px and the row's 10px gap. */
+  padding-left: 30px;
+}
 .nav-item[aria-current="page"] {
   background: var(--selected);
 }
@@ -1655,6 +1669,49 @@ select.field {
   color: var(--text-2);
   border: 1px solid var(--border-strong);
 }
+.logout-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 1px 7px;
+  color: var(--text-2);
+  border: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+.logout-badge-glyph {
+  flex: none;
+  color: var(--st-needs);
+}
+.logout-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.logout-warning-text {
+  margin: 0;
+  font-size: var(--fs-meta);
+  color: var(--text-2);
+}
+.logout-warning-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.logout-warning-command code {
+  font-size: var(--fs-meta);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 8px;
+  overflow-wrap: anywhere;
+}
 .machine-fixes {
   display: flex;
   flex-wrap: wrap;
@@ -2106,6 +2163,49 @@ select.field {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* A file dragged over the terminal: a veil over the host that says where it would go. It takes no
+   pointer events, so it never gets in the way of the drag or of the terminal under it. */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  border: 2px dashed var(--focus);
+  color: var(--text);
+  font-size: var(--fs-body);
+  pointer-events: none;
+  animation: enter-fade var(--dur-fast) var(--ease-out);
+}
+/* A refusal is told by its words and its solid, muted border, never by color alone. */
+.drop-overlay.is-refused {
+  border-style: solid;
+  border-color: var(--border-strong);
+  color: var(--text-2);
+}
+/* The file on its way, in the corner over the last rows. */
+.sending-chip {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 3;
+  max-width: calc(100% - 28px);
+  padding: 6px 12px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: var(--fs-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: enter-fade var(--dur-fast) var(--ease-out);
 }
 
 /* ---------- workspace ---------- */
@@ -3410,11 +3510,20 @@ select.field {
 }
 .wb-card-id {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.wb-card-title {
+  display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 .wb-card-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: var(--fs-body);
   font-weight: 600;

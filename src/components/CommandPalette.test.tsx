@@ -23,6 +23,7 @@ import {
 } from "../test/builders";
 import { HOME, useTerminalStore } from "../terminal/terminalStore";
 import { ClosePaneHost } from "./ClosePaneHost";
+import { RefreshCoreHost } from "./RefreshCoreHost";
 import { CommandPalette } from "./CommandPalette";
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -101,6 +102,7 @@ afterEach(() => {
     closeRow: null,
     clearEndedId: null,
     closeReturn: null,
+    refreshCoreOpen: false,
   });
 });
 
@@ -1115,6 +1117,116 @@ describe("CommandPalette agent frame", () => {
       machineId: "buildbox",
     });
     expect(useAppStore.getState().clearEndedId).toBeNull();
+  });
+
+  describe("Refresh core environment", () => {
+    const REFRESH = ["server", "restart", "--fresh"];
+    const withAbility = (refresh_environment: boolean) =>
+      useAppStore.setState({
+        state: appState(
+          [[{ id: "buildbox", target: "buildbox" }, buildboxTerms()]],
+          { abilities: { refresh_environment } },
+        ),
+      });
+    const tabs = () => useTerminalStore.getState().tabs;
+    // The palette itself reads the installed terminals (`get_terminals`); nothing else may run.
+    const calls = () =>
+      invoke.mock.calls.map((c) => c[0]).filter((n) => n !== "get_terminals");
+
+    it("offers_refresh_core_environment_on_0_1_20", async () => {
+      withAbility(true);
+      const user = userEvent.setup();
+      render(
+        <>
+          <Harness />
+          <RefreshCoreHost />
+        </>,
+      );
+      await user.type(screen.getByRole("combobox"), "refresh core");
+      await user.click(
+        screen.getByRole("option", { name: /Refresh core environment…/ }),
+      );
+      // Choosing it asks first, in the host that outlives the palette; nothing runs yet.
+      expect(screen.queryByRole("combobox")).toBeNull();
+      const dialog = screen.getByRole("dialog", {
+        name: "Refresh core environment",
+      });
+      expect(dialog).toHaveTextContent(
+        "Restart herdr-core with your login shell’s environment? New terminals get it; running programs keep going.",
+      );
+      expect(calls()).toEqual([]);
+      expect(tabs()).toEqual([]);
+    });
+
+    it("cancel_calls_nothing_at_all", async () => {
+      withAbility(true);
+      const user = userEvent.setup();
+      render(
+        <>
+          <Harness />
+          <RefreshCoreHost />
+        </>,
+      );
+      await user.type(screen.getByRole("combobox"), "refresh core");
+      await user.click(
+        screen.getByRole("option", { name: /Refresh core environment…/ }),
+      );
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(calls()).toEqual([]);
+      expect(tabs()).toEqual([]);
+      expect(useAppStore.getState().refreshCoreOpen).toBe(false);
+    });
+
+    it("confirm_asks_core_refresh_args_then_opens_the_tab", async () => {
+      withAbility(true);
+      invoke.mockImplementation(async (name: string) =>
+        name === "core_refresh_args" ? REFRESH : null,
+      );
+      const user = userEvent.setup();
+      render(
+        <>
+          <Harness />
+          <RefreshCoreHost />
+        </>,
+      );
+      await user.type(screen.getByRole("combobox"), "refresh core");
+      await user.click(
+        screen.getByRole("option", { name: /Refresh core environment…/ }),
+      );
+      expect(calls()).toEqual([]);
+      await user.click(
+        screen.getByRole("button", { name: "Restart herdr-core" }),
+      );
+      await waitFor(() => expect(tabs()).toHaveLength(1));
+      expect(invoke).toHaveBeenCalledWith("core_refresh_args");
+      expect(tabs()[0].target).toEqual({
+        kind: "command",
+        machineId: "local",
+        args: REFRESH,
+      });
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("hides_refresh_on_a_0_1_19_core", async () => {
+      withAbility(false);
+      const user = userEvent.setup();
+      render(<Harness />);
+      await user.type(screen.getByRole("combobox"), "refresh");
+      expect(
+        screen.queryByRole("option", { name: /Refresh core environment/ }),
+      ).toBeNull();
+    });
+
+    it("hides_refresh_before_the_first_state", async () => {
+      useAppStore.setState({ state: null });
+      const user = userEvent.setup();
+      render(<Harness />);
+      await user.type(screen.getByRole("combobox"), "refresh core");
+      expect(
+        screen.queryByRole("option", { name: /Refresh core environment/ }),
+      ).toBeNull();
+    });
   });
 
   it("reply_goes_to_the_inspector", async () => {

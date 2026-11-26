@@ -46,6 +46,8 @@ const COMMANDS: &[&str] = &[
     "preview_launch_template",
     "show_main",
     "show_main_new_session",
+    "core_refresh_args",
+    "show_main_refresh_core",
     "open_settings",
     "term_open",
     "term_write",
@@ -55,6 +57,7 @@ const COMMANDS: &[&str] = &[
     "set_looking",
     "herdr_app_status",
     "open_in_herdr",
+    "put_files",
 ];
 
 fn main() {

@@ -82,6 +82,11 @@ type AppStore = {
   closeRow: Row | null;
   /** The workbox whose "Clear ended" was asked for from the palette; `App` confirms it the same way. */
   clearEndedId: string | null;
+  /**
+   * The "Refresh core environment" confirm is showing (`RefreshCoreHost`, mounted by `App`). Set
+   * by the palette and by the `"refresh-core"` event; only its Confirm opens the command tab.
+   */
+  refreshCoreOpen: boolean;
   /** Where focus goes when that confirmation ends: the control the asker was opened from. */
   closeReturn: HTMLElement | null;
   /**
@@ -130,6 +135,7 @@ type AppStore = {
     machineId: string | null,
     returnTo?: HTMLElement | null,
   ) => void;
+  setRefreshCoreOpen: (open: boolean) => void;
   dismissVersionBanner: (version: string) => void;
   /** Shows an action error. Every report restarts the auto-dismiss timer. */
   reportError: (e: unknown) => void;
@@ -196,6 +202,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   shortcutsOpen: false,
   closeRow: null,
   clearEndedId: null,
+  refreshCoreOpen: false,
   closeReturn: null,
   dismissedVersion: null,
   toast: null,
@@ -224,6 +231,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ closeRow, closeReturn: closeRow ? returnTo : null }),
   setClearEnded: (clearEndedId, returnTo = null) =>
     set({ clearEndedId, closeReturn: clearEndedId ? returnTo : null }),
+  setRefreshCoreOpen: (refreshCoreOpen) => set({ refreshCoreOpen }),
   dismissVersionBanner: (dismissedVersion) => set({ dismissedVersion }),
   reportError: (e) => {
     get().showToast(actionErrorMessage(toActionError(e)), "error");

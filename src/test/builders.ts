@@ -10,6 +10,7 @@
  * `${machineId}::${address}`.
  */
 import type { AppState } from "../lib/bindings/AppState";
+import type { CoreAbilities } from "../lib/bindings/CoreAbilities";
 import type { DisplayStatus } from "../lib/bindings/DisplayStatus";
 import type { Health } from "../lib/bindings/Health";
 import type { MachineView } from "../lib/bindings/MachineView";
@@ -42,6 +43,10 @@ export type MachineSpec = {
   host?: string | null;
   /** Herdr's spaces on the machine; `null` (the default) when it has none. */
   layout?: SpaceLayout | null;
+  /** Whether the machine's programs outlive the last SSH login; `null` (the default) is unknown. */
+  keepsRunningAfterLogout?: boolean | null;
+  /** The user `loginctl enable-linger` names; `null` when the core doesn't say. */
+  logoutLingerUser?: string | null;
 };
 
 export type AgentTermSpec = {
@@ -148,6 +153,8 @@ export function machine(spec: MachineSpec): Required<MachineSpec> {
     stateSinceMs: spec.stateSinceMs ?? null,
     host: spec.host ?? null,
     layout: spec.layout ?? null,
+    keepsRunningAfterLogout: spec.keepsRunningAfterLogout ?? null,
+    logoutLingerUser: spec.logoutLingerUser ?? null,
   };
 }
 
@@ -343,6 +350,8 @@ export function machineView(
     last_ok_ms: m.lastOkMs,
     terminals: (terms ?? []).map(terminalOf),
     layout: m.layout,
+    keeps_running_after_logout: m.keepsRunningAfterLogout,
+    logout_linger_user: m.logoutLingerUser,
   };
 }
 
@@ -357,14 +366,21 @@ export function appState(
     path?: string | null;
     version?: string | null;
     generatedAtMs?: number;
+    /** What the core can do; both on by default (a 0.1.22 core). */
+    abilities?: Partial<CoreAbilities>;
   } = {},
 ): AppState {
   return {
     machines: machines.map(([m, terms]) => machineView(m, terms)),
-    core_version: opts.version === undefined ? "0.1.18" : opts.version,
+    core_version: opts.version === undefined ? "0.1.22" : opts.version,
     core_path: opts.path === undefined ? "/home/dev/.local/bin/hc" : opts.path,
     // No path means the core was not found; startup says so with `notFound`.
     core_state: opts.path === null ? { kind: "notFound" } : { kind: "ready" },
+    core_abilities: {
+      put_files: true,
+      refresh_environment: true,
+      ...opts.abilities,
+    },
     generated_at_ms: opts.generatedAtMs ?? 1,
   };
 }

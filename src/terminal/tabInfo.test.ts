@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { rowOf } from "../test/builders";
 import type { Row } from "../lib/grouping";
-import { countNeeds, tabDotStatus, tabStatus, tabSubline } from "./tabInfo";
+import {
+  countNeeds,
+  tabDotStatus,
+  tabName,
+  tabStatus,
+  tabSubline,
+  tabTitle,
+} from "./tabInfo";
 import type { TermTab } from "./terminalStore";
 
 function tab(over: Partial<TermTab> = {}): TermTab {
@@ -143,5 +150,55 @@ describe("tabDotStatus", () => {
     );
     expect(tabDotStatus(tab({ state: "detached" }), row())).toBe("detached");
     expect(tabDotStatus(tab({ state: "opening" }), row())).toBe("opening");
+  });
+});
+
+describe("tabTitle", () => {
+  it("tab_title_follows_the_rows_name", () => {
+    expect(
+      tabTitle(tab({ title: "claude · t7" }), row({ name: "fix tests" })),
+    ).toBe("fix tests");
+  });
+
+  it("keeps_the_watch_suffix", () => {
+    expect(
+      tabTitle(
+        tab({
+          tabKey: "buildbox::w1:p1::watch",
+          title: "claude · t7 (watching)",
+          observe: true,
+        }),
+        row({ name: "fix tests" }),
+      ),
+    ).toBe("fix tests (watching)");
+  });
+
+  it("falls_back_to_the_stored_title", () => {
+    expect(tabTitle(tab({ title: "claude · t7" }), undefined)).toBe(
+      "claude · t7",
+    );
+    expect(
+      tabTitle(
+        tab({
+          tabKey: "buildbox::cmd:machine login",
+          target: {
+            kind: "command",
+            machineId: "buildbox",
+            args: ["machine", "login"],
+          },
+          title: "Log in to buildbox",
+        }),
+        undefined,
+      ),
+    ).toBe("Log in to buildbox");
+  });
+
+  it("the_accessible_name_uses_the_followed_title", () => {
+    expect(
+      tabName(
+        tab({ title: "old" }),
+        row({ name: "fix tests", status: "working" }),
+      ),
+    ).toMatch(/^fix tests, /);
   });
 });

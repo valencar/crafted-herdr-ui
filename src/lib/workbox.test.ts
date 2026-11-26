@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { machineView } from "../test/builders";
 import type { Health } from "./bindings/Health";
-import { needsLogin, shownMachines, stateLine, updateOffered } from "./workbox";
+import {
+  lingerCommand,
+  needsLogin,
+  shownMachines,
+  stateLine,
+  stopsAtLogout,
+  updateOffered,
+} from "./workbox";
 
 const NOW = 1_800_000_000_000;
 const box = (
@@ -107,5 +114,50 @@ describe("offers", () => {
       machineView({ id: "gpubox", health: { kind: "hidden" } }, []),
     ];
     expect(shownMachines(list).map((m) => m.id)).toEqual(["buildbox"]);
+  });
+});
+
+describe("logout warning", () => {
+  it("warns_only_when_the_core_says_false", () => {
+    const m = (
+      over: {
+        keepsRunningAfterLogout?: boolean | null;
+        id?: string;
+        isLocal?: boolean;
+      },
+      rows = [],
+    ) => machineView({ ...over, id: over.id ?? "buildbox" }, rows);
+    expect(stopsAtLogout(m({ keepsRunningAfterLogout: false }))).toBe(true);
+    expect(stopsAtLogout(m({ keepsRunningAfterLogout: true }))).toBe(false);
+    expect(stopsAtLogout(m({ keepsRunningAfterLogout: null }))).toBe(false);
+    expect(stopsAtLogout(m({}))).toBe(false);
+    expect(
+      stopsAtLogout({
+        ...m({}),
+        keeps_running_after_logout: undefined,
+      } as never),
+    ).toBe(false);
+    expect(
+      stopsAtLogout(
+        m({ id: "local", isLocal: true, keepsRunningAfterLogout: false }),
+      ),
+    ).toBe(false);
+  });
+
+  it("builds_the_linger_command", () => {
+    const m = (user: string | null) =>
+      machineView({ id: "buildbox", logoutLingerUser: user }, []);
+    expect(lingerCommand(m("dev"))).toBe("sudo loginctl enable-linger -- dev");
+    expect(lingerCommand(m("dev.ops_1-x"))).toBe(
+      "sudo loginctl enable-linger -- dev.ops_1-x",
+    );
+    expect(lingerCommand(m(null))).toBe("sudo loginctl enable-linger -- $USER");
+    expect(lingerCommand(m(""))).toBe("sudo loginctl enable-linger -- $USER");
+    expect(lingerCommand(m("dev; rm -rf ~"))).toBe(
+      "sudo loginctl enable-linger -- $USER",
+    );
+    expect(lingerCommand(m("dev\n"))).toBe(
+      "sudo loginctl enable-linger -- $USER",
+    );
   });
 });

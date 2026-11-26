@@ -741,6 +741,16 @@ describe("motion tokens", () => {
     expect(css).not.toContain(".term-overlay");
   });
 
+  it("the_drop_overlay_and_sending_chip_fade_with_tokens_and_stop_for_reduced_motion", () => {
+    for (const selector of [".drop-overlay", ".sending-chip"]) {
+      const body = rule(selector);
+      expect(body).toContain("enter-fade var(--dur-fast) var(--ease-out)");
+      expect(body).toMatch(/pointer-events:\s*none/);
+      expect(body).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+      expect(reduced()).toContain(selector);
+    }
+  });
+
   it("text_is_not_thinned_by_font_smoothing", () => {
     // `antialiased` makes macOS draw light-on-dark text thin; the default weight is wanted.
     for (const file of ["app.css", "windows.css", "global.css", "tokens.css"]) {

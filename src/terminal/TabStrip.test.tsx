@@ -30,7 +30,11 @@ vi.mock("./Workspace", () => ({
 
 function appState(): AppState {
   return buildState([
-    [machine({ id: "buildbox" }), buildboxTerms()],
+    // A tab is named after its row, so the row the tests open as "infra" carries that name.
+    [
+      machine({ id: "buildbox" }),
+      buildboxTerms({ "w1:p2": { name: "infra" } }),
+    ],
     [machine({ id: "gpubox" }), null],
   ]);
 }

@@ -161,3 +161,53 @@ describe("the Local card", () => {
     ).toHaveTextContent("herdr-core isn’t answering yet");
   });
 });
+
+describe("a workbox that needs attention", () => {
+  const SENTENCE =
+    "herdr-core retries a failed login only every few minutes. Log in to reconnect now.";
+  const staging = (state: string, error: string) =>
+    machineView(
+      {
+        id: "staging",
+        name: "staging",
+        health: { kind: "attention", error },
+        state,
+        lastOkMs: null,
+      },
+      null,
+    );
+  const show = (m: ReturnType<typeof staging>) => {
+    withState({ machines: [m] });
+    render(<MachineNotices machines={[m]} nowMs={1} />);
+    return screen.getByRole("region", { name: "staging needs attention" });
+  };
+
+  it("tells_a_needs_login_workbox_to_log_in_now", async () => {
+    invoke.mockImplementation(async (name: string) =>
+      name === "machine_login_args" ? ["machine", "login", "staging"] : null,
+    );
+    const card = show(staging("needs_login", "Needs login"));
+    expect(card).toHaveTextContent("Needs login");
+    expect(within(card).getByText(SENTENCE)).toBeInTheDocument();
+    const buttons = within(card).getAllByRole("button");
+    expect(buttons.map((b) => b.textContent)).toEqual([
+      "Log in…",
+      "Connect now",
+    ]);
+    expect(buttons[0]).toHaveClass("btn-primary");
+    expect(buttons[1]).not.toHaveClass("btn-primary");
+    await userEvent.setup().click(buttons[0]);
+    expect(invoke).toHaveBeenCalledWith("machine_login_args", {
+      machineId: "staging",
+    });
+  });
+
+  it("keeps_other_attention_notices_as_they_were", () => {
+    const card = show(staging("unreachable", "ssh: connection refused"));
+    expect(within(card).queryByText(SENTENCE)).toBeNull();
+    expect(within(card).queryByRole("button", { name: "Log in…" })).toBeNull();
+    const buttons = within(card).getAllByRole("button");
+    expect(buttons[0]).toHaveTextContent("Connect now");
+    expect(buttons[0]).not.toHaveClass("btn-primary");
+  });
+});

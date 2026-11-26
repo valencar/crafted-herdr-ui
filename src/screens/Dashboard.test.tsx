@@ -172,6 +172,36 @@ describe("Dashboard", () => {
     expect(tile!.querySelector(".sdot")).toBeNull();
   });
 
+  it("offers_log_in_on_a_needs_login_card", async () => {
+    invoke.mockImplementation(async (name: string) =>
+      name === "machine_login_args"
+        ? ["machine", "login", "gpubox"]
+        : name === "get_command_log"
+          ? log
+          : null,
+    );
+    const gpubox = {
+      ...machine("gpubox", { kind: "attention", error: "Needs login" }),
+      state: "needs_login",
+    };
+    const user = setup(appState(machine("buildbox"), gpubox));
+    const card = screen.getByRole("article", { name: /gpubox/ });
+    // Log in… takes the place of Retry now, and leads.
+    expect(
+      within(card).queryByRole("button", { name: "Retry now" }),
+    ).toBeNull();
+    const login = within(card).getByRole("button", { name: "Log in…" });
+    expect(login).toHaveClass("btn-primary");
+    await user.click(login);
+    expect(calls("machine_login_args")).toEqual([
+      ["machine_login_args", { machineId: "gpubox" }],
+    ]);
+    expect(calls("machine_connect")).toEqual([]);
+    // Another card still says Retry now.
+    const other = screen.getByRole("article", { name: /buildbox/ });
+    expect(within(other).queryByRole("button", { name: "Log in…" })).toBeNull();
+  });
+
   it("first_load_shows_a_skeleton", () => {
     setup(null);
     const busy = document.querySelector('[aria-busy="true"]') as HTMLElement;
@@ -604,6 +634,25 @@ describe("Dashboard", () => {
       within(section("Workboxes")).getByRole("article", { name });
     expect(within(card("edgebox")).getByText("Temporary")).toBeInTheDocument();
     expect(within(card("buildbox")).queryByText("Temporary")).toBeNull();
+  });
+
+  it("marks_a_card_that_stops_at_logout", () => {
+    const stops = machineView(
+      { id: "edgebox", keepsRunningAfterLogout: false },
+      [],
+    );
+    const keeps = machineView(
+      { id: "gpubox", keepsRunningAfterLogout: true },
+      [],
+    );
+    setup(appState(machine("buildbox"), stops, keeps));
+    const card = (name: string) =>
+      within(section("Workboxes")).getByRole("article", { name });
+    expect(
+      within(card("edgebox")).getByText("stops at logout"),
+    ).toBeInTheDocument();
+    expect(within(card("gpubox")).queryByText("stops at logout")).toBeNull();
+    expect(within(card("buildbox")).queryByText("stops at logout")).toBeNull();
   });
 
   it("workbox_card_actions_follow_health", async () => {

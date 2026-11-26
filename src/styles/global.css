@@ -189,6 +189,11 @@ textarea {
 }
 
 /* Entrances */
+@keyframes enter-fade {
+  from {
+    opacity: 0;
+  }
+}
 @keyframes enter-pop {
   from {
     opacity: 0;
@@ -241,6 +246,8 @@ textarea {
   .sheet,
   .toast,
   .term-bar,
+  .drop-overlay,
+  .sending-chip,
   .activity {
     animation: none !important;
   }

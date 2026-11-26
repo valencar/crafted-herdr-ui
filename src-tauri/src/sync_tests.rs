@@ -421,7 +421,7 @@ async fn builds_state_from_subscribe_and_machine_list() {
     let h = Harness::new().up().await;
     let state = h.state();
     assert_eq!(state.core_state, CoreState::Ready);
-    assert_eq!(state.core_version.as_deref(), Some("0.1.18"));
+    assert_eq!(state.core_version.as_deref(), Some("0.1.22"));
 
     // Local first, then the list's order.
     let ids: Vec<&str> = state.machines.iter().map(|m| m.id.as_str()).collect();
@@ -431,7 +431,7 @@ async fn builds_state_from_subscribe_and_machine_list() {
     assert_eq!(local.name, "Local");
     assert!(local.is_local);
     assert_eq!(local.host.as_deref(), Some("workstation"));
-    assert_eq!(local.hc_version.as_deref(), Some("0.1.18"));
+    assert_eq!(local.hc_version.as_deref(), Some("0.1.22"));
     assert_eq!(local.health, Health::Online);
     assert_eq!(local.terminals.len(), 8);
 
@@ -453,7 +453,7 @@ async fn builds_state_from_subscribe_and_machine_list() {
     assert_eq!(buildbox.name, "buildbox");
     assert_eq!(buildbox.health, Health::Online);
     assert_eq!(buildbox.target.as_deref(), Some("dev@buildbox.example"));
-    assert_eq!(buildbox.hc_version.as_deref(), Some("0.1.18"));
+    assert_eq!(buildbox.hc_version.as_deref(), Some("0.1.22"));
     assert_eq!(addresses(&state, BUILDBOX), ["t2", "t3", "t4"]);
 
     // The core's own word for each machine, and the flags the Workbox screen shows. Local has
@@ -1402,6 +1402,61 @@ async fn unknown_machine_name_triggers_machine_list() {
     // And the list isn't asked again for it.
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(h.script.lists.load(Ordering::SeqCst), 2);
+}
+
+const STAGING: &str = "000000000000000000000000c0de0004";
+
+#[tokio::test(start_paused = true)]
+async fn machine_view_carries_the_logout_fields() {
+    let h = Harness::new().up().await;
+    let state = h.state();
+    let staging = machine(&state, STAGING);
+    assert_eq!(staging.keeps_running_after_logout, Some(false));
+    assert_eq!(staging.logout_linger_user.as_deref(), Some("dev"));
+    // The warning is for the person to read; it changes neither health nor attention.
+    assert_eq!(
+        staging.health,
+        Health::Attention {
+            error: "Needs login".into()
+        }
+    );
+    assert_eq!(
+        machine(&state, BUILDBOX).keeps_running_after_logout,
+        Some(true)
+    );
+    assert_eq!(machine(&state, BUILDBOX).logout_linger_user, None);
+    // gpubox says null, edgebox says nothing: both are unknown.
+    assert_eq!(machine(&state, GPUBOX).keeps_running_after_logout, None);
+    let edgebox = machine(&state, "000000000000000000000000c0de0005");
+    assert_eq!(edgebox.keeps_running_after_logout, None);
+    assert_eq!(edgebox.logout_linger_user, None);
+    // This computer has no such fields.
+    let local = machine(&state, "local");
+    assert_eq!(local.keeps_running_after_logout, None);
+    assert_eq!(local.logout_linger_user, None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_logout_change_alone_emits_a_state() {
+    let h = Harness::new();
+    let mut later = json_of(MACHINE_LIST);
+    assert_eq!(later["machines"][0]["keeps_running_after_logout"], true);
+    later["machines"][0]["keeps_running_after_logout"] = json!(false);
+    *lock(&h.script.machine_list) = vec![json_of(MACHINE_LIST), later];
+    let h = h.up().await;
+    assert_eq!(
+        machine(&h.state(), BUILDBOX).keeps_running_after_logout,
+        Some(true)
+    );
+    let before = h.emit_count();
+
+    h.sync().refresh_machines();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        machine(&h.state(), BUILDBOX).keeps_running_after_logout,
+        Some(false)
+    );
+    assert!(h.emit_count() > before);
 }
 
 // ---- connection ----

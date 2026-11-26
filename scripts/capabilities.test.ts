@@ -53,11 +53,13 @@ const INVOKE_RE = /\binvoke(?:Typed)?(?:<[^>]*>)?\(\s*["']([a-z_]+)["']/g;
 const INVOKE_TYPED_RE = /\binvokeTyped\(\s*["']([a-z_]+)["']/g;
 /** `openTerm(…)` (an `ipc.ts` wrapper) calls `term_open`. */
 const OPEN_TERM_RE = /\bopenTerm\(/;
+/** `putFiles(…)` (an `ipc.ts` wrapper) calls `put_files`. */
+const PUT_FILES_RE = /\bputFiles\(/;
 
 /**
  * Every command the files reachable from `entry` call. `ipc.ts` is imported by every window and
  * holds wrappers for several commands, so it counts only for its typed helpers (state and
- * settings reads); a window that wants `term_open` has to call `openTerm(` itself.
+ * settings reads); a window that wants `term_open` or `put_files` has to call `openTerm(` or `putFiles(` itself.
  */
 function commandsReachableFrom(entry: string): string[] {
   const seen = new Set<string>();
@@ -71,6 +73,7 @@ function commandsReachableFrom(entry: string): string[] {
     } else {
       for (const m of text.matchAll(INVOKE_RE)) found.add(m[1]);
       if (OPEN_TERM_RE.test(text)) found.add("term_open");
+      if (PUT_FILES_RE.test(text)) found.add("put_files");
     }
     for (const spec of runtimeImports(text)) {
       const next = resolveImport(file, spec);

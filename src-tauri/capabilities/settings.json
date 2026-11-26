@@ -18,6 +18,7 @@
     "allow-set-settings",
     "allow-set-workbox-hidden",
     "allow-shortcut-status",
+    "allow-show-main-refresh-core",
     "dialog:allow-open"
   ]
 }

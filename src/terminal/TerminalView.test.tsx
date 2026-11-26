@@ -1,8 +1,15 @@
 import { createRef, useEffect, useState } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TermEvent } from "../lib/bindings/TermEvent";
+import type { FileDropEvent } from "../lib/ipc";
 import type { TerminalFont } from "../lib/bindings/TerminalFont";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -18,6 +25,7 @@ type FakeTerm = {
   reset: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
+  paste: ReturnType<typeof vi.fn>;
   keyHandler: ((e: Partial<KeyboardEvent>) => boolean) | null;
   dataHandler: ((d: string) => void) | null;
   /** The fake selection ("" for none). Setting it fires nothing; see `open` in the fake. */
@@ -43,6 +51,8 @@ const h = vi.hoisted(() => ({
   },
   webglThrows: false,
   observers: [] as { cb: () => void }[],
+  drop: null as null | ((e: FileDropEvent) => void),
+  putFiles: vi.fn(),
 }));
 
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
@@ -55,6 +65,7 @@ vi.mock("@xterm/xterm", () => ({
     reset = vi.fn();
     dispose = vi.fn();
     focus = vi.fn();
+    paste = vi.fn();
     // xterm 6.0.0 fires onSelectionChange for a mouse selection in one place: its document
     // `mouseup` listener, which it adds at mousedown (so after the app's own listeners, which
     // were added at mount). Dragging and double clicks only redraw.
@@ -168,6 +179,13 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   invokeTyped: vi.fn(),
   openTerm: vi.fn(),
   copyText: vi.fn(),
+  onFileDrop: vi.fn((cb: (e: FileDropEvent) => void) => {
+    h.drop = cb;
+    return Promise.resolve(() => {
+      if (h.drop === cb) h.drop = null;
+    });
+  }),
+  putFiles: h.putFiles,
 }));
 import { copyText, invokeTyped, openTerm } from "../lib/ipc";
 import { TerminalView, type TerminalHandle } from "./TerminalView";
@@ -2246,6 +2264,186 @@ describe("TerminalView", () => {
       await flush();
       expect(container.querySelector(".term-view")).toHaveAttribute("hidden");
       expect(open).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("files dropped and pasted", () => {
+    const WATCH = `${KEY}::watch`;
+    const inView = () =>
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        width: 800,
+        height: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect);
+    const listBuildbox = () =>
+      act(() =>
+        useAppStore.setState({
+          state: appState([
+            [
+              machine({ id: "buildbox", target: "buildbox" }),
+              buildboxTerms(),
+            ],
+          ]),
+        }),
+      );
+    const hover = (type: "enter" | "leave", x = 100, y = 100) =>
+      act(() =>
+        h.drop?.({
+          type,
+          paths: type === "enter" ? ["/Users/dev/a.txt"] : [],
+          x,
+          y,
+        }),
+      );
+    const png = () =>
+      new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" });
+    /** A paste event carrying `files` and no text, as ⌘V of a screenshot makes. */
+    const imagePaste = () => {
+      const event = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", {
+        value: { files: [png()], types: ["Files"], getData: () => "" },
+      });
+      return event;
+    };
+
+    beforeEach(() => {
+      h.drop = null;
+      h.putFiles.mockReset().mockResolvedValue({ paths: ["/home/dev/a.png"] });
+      inView();
+      listBuildbox();
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      act(() => useAppStore.setState({ state: null }));
+    });
+
+    it("shows_the_drop_target_while_files_are_over_the_terminal", async () => {
+      render(<Harness />);
+      await flush();
+      expect(screen.queryByRole("status")).toBeNull();
+      await hover("enter");
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Drop to send to buildbox",
+      );
+      // The window losing the drag clears it.
+      await hover("leave");
+      expect(screen.queryByText("Drop to send to buildbox")).toBeNull();
+    });
+
+    it("says_it_cannot_take_files_on_a_watch_tab", async () => {
+      useTerminalStore.getState().openTab({
+        tabKey: WATCH,
+        target: { kind: "terminal", machineId: "buildbox", address: "w1:p1" },
+        title: "agent",
+        machineLabel: "buildbox",
+        observe: true,
+      });
+      render(<Harness tabKey={WATCH} />);
+      await flush();
+      await hover("enter");
+      const overlay = screen.getByRole("status");
+      expect(overlay).toHaveTextContent("Can’t send files to this terminal");
+      expect(overlay).toHaveClass("is-refused");
+    });
+
+    it("shows_the_sending_chip_with_a_count", async () => {
+      let release: () => void = () => {};
+      h.putFiles.mockImplementation(async (_m, _a, _items, onProgress) => {
+        onProgress({ index: 1, total: 3, name: "b.txt" });
+        await new Promise<void>((resolve) => (release = resolve));
+        return { paths: [] };
+      });
+      render(<Harness />);
+      await flush();
+      await act(async () => {
+        h.drop?.({
+          type: "drop",
+          paths: ["/home/dev/a.txt", "/home/dev/b.txt", "/home/dev/c.txt"],
+          x: 100,
+          y: 100,
+        });
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Sending b.txt… · 2 of 3",
+      );
+      await act(async () => release());
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+
+    it("an_image_paste_is_sent_and_never_reaches_xterm", async () => {
+      render(<Harness />);
+      await flush();
+      const host = document.querySelector(".term-host") as HTMLElement;
+      // xterm hears a paste on its textarea, a child of the host; the host's capture phase is first.
+      const textarea = host.appendChild(document.createElement("textarea"));
+      const xtermHeard = vi.fn();
+      textarea.addEventListener("paste", xtermHeard);
+      const event = imagePaste();
+      act(() => {
+        textarea.dispatchEvent(event);
+      });
+      expect(event.defaultPrevented).toBe(true);
+      expect(xtermHeard).not.toHaveBeenCalled();
+      // The image is read with a FileReader, which jsdom finishes on its own schedule (under load
+      // it can be after any fixed pause), so wait for what the send ends with: the typed path.
+      await waitFor(() => expect(term().paste).toHaveBeenCalledTimes(1));
+      // A late synthetic paste would have arrived by now.
+      expect(xtermHeard).not.toHaveBeenCalled();
+      expect(h.putFiles).toHaveBeenCalledTimes(1);
+      // What xterm was driven with: only the path, once, as its own paste.
+      expect(term().paste).toHaveBeenCalledWith("'/home/dev/a.png' ");
+      expect(invoke).not.toHaveBeenCalledWith("term_write", expect.anything());
+    });
+
+    it("leaves_a_text_paste_to_xterm", async () => {
+      render(<Harness />);
+      await flush();
+      const host = document.querySelector(".term-host") as HTMLElement;
+      const textarea = host.appendChild(document.createElement("textarea"));
+      const xtermHeard = vi.fn();
+      textarea.addEventListener("paste", xtermHeard);
+      const event = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", {
+        value: { files: [], types: ["text/plain"], getData: () => "ls" },
+      });
+      await act(async () => {
+        textarea.dispatchEvent(event);
+      });
+      expect(event.defaultPrevented).toBe(false);
+      expect(xtermHeard).toHaveBeenCalledTimes(1);
+      expect(h.putFiles).not.toHaveBeenCalled();
+    });
+
+    it("passes_ctrl_v_to_the_program", async () => {
+      render(<Harness />);
+      await flush();
+      // The key handler returns true for anything but a ⌘ key, so xterm sends ^V to the program
+      // (Claude Code reads its own clipboard image on it).
+      const key = {
+        type: "keydown",
+        key: "v",
+        ctrlKey: true,
+        metaKey: false,
+        preventDefault: vi.fn(),
+      };
+      expect(term().keyHandler?.(key)).toBe(true);
+      expect(key.preventDefault).not.toHaveBeenCalled();
+      const event = new KeyboardEvent("keydown", {
+        key: "v",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      document.querySelector(".term-host")!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(h.putFiles).not.toHaveBeenCalled();
+      expect(term().paste).not.toHaveBeenCalled();
     });
   });
 });

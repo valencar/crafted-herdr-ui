@@ -25,8 +25,16 @@ import { invokeTyped } from "../lib/ipc";
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
 
 function appState(patch: Parameters<typeof buildboxTerms>[0] = {}): AppState {
+  // A tab is named after its row, so the rows the tests open as "infra" and "web" carry those names.
   return buildState([
-    [machine({ id: "buildbox" }), buildboxTerms(patch)],
+    [
+      machine({ id: "buildbox" }),
+      buildboxTerms({
+        "w1:p2": { name: "infra" },
+        "w1:p3": { title: "web" },
+        ...patch,
+      }),
+    ],
     [machine({ id: "gpubox" }), null],
   ]);
 }
@@ -78,6 +86,37 @@ function Harness({ machineId }: { machineId: string }) {
 const nav = () => screen.getByRole("navigation", { name: "Tabs" });
 
 describe("SessionRow", () => {
+  it("renames_the_tab_when_the_agent_sets_a_title", () => {
+    useAppStore.setState({
+      state: appState({ "w1:p2": { title: "copilot: terraform plan" } }),
+    });
+    open("buildbox", "w1:p2", "copilot: terraform plan");
+    render(<Harness machineId="buildbox" />);
+    expect(
+      screen.getByRole("button", { name: /^copilot: terraform plan/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Close tab copilot: terraform plan" }),
+    ).toBeInTheDocument();
+
+    // The agent sets a title: the row has no name, so the core title is its name.
+    act(() =>
+      useAppStore.setState({
+        state: appState({ "w1:p2": { title: "fix the flaky test" } }),
+      }),
+    );
+    const tab = screen.getByRole("button", { name: /^fix the flaky test/ });
+    expect(tab.querySelector(".session-tab-title")).toHaveTextContent(
+      "fix the flaky test",
+    );
+    expect(
+      screen.getByRole("button", { name: "Close tab fix the flaky test" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /terraform plan/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("session_row_shows_only_its_workbox_even_with_equal_titles", async () => {
     const user = userEvent.setup();
     open("buildbox", "w1:p1", "planner");

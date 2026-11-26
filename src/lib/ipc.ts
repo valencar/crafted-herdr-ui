@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { ActionError } from "./bindings/ActionError";
@@ -11,6 +12,9 @@ import type { CoreStatus } from "./bindings/CoreStatus";
 import type { MenuId } from "./bindings/MenuId";
 import type { NewSessionRequest } from "./bindings/NewSessionRequest";
 import type { PreviewFrame } from "./bindings/PreviewFrame";
+import type { PutFilesResult } from "./bindings/PutFilesResult";
+import type { PutItem } from "./bindings/PutItem";
+import type { PutProgress } from "./bindings/PutProgress";
 import type { RunChoices } from "./bindings/RunChoices";
 import type { Settings } from "./bindings/Settings";
 import type { ShortcutStatus } from "./bindings/ShortcutStatus";
@@ -45,6 +49,8 @@ export type CommandResults = {
   machine_login_args: string[];
   /** What follows the core in `machine update <name>`, for a command tab. */
   machine_update_args: string[];
+  /** What follows the core in `server restart --fresh`, for a command tab; the UI confirms first. */
+  core_refresh_args: string[];
   refresh_now: null;
   reconnect_core: null;
   get_command_log: CommandLogEntry[];
@@ -74,6 +80,8 @@ export type CommandResults = {
   preview_launch_template: string;
   show_main: null;
   show_main_new_session: null;
+  /** Shows the main window and asks it for the Refresh core environment confirm. */
+  show_main_refresh_core: null;
   open_settings: null;
   /** The new terminal's id, for `term_write`, `term_resize` and `term_close`. */
   term_open: number;
@@ -117,6 +125,7 @@ export type CommandArgs = {
   machine_login_args: { machineId: string };
   /** The UI confirms first: it copies hc to the machine and restarts its core. */
   machine_update_args: { machineId: string };
+  core_refresh_args: undefined;
   refresh_now: { machineId?: string | null };
   reconnect_core: undefined;
   get_command_log: undefined;
@@ -148,6 +157,7 @@ export type CommandArgs = {
   preview_launch_template: { template: string };
   show_main: undefined;
   show_main_new_session: undefined;
+  show_main_refresh_core: undefined;
   open_settings: undefined;
   /** `onEvent` (the output channel) is added by `openTerm`; callers don't pass it. */
   term_open: {
@@ -279,6 +289,14 @@ export function onNewSession(cb: () => void): Promise<() => void> {
   return listen("new-session", () => cb());
 }
 
+/**
+ * Subscribes to `"refresh-core"`: the Settings window asked the main window for the Refresh core
+ * environment confirm. It only asks; nothing has run.
+ */
+export function onRefreshCore(cb: () => void): Promise<() => void> {
+  return listen("refresh-core", () => cb());
+}
+
 /** Subscribes to `"menu"`: a native menu item was chosen; the payload is its id. */
 export function onMenu(cb: (id: MenuId) => void): Promise<() => void> {
   return listen<MenuId>("menu", (event) => cb(event.payload));
@@ -309,6 +327,70 @@ export async function openTerm(
       cols,
       rows,
       onEvent: channel,
+    });
+  } catch (e) {
+    throw toActionError(e);
+  }
+}
+
+/**
+ * A file drag over the window: `paths` is what Tauri reported (only `drop` carries them, and a
+ * `leave` has no point, so `x` and `y` are 0), the point is in CSS pixels.
+ */
+export type FileDropEvent = {
+  type: "enter" | "over" | "drop" | "leave";
+  paths: string[];
+  x: number;
+  y: number;
+};
+
+/** Whether the webview is WKWebView (macOS): its user agent says "Macintosh". */
+function onMac(): boolean {
+  return /Macintosh|Mac OS X/.test(navigator.userAgent);
+}
+
+/**
+ * Subscribes to files dragged over this window from Finder. The point is in CSS pixels, so it
+ * can be compared with a `getBoundingClientRect`. On macOS wry reports points (no backing
+ * scale) that tauri-runtime-wry wraps as `PhysicalPosition`, so they already are CSS pixels; on
+ * Windows (WebView2) they are physical and are divided by `devicePixelRatio`.
+ * The paths are handed over exactly as Tauri gave them: Rust compares a put against them.
+ */
+export function onFileDrop(
+  cb: (e: FileDropEvent) => void,
+): Promise<() => void> {
+  return getCurrentWebview().onDragDropEvent((event) => {
+    const p = event.payload;
+    const ratio = onMac() ? 1 : window.devicePixelRatio || 1;
+    const at = p.type === "leave" ? { x: 0, y: 0 } : p.position;
+    cb({
+      type: p.type,
+      paths: p.type === "enter" || p.type === "drop" ? p.paths : [],
+      x: at.x / ratio,
+      y: at.y / ratio,
+    });
+  });
+}
+
+/**
+ * Sends dropped files and pasted images to a terminal (`terminal.put`) and answers where each
+ * landed on that terminal's machine. `onProgress` is told before each item. Rejects with an
+ * `ActionError`.
+ */
+export async function putFiles(
+  machineId: string,
+  address: string,
+  items: PutItem[],
+  onProgress: (p: PutProgress) => void,
+): Promise<PutFilesResult> {
+  const channel = new Channel<PutProgress>();
+  channel.onmessage = onProgress;
+  try {
+    return await invoke<PutFilesResult>("put_files", {
+      machineId,
+      address,
+      items,
+      onProgress: channel,
     });
   } catch (e) {
     throw toActionError(e);

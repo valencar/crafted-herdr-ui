@@ -3,35 +3,41 @@
     {
       "host": "buildbox",
       "id": "000000000000000000000000c0de0002",
+      "keeps_running_after_logout": true,
+      "logout_linger_user": null,
       "name": "buildbox",
       "session": null,
       "state": "connected",
       "target": "dev@buildbox.example",
       "temporary": false,
-      "version": "0.1.18",
+      "version": "0.1.22",
       "via": false
     },
     {
       "host": "gpubox",
       "id": "000000000000000000000000c0de0003",
+      "keeps_running_after_logout": null,
+      "logout_linger_user": null,
       "name": "gpubox",
       "session": "scratch",
       "state": "connecting",
       "target": "dev@gpubox.example:2222",
       "temporary": false,
-      "version": "0.1.18",
+      "version": "0.1.22",
       "via": false
     },
     {
       "host": "staging",
       "id": "000000000000000000000000c0de0004",
+      "keeps_running_after_logout": false,
+      "logout_linger_user": "dev",
       "name": "staging",
       "session": null,
       "since_ms": 1767225917311,
       "state": "needs_login",
       "target": "staging",
       "temporary": false,
-      "version": "0.1.18",
+      "version": "0.1.22",
       "via": false
     },
     {
@@ -55,7 +61,7 @@
       "state": "unreachable",
       "target": "dev@devbox.example",
       "temporary": false,
-      "version": "0.1.18",
+      "version": "0.1.22",
       "via": false,
       "why": "cannot reach dev@devbox.example: ssh: Could not resolve hostname devbox.example: Name or service not known"
     }

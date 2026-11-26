@@ -15,7 +15,38 @@ pub fn display(method: &str, params: &Value, bin_name: &str) -> String {
             words.push(shell_quote(&params.to_string()));
         }
     }
-    words.join(" ")
+    let mut line = words.join(" ");
+    if let Some(note) = comment(method, params) {
+        line.push_str(" # ");
+        line.push_str(&note);
+    }
+    line
+}
+
+/// A shell comment after the quoted words: it is not quoted, and the line still runs as copied.
+/// Only `terminal.put` has one: how much it sent, never the bytes.
+fn comment(method: &str, params: &Value) -> Option<String> {
+    (method == "terminal.put")
+        .then(|| byte_size(decoded_len(text(params, "data").unwrap_or_default())))
+}
+
+/// The size of base64 text once decoded, from its length alone (the text is never decoded).
+fn decoded_len(data: &str) -> usize {
+    let padding = data.bytes().rev().take_while(|b| *b == b'=').count().min(2);
+    (data.len() / 4 * 3).saturating_sub(padding)
+}
+
+/// `10 B`, `412 KB` (whole), `3.4 MB` (one decimal).
+fn byte_size(bytes: usize) -> String {
+    const KB: usize = 1024;
+    const MB: usize = 1024 * 1024;
+    if bytes < KB {
+        format!("{bytes} B")
+    } else if bytes < MB {
+        format!("{} KB", (bytes as f64 / KB as f64).round())
+    } else {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    }
 }
 
 fn text<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
@@ -87,6 +118,12 @@ fn cli_words(method: &str, params: &Value) -> Option<Vec<String>> {
             w.push(text(params, "text").unwrap_or_default().to_owned());
             w
         }
+        // The bytes (`data`) are never part of the line; `display` adds the size.
+        "terminal.put" => vec![
+            "put".to_owned(),
+            terminal(params),
+            text(params, "name").unwrap_or_default().to_owned(),
+        ],
         "terminal.kill" => vec!["kill".to_owned(), terminal(params)],
         "terminal.rm" => vec!["rm".to_owned(), terminal(params)],
         "terminal.keep" => {
@@ -265,5 +302,56 @@ mod tests {
             ),
             "hc label t7 k="
         );
+    }
+
+    fn base64_of(bytes: &[u8]) -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    #[test]
+    fn put_line_names_terminal_file_and_size() {
+        let put = |terminal: &str, name: &str, bytes: usize| {
+            display(
+                "terminal.put",
+                &json!({"terminal": terminal, "name": name, "data": base64_of(&vec![0u8; bytes])}),
+                "hc",
+            )
+        };
+        assert_eq!(
+            put("buildbox/t7", "shot.png", 421_888),
+            "hc put buildbox/t7 shot.png # 412 KB"
+        );
+        assert_eq!(put("t7", "a.txt", 10), "hc put t7 a.txt # 10 B");
+        assert_eq!(put("t7", "a.txt", 0), "hc put t7 a.txt # 0 B");
+        assert_eq!(put("t7", "a.txt", 1023), "hc put t7 a.txt # 1023 B");
+        assert_eq!(put("t7", "a.txt", 1024), "hc put t7 a.txt # 1 KB");
+        assert_eq!(
+            put("t7", "big.bin", 3_565_158),
+            "hc put t7 big.bin # 3.4 MB"
+        );
+        assert_eq!(put("t7", "big.bin", 8 << 20), "hc put t7 big.bin # 8.0 MB");
+    }
+
+    #[test]
+    fn put_line_never_holds_the_data() {
+        let data = "SEVSRFJVSVFBTUFSS0VS".repeat(50);
+        let line = display(
+            "terminal.put",
+            &json!({"terminal": "t7", "name": "shot.png", "data": data}),
+            "hc",
+        );
+        assert!(!line.contains("SEVSRFJVSVFB"), "{line}");
+        assert!(!line.contains("rpc"), "{line}");
+    }
+
+    #[test]
+    fn put_line_quotes_a_hostile_name() {
+        let line = display(
+            "terminal.put",
+            &json!({"terminal": "t7", "name": "it's $(x).png", "data": "AAAA"}),
+            "hc",
+        );
+        assert_eq!(line, r"hc put t7 'it'\''s $(x).png' # 3 B");
     }
 }

@@ -30,10 +30,12 @@ import { Workbox } from "./Workbox";
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
   invokeTyped: vi.fn(),
+  copyText: vi.fn(),
 }));
-import { invokeTyped } from "../lib/ipc";
+import { copyText, invokeTyped } from "../lib/ipc";
 
 const invoke = vi.mocked(invokeTyped) as unknown as ReturnType<typeof vi.fn>;
+const copy = vi.mocked(copyText);
 
 const NOW = Date.now();
 
@@ -49,6 +51,8 @@ function machine(
     host?: string;
     since?: number;
     layout?: SpaceLayout | null;
+    keepsRunningAfterLogout?: boolean | null;
+    logoutLingerUser?: string | null;
   } = {},
   health: Health = { kind: "online" },
 ): MachineView {
@@ -67,6 +71,8 @@ function machine(
       host: over.host,
       stateSinceMs: over.since,
       layout: over.layout,
+      keepsRunningAfterLogout: over.keepsRunningAfterLogout,
+      logoutLingerUser: over.logoutLingerUser,
     },
     over.terms ?? buildboxTerms(),
   );
@@ -452,6 +458,51 @@ describe("Workbox", () => {
     ).toBeNull();
   });
 
+  it("explains_the_login_retry_on_the_workbox_screen", () => {
+    const SENTENCE =
+      "herdr-core retries a failed login only every few minutes. Log in to reconnect now.";
+    setup(
+      appState(
+        machine(
+          "buildbox",
+          {
+            state: "needs_login",
+            since: NOW - 2 * 60_000,
+            keepsRunningAfterLogout: false,
+          },
+          { kind: "attention", error: "Needs login" },
+        ),
+      ),
+    );
+    const sentence = screen.getByText(SENTENCE);
+    // Directly under the state line, before the logout warning.
+    const state = screen.getByText("Needs login · since 2m");
+    expect(state.nextElementSibling).toBe(sentence);
+    expect(sentence.nextElementSibling).toHaveTextContent(
+      "end when your last SSH login there closes",
+    );
+    // Log in… leads the actions.
+    const actions = screen
+      .getByRole("button", { name: "Log in…" })
+      .closest(".workbox-actions") as HTMLElement;
+    expect(within(actions).getAllByRole("button")[0]).toHaveTextContent(
+      "Log in…",
+    );
+  });
+
+  it("says_nothing_about_logging_in_for_other_states", () => {
+    setup(
+      appState(
+        machine(
+          "buildbox",
+          { state: "unreachable", since: NOW - 2 * 60_000 },
+          { kind: "attention", error: "ssh: connection refused" },
+        ),
+      ),
+    );
+    expect(screen.queryByText(/retries a failed login/)).toBeNull();
+  });
+
   it("update_asks_first_then_opens_a_command_tab", async () => {
     const user = setup(
       appState(
@@ -654,6 +705,77 @@ describe("Workbox", () => {
     cleanup();
     setup();
     expect(screen.queryByText("Temporary")).toBeNull();
+  });
+
+  it("offers_the_linger_command_with_copy", async () => {
+    copy.mockReset();
+    copy.mockResolvedValue(undefined);
+    const user = setup(
+      appState(
+        machine("buildbox", {
+          keepsRunningAfterLogout: false,
+          logoutLingerUser: "dev",
+        }),
+      ),
+    );
+    const summary = screen.getByRole("region", { name: "buildbox" });
+    expect(
+      within(summary).getByText(
+        "Programs on buildbox end when your last SSH login there closes.",
+      ),
+    ).toBeInTheDocument();
+    const command = "sudo loginctl enable-linger -- dev";
+    expect(within(summary).getByText(command).tagName).toBe("CODE");
+    await user.click(within(summary).getByRole("button", { name: "Copy" }));
+    expect(copy).toHaveBeenCalledWith(command);
+    await waitFor(() => expect(useAppStore.getState().toast).toBe("Copied"));
+    // The app never runs it.
+    expect(calls("run_core_terminal_command")).toEqual([]);
+    expect(calls("machine_login_args")).toEqual([]);
+  });
+
+  it("falls_back_to_user_and_reports_a_refused_copy", async () => {
+    copy.mockReset();
+    copy.mockRejectedValue(new Error("refused"));
+    const user = setup(
+      appState(machine("buildbox", { keepsRunningAfterLogout: false })),
+    );
+    expect(
+      screen.getByText("sudo loginctl enable-linger -- $USER"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() =>
+      expect(useAppStore.getState().toast).toBe(
+        "Couldn’t copy to the clipboard.",
+      ),
+    );
+  });
+
+  it("shows_no_warning_for_true_null_or_this_computer", () => {
+    for (const keeps of [true, null] as const) {
+      setup(appState(machine("buildbox", { keepsRunningAfterLogout: keeps })));
+      expect(screen.queryByText(/end when your last SSH login/)).toBeNull();
+      cleanup();
+    }
+    setup(
+      appState(machine("local", { keepsRunningAfterLogout: false })),
+      "local",
+    );
+    expect(screen.queryByText(/end when your last SSH login/)).toBeNull();
+  });
+
+  it("clears_the_warning_when_the_core_says_true", () => {
+    setup(appState(machine("buildbox", { keepsRunningAfterLogout: false })));
+    expect(
+      screen.getByText(/end when your last SSH login/),
+    ).toBeInTheDocument();
+    act(() => {
+      useAppStore.setState({
+        state: appState(machine("buildbox", { keepsRunningAfterLogout: true })),
+      });
+    });
+    expect(screen.queryByText(/end when your last SSH login/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
   });
 
   it("rename_validates_and_calls", async () => {

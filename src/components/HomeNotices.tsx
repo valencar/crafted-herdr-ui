@@ -8,6 +8,7 @@ import {
   isSupportedVersion,
 } from "../lib/format";
 import { invokeTyped } from "../lib/ipc";
+import { LOGIN_RETRY_NOTE, needsLogin } from "../lib/workbox";
 import { useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
 import { ReconnectBox } from "./ReconnectBox";
@@ -127,6 +128,7 @@ export function MachineNotices({
             {m.health.kind === "attention" ? m.health.error : ""} ·{" "}
             {formatStaleness(m.last_ok_ms, nowMs)}
           </p>
+          {needsLogin(m) && <p className="muted">{LOGIN_RETRY_NOTE}</p>}
           <ReconnectBox machine={m} />
         </EmptyState>
       ))}

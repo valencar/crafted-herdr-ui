@@ -38,6 +38,10 @@ export function needsLogin(machine: MachineView): boolean {
   return !machine.is_local && machine.state === "needs_login";
 }
 
+/** Why Log in… is the lead action: since core 0.1.21 a failed login is retried only every few minutes. */
+export const LOGIN_RETRY_NOTE =
+  "herdr-core retries a failed login only every few minutes. Log in to reconnect now.";
+
 /**
  * Whether Update hc there… is offered: the core says the machine needs an update, or the hc
  * there is numerically older than the one running here (`coreVersion`, this computer's).
@@ -76,4 +80,28 @@ export function updateBody(
 /** The machines the person has not hidden: what the sidebar and the lists show. */
 export function shownMachines(machines: MachineView[]): MachineView[] {
   return machines.filter((m) => m.health.kind !== "hidden");
+}
+
+/**
+ * Whether the workbox's programs end when the last SSH login there closes: only a remote core
+ * that says so (`keeps_running_after_logout` is `false`). `null` (unknown, not Linux or systemd,
+ * an older core) and a missing field warn about nothing. It changes neither the workbox's state
+ * nor its attention.
+ */
+export function stopsAtLogout(m: MachineView): boolean {
+  return !m.is_local && m.keeps_running_after_logout === false;
+}
+
+/** A login name that is safe to paste into a shell as it is. */
+const SAFE_USER = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * The command that keeps the person's programs running after logout, for them to copy and run on
+ * the workbox. The app never runs it. A user that is absent or not a plain login name counts as
+ * unknown, so the copied line is never odd shell text and `$USER` stands in.
+ */
+export function lingerCommand(m: MachineView): string {
+  const user = m.logout_linger_user;
+  const who = user !== null && SAFE_USER.test(user) ? user : "$USER";
+  return `sudo loginctl enable-linger -- ${who}`;
 }

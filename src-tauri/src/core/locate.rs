@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn parses_hc_version_only() {
-        assert_eq!(parse_core_version(HC).as_deref(), Some("0.1.18"));
+        assert_eq!(parse_core_version(HC).as_deref(), Some("0.1.22"));
         assert_eq!(
             parse_core_version("hc 0.1.18\nsecond line\n").as_deref(),
             Some("0.1.18")
@@ -328,7 +328,7 @@ mod tests {
             LIMIT,
         )
         .await;
-        assert_eq!(found.core, Some((core, "0.1.18".to_owned())));
+        assert_eq!(found.core, Some((core, "0.1.22".to_owned())));
         assert!(found.saved_missing, "the saved path was not the core");
     }
 
@@ -355,7 +355,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         let found = locate_with(&[], None, std::slice::from_ref(&link), LIMIT).await;
         // Not the symlink's target: an update changes the target but not the link.
-        assert_eq!(found.core, Some((link, "0.1.18".to_owned())));
+        assert_eq!(found.core, Some((link, "0.1.22".to_owned())));
     }
 
     /// A login environment whose `HOME` is `home` and whose shell is none, so nothing outside
@@ -427,7 +427,7 @@ mod tests {
             shell.display()
         ));
         let found = locate(&env, None, &[]).await;
-        assert_eq!(found.core, Some((core, "0.1.18".to_owned())));
+        assert_eq!(found.core, Some((core, "0.1.22".to_owned())));
         assert_eq!(found.legacy_herdr, None);
     }
 }

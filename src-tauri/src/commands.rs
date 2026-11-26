@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use serde::Deserialize;
 use tauri::ipc::Channel;
@@ -13,14 +14,17 @@ use ts_rs::TS;
 use crate::LOCAL;
 use crate::actions::{
     ActionError, AddMachineRequest, CreatedSession, KindsCache, MachineActions, NewSessionRequest,
-    NewSessions, RowActions, RunChoices, machine_command_args, preview, preview_add,
+    NewSessions, REFRESH_ARGS, RowActions, RunChoices, machine_command_args, preview, preview_add,
+    refresh_args,
 };
 use crate::activity::ActivityV2;
+use crate::agents::DisplayStatus;
 use crate::core::{CommandLogEntry, CoreClient};
 use crate::herdr_app::HerdrApp;
 use crate::notify::{self, Looking};
 use crate::preview::{self, PreviewManager};
 use crate::pty::TermSize;
+use crate::put::{self, DroppedFiles, PutFilesResult, PutItem, PutProgress};
 use crate::settings::{
     self, CoreLocator, CoreStatus, Settings, SharedSettings, ShortcutState, ShortcutStatus, changes,
 };
@@ -531,6 +535,52 @@ fn core_env(locator: &CoreLocator) -> Vec<(String, String)> {
     crate::env::forwarded_env(&locator.login())
 }
 
+/// The variables a terminal tab runs its command with. Every command gets `core_env`, except
+/// Refresh core environment (`server restart --fresh`), which gives the new environment to every
+/// terminal the core starts afterwards and so runs with the login shell's (`env::refresh_env`,
+/// Ruling R1). Both only ever run `hc`.
+/// Refresh reads the login shell again now (`fresh`, in production `env::refresh_env_now`), not
+/// the launch capture: the usual reason to click it is a profile change, and the app can run for
+/// days. It is refused when that read fell back (`None`): the app's own launch environment would
+/// replace the core's, which isn't what the confirm promises. Another command never calls
+/// `fresh`.
+async fn tab_env_with<F, Fut>(
+    args: &[String],
+    launch: &crate::env::LoginEnv,
+    fresh: F,
+) -> Result<Vec<(String, String)>, ActionError>
+where
+    F: FnOnce(crate::env::LoginEnv) -> Fut,
+    Fut: std::future::Future<Output = Option<Vec<(String, String)>>>,
+{
+    if args == REFRESH_ARGS {
+        fresh(launch.clone()).await.ok_or_else(login_unreadable)
+    } else {
+        Ok(crate::env::forwarded_env(launch))
+    }
+}
+
+fn login_unreadable() -> ActionError {
+    ActionError::invalid("Couldn’t read your login shell’s environment.")
+}
+
+/// The arguments of Refresh core environment, for a core that can. The login shell is read when
+/// the tab opens (`tab_env_with`), and that read decides whether the refresh goes ahead.
+fn refresh_request(abilities: crate::state::CoreAbilities) -> Result<Vec<String>, ActionError> {
+    refresh_args(abilities).map_err(ActionError::invalid)
+}
+
+/// The external launcher's environment isn't the login shell's, and `--fresh` replaces the
+/// core's whole environment with it, so Refresh core environment runs only in a tab here.
+fn refuse_refresh_outside_a_tab(args: &[String]) -> Result<(), ActionError> {
+    if args == REFRESH_ARGS {
+        return Err(ActionError::invalid(
+            "Refresh core environment runs only in a tab here.",
+        ));
+    }
+    Ok(())
+}
+
 /// A target's command for the current core and state.
 fn launch_for(
     locator: &CoreLocator,
@@ -616,7 +666,15 @@ pub async fn term_open(
     on_event: Channel<TermEvent>,
 ) -> Result<TermId, ActionError> {
     let launch = launch_for(&locator, &sync, &target, observe)?;
-    let env = core_env(&locator);
+    let env = match &target {
+        TermTarget::Command { args } => {
+            tab_env_with(args, &locator.login(), |launch| async move {
+                crate::env::refresh_env_now(&launch).await
+            })
+            .await?
+        }
+        TermTarget::Terminal { .. } => core_env(&locator),
+    };
     let sink: TermSink = Arc::new(move |event| on_event.send(event).is_ok());
     let sessions = Arc::clone(&sessions);
     let argv = launch.argv;
@@ -644,6 +702,53 @@ async fn on_sessions<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(move || work(&sessions))
         .await
         .map_err(|e| ActionError::invalid(e.to_string()))
+}
+
+/// Sends dropped files and pasted images to a terminal (`terminal.put`) and answers the paths
+/// where they landed on its machine. Every item is checked before any is sent; progress goes to
+/// `on_progress` before each. The UI types the paths; nothing here does.
+#[tauri::command]
+pub async fn put_files(
+    core: State<'_, Arc<CoreClient>>,
+    sync: State<'_, SyncCell>,
+    dropped: State<'_, DroppedFiles>,
+    machine_id: String,
+    address: String,
+    items: Vec<PutItem>,
+    on_progress: Channel<PutProgress>,
+) -> Result<PutFilesResult, ActionError> {
+    let sync = sync
+        .get()
+        .ok_or_else(|| ActionError::invalid("herdr-core is not connected yet."))?;
+    if !sync.state().is_some_and(|s| s.core_abilities.put_files) {
+        return Err(ActionError::invalid("This herdr-core can’t receive files."));
+    }
+    let (Some(full), Some(machine)) = (
+        sync.full_address(&machine_id, &address),
+        sync.machine_name(&machine_id),
+    ) else {
+        return Err(ActionError::invalid(format!(
+            "Unknown workbox {machine_id}."
+        )));
+    };
+    if sync
+        .terminal(&machine_id, &address)
+        .is_some_and(|t| t.status == DisplayStatus::Ended)
+    {
+        return Err(ActionError::invalid("This terminal has ended."));
+    }
+    let workbox = if machine_id == LOCAL {
+        "this computer"
+    } else {
+        machine.as_str()
+    };
+    let prepared = put::prepare(&items, &dropped, Instant::now(), workbox)?;
+    let result = put::send(&core, &machine_id, &full, prepared, |progress| {
+        let _ = on_progress.send(progress);
+    })
+    .await;
+    refresh_if_maybe_applied(&result, || sync.refresh_machines());
+    result.map(|paths| PutFilesResult { paths })
 }
 
 /// Types keystrokes or a paste into a terminal tab. Nothing but input goes through here.
@@ -720,6 +825,7 @@ pub async fn open_in_terminal(
     settings: State<'_, SharedSettings>,
     args: Vec<String>,
 ) -> Result<(), ActionError> {
+    refuse_refresh_outside_a_tab(&args)?;
     let launch = term_launch(
         &resolved_core(&locator)?,
         &TermTarget::Command { args },
@@ -921,6 +1027,25 @@ pub fn preview_launch_template(template: String) -> String {
 pub fn show_main(app: AppHandle) {
     tray::show_main(&app);
     tray::hide_popover(&app);
+}
+
+/// What follows the core in `server restart --fresh`, for the Refresh core environment tab. The
+/// UI asks for a confirmation before it opens the tab; nothing runs here.
+#[tauri::command]
+pub fn core_refresh_args(sync: State<'_, SyncCell>) -> Result<Vec<String>, ActionError> {
+    let abilities = sync
+        .get()
+        .and_then(|s| s.state())
+        .map(|s| s.core_abilities)
+        .ok_or_else(|| ActionError::invalid("herdr-core is not connected yet."))?;
+    refresh_request(abilities)
+}
+
+/// Shows the main window and asks it to confirm Refresh core environment, from Settings. The
+/// confirmation and the tab are the main window's.
+#[tauri::command]
+pub fn show_main_refresh_core(app: AppHandle) {
+    tray::show_main_refresh_core(&app);
 }
 
 /// Shows the main window with the New session sheet open, from the popover.
@@ -1207,6 +1332,115 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_refresh_tab_runs_the_resolved_core() {
+        let target = TermTarget::Command {
+            args: REFRESH_ARGS.map(str::to_owned).into(),
+        };
+        let launch = term_launch(core(), &target, false, |_, _| None).unwrap();
+        assert_eq!(
+            launch.argv,
+            [
+                "/opt/herdr-core/bin/herdr-core",
+                "server",
+                "restart",
+                "--fresh"
+            ]
+        );
+        assert_eq!(launch.display, "herdr-core server restart --fresh");
+        assert_eq!(launch.machine_id, "local");
+    }
+
+    fn fake_fresh(
+        calls: &std::cell::Cell<u32>,
+        env: Option<Vec<(String, String)>>,
+    ) -> impl FnOnce(crate::env::LoginEnv) -> std::future::Ready<Option<Vec<(String, String)>>> + '_
+    {
+        move |_| {
+            calls.set(calls.get() + 1);
+            std::future::ready(env)
+        }
+    }
+
+    #[tokio::test]
+    async fn the_refresh_tab_takes_the_fresh_environment_and_other_tabs_the_launch_one() {
+        let launch = crate::env::parse_env_output("PATH=/a\0EDITOR=old\0");
+        let fresh_env = vec![("EDITOR".to_string(), "new".to_string())];
+        let refresh: Vec<String> = REFRESH_ARGS.map(str::to_owned).into();
+        let calls = std::cell::Cell::new(0);
+        let env = tab_env_with(
+            &refresh,
+            &launch,
+            fake_fresh(&calls, Some(fresh_env.clone())),
+        )
+        .await
+        .unwrap();
+        assert_eq!(env, fresh_env);
+        assert_eq!(calls.get(), 1);
+
+        // Any other command keeps the launch core environment and never captures.
+        let other: Vec<String> = ["machine", "login", "buildbox"].map(str::to_owned).into();
+        let calls = std::cell::Cell::new(0);
+        let env = tab_env_with(&other, &launch, fake_fresh(&calls, Some(fresh_env)))
+            .await
+            .unwrap();
+        assert_eq!(env, crate::env::forwarded_env(&launch));
+        assert!(!env.iter().any(|(k, _)| k == "EDITOR"));
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_refresh_whose_fresh_capture_failed_is_refused() {
+        let msg = "Couldn’t read your login shell’s environment.";
+        let launch = crate::env::parse_env_output("PATH=/usr/bin\0");
+        let refresh: Vec<String> = REFRESH_ARGS.map(str::to_owned).into();
+        let calls = std::cell::Cell::new(0);
+        let err = tab_env_with(&refresh, &launch, fake_fresh(&calls, None))
+            .await
+            .unwrap_err();
+        assert_eq!(err, ActionError::invalid(msg));
+        // The launch capture having fallen back doesn't matter: the fresh one decides.
+        let fell_back = crate::env::LoginEnv {
+            fell_back: true,
+            ..launch
+        };
+        let fresh = vec![("A".to_string(), "1".to_string())];
+        assert_eq!(
+            tab_env_with(
+                &refresh,
+                &fell_back,
+                fake_fresh(&calls, Some(fresh.clone()))
+            )
+            .await,
+            Ok(fresh)
+        );
+    }
+
+    #[test]
+    fn refresh_is_asked_only_of_a_core_that_can() {
+        let able = crate::state::CoreAbilities {
+            refresh_environment: true,
+            ..Default::default()
+        };
+        let refresh: Vec<String> = REFRESH_ARGS.map(str::to_owned).into();
+        assert_eq!(refresh_request(able), Ok(refresh));
+        // A core that can't refresh is refused with its own words.
+        assert!(refresh_request(Default::default()).is_err());
+    }
+
+    #[test]
+    fn an_external_terminal_never_runs_the_refresh() {
+        let refresh: Vec<String> = REFRESH_ARGS.map(str::to_owned).into();
+        assert_eq!(
+            refuse_refresh_outside_a_tab(&refresh),
+            Err(ActionError::invalid(
+                "Refresh core environment runs only in a tab here."
+            ))
+        );
+        let other: Vec<String> = ["machine", "login", "buildbox"].map(str::to_owned).into();
+        assert_eq!(refuse_refresh_outside_a_tab(&other), Ok(()));
     }
 
     #[test]

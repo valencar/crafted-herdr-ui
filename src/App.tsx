@@ -6,10 +6,17 @@ import { ClosePaneHost } from "./components/ClosePaneHost";
 import { CommandPalette } from "./components/CommandPalette";
 import { Header } from "./components/Header";
 import { VersionBanner } from "./components/HomeNotices";
+import { RefreshCoreHost } from "./components/RefreshCoreHost";
 import { ShortcutsSheet } from "./components/ShortcutsSheet";
 import { StoreToast } from "./components/Toast";
 import { toRows } from "./lib/grouping";
-import { onFocusRow, onMenu, onNewSession, onOpenRow } from "./lib/ipc";
+import {
+  onFocusRow,
+  onMenu,
+  onNewSession,
+  onOpenRow,
+  onRefreshCore,
+} from "./lib/ipc";
 import { runMenuAction } from "./lib/menuActions";
 import { defaultOpenHow, openRow, useOpenWhenListed } from "./lib/openRow";
 import {
@@ -57,6 +64,7 @@ function App() {
   const setGroupBy = useAppStore((s) => s.setGroupBy);
   const focusRow = useAppStore((s) => s.focusRow);
   const openNewSession = useAppStore((s) => s.openNewSession);
+  const setRefreshCoreOpen = useAppStore((s) => s.setRefreshCoreOpen);
   const machines = useAppStore((s) => s.state?.machines);
   const activityOpen = useAppStore((s) => s.activityOpen);
   const setActivityOpen = useAppStore((s) => s.setActivityOpen);
@@ -124,11 +132,16 @@ function App() {
     onNewSession(() => openNewSession())
       .then(keep)
       .catch(() => {});
+    // Settings asked for "Refresh core environment": this only shows the confirm; nothing runs
+    // until its Confirm (`RefreshCoreHost`).
+    onRefreshCore(() => setRefreshCoreOpen(true))
+      .then(keep)
+      .catch(() => {});
     return () => {
       alive = false;
       unlisten.forEach((un) => un());
     };
-  }, [focusRow, openNewSession]);
+  }, [focusRow, openNewSession, setRefreshCoreOpen]);
 
   // The native menu owns the app's shortcuts (so they work while a terminal has focus) and
   // sends each chosen item here. They stand down while a sheet or a dialog is open. Settings…
@@ -201,6 +214,7 @@ function App() {
         <ShortcutsSheet onClose={() => setShortcutsOpen(false)} />
       )}
       <ClosePaneHost />
+      <RefreshCoreHost />
       {activityOpen && (
         <ActivityDrawer
           machines={machines ?? []}

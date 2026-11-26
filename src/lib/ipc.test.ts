@@ -10,6 +10,10 @@ class MockChannel<T> {
 }
 vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: MockChannel }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
+const onDragDropEvent = vi.fn();
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ onDragDropEvent }),
+}));
 const writeText = vi.fn();
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText }));
 
@@ -18,11 +22,14 @@ const {
   getSettings,
   getState,
   invokeTyped,
+  onFileDrop,
   onFocusRow,
   onMenu,
   onNewSession,
   onOpenRow,
+  onRefreshCore,
   openTerm,
+  putFiles,
   onPreview,
   onSettings,
   onState,
@@ -32,6 +39,7 @@ const {
 beforeEach(() => {
   invoke.mockReset();
   listen.mockReset();
+  onDragDropEvent.mockReset();
   writeText.mockReset();
 });
 
@@ -178,14 +186,18 @@ describe("settings and window events", () => {
     await onSettings(settings);
     await onFocusRow(focus);
     await onNewSession(newSession);
+    const refresh = vi.fn();
+    await onRefreshCore(refresh);
 
     handlers.get("settings")!({ payload: { group_by: "status" } });
     handlers.get("focus-row")!({ payload: "buildbox::w1:p1" });
     handlers.get("new-session")!({ payload: null });
+    handlers.get("refresh-core")!({ payload: null });
 
     expect(settings).toHaveBeenCalledWith({ group_by: "status" });
     expect(focus).toHaveBeenCalledWith("buildbox::w1:p1");
     expect(newSession).toHaveBeenCalledWith();
+    expect(refresh).toHaveBeenCalledWith();
   });
 });
 
@@ -263,5 +275,88 @@ describe("onMenu", () => {
     expect(listen.mock.calls[0][0]).toBe("menu");
     listen.mock.calls[0][1]({ payload: "toggle-terminal" });
     expect(cb).toHaveBeenCalledWith("toggle-terminal");
+  });
+});
+
+describe("onFileDrop", () => {
+  const MAC =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15";
+  const WINDOWS =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/130.0";
+
+  async function emit(userAgent: string, ratio: number) {
+    vi.stubGlobal("devicePixelRatio", ratio);
+    vi.stubGlobal("navigator", { userAgent });
+    onDragDropEvent.mockResolvedValue(vi.fn());
+    const cb = vi.fn();
+    await onFileDrop(cb);
+    const handler = onDragDropEvent.mock.calls[0][0];
+    handler({
+      payload: {
+        type: "drop",
+        paths: [" /Users/dev/a b.png"],
+        position: { x: 200, y: 100 },
+      },
+    });
+    handler({ payload: { type: "over", position: { x: 40, y: 20 } } });
+    handler({ payload: { type: "leave" } });
+    vi.unstubAllGlobals();
+    return cb.mock.calls;
+  }
+
+  it("keeps_the_point_as_is_on_macos_where_wry_reports_points", async () => {
+    await expect(emit(MAC, 2)).resolves.toEqual([
+      [{ type: "drop", paths: [" /Users/dev/a b.png"], x: 200, y: 100 }],
+      [{ type: "over", paths: [], x: 40, y: 20 }],
+      [{ type: "leave", paths: [], x: 0, y: 0 }],
+    ]);
+  });
+
+  it("divides_physical_pixels_by_the_ratio_on_windows", async () => {
+    await expect(emit(WINDOWS, 2)).resolves.toEqual([
+      [{ type: "drop", paths: [" /Users/dev/a b.png"], x: 100, y: 50 }],
+      [{ type: "over", paths: [], x: 20, y: 10 }],
+      [{ type: "leave", paths: [], x: 0, y: 0 }],
+    ]);
+  });
+
+  it("returns_the_unsubscribe_it_was_given", async () => {
+    const unlisten = vi.fn();
+    onDragDropEvent.mockResolvedValue(unlisten);
+    await expect(onFileDrop(() => {})).resolves.toBe(unlisten);
+  });
+});
+
+describe("putFiles", () => {
+  it("sends the items with a progress channel and answers the paths", async () => {
+    invoke.mockImplementation(async (_name, args) => {
+      args.onProgress.onmessage({ index: 0, total: 1, name: "a.png" });
+      return { paths: ["/home/dev/.cache/a.png"] };
+    });
+    const seen: unknown[] = [];
+
+    const out = await putFiles(
+      "buildbox-id",
+      "t7",
+      [{ kind: "path", path: "/Users/dev/a.png" }],
+      (p) => seen.push(p),
+    );
+
+    expect(out).toEqual({ paths: ["/home/dev/.cache/a.png"] });
+    expect(seen).toEqual([{ index: 0, total: 1, name: "a.png" }]);
+    expect(invoke.mock.calls[0][0]).toBe("put_files");
+    expect(invoke.mock.calls[0][1]).toMatchObject({
+      machineId: "buildbox-id",
+      address: "t7",
+      items: [{ kind: "path", path: "/Users/dev/a.png" }],
+    });
+  });
+
+  it("rejects with an ActionError", async () => {
+    invoke.mockRejectedValue("boom");
+    await expect(putFiles("local", "t7", [], () => {})).rejects.toEqual({
+      kind: "invalid",
+      message: "boom",
+    });
   });
 });

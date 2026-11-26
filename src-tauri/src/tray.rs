@@ -29,6 +29,9 @@ pub const SETTINGS_WINDOW: &str = "settings";
 /// Tells the main window to open its New session sheet.
 pub const NEW_SESSION_EVENT: &str = "new-session";
 
+/// Tells the main window to ask for Refresh core environment's confirmation.
+pub const REFRESH_CORE_EVENT: &str = "refresh-core";
+
 const TRAY_ID: &str = "main";
 const MENU_OPEN: &str = "open";
 const MENU_NEW_SESSION: &str = "new-session";
@@ -181,6 +184,14 @@ pub fn show_main_new_session<R: Runtime>(app: &AppHandle<R>) {
     show_main(app);
     hide_popover(app);
     let _ = app.emit_to(MAIN_WINDOW, NEW_SESSION_EVENT, ());
+}
+
+/// Shows the main window, which then asks for Refresh core environment's confirmation (Settings
+/// asks for it).
+pub fn show_main_refresh_core<R: Runtime>(app: &AppHandle<R>) {
+    show_main(app);
+    hide_popover(app);
+    let _ = app.emit_to(MAIN_WINDOW, REFRESH_CORE_EVENT, ());
 }
 
 /// The Settings window's native background before its page paints: the `--panel-2` token of

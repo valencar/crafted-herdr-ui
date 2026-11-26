@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use crafted_herdr_ui_lib::activity::{ActivityV2, Transition, TransitionKind};
 use crafted_herdr_ui_lib::core::{CoreClient, ProcessConnector};
 use crafted_herdr_ui_lib::settings::{Settings, SharedSettings};
-use crafted_herdr_ui_lib::state::{AppState, CoreState, Health};
+use crafted_herdr_ui_lib::state::{AppState, CoreAbilities, CoreState, Health};
 use crafted_herdr_ui_lib::sync::CoreSync;
 use tempfile::TempDir;
 
@@ -191,4 +191,30 @@ async fn reads_the_herdr_app_layout_through_a_real_connection() {
     let calls = fs::read_to_string(dir.path().join("calls.log")).unwrap();
     assert!(calls.contains(r#""method":"doc.get""#));
     assert!(!calls.contains("doc.set"));
+}
+
+#[tokio::test]
+async fn a_0_1_18_core_hides_refresh() {
+    let dir = fake();
+    fs::copy(
+        Path::new(FIXTURES).join("hello_0_1_18.json"),
+        dir.path().join("hello.json"),
+    )
+    .unwrap();
+    let run = start(&dir);
+    until("a ready state", || {
+        run.sync
+            .state()
+            .is_some_and(|s| s.core_state == CoreState::Ready)
+    })
+    .await;
+    let state = run.sync.state().unwrap();
+    assert_eq!(state.core_version.as_deref(), Some("0.1.18"));
+    assert_eq!(
+        state.core_abilities,
+        CoreAbilities {
+            put_files: true,
+            refresh_environment: false
+        }
+    );
 }
