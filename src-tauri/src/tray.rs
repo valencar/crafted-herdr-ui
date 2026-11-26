@@ -186,7 +186,8 @@ pub fn show_main_new_session<R: Runtime>(app: &AppHandle<R>) {
     let _ = app.emit_to(MAIN_WINDOW, NEW_SESSION_EVENT, ());
 }
 
-/// Shows the main window, which then asks for Refresh core environment's confirmation.
+/// Shows the main window, which then asks for Refresh core environment's confirmation (Settings
+/// asks for it).
 pub fn show_main_refresh_core<R: Runtime>(app: &AppHandle<R>) {
     show_main(app);
     hide_popover(app);
