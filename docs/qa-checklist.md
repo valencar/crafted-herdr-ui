@@ -367,16 +367,36 @@ herdr-core. Use generic data (buildbox, gpubox, staging; api-service, web-app, i
 
 ## v0.11
 
+### The sandbox wrapper (`qa-hc`)
+
+Every step below that runs `hc` runs it as `/tmp/hcqa/qa-hc …`, never as a bare `hc`. Your shell may be inside a core terminal, which exports `HC_SOCKET`, `HC_TERMINAL_SOCKET`, `HC_TERMINAL_ID` and `HC_SCOPE`, and those point at your own core. The wrapper starts from `env -i`, so none of them reaches `hc`, and it names the sandbox session and the scratch dirs itself. Create it once (the heredoc is quoted, so nothing is expanded until the wrapper runs):
+
+```sh
+mkdir -p /tmp/hcqa/bin /tmp/hcqa/state /tmp/hcqa/config /tmp/hcqa/run && chmod 700 /tmp/hcqa/run
+cat > /tmp/hcqa/qa-hc <<'EOF'
+#!/bin/sh
+# Runs hc against the sandbox core only. env -i: no HC_SOCKET, HC_TERMINAL_* or HC_SCOPE gets through.
+QA=/tmp/hcqa
+exec env -i PATH="$QA/bin:/usr/bin:/bin" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" \
+  TERM="${TERM:-xterm-256color}" SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+  HC_SESSION=herdr-ui-qa XDG_STATE_HOME="$QA/state" XDG_CONFIG_HOME="$QA/config" XDG_RUNTIME_DIR="$QA/run" \
+  "$QA/bin/hc" "$@"
+EOF
+chmod +x /tmp/hcqa/qa-hc
+```
+
+`/tmp/hcqa/bin/hc` must be the herdr-core build you are testing (0.1.22), with `hc` beside `herdr-core` as a symlink; it is called by its full path, so no other `hc` on the `PATH` can be picked up. The build may already have left a `/tmp/hcqa/sandbox` that does the same for any command; `qa-hc` is the same idea for `hc` alone. The first `qa-hc` call starts the sandbox core (that is `hc`'s own behavior). Never run `hc update` or a plain `hc server restart`; `/tmp/hcqa/qa-hc server restart --fresh` is allowed, on the sandbox session only, with the app launched as under "Launching the app against the sandbox core".
+
 ### herdr-core 0.1.22 baseline
 
 - [ ] An agent exits back to the shell (quit Claude or another agent in a sandbox-core terminal, so the shell prompt is back): within a moment its row stops showing the agent's last status (core 0.1.20 clears it), and nothing else about the row breaks.
-- [ ] `restore_screen = true` on the sandbox core only (set it in the sandbox's config dir, never your own), with a kept terminal live there (a New session you made with keep on). Restart the *sandbox* core the way the v0.9 "Deliberate stop" item does, never `hc server restart` (`server restart --fresh` is allowed only on the sandbox session, with the app launched as under "Launching the app against the sandbox core"): run `hc server stop` in the sandbox session (`HC_SESSION=herdr-ui-qa` and its own `XDG_*` dirs), then press Reconnect in the app. The kept terminal comes back with its last screen above the new shell: the Inspector's preview shows the restored screen and nothing breaks (no error, no layout jump).
+- [ ] `restore_screen = true` on the sandbox core only. Set it in the sandbox core's config file, `/tmp/hcqa/config/herdr-core/config.toml` (core picks the folder from `XDG_CONFIG_HOME`; never `~/.config/herdr-core/config.toml`, which is your own core's): `mkdir -p /tmp/hcqa/config/herdr-core && printf 'restore_screen = true\n' > /tmp/hcqa/config/herdr-core/config.toml`. With the app launched as under "Launching the app against the sandbox core" and its check done, make a kept terminal live there (a New session with keep on). Then restart the *sandbox* core the way the v0.9 "Deliberate stop" item does, never with a plain `hc server restart`: run `/tmp/hcqa/qa-hc server stop` (it stops the sandbox session only), then press Reconnect in the app. The kept terminal comes back with its last screen above the new shell: the Inspector's preview shows the restored screen and nothing breaks (no error, no layout jump). Remove the config file afterwards.
 
 ### Sending files (`put_files`)
 
 - [ ] Drop a file from Finder onto a terminal tab of a remote workbox (core 0.1.22 on both ends): it lands on the remote machine (under the remote core's state dir, in `herdr-core/<session>/files/<terminal>/`), its path is typed at the prompt, and the command log shows `hc put buildbox/t7 <name> # <size>` with no file contents.
-- [ ] Drop a file over 8 MB: the toast says `{name} is over 8 MB; herdr-core can’t send it.` and nothing is typed. Drop a folder: `{name} is a folder; only files can be sent to {workbox}`.
-- [ ] Drop two files, one a folder: the whole drop is refused and the file is not sent either.
+- [ ] On a remote tab, drop a file over 8 MB: the toast says `{name} is over 8 MB; herdr-core can’t send it.` and nothing is typed. On a remote tab, drop a folder: `{name} is a folder; only files can be sent to {workbox}`. On a local tab, a folder or a file over 8 MB types its path instead (nothing is sent, so neither limit applies).
+- [ ] On a remote tab, drop two files, one a folder: the whole drop is refused and the file is not sent either.
 - [ ] Drop a file on each quadrant of the terminal (top-left, top-right, bottom-left, bottom-right) and on the Dashboard split column beside it (⌘\), on a Retina and on a non-Retina display: only a drop inside the terminal acts (the overlay shows and the path is typed), a drop on the split column, the tab strip or the sidebar does nothing, and the overlay follows the pointer's edge exactly.
 - [ ] A real Finder drop on a local tab types the quoted path with a trailing space and no Enter; on a remote tab the file lands there first and its path is typed. The overlay says "Drop to type the path" (local) or "Drop to send to {workbox}" (remote), and "Can’t send files to this terminal" on a Watch tab or one that is detached.
 - [ ] Copy a screenshot with ⌃⇧⌘4 and paste it with ⌘V on a local and on a remote tab: the "Sending paste-….png…" chip shows while it goes, one path is typed. ⌘V of a screenshot types one path, not also garbage or an empty paste.
@@ -409,15 +429,19 @@ env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="$LANG" TERM="$TERM" \
   "/path/to/Crafted Herdr.app/Contents/MacOS/<the executable in that folder>"
 ```
 
-`SHELL` must be passed: the app reads it to find the login shell it captures the environment from. There must be no `HC_SOCKET`, `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` (run it from a terminal that is not inside a core terminal, or check `env | grep ^HC_` first). Quit your normal copy of the app first.
+`SHELL` must be passed: the app reads it to find the login shell it captures the environment from. There must be no `HC_SOCKET`, `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` (run it from a terminal that is not inside a core terminal, or check `env | grep ^HC_` first). Quit your normal copy of the app first. Make the probe terminal of the first check below, through `qa-hc` (see "The sandbox wrapper" above), before you run this.
 
-- [ ] Before any click, check that the app is on the sandbox: it shows only the sandbox core's terminals (create one with New session, label it `herdr-ui-qa=1` with `hc label` in the sandbox session; none of your own sessions appear), and Settings → herdr-core shows the binary and the version you expect (`hc` 0.1.20 or later). If your own terminals show, quit the app and don't continue: your login profile may export `HC_SESSION` or `XDG_*` names that override the wrapper's.
+- [ ] Before any click, check that the app is on the sandbox, with a probe you made and can name:
+  1. Before launching the app, start one probe terminal from the wrapper and label it: `/tmp/hcqa/qa-hc run --bg --name herdr-ui-qa-probe -- sleep 3600` prints its address (`t1` on a fresh sandbox core), then `/tmp/hcqa/qa-hc label t1 herdr-ui-qa=1` (use the address it printed).
+  2. Launch the app with the `env -i` line above.
+  3. `ls /tmp/hcqa/run/herdr-core/herdr-ui-qa.sock` shows the sandbox core's socket (plain `ls`, not `hc`), and the app lists exactly one terminal: `herdr-ui-qa-probe`, at that address. Settings → herdr-core shows the binary and the version you expect (`hc` 0.1.20 or later).
+  4. If the app shows any other terminal, or the probe is missing, quit the app and click nothing: your login profile may export `HC_SESSION` or `XDG_*` names that override the wrapper's.
 
 ### Refresh core environment
 
 - [ ] On a sandbox core 0.1.20 or later (the app launched as under "Launching the app against the sandbox core", and the check there done; never your own core), Refresh core environment… (Palette or Settings), then Restart herdr-core: a tab opens, shows hc's output and ends. Open in-app tabs reattach once the core is back.
-- [ ] A terminal started after the refresh has `EDITOR` (or another variable your login profile exports) from the login shell, and no `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` from the app's launcher, and none of `__CFBundleIdentifier`, `XPC_SERVICE_NAME` or `XPC_FLAGS`. Programs that were running keep going.
-- [ ] The refresh reads your profile at click time. With the app already running (launched as above), add a new `export QA_REFRESH_PROBE=1` to your login profile, then run Refresh core environment… and Restart herdr-core: a terminal started afterwards has `QA_REFRESH_PROBE`. Remove the line afterwards. The core it restarted is still the sandbox one (the Settings check above still holds).
+- [ ] A terminal started after the refresh (New session, then `env` in it) has `EDITOR` (or another variable your login profile exports) from the login shell, and none of `__CFBundleIdentifier`, `XPC_SERVICE_NAME` or `XPC_FLAGS`. `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` and `HC_SCOPE` are there too: herdr-core gives every terminal its own values for those three, so they are not a leak. The check is that they are the new terminal's own: `HC_TERMINAL_ID` names that terminal (compare it with the address the app shows for it), not the terminal or launcher the app or the refresh tab was started from. An app started through the `env -i` line above never had `__CFBundleIdentifier`, `XPC_SERVICE_NAME` or `XPC_FLAGS`, so on that path their absence proves little. Programs that were running keep going.
+- [ ] The refresh reads your profile at click time. The capture runs `$SHELL -lc 'env -0'`, a login shell that is not interactive: zsh reads `~/.zshenv` and `~/.zprofile` and never `~/.zshrc` (bash reads `~/.bash_profile`, not `~/.bashrc`), so a variable set only in `~/.zshrc` is not picked up. With the app already running (launched as above), add `export QA_REFRESH_PROBE=1` to `~/.zprofile` (or `~/.zshenv`; `~/.bash_profile` for bash), then run Refresh core environment… and Restart herdr-core: a terminal started afterwards has `QA_REFRESH_PROBE` in its `env`. Remove the line afterwards. The core it restarted is still the sandbox one (the launch check above still holds: the socket is still `/tmp/hcqa/run/herdr-core/herdr-ui-qa.sock`, and the probe terminal is still there).
 - [ ] From Settings → herdr-core and from ⌘K (on a sandbox core 0.1.20 or later), the main window comes forward with the "Refresh core environment" confirm (Settings: even when the main window was hidden or behind another app). Cancel (or Escape) runs nothing: no tab opens and the core is not restarted. Confirm opens the "Refresh core" tab, and the app reconnects within the 2-minute retry. After it ends, asking again shows the confirm again; the ended tab never restarts the core by itself, and its bar offers only Close tab.
 - [ ] On a core older than 0.1.20 the action is not offered (not in ⌘K, not in Settings → herdr-core).
 
