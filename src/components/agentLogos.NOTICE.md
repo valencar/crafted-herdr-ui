@@ -1,6 +1,6 @@
 # Agent logo sources
 
-The path data in `agentLogos.ts` is copied from [Simple Icons](https://github.com/simple-icons/simple-icons),
+Most of the path data in `agentLogos.ts` is copied from [Simple Icons](https://github.com/simple-icons/simple-icons),
 pinned at **16.36.0** (npm tarball `simple-icons@16.36.0`, published 2026-10-25), license
 [CC0 1.0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md). Only each icon's
 `viewBox` and `path` were taken; nothing is fetched at runtime and `simple-icons` is not a dependency.
@@ -31,9 +31,18 @@ data were taken. herdr-app's `defaults/icons/LICENSES.md` says:
   (https://github.com/can1357/oh-my-pi, MIT). Full notice: LICENSE-oh-my-pi.txt."
 - "Trademark rights are not granted by these licenses."
 
-The omp silhouette was redrawn by herdr-app, which is licensed under the Apache License, Version 2.0
-(https://www.apache.org/licenses/LICENSE-2.0); the redrawing is attributed to herdr-app under that
-license. The mark it was redrawn from is oh-my-pi's, under the MIT license below.
+herdr-app's own `THIRD-PARTY-NOTICES` lists the two icons the same way: "LobeHub icons"
+(https://github.com/lobehub/lobe-icons) and "oh-my-pi agent icon" (https://github.com/can1357/oh-my-pi),
+each with the license text reproduced below.
+
+The omp silhouette was redrawn by herdr-app, whose license is the Apache License, Version 2.0
+(https://github.com/herdrdev/herdr-app, `LICENSE`). The full text of that license, copied verbatim from
+herdr-app's `LICENSE`, is in [`LICENSE-Apache-2.0.txt`](LICENSE-Apache-2.0.txt) beside this file. The mark it was
+redrawn from is oh-my-pi's, under the MIT license below.
+
+Changes made here (Apache-2.0 section 4(b)): only the `viewBox` and the path data of `omp.svg` were taken; the
+`fill="#fff"` was dropped and the path is drawn in `currentColor`. For `goose.svg` likewise only the `viewBox`
+and path data were taken (its `fill-rule` and size attributes were dropped; the shape draws the same).
 
 ### LobeHub icons (goose)
 

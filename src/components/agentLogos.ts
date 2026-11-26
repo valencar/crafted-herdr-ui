@@ -1,7 +1,8 @@
 /**
  * Agent marks drawn by `KindBadge`, keyed by herdr agent kind. Path data and viewBox are copied from
- * Simple Icons 16.36.0 (CC0), and, for goose and omp, from herdr-app's own icons (MIT; omp redrawn
- * by herdr-app); sources, licenses and the trademark line are in `agentLogos.NOTICE.md`.
+ * Simple Icons 16.36.0 (CC0), except goose and omp, which come from herdr-app's `defaults/icons/` (goose:
+ * LobeHub, MIT; omp: redrawn by herdr-app from oh-my-pi's mark, MIT, the redraw Apache-2.0); sources,
+ * licenses and the trademark line are in `agentLogos.NOTICE.md`.
  * Inline only, nothing is fetched. `mono` draws in `currentColor`; a `brand` logo would take its color
  * from a `--logo-<kind>` token (none is used today). Kinds without a clean permissively licensed mark
  * (codex) are left out and keep their monogram.
