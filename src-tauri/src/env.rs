@@ -53,7 +53,7 @@ const HERDR_APP_FORWARDED: [&str; 8] = [
     "XDG_CONFIG_HOME",
 ];
 /// What `refresh_env` leaves out of the login environment.
-const REFRESH_DROPPED: [&str; 7] = [
+const REFRESH_DROPPED: [&str; 10] = [
     "HC_TERMINAL_SOCKET",
     "HC_TERMINAL_ID",
     "HC_SCOPE",
@@ -61,7 +61,22 @@ const REFRESH_DROPPED: [&str; 7] = [
     "OLDPWD",
     "SHLVL",
     "_",
+    // A Dock or Finder launch passes these; like `PWD` they describe how the app was started.
+    "__CFBundleIdentifier",
+    "XPC_SERVICE_NAME",
+    "XPC_FLAGS",
 ];
+/// The names that choose which core a process talks to. A refresh takes them from the launch
+/// capture, the one the app connects with, so the restart targets the core the app is on.
+const CORE_SELECTING: [&str; 5] = [
+    "HC_SESSION",
+    "HC_SOCKET",
+    "XDG_STATE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_RUNTIME_DIR",
+];
+/// The shell used when the launch capture has no `SHELL` (it always has one once startup ran).
+const DEFAULT_SHELL: &str = "/bin/zsh";
 const DEFAULT_TERM: &str = "xterm-256color";
 
 /// The environment of the user's login shell.
@@ -197,7 +212,7 @@ pub fn forwarded_env(login: &LoginEnv) -> Vec<(String, String)> {
 /// the new environment to that terminal. `TERM` is defaulted as `forwarded_env` does. Only for
 /// that one command, which runs `hc`; sorted by name so it is the same every time. Also leaves
 /// out the capturing shell's own bookkeeping (`PWD`, `OLDPWD`, `SHLVL`, `_`), which every new
-/// terminal would inherit. Callers check `fell_back` first (`commands::tab_env`).
+/// terminal would inherit. `refresh_env_now` is the click-time read that feeds it; it refuses a capture that fell back (`commands::tab_env_with`).
 pub fn refresh_env(login: &LoginEnv) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = login
         .vars
@@ -210,6 +225,56 @@ pub fn refresh_env(login: &LoginEnv) -> Vec<(String, String)> {
     }
     env.sort();
     env
+}
+
+/// The login environment a refresh uses: the fresh capture, except that the core-selecting names
+/// (`CORE_SELECTING`) come from the launch capture. A name the launch capture lacks is removed
+/// from the fresh one.
+pub fn merge_refresh_login(launch: &LoginEnv, fresh: LoginEnv) -> LoginEnv {
+    let mut vars = fresh.vars;
+    for name in CORE_SELECTING {
+        match launch.vars.get(name) {
+            Some(v) => {
+                vars.insert(name.to_string(), v.clone());
+            }
+            None => {
+                vars.remove(name);
+            }
+        }
+    }
+    LoginEnv {
+        vars,
+        fell_back: fresh.fell_back,
+    }
+}
+
+/// The environment Refresh core environment runs with, read from the login shell now, so a
+/// profile changed since launch counts (the app can run for days). `None` when that read fell
+/// back (failed, timed out or came back empty): the caller refuses. The login shell is the one
+/// the launch capture used. The core-selecting names stay the launch ones (`merge_refresh_login`).
+pub async fn refresh_env_now(launch: &LoginEnv) -> Option<Vec<(String, String)>> {
+    let shell = launch
+        .vars
+        .get("SHELL")
+        .filter(|s| !s.is_empty())
+        .map_or(DEFAULT_SHELL, String::as_str);
+    refresh_env_with(launch, shell, SHELL_TIMEOUT).await
+}
+
+async fn refresh_env_with(
+    launch: &LoginEnv,
+    shell: &str,
+    limit: Duration,
+) -> Option<Vec<(String, String)>> {
+    let mut fresh = capture_login_env_with(shell, limit).await;
+    if fresh.fell_back {
+        return None;
+    }
+    fresh
+        .vars
+        .entry("SHELL".to_owned())
+        .or_insert_with(|| shell.to_owned());
+    Some(refresh_env(&merge_refresh_login(launch, fresh)))
 }
 
 /// The variables the legacy herdr probe gets: the first six of `forwarded_env`, never an `HC_*`
@@ -332,6 +397,115 @@ mod tests {
         assert_eq!(env.get("TERM").map(String::as_str), Some("xterm-256color"));
         let kept = refresh_env(&parse_env_output("TERM=screen\0"));
         assert!(kept.contains(&("TERM".to_string(), "screen".to_string())));
+    }
+
+    #[test]
+    fn refresh_env_drops_the_launch_identity_names_too() {
+        let login = parse_env_output(
+            "PATH=/a\0__CFBundleIdentifier=dev.app\0XPC_SERVICE_NAME=0\0XPC_FLAGS=0x0\0EDITOR=vim\0",
+        );
+        let env: HashMap<String, String> = refresh_env(&login).into_iter().collect();
+        for k in ["__CFBundleIdentifier", "XPC_SERVICE_NAME", "XPC_FLAGS"] {
+            assert!(!env.contains_key(k), "{k}");
+        }
+        assert_eq!(env.get("EDITOR").map(String::as_str), Some("vim"));
+    }
+
+    /// A shell whose `FRESH` value counts its own runs, so a second capture differs.
+    fn counting_shell(dir: &Path) -> String {
+        let counter = dir.join("count");
+        fake_shell(
+            dir,
+            "sh-count",
+            &format!(
+                "f='{c}'; n=$(cat \"$f\" 2>/dev/null || echo 0); n=$((n+1)); echo $n > \"$f\"; \
+                 printf 'PATH=/fresh\\0FRESH=%s\\0HC_SESSION=fresh-session\\0XDG_STATE_HOME=/fresh/state\\0' $n",
+                c = counter.display()
+            ),
+        )
+    }
+
+    #[tokio::test]
+    async fn refresh_reads_the_login_shell_again_at_click_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let shell = counting_shell(dir.path());
+        let launch = parse_env_output("PATH=/launch\0FRESH=launch\0");
+        let first = refresh_env_with(&launch, &shell, Duration::from_secs(5)).await;
+        let second = refresh_env_with(&launch, &shell, Duration::from_secs(5)).await;
+        let get = |env: Option<Vec<(String, String)>>| {
+            env.unwrap()
+                .into_iter()
+                .find(|(k, _)| k == "FRESH")
+                .map(|(_, v)| v)
+        };
+        assert_eq!(get(first).as_deref(), Some("1"));
+        assert_eq!(get(second).as_deref(), Some("2"));
+    }
+
+    #[tokio::test]
+    async fn refresh_is_refused_when_the_fresh_capture_fell_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let hang = fake_shell(dir.path(), "sh-hang", "exec sleep 30");
+        let launch = parse_env_output("PATH=/launch\0");
+        assert!(
+            refresh_env_with(&launch, &hang, Duration::from_millis(300))
+                .await
+                .is_none()
+        );
+        assert!(
+            refresh_env_with(&launch, "/nonexistent/shell", Duration::from_secs(5))
+                .await
+                .is_none()
+        );
+        // An empty capture is a fall-back too.
+        let empty = fake_shell(dir.path(), "sh-empty", "printf ''");
+        assert!(
+            refresh_env_with(&launch, &empty, Duration::from_secs(5))
+                .await
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_launch_core_names_win_and_a_launch_absent_one_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let shell = counting_shell(dir.path());
+        // The fresh capture has HC_SESSION and XDG_STATE_HOME; the launch one has only
+        // HC_SESSION (different) and XDG_CONFIG_HOME.
+        let launch = parse_env_output(
+            "PATH=/launch\0HC_SESSION=launch-session\0XDG_CONFIG_HOME=/launch/config\0",
+        );
+        let env: HashMap<String, String> =
+            refresh_env_with(&launch, &shell, Duration::from_secs(5))
+                .await
+                .unwrap()
+                .into_iter()
+                .collect();
+        assert_eq!(
+            env.get("HC_SESSION").map(String::as_str),
+            Some("launch-session")
+        );
+        assert_eq!(
+            env.get("XDG_CONFIG_HOME").map(String::as_str),
+            Some("/launch/config")
+        );
+        assert!(!env.contains_key("XDG_STATE_HOME"));
+        assert_eq!(env.get("PATH").map(String::as_str), Some("/fresh"));
+        assert_eq!(env.get("FRESH").map(String::as_str), Some("1"));
+    }
+
+    #[test]
+    fn the_merge_keeps_every_non_core_name_of_the_fresh_capture() {
+        let launch = parse_env_output("HC_SOCKET=/launch.sock\0OLD=1\0");
+        let fresh = parse_env_output("HC_SOCKET=/fresh.sock\0NEW=2\0");
+        let merged = merge_refresh_login(&launch, fresh);
+        assert_eq!(
+            merged.vars.get("HC_SOCKET").map(String::as_str),
+            Some("/launch.sock")
+        );
+        assert_eq!(merged.vars.get("NEW").map(String::as_str), Some("2"));
+        assert!(!merged.vars.contains_key("OLD"));
+        assert!(!merged.fell_back);
     }
 
     #[test]
